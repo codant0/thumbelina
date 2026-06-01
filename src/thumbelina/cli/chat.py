@@ -9,7 +9,7 @@ from typing import Any
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import InMemoryHistory
 
-from thumbelina.config import AppConfig
+from thumbelina.config import load_config
 from thumbelina.llm.factory import create_provider
 from thumbelina.memory.manager import MemoryManager
 
@@ -147,19 +147,19 @@ def run_chat(provider: str, model: str | None = None) -> None:
     model:
         Optional model name to use.
     """
-    config = AppConfig.from_env()
+    config = load_config()
 
     kwargs: dict[str, Any] = {}
-    if provider == "openai" and config.openai_api_key:
-        kwargs["api_key"] = config.openai_api_key
-    elif provider == "anthropic" and config.anthropic_api_key:
-        kwargs["api_key"] = config.anthropic_api_key
+    if provider == "openai" and config.llm.api_key:
+        kwargs["api_key"] = config.llm.api_key
+    elif provider == "anthropic" and config.llm.api_key:
+        kwargs["api_key"] = config.llm.api_key
     if model:
         kwargs["model"] = model
 
     llm_provider = create_provider(provider, **kwargs)
 
-    memory_manager = MemoryManager(db_url=config.db_url)
+    memory_manager = MemoryManager(db_url=config.memory.database_url)
 
     session = ChatSession(provider=llm_provider, memory_manager=memory_manager)
 
