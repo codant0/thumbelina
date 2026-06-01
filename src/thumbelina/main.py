@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
+from thumbelina.api.app import create_app as create_api_app
 from thumbelina.config import AppConfig, load_config
 
 
@@ -19,12 +20,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     if config is None:
         config = load_config()
 
-    app = FastAPI(title="thumbelina", debug=False)
-
-    @app.get("/health")
-    async def health() -> dict[str, str]:
-        return {"status": "ok", "app_name": "thumbelina"}
-
+    app = create_api_app()
     return app
 
 
