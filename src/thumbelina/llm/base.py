@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
 from typing import Any
 
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 
@@ -108,4 +109,10 @@ class LLMProvider(ABC):
     @abstractmethod
     def model(self) -> str:
         """Return the model identifier for this provider."""
+        ...
+
+    @property
+    @abstractmethod
+    def chat_model(self) -> BaseChatModel:
+        """Return the underlying LangChain chat model."""
         ...

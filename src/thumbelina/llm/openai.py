@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 from typing import Any
 
+from langchain_core.language_models import BaseChatModel
+
 from thumbelina.llm.base import LLMProvider, _to_langchain_messages
 
 
@@ -30,6 +32,10 @@ class OpenAIProvider(LLMProvider):
     @property
     def model(self) -> str:
         return self._model_name
+
+    @property
+    def chat_model(self) -> BaseChatModel:
+        return self._model
 
     async def chat(self, messages: list[dict[str, str]]) -> str:
         lc_messages = _to_langchain_messages(messages)

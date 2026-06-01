@@ -44,12 +44,18 @@ class TestLLMProviderABC:
     def test_complete_subclass_can_instantiate(self):
         """A subclass implementing all abstract methods can be instantiated."""
 
+        from unittest.mock import MagicMock
+
         from thumbelina.llm.base import LLMProvider
 
         class CompleteProvider(LLMProvider):
             @property
             def model(self) -> str:
                 return "test-model"
+
+            @property
+            def chat_model(self):
+                return MagicMock()
 
             async def chat(self, messages):
                 return "response"
