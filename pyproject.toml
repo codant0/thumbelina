@@ -20,6 +20,8 @@ dependencies = [
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
     "sqlalchemy>=2.0",
+    "click>=8.0",
+    "prompt_toolkit>=3.0",
 ]
 
 [project.optional-dependencies]
@@ -33,7 +35,8 @@ dev = [
 ]
 
 [project.scripts]
-thumbelina = "thumbelina.main:main"
+thumbelina = "thumbelina.cli.main:cli"
+thumbelina-serve = "thumbelina.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/thumbelina"]
