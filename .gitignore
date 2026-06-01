@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment
+.env
+.env.*
+
+# SQLite databases (generated at runtime)
+*.db
+*.sqlite3
+
+# Chroma/Qdrant data directories
+chroma_db/
+qdrant_data/
+
+# OS
+.DS_Store
+Thumbs.db
