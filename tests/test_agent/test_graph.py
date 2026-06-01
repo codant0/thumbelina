@@ -140,3 +140,175 @@ class TestGraphStructure:
 
         # Graph should be built with tools
         assert agent.graph is not None
+
+
+class TestAgentMemoryIntegration:
+    """Tests for agent integration with memory system."""
+
+    def test_agent_accepts_memory_manager(self):
+        """ThumbelinaAgent should accept an optional memory manager."""
+        from thumbelina.agent.graph import ThumbelinaAgent
+        from thumbelina.memory.manager import MemoryManager
+
+        mock_provider = _create_mock_provider()
+        mock_memory = MagicMock(spec=MemoryManager)
+
+        agent = ThumbelinaAgent(llm_provider=mock_provider, memory_manager=mock_memory)
+
+        assert agent.memory_manager is mock_memory
+
+    def test_agent_default_no_memory(self):
+        """ThumbelinaAgent should default to no memory manager."""
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        mock_provider = _create_mock_provider()
+        agent = ThumbelinaAgent(llm_provider=mock_provider)
+
+        assert agent.memory_manager is None
+
+    @pytest.mark.asyncio
+    async def test_agent_creates_conversation_on_run(self):
+        """Agent should create a conversation when memory is enabled."""
+        from thumbelina.agent.graph import ThumbelinaAgent
+        from thumbelina.memory.manager import MemoryManager
+
+        mock_provider = _create_mock_provider()
+        mock_provider.chat_model.ainvoke.return_value = AIMessage(content="Hello!")
+
+        mock_memory = AsyncMock(spec=MemoryManager)
+        mock_memory.create_conversation.return_value = "test-conversation-id"
+        mock_memory.add_message = AsyncMock()
+
+        agent = ThumbelinaAgent(llm_provider=mock_provider, memory_manager=mock_memory)
+        await agent.run("Hi")
+
+        mock_memory.create_conversation.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_agent_saves_user_message(self):
+        """Agent should save user message to memory."""
+        from thumbelina.agent.graph import ThumbelinaAgent
+        from thumbelina.memory.manager import MemoryManager
+
+        mock_provider = _create_mock_provider()
+        mock_provider.chat_model.ainvoke.return_value = AIMessage(content="Hello!")
+
+        mock_memory = AsyncMock(spec=MemoryManager)
+        mock_memory.create_conversation.return_value = "test-conversation-id"
+        mock_memory.add_message = AsyncMock()
+
+        agent = ThumbelinaAgent(llm_provider=mock_provider, memory_manager=mock_memory)
+        await agent.run("Hi")
+
+        # Verify user message was saved
+        mock_memory.add_message.assert_any_call(
+            conversation_id="test-conversation-id",
+            role="user",
+            content="Hi",
+        )
+
+    @pytest.mark.asyncio
+    async def test_agent_saves_assistant_response(self):
+        """Agent should save assistant response to memory."""
+        from thumbelina.agent.graph import ThumbelinaAgent
+        from thumbelina.memory.manager import MemoryManager
+
+        mock_provider = _create_mock_provider()
+        mock_provider.chat_model.ainvoke.return_value = AIMessage(content="Hello!")
+
+        mock_memory = AsyncMock(spec=MemoryManager)
+        mock_memory.create_conversation.return_value = "test-conversation-id"
+        mock_memory.add_message = AsyncMock()
+
+        agent = ThumbelinaAgent(llm_provider=mock_provider, memory_manager=mock_memory)
+        await agent.run("Hi")
+
+        # Verify assistant message was saved
+        mock_memory.add_message.assert_any_call(
+            conversation_id="test-conversation-id",
+            role="assistant",
+            content="Hello!",
+        )
+
+    @pytest.mark.asyncio
+    async def test_agent_does_not_save_without_memory(self):
+        """Agent should not attempt to save messages without memory manager."""
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        mock_provider = _create_mock_provider()
+        mock_provider.chat_model.ainvoke.return_value = AIMessage(content="Hello!")
+
+        agent = ThumbelinaAgent(llm_provider=mock_provider)
+
+        # Should not raise any errors
+        result = await agent.run("Hi")
+        assert result == "Hello!"
+
+    @pytest.mark.asyncio
+    async def test_agent_creates_conversation_only_once(self):
+        """Agent should create conversation only once for multiple messages."""
+        from thumbelina.agent.graph import ThumbelinaAgent
+        from thumbelina.memory.manager import MemoryManager
+
+        mock_provider = _create_mock_provider()
+        mock_provider.chat_model.ainvoke.return_value = AIMessage(content="Response")
+
+        mock_memory = AsyncMock(spec=MemoryManager)
+        mock_memory.create_conversation.return_value = "test-conversation-id"
+        mock_memory.add_message = AsyncMock()
+
+        agent = ThumbelinaAgent(llm_provider=mock_provider, memory_manager=mock_memory)
+        await agent.run("First message")
+        await agent.run("Second message")
+
+        # create_conversation should only be called once
+        mock_memory.create_conversation.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_agent_stream_saves_user_message(self):
+        """Agent should save user message during streaming."""
+        from thumbelina.agent.graph import ThumbelinaAgent
+        from thumbelina.memory.manager import MemoryManager
+
+        mock_provider = _create_mock_provider()
+
+        mock_memory = AsyncMock(spec=MemoryManager)
+        mock_memory.create_conversation.return_value = "test-conversation-id"
+        mock_memory.add_message = AsyncMock()
+
+        agent = ThumbelinaAgent(llm_provider=mock_provider, memory_manager=mock_memory)
+
+        chunks = []
+        async for chunk in agent.stream("Hi"):
+            chunks.append(chunk)
+
+        # Verify user message was saved
+        mock_memory.add_message.assert_any_call(
+            conversation_id="test-conversation-id",
+            role="user",
+            content="Hi",
+        )
+
+    @pytest.mark.asyncio
+    async def test_agent_stream_saves_assistant_response(self):
+        """Agent should save assistant response during streaming."""
+        from thumbelina.agent.graph import ThumbelinaAgent
+        from thumbelina.memory.manager import MemoryManager
+
+        mock_provider = _create_mock_provider()
+
+        mock_memory = AsyncMock(spec=MemoryManager)
+        mock_memory.create_conversation.return_value = "test-conversation-id"
+        mock_memory.add_message = AsyncMock()
+
+        agent = ThumbelinaAgent(llm_provider=mock_provider, memory_manager=mock_memory)
+
+        chunks = []
+        async for chunk in agent.stream("Hi"):
+            chunks.append(chunk)
+
+        # Verify assistant message was saved (should have 2 calls: user + assistant)
+        assert mock_memory.add_message.call_count == 2
+        assistant_call = mock_memory.add_message.call_args_list[1]
+        assert assistant_call.kwargs["role"] == "assistant"
+        assert assistant_call.kwargs["conversation_id"] == "test-conversation-id"
