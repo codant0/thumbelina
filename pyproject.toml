@@ -23,6 +23,7 @@ dependencies = [
     "sqlalchemy>=2.0",
     "click>=8.0",
     "prompt_toolkit>=3.0",
+    "dateparser>=1.2",
 ]
 
 [project.optional-dependencies]
