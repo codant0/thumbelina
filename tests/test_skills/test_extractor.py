@@ -58,14 +58,24 @@ class TestSkillExtractor:
 
     @pytest.mark.asyncio
     async def test_extract_returns_none_on_error(self, mock_llm):
-        """Should return None when LLM fails."""
-        mock_llm.chat = AsyncMock(side_effect=Exception("LLM error"))
+        """Should return None when LLM raises ValueError."""
+        mock_llm.chat = AsyncMock(side_effect=ValueError("LLM error"))
         ext = SkillExtractor(llm_provider=mock_llm)
 
         messages = [{"role": "user", "content": "test"}]
         skill = await ext.extract(messages)
 
         assert skill is None
+
+    @pytest.mark.asyncio
+    async def test_extract_propagates_unexpected_error(self, mock_llm):
+        """Should propagate unexpected exceptions like RuntimeError."""
+        mock_llm.chat = AsyncMock(side_effect=RuntimeError("unexpected"))
+        ext = SkillExtractor(llm_provider=mock_llm)
+
+        messages = [{"role": "user", "content": "test"}]
+        with pytest.raises(RuntimeError, match="unexpected"):
+            await ext.extract(messages)
 
     @pytest.mark.asyncio
     async def test_extract_handles_invalid_json(self, mock_llm):

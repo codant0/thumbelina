@@ -72,6 +72,6 @@ class SkillExtractor:
                 trigger_conditions=data.get("trigger_conditions", []),
                 steps=data.get("steps", []),
             )
-        except (json.JSONDecodeError, Exception):
+        except (json.JSONDecodeError, ValueError, KeyError):
             logger.warning("Failed to extract skill", exc_info=True)
             return None

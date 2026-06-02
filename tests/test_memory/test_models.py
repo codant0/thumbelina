@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import create_engine
@@ -67,7 +67,7 @@ class TestConversationModel:
         db_session.commit()
 
         original_updated = conversation.updated_at
-        conversation.updated_at = datetime.utcnow()
+        conversation.updated_at = datetime.now(timezone.utc)
         db_session.commit()
 
         assert conversation.updated_at != original_updated

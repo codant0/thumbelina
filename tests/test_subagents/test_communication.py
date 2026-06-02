@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from thumbelina.subagents.communication import MessageQueue, SharedState
@@ -88,6 +90,26 @@ class TestMessageQueue:
 
         assert await queue.size("agent-1") == 2
 
+    @pytest.mark.asyncio
+    async def test_broadcast_excludes_sender(self, queue):
+        """Broadcast should not send to the sender."""
+        # Create queues for sender and other
+        await queue.send(to="sender", content="init")
+        await queue.send(to="other", content="init")
+        await queue.receive("sender")
+        await queue.receive("other")
+
+        await queue.broadcast("sender", "Hello all")
+
+        # Sender should not receive the broadcast
+        msg_sender = await queue.receive("sender")
+        assert msg_sender is None
+
+        # Other should receive it
+        msg_other = await queue.receive("other")
+        assert msg_other is not None
+        assert msg_other["content"] == "Hello all"
+
 
 class TestSharedState:
     """Tests for the SharedState class."""
@@ -147,3 +169,32 @@ class TestSharedState:
 
         keys = await state.keys()
         assert set(keys) == {"a", "b"}
+
+    @pytest.mark.asyncio
+    async def test_concurrent_set_and_get(self, state):
+        """Concurrent set and get should not corrupt data."""
+        async def writer(n: int) -> None:
+            for i in range(n):
+                await state.set(f"key-{i}", i)
+
+        async def reader(n: int) -> list:
+            results = []
+            for i in range(n):
+                val = await state.get(f"key-{i}")
+                results.append(val)
+            return results
+
+        # Run concurrent writers and readers
+        await asyncio.gather(
+            writer(50),
+            reader(50),
+            writer(50),
+            reader(50),
+        )
+
+        # Verify final state is consistent
+        keys = await state.keys()
+        assert len(keys) > 0
+        for key in keys:
+            val = await state.get(key)
+            assert val is not None

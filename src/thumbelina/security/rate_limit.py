@@ -28,6 +28,8 @@ class RateLimiter:
         self._requests[key] = [
             t for t in self._requests[key] if t > cutoff
         ]
+        if not self._requests[key]:
+            del self._requests[key]
 
     def is_allowed(self, key: str) -> bool:
         """Check if a request is allowed.
@@ -43,7 +45,7 @@ class RateLimiter:
             True if request is allowed, False if rate limit exceeded.
         """
         self._clean_old_requests(key)
-        if len(self._requests[key]) >= self.max_requests:
+        if len(self._requests.get(key, [])) >= self.max_requests:
             return False
         self._requests[key].append(time.time())
         return True
@@ -62,7 +64,7 @@ class RateLimiter:
             Number of remaining requests.
         """
         self._clean_old_requests(key)
-        return max(0, self.max_requests - len(self._requests[key]))
+        return max(0, self.max_requests - len(self._requests.get(key, [])))
 
     def reset(self, key: str) -> None:
         """Reset the rate limit for a key.
@@ -72,4 +74,4 @@ class RateLimiter:
         key:
             Identifier for the client.
         """
-        self._requests[key] = []
+        self._requests.pop(key, None)

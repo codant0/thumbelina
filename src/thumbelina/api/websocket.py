@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from thumbelina.api.deps import get_memory_manager
+from thumbelina.agent.graph import ThumbelinaAgent
+from thumbelina.memory.manager import MemoryManager
 
 router = APIRouter(tags=["websocket"])
 
@@ -15,21 +16,17 @@ async def websocket_chat(websocket: WebSocket) -> None:
 
     Accepts JSON messages with a ``message`` field and responds with
     a JSON object containing a ``response`` field.
-
-    Parameters
-    ----------
-    websocket:
-        The WebSocket connection.
     """
     await websocket.accept()
-    memory = get_memory_manager()
+    memory: MemoryManager = websocket.app.state.memory_manager
+    agent: ThumbelinaAgent = websocket.app.state.agent
 
     # Create a conversation for this WebSocket session
     conversation_id = await memory.create_conversation()
+    agent.current_conversation_id = conversation_id
 
     try:
         while True:
-            # Receive message from client
             data = await websocket.receive_json()
             message = data.get("message", "")
 
@@ -37,26 +34,8 @@ async def websocket_chat(websocket: WebSocket) -> None:
                 await websocket.send_json({"error": "Empty message"})
                 continue
 
-            # Persist user message
-            await memory.add_message(
-                conversation_id=conversation_id,
-                role="user",
-                content=message,
-            )
-
-            # Generate response (simple echo for now; agent integration later)
-            response_text = f"Received: {message}"
-
-            # Persist assistant message
-            await memory.add_message(
-                conversation_id=conversation_id,
-                role="assistant",
-                content=response_text,
-            )
-
-            # Send response to client
+            response_text = await agent.run(message)
             await websocket.send_json({"response": response_text})
 
     except WebSocketDisconnect:
-        # Client disconnected; nothing to clean up
         pass

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 
@@ -74,7 +75,7 @@ class TestBackupManager:
     @pytest.mark.asyncio
     async def test_restore_nonexistent(self, manager):
         """Should return None for non-existent backup."""
-        data = await manager.restore_backup("nonexistent")
+        data = await manager.restore_backup("00000000-0000-0000-0000-000000000000")
         assert data is None
 
     @pytest.mark.asyncio
@@ -91,7 +92,7 @@ class TestBackupManager:
     @pytest.mark.asyncio
     async def test_delete_nonexistent(self, manager):
         """Should return False when deleting non-existent backup."""
-        result = await manager.delete_backup("nonexistent")
+        result = await manager.delete_backup("00000000-0000-0000-0000-000000000000")
         assert result is False
 
     @pytest.mark.asyncio
@@ -107,3 +108,44 @@ class TestBackupManager:
         assert len(backups) == 1
         data = await manager2.restore_backup(backups[0].id)
         assert data == {"test": 123}
+
+    @pytest.mark.asyncio
+    async def test_restore_invalid_id_raises(self, manager):
+        """Should raise ValueError for invalid backup ID."""
+        with pytest.raises(ValueError, match="Invalid backup ID format"):
+            await manager.restore_backup("../etc/passwd")
+
+    @pytest.mark.asyncio
+    async def test_delete_invalid_id_raises(self, manager):
+        """Should raise ValueError for invalid backup ID."""
+        with pytest.raises(ValueError, match="Invalid backup ID format"):
+            await manager.delete_backup("../../secret")
+
+    @pytest.mark.asyncio
+    async def test_restore_rejects_dot_dot(self, manager):
+        """Should reject path traversal attempts."""
+        with pytest.raises(ValueError, match="Invalid backup ID format"):
+            await manager.restore_backup("../../../etc/passwd")
+
+    @pytest.mark.asyncio
+    async def test_list_backups_preserves_name(self, manager):
+        """Listed backups should preserve the original name."""
+        await manager.create_backup(name="my-backup", data={"key": "value"})
+
+        backups = await manager.list_backups()
+        assert len(backups) == 1
+        assert backups[0].name == "my-backup"
+
+    @pytest.mark.asyncio
+    async def test_restore_backward_compatible(self, backup_dir):
+        """Should restore old-format backups (plain JSON without envelope)."""
+        # Write an old-format backup directly
+        import uuid
+        backup_id = str(uuid.uuid4())
+        filepath = os.path.join(backup_dir, f"{backup_id}.json")
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump({"legacy_key": "legacy_value"}, f)
+
+        manager = BackupManager(backup_dir=backup_dir)
+        data = await manager.restore_backup(backup_id)
+        assert data == {"legacy_key": "legacy_value"}

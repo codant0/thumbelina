@@ -79,7 +79,7 @@ class TimeParser:
 
                 return {
                     "frequency": frequency,
-                    "time": time_part or datetime.now(),
+                    "time": time_part,
                 }
 
         return None

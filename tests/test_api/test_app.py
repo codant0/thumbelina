@@ -6,48 +6,55 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from thumbelina.config.models import AppConfig, LLMConfig, MemoryConfig
 
-def test_create_app_returns_fastapi():
+
+@pytest.fixture
+def test_config():
+    """Create a test configuration."""
+    return AppConfig(
+        llm=LLMConfig(provider="openai", model="test", api_key="test-key"),
+        memory=MemoryConfig(database_url="sqlite:///:memory:"),
+    )
+
+
+def test_create_app_returns_fastapi(test_config):
     """create_app should return a FastAPI instance."""
     from thumbelina.api.app import create_app
 
-    app = create_app()
+    app = create_app(test_config)
     assert isinstance(app, FastAPI)
 
 
-def test_app_has_title():
+def test_app_has_title(test_config):
     """App should have the correct title."""
     from thumbelina.api.app import create_app
 
-    app = create_app()
+    app = create_app(test_config)
     assert app.title == "Thumbelina API"
 
 
-def test_app_has_version():
+def test_app_has_version(test_config):
     """App should have a version."""
     from thumbelina.api.app import create_app
 
-    app = create_app()
+    app = create_app(test_config)
     assert app.version == "0.1.0"
 
 
-def test_health_endpoint():
+def test_health_endpoint(client):
     """GET /health should return status ok."""
-    from thumbelina.api.app import create_app
-
-    app = create_app()
-    client = TestClient(app)
     response = client.get("/health")
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "ok"
 
 
-def test_cors_allows_all_origins():
+def test_cors_allows_all_origins(test_config):
     """CORS middleware should be configured to allow all origins."""
     from thumbelina.api.app import create_app
 
-    app = create_app()
+    app = create_app(test_config)
     # Verify CORS middleware is present
     middleware_classes = [
         m.cls.__name__ for m in app.user_middleware
@@ -55,12 +62,8 @@ def test_cors_allows_all_origins():
     assert "CORSMiddleware" in middleware_classes
 
 
-def test_cors_options_request():
+def test_cors_options_request(client):
     """CORS preflight request should succeed."""
-    from thumbelina.api.app import create_app
-
-    app = create_app()
-    client = TestClient(app)
     response = client.options(
         "/api/chat",
         headers={
@@ -71,21 +74,21 @@ def test_cors_options_request():
     assert response.status_code == 200
 
 
-def test_app_includes_chat_router():
+def test_app_includes_chat_router(test_config):
     """App should include the chat router."""
     from thumbelina.api.app import create_app
 
-    app = create_app()
+    app = create_app(test_config)
     # Check that /api/chat route exists
     routes = [r.path for r in app.routes]
     assert "/api/chat" in routes
 
 
-def test_app_includes_conversations_router():
+def test_app_includes_conversations_router(test_config):
     """App should include the conversations router."""
     from thumbelina.api.app import create_app
 
-    app = create_app()
+    app = create_app(test_config)
     routes = [r.path for r in app.routes]
     assert "/api/conversations" in routes
     assert "/api/conversations/{conversation_id}" in routes

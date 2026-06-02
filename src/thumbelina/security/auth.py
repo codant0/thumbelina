@@ -28,6 +28,11 @@ class AuthService:
     """
 
     def __init__(self, secret_key: str) -> None:
+        if len(secret_key.encode("utf-8")) < 32:
+            raise ValueError(
+                "secret_key must be at least 32 bytes. "
+                f"Got {len(secret_key.encode('utf-8'))} bytes."
+            )
         self.secret_key = secret_key
 
     def create_token(

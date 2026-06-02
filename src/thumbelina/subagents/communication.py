@@ -58,7 +58,8 @@ class MessageQueue:
             Message content.
         """
         for agent_id in self._queues:
-            await self.send(agent_id, content, sender)
+            if agent_id != sender:
+                await self.send(agent_id, content, sender)
 
     async def size(self, agent_id: str) -> int:
         """Get the number of pending messages for an agent."""
@@ -75,7 +76,8 @@ class SharedState:
 
     async def get(self, key: str) -> Any:
         """Get a value from shared state."""
-        return self._store.get(key)
+        async with self._lock:
+            return self._store.get(key)
 
     async def set(self, key: str, value: Any) -> None:
         """Set a value in shared state."""
@@ -92,4 +94,5 @@ class SharedState:
 
     async def keys(self) -> list[str]:
         """List all keys in shared state."""
-        return list(self._store.keys())
+        async with self._lock:
+            return list(self._store.keys())

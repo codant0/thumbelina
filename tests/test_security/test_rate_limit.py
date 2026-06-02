@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 from thumbelina.security.rate_limit import RateLimiter
@@ -57,3 +59,21 @@ class TestRateLimiter:
 
         limiter.is_allowed("user-1")
         assert limiter.get_remaining("user-1") == 2
+
+    def test_stale_keys_cleaned_up(self):
+        """Should remove keys with no recent requests after window expires."""
+        limiter = RateLimiter(max_requests=3, window_seconds=1)
+
+        with patch("thumbelina.security.rate_limit.time") as mock_time:
+            mock_time.time.return_value = 1000.0
+            limiter.is_allowed("user-1")
+            limiter.is_allowed("user-1")
+            assert "user-1" in limiter._requests
+
+            # Advance time past the window and check remaining
+            mock_time.time.return_value = 1002.0
+            remaining = limiter.get_remaining("user-1")
+
+            # Old entries expired, key should be cleaned up
+            assert remaining == 3
+            assert "user-1" not in limiter._requests

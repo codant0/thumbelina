@@ -79,12 +79,14 @@ class TestTimeParser:
         result = parser.parse_recurring("每天")
         assert result is not None
         assert result["frequency"] == "daily"
+        assert result["time"] is None
 
     def test_parse_recurring_weekly(self, parser):
         """Should detect recurring pattern '每周'."""
         result = parser.parse_recurring("每周")
         assert result is not None
         assert result["frequency"] == "weekly"
+        assert result["time"] is None
 
     def test_parse_recurring_english_daily(self, parser):
         """Should detect recurring pattern 'every day'."""

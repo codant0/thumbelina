@@ -4,10 +4,16 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
+
+_UUID_PATTERN = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -33,6 +39,12 @@ class BackupManager:
         self.backup_dir = backup_dir
         os.makedirs(backup_dir, exist_ok=True)
 
+    @staticmethod
+    def _validate_backup_id(backup_id: str) -> None:
+        """Validate that backup_id is a safe UUID string."""
+        if not _UUID_PATTERN.match(backup_id):
+            raise ValueError(f"Invalid backup ID format: {backup_id!r}")
+
     async def create_backup(self, name: str, data: dict[str, Any]) -> BackupInfo:
         """Create a backup.
 
@@ -52,7 +64,14 @@ class BackupManager:
         filename = f"{backup_id}.json"
         filepath = os.path.join(self.backup_dir, filename)
 
-        content = json.dumps(data, ensure_ascii=False, indent=2)
+        envelope = {
+            "_thumbelina_backup": {
+                "name": name,
+                "created_at": datetime.now().isoformat(),
+            },
+            "data": data,
+        }
+        content = json.dumps(envelope, ensure_ascii=False, indent=2)
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
 
@@ -71,9 +90,19 @@ class BackupManager:
                 filepath = os.path.join(self.backup_dir, filename)
                 stat = os.stat(filepath)
                 backup_id = filename.replace(".json", "")
+
+                name = backup_id
+                try:
+                    with open(filepath, "r", encoding="utf-8") as f:
+                        raw = json.load(f)
+                    if isinstance(raw, dict) and "_thumbelina_backup" in raw:
+                        name = raw["_thumbelina_backup"].get("name", backup_id)
+                except (json.JSONDecodeError, OSError):
+                    pass
+
                 backups.append(BackupInfo(
                     id=backup_id,
-                    name=backup_id,
+                    name=name,
                     created_at=datetime.fromtimestamp(stat.st_mtime),
                     size_bytes=stat.st_size,
                 ))
@@ -92,12 +121,17 @@ class BackupManager:
         dict[str, Any] | None
             Restored data, or None if backup not found.
         """
+        self._validate_backup_id(backup_id)
         filepath = os.path.join(self.backup_dir, f"{backup_id}.json")
         if not os.path.exists(filepath):
             return None
 
         with open(filepath, "r", encoding="utf-8") as f:
-            return json.load(f)
+            raw = json.load(f)
+
+        if isinstance(raw, dict) and "_thumbelina_backup" in raw:
+            return raw["data"]
+        return raw
 
     async def delete_backup(self, backup_id: str) -> bool:
         """Delete a backup.
@@ -112,6 +146,7 @@ class BackupManager:
         bool
             True if deleted, False if not found.
         """
+        self._validate_backup_id(backup_id)
         filepath = os.path.join(self.backup_dir, f"{backup_id}.json")
         if not os.path.exists(filepath):
             return False

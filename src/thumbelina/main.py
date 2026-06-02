@@ -20,7 +20,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     if config is None:
         config = load_config()
 
-    app = create_api_app()
+    app = create_api_app(config)
     return app
 
 

@@ -2,19 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
-
 import pytest
-from fastapi.testclient import TestClient
-
-
-@pytest.fixture
-def client():
-    """Create a test client with a mocked agent."""
-    from thumbelina.api.app import create_app
-
-    app = create_app()
-    return TestClient(app)
 
 
 def test_chat_endpoint_exists(client):

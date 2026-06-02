@@ -2,48 +2,30 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from thumbelina.api.deps import get_memory_manager
 from thumbelina.api.schemas import ConversationDetailSchema, ConversationSchema, MessageSchema
+from thumbelina.memory.manager import MemoryManager
 
 router = APIRouter(tags=["conversations"])
 
 
 @router.get("/conversations", response_model=list[ConversationSchema])
-async def list_conversations() -> list[ConversationSchema]:
-    """List all conversations.
-
-    Returns
-    -------
-    list[ConversationSchema]
-        List of conversation summaries.
-    """
-    memory = get_memory_manager()
+async def list_conversations(
+    memory: MemoryManager = Depends(get_memory_manager),
+) -> list[ConversationSchema]:
+    """List all conversations."""
     conversations = await memory.get_conversations()
     return [ConversationSchema(**c) for c in conversations]
 
 
 @router.get("/conversations/{conversation_id}", response_model=ConversationDetailSchema)
-async def get_conversation(conversation_id: str) -> ConversationDetailSchema:
-    """Get a conversation with its messages.
-
-    Parameters
-    ----------
-    conversation_id:
-        The ID of the conversation to retrieve.
-
-    Returns
-    -------
-    ConversationDetailSchema
-        The conversation details including messages.
-
-    Raises
-    ------
-    HTTPException
-        If the conversation is not found.
-    """
-    memory = get_memory_manager()
+async def get_conversation(
+    conversation_id: str,
+    memory: MemoryManager = Depends(get_memory_manager),
+) -> ConversationDetailSchema:
+    """Get a conversation with its messages."""
     conversation = await memory.get_conversation(conversation_id)
 
     if conversation is None:
@@ -61,25 +43,11 @@ async def get_conversation(conversation_id: str) -> ConversationDetailSchema:
 
 
 @router.delete("/conversations/{conversation_id}")
-async def delete_conversation(conversation_id: str) -> dict[str, bool]:
-    """Delete a conversation.
-
-    Parameters
-    ----------
-    conversation_id:
-        The ID of the conversation to delete.
-
-    Returns
-    -------
-    dict[str, bool]
-        Confirmation of deletion.
-
-    Raises
-    ------
-    HTTPException
-        If the conversation is not found.
-    """
-    memory = get_memory_manager()
+async def delete_conversation(
+    conversation_id: str,
+    memory: MemoryManager = Depends(get_memory_manager),
+) -> dict[str, bool]:
+    """Delete a conversation."""
     deleted = await memory.delete_conversation(conversation_id)
 
     if not deleted:

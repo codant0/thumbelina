@@ -10,7 +10,7 @@ from thumbelina.security.auth import AuthService, TokenPayload
 @pytest.fixture
 def auth_service():
     """Create an AuthService."""
-    return AuthService(secret_key="test-secret-key")
+    return AuthService(secret_key="test-secret-key-that-is-long-enough")
 
 
 class TestAuthService:
@@ -22,8 +22,18 @@ class TestAuthService:
 
     def test_auth_service_requires_secret_key(self):
         """Should accept a secret key."""
-        service = AuthService(secret_key="my-secret")
-        assert service.secret_key == "my-secret"
+        service = AuthService(secret_key="a" * 32)
+        assert service.secret_key == "a" * 32
+
+    def test_secret_key_minimum_length(self):
+        """Should accept a 32-byte key."""
+        service = AuthService(secret_key="a" * 32)
+        assert service.secret_key == "a" * 32
+
+    def test_secret_key_too_short_raises(self):
+        """Should raise ValueError for keys shorter than 32 bytes."""
+        with pytest.raises(ValueError, match="at least 32 bytes"):
+            AuthService(secret_key="short")
 
     def test_create_token(self, auth_service):
         """Should create a JWT token."""
