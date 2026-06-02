@@ -24,6 +24,7 @@ dependencies = [
     "click>=8.0",
     "prompt_toolkit>=3.0",
     "dateparser>=1.2",
+    "PyJWT>=2.8",
 ]
 
 [project.optional-dependencies]
