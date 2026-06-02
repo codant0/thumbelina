@@ -65,8 +65,10 @@ Configuration priority (highest to lowest):
 # Start the API server (default: http://127.0.0.1:8000)
 thumbelina-serve
 
-# Or use the interactive CLI
+# Or use the interactive CLI (`thumb` is an equivalent shortcut)
 thumbelina
+# or
+thumb
 
 # Start the frontend dev server
 cd frontend && npm run dev
@@ -77,15 +79,15 @@ cd frontend && npm run dev
 ```
 ┌─────────────────────────────────────────────────────┐
 │  React Frontend (Vite)                              │
-│  WebSocket /ws/chat · HTTP /api/chat                │
+│  WebSocket /ws/chat · HTTP /api/v1/chat             │
 └──────────────────────┬──────────────────────────────┘
                        │
 ┌──────────────────────▼──────────────────────────────┐
 │  FastAPI Application (api/app.py)                   │
 │  ┌──────────┐ ┌──────────────┐ ┌──────────────────┐ │
 │  │ Lifespan │ │ Routes       │ │ WebSocket        │ │
-│  │ (init)   │ │ /api/chat    │ │ /ws/chat         │ │
-│  │          │ │ /api/convos  │ │                  │ │
+│  │ (init)   │ │ /api/v1/chat │ │ /ws/chat         │ │
+│  │          │ │ /api/v1/conv…│ │                  │ │
 │  └──────────┘ └──────┬───────┘ └────────┬─────────┘ │
 └──────────────────────┼─────────────────┼────────────┘
                        │                 │
@@ -139,10 +141,10 @@ thumbelina/
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/health` | Health check |
-| POST | `/api/chat` | Send a message, get an agent response |
-| GET | `/api/conversations` | List all conversations |
-| GET | `/api/conversations/{id}` | Get conversation with messages |
-| DELETE | `/api/conversations/{id}` | Delete a conversation |
+| POST | `/api/v1/chat` | Send a message, get an agent response |
+| GET | `/api/v1/conversations` | List all conversations |
+| GET | `/api/v1/conversations/{id}` | Get conversation with messages |
+| DELETE | `/api/v1/conversations/{id}` | Delete a conversation |
 | WS | `/ws/chat` | Real-time chat via WebSocket |
 
 ## Development
@@ -190,6 +192,15 @@ llm:
   provider: openai          # openai | anthropic | ollama
   model: gpt-4o             # Model identifier
   api_key: ${OPENAI_API_KEY} # Supports ${VAR} env substitution
+  request_timeout: null     # LLM request timeout in seconds, null = no limit
+
+auth:
+  secret_key: ""            # JWT signing key; Bearer auth enabled when non-empty
+
+rate_limit:
+  enabled: false            # Whether rate limiting is enabled
+  max_requests: 60          # Max requests per window
+  window_seconds: 60        # Time window in seconds
 
 memory:
   database_url: sqlite:///thumbelina.db

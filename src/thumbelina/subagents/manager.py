@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -57,6 +58,57 @@ class SubagentManager:
         agent = Subagent(task=task)
         self._agents[agent.id] = agent
         return agent
+
+    async def run_agent(self, agent_id: str) -> None:
+        """Start executing a subagent asynchronously.
+
+        The agent executes the task via the LLM provider in a background
+        coroutine.  Status transitions: PENDING → RUNNING → COMPLETED/FAILED.
+
+        Parameters
+        ----------
+        agent_id:
+            ID of the agent to run.
+
+        Raises
+        ------
+        ValueError
+            If the agent does not exist or is not in PENDING state.
+        """
+        agent = self._agents.get(agent_id)
+        if agent is None:
+            raise ValueError(f"Agent not found: {agent_id!r}")
+        if agent.status != SubagentStatus.PENDING:
+            raise ValueError(
+                f"Agent {agent_id!r} cannot be run: current status is {agent.status.value}"
+            )
+
+        agent.status = SubagentStatus.RUNNING
+        asyncio.create_task(self._execute(agent))
+
+    async def _execute(self, agent: Subagent) -> None:
+        """Internal: execute the agent's task via LLM and store the result."""
+        try:
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a subagent executing a specific task. "
+                        "Complete the task concisely and return only the result."
+                    ),
+                },
+                {"role": "user", "content": agent.task},
+            ]
+            result = await self.llm_provider.chat(messages)
+            agent.result = result
+            agent.status = SubagentStatus.COMPLETED
+        except asyncio.CancelledError:
+            agent.status = SubagentStatus.CANCELLED
+            raise
+        except Exception as exc:
+            logger.warning("Subagent %s failed: %s", agent.id, exc)
+            agent.error = str(exc)
+            agent.status = SubagentStatus.FAILED
 
     async def get_agent(self, agent_id: str) -> Subagent | None:
         """Get a subagent by ID."""

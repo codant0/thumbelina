@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta
 
 import pytest
@@ -119,6 +120,78 @@ class TestTaskScheduler:
 
         task = await scheduler.get_task("task-1")
         assert task.status == TaskStatus.COMPLETED
+
+    @pytest.mark.asyncio
+    async def test_start_stop(self, scheduler):
+        """Should start and stop the polling loop."""
+        assert scheduler.running is False
+
+        await scheduler.start()
+        assert scheduler.running is True
+
+        await scheduler.stop()
+        assert scheduler.running is False
+
+    @pytest.mark.asyncio
+    async def test_start_already_running_raises(self, scheduler):
+        """Should raise RuntimeError if already running."""
+        await scheduler.start()
+        try:
+            with pytest.raises(RuntimeError, match="already running"):
+                await scheduler.start()
+        finally:
+            await scheduler.stop()
+
+    @pytest.mark.asyncio
+    async def test_poll_executes_due_task(self, scheduler):
+        """Background poll should execute due tasks via callback."""
+        past_task = ScheduledTask(
+            id="past",
+            description="Past task",
+            scheduled_time=datetime.now() - timedelta(hours=1),
+        )
+        await scheduler.add_task(past_task)
+
+        executed: list[str] = []
+
+        async def callback(task: ScheduledTask) -> None:
+            executed.append(task.id)
+
+        await scheduler.start(on_due_task=callback)
+
+        # Wait briefly for the poll loop to pick up the task
+        await asyncio.sleep(0.2)
+
+        await scheduler.stop()
+
+        assert past_task.id in executed
+        updated = await scheduler.get_task(past_task.id)
+        assert updated.status == TaskStatus.COMPLETED
+
+    @pytest.mark.asyncio
+    async def test_poll_handles_callback_error(self, scheduler):
+        """Should mark task as CANCELLED when callback raises."""
+        past_task = ScheduledTask(
+            id="past",
+            description="Past task",
+            scheduled_time=datetime.now() - timedelta(hours=1),
+        )
+        await scheduler.add_task(past_task)
+
+        async def failing_callback(task: ScheduledTask) -> None:
+            raise RuntimeError("boom")
+
+        await scheduler.start(on_due_task=failing_callback)
+        await asyncio.sleep(0.2)
+        await scheduler.stop()
+
+        updated = await scheduler.get_task(past_task.id)
+        assert updated.status == TaskStatus.CANCELLED
+
+    @pytest.mark.asyncio
+    async def test_not_running_initially(self, scheduler):
+        """Scheduler should not be running initially."""
+        assert scheduler.running is False
 
 
 class TestScheduledTask:

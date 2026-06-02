@@ -37,6 +37,7 @@ dev = [
 ]
 
 [project.scripts]
+thumb = "thumbelina.cli.main:cli"
 thumbelina = "thumbelina.cli.main:cli"
 thumbelina-serve = "thumbelina.main:main"
 
@@ -46,6 +47,7 @@ packages = ["src/thumbelina"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+asyncio_mode = "auto"
 
 [tool.ruff]
 src = ["src"]

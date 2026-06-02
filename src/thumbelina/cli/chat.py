@@ -9,6 +9,7 @@ from typing import Any
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import InMemoryHistory
 
+from thumbelina.agent.graph import ThumbelinaAgent
 from thumbelina.config import load_config
 from thumbelina.llm.factory import create_provider
 from thumbelina.memory.manager import MemoryManager
@@ -21,21 +22,17 @@ EXIT_COMMANDS = frozenset({"/exit", "/quit"})
 class ChatSession:
     """Manages an interactive chat session with the Thumbelina agent.
 
+    The agent handles its own conversation persistence internally, so
+    the session only tracks the in-memory history for display purposes.
+
     Parameters
     ----------
-    provider:
-        The LLM provider instance to use for generating responses.
-    memory_manager:
-        Optional memory manager for conversation persistence.
+    agent:
+        The ThumbelinaAgent instance to use for generating responses.
     """
 
-    def __init__(
-        self,
-        provider: Any,
-        memory_manager: MemoryManager | None = None,
-    ) -> None:
-        self.provider = provider
-        self.memory_manager = memory_manager
+    def __init__(self, agent: ThumbelinaAgent) -> None:
+        self.agent = agent
         self.history: list[dict[str, str]] = []
         self.running = False
 
@@ -94,8 +91,8 @@ class ChatSession:
         """
         self.history.append({"role": "user", "content": user_input})
 
-        messages = self.history.copy()
-        response = await self.provider.chat(messages)
+        # Use the full agent pipeline (with graph, tools, memory)
+        response = await self.agent.run(user_input)
 
         self.history.append({"role": "assistant", "content": response})
         return response
@@ -161,7 +158,13 @@ def run_chat(provider: str, model: str | None = None) -> None:
 
     memory_manager = MemoryManager(db_url=config.memory.database_url)
 
-    session = ChatSession(provider=llm_provider, memory_manager=memory_manager)
+    agent = ThumbelinaAgent(
+        llm_provider=llm_provider,
+        memory_manager=memory_manager,
+        request_timeout=config.llm.request_timeout,
+    )
+
+    session = ChatSession(agent=agent)
 
     try:
         asyncio.run(session.run())

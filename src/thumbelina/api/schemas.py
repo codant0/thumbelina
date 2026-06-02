@@ -37,6 +37,7 @@ class ConversationSchema(BaseModel):
     id: str
     created_at: str
     updated_at: str
+    summary: str | None = None
 
 
 class ConversationDetailSchema(BaseModel):
@@ -45,6 +46,7 @@ class ConversationDetailSchema(BaseModel):
     id: str
     created_at: str
     updated_at: str
+    summary: str | None = None
     messages: list[MessageSchema]
 
 
@@ -52,9 +54,17 @@ class WebSocketMessage(BaseModel):
     """Schema for WebSocket incoming messages."""
 
     message: str = Field(..., min_length=1, description="The user's message")
+    conversation_id: str | None = Field(
+        default=None,
+        description="Optional conversation ID to resume an existing conversation",
+    )
 
 
 class WebSocketResponse(BaseModel):
     """Schema for WebSocket outgoing messages."""
 
     response: str = Field(..., description="The assistant's response")
+    conversation_id: str | None = Field(
+        default=None,
+        description="The conversation ID for this WebSocket session",
+    )

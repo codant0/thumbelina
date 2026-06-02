@@ -65,7 +65,7 @@ def test_cors_allows_all_origins(test_config):
 def test_cors_options_request(client):
     """CORS preflight request should succeed."""
     response = client.options(
-        "/api/chat",
+        "/api/v1/chat",
         headers={
             "Origin": "http://example.com",
             "Access-Control-Request-Method": "POST",
@@ -79,9 +79,9 @@ def test_app_includes_chat_router(test_config):
     from thumbelina.api.app import create_app
 
     app = create_app(test_config)
-    # Check that /api/chat route exists
+    # Check that /api/v1/chat route exists
     routes = [r.path for r in app.routes]
-    assert "/api/chat" in routes
+    assert "/api/v1/chat" in routes
 
 
 def test_app_includes_conversations_router(test_config):
@@ -90,5 +90,5 @@ def test_app_includes_conversations_router(test_config):
 
     app = create_app(test_config)
     routes = [r.path for r in app.routes]
-    assert "/api/conversations" in routes
-    assert "/api/conversations/{conversation_id}" in routes
+    assert "/api/v1/conversations" in routes
+    assert "/api/v1/conversations/{conversation_id}" in routes

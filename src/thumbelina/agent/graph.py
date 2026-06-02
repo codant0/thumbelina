@@ -39,11 +39,13 @@ class ThumbelinaAgent:
         llm_provider: LLMProvider,
         tools: list[BaseTool] | None = None,
         memory_manager: MemoryManager | None = None,
+        request_timeout: float | None = None,
     ) -> None:
         self.llm_provider = llm_provider
         self.llm = llm_provider.chat_model
         self.tools: list[BaseTool] = tools or []
         self.memory_manager = memory_manager
+        self.request_timeout = request_timeout
         self.current_conversation_id: str | None = None
         self.graph = self._build_graph()
 
@@ -89,7 +91,7 @@ class ThumbelinaAgent:
 
     async def _call_model_node(self, state: AgentState) -> dict[str, list[AIMessage]]:
         """Node wrapper for calling the LLM."""
-        return await call_model(state, self.llm)
+        return await call_model(state, self.llm, timeout=self.request_timeout)
 
     async def _tool_node_node(self, state: AgentState) -> dict[str, list[Any]]:
         """Node wrapper for executing tools."""
@@ -101,7 +103,11 @@ class ThumbelinaAgent:
             try:
                 self.current_conversation_id = await self.memory_manager.create_conversation()
             except Exception:
-                logger.warning("Failed to create conversation", exc_info=True)
+                logger.warning(
+                    "Failed to create conversation — messages will not be persisted "
+                    "for this request",
+                    exc_info=True,
+                )
 
     async def _persist_message(self, role: str, content: str) -> None:
         """Persist a message to memory if enabled.
@@ -122,6 +128,24 @@ class ThumbelinaAgent:
                 )
             except Exception:
                 logger.warning("Failed to persist message to memory", exc_info=True)
+
+    def clone(self) -> ThumbelinaAgent:
+        """Create an independent clone sharing the same LLM provider and memory manager.
+
+        Each clone has its own compiled graph and conversation tracking,
+        making it safe for concurrent use (e.g., per-WebSocket-connection).
+
+        Returns
+        -------
+        ThumbelinaAgent
+            A new agent instance with isolated graph state.
+        """
+        return ThumbelinaAgent(
+            llm_provider=self.llm_provider,
+            tools=list(self.tools),
+            memory_manager=self.memory_manager,
+            request_timeout=self.request_timeout,
+        )
 
     async def run(self, user_input: str) -> str:
         """Run the agent with user input and return the response.

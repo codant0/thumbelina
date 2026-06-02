@@ -27,7 +27,7 @@ class SearchEngine:
         query: str,
         limit: int = 20,
     ) -> list[dict[str, Any]]:
-        """Search messages by keyword.
+        """Search messages by keyword using database-level LIKE.
 
         Parameters
         ----------
@@ -41,15 +41,4 @@ class SearchEngine:
         list[dict[str, Any]]
             List of matching message dicts.
         """
-        conversations = await self.repository.get_conversations()
-        results = []
-
-        for conv in conversations:
-            messages = await self.repository.get_messages(conv["id"])
-            for msg in messages:
-                if query.lower() in msg["content"].lower():
-                    results.append(msg)
-                    if len(results) >= limit:
-                        return results
-
-        return results
+        return await self.repository.search_messages(query, limit=limit)

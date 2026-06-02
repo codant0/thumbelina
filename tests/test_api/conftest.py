@@ -16,6 +16,9 @@ def mock_agent():
     agent = MagicMock()
     agent.run = AsyncMock(return_value="Agent response")
     agent.current_conversation_id = None
+    agent.memory_manager = None
+    # clone() returns a new mock (memory_manager=None is safe for clone)
+    agent.clone.return_value = agent
     return agent
 
 

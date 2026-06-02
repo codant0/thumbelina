@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -112,6 +113,62 @@ class TestSubagentManager:
         """Should return False when cancelling non-existent agent."""
         result = await manager.cancel_agent("nonexistent")
         assert result is False
+
+    @pytest.mark.asyncio
+    async def test_run_agent(self, manager):
+        """Should run an agent and complete successfully."""
+        agent = await manager.create_agent(task="Summarize: hello world")
+        await manager.run_agent(agent.id)
+
+        # Should be RUNNING immediately after run_agent returns
+        updated = await manager.get_agent(agent.id)
+        assert updated.status == SubagentStatus.RUNNING
+
+        # Let the background task complete
+        await asyncio.sleep(0.1)
+
+        done = await manager.get_agent(agent.id)
+        assert done.status == SubagentStatus.COMPLETED
+        assert done.result == "Task completed"
+
+    @pytest.mark.asyncio
+    async def test_run_agent_nonexistent(self, manager):
+        """Should raise ValueError for non-existent agent."""
+        with pytest.raises(ValueError, match="Agent not found"):
+            await manager.run_agent("nonexistent")
+
+    @pytest.mark.asyncio
+    async def test_run_agent_already_running(self, manager):
+        """Should raise ValueError if agent is not PENDING."""
+        agent = await manager.create_agent(task="Test")
+        await manager.run_agent(agent.id)
+
+        with pytest.raises(ValueError, match="cannot be run"):
+            await manager.run_agent(agent.id)
+
+    @pytest.mark.asyncio
+    async def test_run_agent_cancelled(self, manager):
+        """Should raise ValueError if agent was cancelled."""
+        agent = await manager.create_agent(task="Test")
+        await manager.cancel_agent(agent.id)
+
+        with pytest.raises(ValueError, match="cannot be run"):
+            await manager.run_agent(agent.id)
+
+    @pytest.mark.asyncio
+    async def test_run_agent_failure(self, mock_llm):
+        """Should mark agent as FAILED when LLM raises."""
+        mock_llm.chat = AsyncMock(side_effect=RuntimeError("LLM down"))
+        mgr = SubagentManager(llm_provider=mock_llm, max_agents=3)
+
+        agent = await mgr.create_agent(task="Test")
+        await mgr.run_agent(agent.id)
+
+        await asyncio.sleep(0.1)
+
+        done = await mgr.get_agent(agent.id)
+        assert done.status == SubagentStatus.FAILED
+        assert "LLM down" in done.error
 
 
 class TestSubagent:

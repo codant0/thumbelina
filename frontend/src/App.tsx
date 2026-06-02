@@ -8,7 +8,7 @@ function App() {
   const [conversations, setConversations] = useState<Conversation[]>([])
 
   useEffect(() => {
-    fetch('/api/conversations')
+    fetch('/api/v1/conversations')
       .then(res => res.json())
       .then(setConversations)
       .catch(() => {})

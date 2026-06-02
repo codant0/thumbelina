@@ -38,6 +38,7 @@ async def get_conversation(
         id=conversation["id"],
         created_at=conversation["created_at"],
         updated_at=conversation["updated_at"],
+        summary=conversation.get("summary"),
         messages=message_schemas,
     )
 

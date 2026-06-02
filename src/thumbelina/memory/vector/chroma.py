@@ -55,7 +55,8 @@ class ChromaVectorStore(VectorStore):
         limit: int = 5,
     ) -> list[dict[str, Any]]:
         """Search for similar documents."""
-        limit = min(limit, self._collection.count()) if self._collection.count() > 0 else 0
+        total = self._collection.count()
+        limit = min(limit, total) if total > 0 else 0
         if limit == 0:
             return []
 

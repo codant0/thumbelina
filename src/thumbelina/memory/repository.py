@@ -6,7 +6,7 @@ import asyncio
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -37,7 +37,7 @@ class ConversationRepository:
         else:
             self.engine = create_engine(db_url, pool_pre_ping=True)
         Base.metadata.create_all(self.engine)
-        self.SessionLocal = sessionmaker(bind=self.engine)
+        self.SessionLocal = sessionmaker(bind=self.engine, expire_on_commit=False)
 
     def _get_session(self) -> Session:
         """Get a new database session."""
@@ -274,3 +274,45 @@ class ConversationRepository:
             True if set successfully, False if conversation not found.
         """
         return await asyncio.to_thread(self._set_summary_sync, conversation_id, summary)
+
+    def _search_messages_sync(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
+        """Synchronous implementation of search_messages."""
+        with self._get_session() as session:
+            stmt = (
+                select(Message)
+                .where(Message.content.ilike(f"%{query}%"))
+                .order_by(Message.created_at.desc())
+                .limit(limit)
+            )
+            result = session.execute(stmt)
+            messages = result.scalars().all()
+
+            return [
+                {
+                    "id": msg.id,
+                    "conversation_id": msg.conversation_id,
+                    "role": msg.role,
+                    "content": msg.content,
+                    "created_at": msg.created_at.isoformat(),
+                }
+                for msg in messages
+            ]
+
+    async def search_messages(
+        self, query: str, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        """Search messages by keyword using SQL LIKE.
+
+        Parameters
+        ----------
+        query:
+            Text to search for in message content.
+        limit:
+            Maximum number of results.
+
+        Returns
+        -------
+        list[dict[str, Any]]
+            List of matching message dicts.
+        """
+        return await asyncio.to_thread(self._search_messages_sync, query, limit)

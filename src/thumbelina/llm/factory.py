@@ -6,22 +6,24 @@ from typing import Any
 
 from thumbelina.llm.base import LLMProvider
 
-# Registry of provider name -> class (populated lazily to avoid import errors
-# when optional SDKs are not installed).
-_PROVIDER_REGISTRY: dict[str, type[LLMProvider]] = {}
+# Module-level registry — built once on first access.
+_registry: dict[str, type[LLMProvider]] | None = None
 
 
-def _build_registry() -> dict[str, type[LLMProvider]]:
-    """Build the provider registry, importing classes lazily."""
-    from thumbelina.llm.anthropic import AnthropicProvider
-    from thumbelina.llm.ollama import OllamaProvider
-    from thumbelina.llm.openai import OpenAIProvider
+def _get_registry() -> dict[str, type[LLMProvider]]:
+    """Return the provider name → class mapping, initialising lazily."""
+    global _registry
+    if _registry is None:
+        from thumbelina.llm.anthropic import AnthropicProvider
+        from thumbelina.llm.ollama import OllamaProvider
+        from thumbelina.llm.openai import OpenAIProvider
 
-    return {
-        "openai": OpenAIProvider,
-        "anthropic": AnthropicProvider,
-        "ollama": OllamaProvider,
-    }
+        _registry = {
+            "openai": OpenAIProvider,
+            "anthropic": AnthropicProvider,
+            "ollama": OllamaProvider,
+        }
+    return _registry
 
 
 def create_provider(name: str, **kwargs: Any) -> LLMProvider:
@@ -45,7 +47,7 @@ def create_provider(name: str, **kwargs: Any) -> LLMProvider:
     ValueError
         If *name* does not match any registered provider.
     """
-    registry = _build_registry()
+    registry = _get_registry()
     key = name.lower()
     cls = registry.get(key)
     if cls is None:
@@ -58,5 +60,4 @@ def create_provider(name: str, **kwargs: Any) -> LLMProvider:
 
 def list_providers() -> list[str]:
     """Return a sorted list of registered provider names."""
-    registry = _build_registry()
-    return sorted(registry.keys())
+    return sorted(_get_registry().keys())

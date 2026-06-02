@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
 
-from thumbelina.llm.base import LLMProvider, _to_langchain_messages
+from thumbelina.llm.base import LLMProvider
 
 
 class AnthropicProvider(LLMProvider):
@@ -42,13 +41,3 @@ class AnthropicProvider(LLMProvider):
     @property
     def chat_model(self) -> BaseChatModel:
         return self._model
-
-    async def chat(self, messages: list[dict[str, str]]) -> str:
-        lc_messages = _to_langchain_messages(messages)
-        response = await self._model.ainvoke(lc_messages)
-        return str(response.content)
-
-    async def stream(self, messages: list[dict[str, str]]) -> AsyncGenerator[str, None]:
-        lc_messages = _to_langchain_messages(messages)
-        async for chunk in self._model.astream(lc_messages):
-            yield str(chunk.content)

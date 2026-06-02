@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from collections import defaultdict
 
 
 class RateLimiter:
-    """Simple rate limiter using sliding window.
+    """Simple rate limiter using sliding window (thread-safe).
 
     Parameters
     ----------
@@ -21,9 +22,10 @@ class RateLimiter:
         self.max_requests = max_requests
         self.window_seconds = window_seconds
         self._requests: dict[str, list[float]] = defaultdict(list)
+        self._lock = threading.Lock()
 
     def _clean_old_requests(self, key: str) -> None:
-        """Remove requests outside the window."""
+        """Remove requests outside the window (caller must hold lock)."""
         cutoff = time.time() - self.window_seconds
         self._requests[key] = [
             t for t in self._requests[key] if t > cutoff
@@ -44,11 +46,12 @@ class RateLimiter:
         bool
             True if request is allowed, False if rate limit exceeded.
         """
-        self._clean_old_requests(key)
-        if len(self._requests.get(key, [])) >= self.max_requests:
-            return False
-        self._requests[key].append(time.time())
-        return True
+        with self._lock:
+            self._clean_old_requests(key)
+            if len(self._requests.get(key, [])) >= self.max_requests:
+                return False
+            self._requests[key].append(time.time())
+            return True
 
     def get_remaining(self, key: str) -> int:
         """Get remaining requests for a key.
@@ -63,8 +66,9 @@ class RateLimiter:
         int
             Number of remaining requests.
         """
-        self._clean_old_requests(key)
-        return max(0, self.max_requests - len(self._requests.get(key, [])))
+        with self._lock:
+            self._clean_old_requests(key)
+            return max(0, self.max_requests - len(self._requests.get(key, [])))
 
     def reset(self, key: str) -> None:
         """Reset the rate limit for a key.
@@ -74,4 +78,5 @@ class RateLimiter:
         key:
             Identifier for the client.
         """
-        self._requests.pop(key, None)
+        with self._lock:
+            self._requests.pop(key, None)

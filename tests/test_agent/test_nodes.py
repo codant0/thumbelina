@@ -66,10 +66,10 @@ class TestToolNode:
         from thumbelina.agent.state import AgentState
         from langchain_core.messages import ToolMessage
 
-        # Create a mock tool
+        # Create a mock tool with async ainvoke
         mock_tool = MagicMock()
         mock_tool.name = "search"
-        mock_tool.invoke.return_value = "search results"
+        mock_tool.ainvoke = AsyncMock(return_value="search results")
 
         # Create an AI message with a tool call
         ai_msg = AIMessage(

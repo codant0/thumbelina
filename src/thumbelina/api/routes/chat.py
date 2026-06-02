@@ -31,8 +31,9 @@ async def chat(
         if existing is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # Set the agent's conversation and let it handle persistence
-    agent.current_conversation_id = conversation_id
-    response_text = await agent.run(request.message)
+    # Clone the agent per request to isolate conversation state
+    isolated_agent = agent.clone()
+    isolated_agent.current_conversation_id = conversation_id
+    response_text = await isolated_agent.run(request.message)
 
     return ChatResponse(response=response_text, conversation_id=conversation_id)

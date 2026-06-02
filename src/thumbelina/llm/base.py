@@ -10,51 +10,79 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 
-def _to_langchain_messages(messages: list[dict[str, str]]) -> list[BaseMessage]:
-    """Convert a list of role/content dicts to LangChain message objects.
-
-    Parameters
-    ----------
-    messages:
-        Each dict must have ``role`` (``"user"``, ``"assistant"``, or ``"system"``)
-        and ``content`` keys.
-
-    Returns
-    -------
-    list[BaseMessage]
-        Corresponding LangChain message instances.
-
-    Raises
-    ------
-    ValueError
-        If a message has an unrecognised ``role``.
-    """
-    role_map: dict[str, type[BaseMessage]] = {
-        "user": HumanMessage,
-        "assistant": AIMessage,
-        "system": SystemMessage,
-    }
-    result: list[BaseMessage] = []
-    for msg in messages:
-        role = msg["role"]
-        cls = role_map.get(role)
-        if cls is None:
-            raise ValueError(
-                f"Unknown role: {role!r}. Expected one of: {list(role_map.keys())}"
-            )
-        result.append(cls(content=msg["content"]))
-    return result
-
-
 class LLMProvider(ABC):
-    """Abstract base class that every LLM provider must implement.
+    """Abstract base class for LLM providers.
 
-    Concrete providers wrap a LangChain chat model and expose a uniform
-    async interface for ``chat`` and ``stream`` operations.  A synchronous
-    convenience method ``chat_sync`` is also provided.
+    Concrete subclasses must implement :attr:`model`, :attr:`chat_model`,
+    and ``__init__`` (which should store the underlying LangChain model
+    as ``self._model``).
+
+    The default :meth:`chat` and :meth:`stream` implementations delegate
+    to ``self.chat_model``, so subclasses rarely need to override them.
     """
 
+    # ------------------------------------------------------------------
+    # Static helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _to_langchain_messages(
+        messages: list[dict[str, str]],
+    ) -> list[BaseMessage]:
+        """Convert role/content dicts to LangChain message objects.
+
+        Parameters
+        ----------
+        messages:
+            Each dict must have ``role`` (``"user"``, ``"assistant"``,
+            or ``"system"``) and ``content`` keys.
+
+        Returns
+        -------
+        list[BaseMessage]
+            Corresponding LangChain message instances.
+
+        Raises
+        ------
+        ValueError
+            If a message has an unrecognised ``role``.
+        """
+        role_map: dict[str, type[BaseMessage]] = {
+            "user": HumanMessage,
+            "assistant": AIMessage,
+            "system": SystemMessage,
+        }
+        result: list[BaseMessage] = []
+        for msg in messages:
+            role = msg["role"]
+            cls = role_map.get(role)
+            if cls is None:
+                raise ValueError(
+                    f"Unknown role: {role!r}. Expected one of: {list(role_map.keys())}"
+                )
+            result.append(cls(content=msg["content"]))
+        return result
+
+    # ------------------------------------------------------------------
+    # Abstract properties every provider must supply
+    # ------------------------------------------------------------------
+
+    @property
     @abstractmethod
+    def model(self) -> str:
+        """Return the model identifier for this provider."""
+        ...
+
+    @property
+    @abstractmethod
+    def chat_model(self) -> BaseChatModel:
+        """Return the underlying LangChain chat model."""
+        ...
+
+    # ------------------------------------------------------------------
+    # Default chat / stream (override only when custom logic is needed)
+    # ------------------------------------------------------------------
+
     async def chat(self, messages: list[dict[str, str]]) -> str:
         """Send a list of messages and return the complete response text.
 
@@ -68,9 +96,10 @@ class LLMProvider(ABC):
         str
             The assistant's reply.
         """
-        ...
+        lc_messages = self._to_langchain_messages(messages)
+        response = await self.chat_model.ainvoke(lc_messages)
+        return str(response.content)
 
-    @abstractmethod
     async def stream(self, messages: list[dict[str, str]]) -> AsyncGenerator[str, None]:
         """Send a list of messages and yield response chunks as they arrive.
 
@@ -84,9 +113,9 @@ class LLMProvider(ABC):
         str
             Incremental text chunks of the response.
         """
-        # Make this an async generator by having at least one yield
-        # (the abstract method uses ... but subclasses override)
-        yield ""  # pragma: no cover
+        lc_messages = self._to_langchain_messages(messages)
+        async for chunk in self.chat_model.astream(lc_messages):
+            yield str(chunk.content)
 
     def chat_sync(self, messages: list[dict[str, str]]) -> str:
         """Synchronous wrapper around :meth:`chat`.
@@ -103,16 +132,13 @@ class LLMProvider(ABC):
         """
         import asyncio
 
-        return asyncio.run(self.chat(messages))
-
-    @property
-    @abstractmethod
-    def model(self) -> str:
-        """Return the model identifier for this provider."""
-        ...
-
-    @property
-    @abstractmethod
-    def chat_model(self) -> BaseChatModel:
-        """Return the underlying LangChain chat model."""
-        ...
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            # No event loop running — safe to call asyncio.run()
+            return asyncio.run(self.chat(messages))
+        else:
+            raise RuntimeError(
+                "chat_sync() cannot be called from within an async context. "
+                "Use 'await provider.chat(messages)' instead."
+            )

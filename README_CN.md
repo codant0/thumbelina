@@ -65,8 +65,10 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 # 启动 API 服务（默认：http://127.0.0.1:8000）
 thumbelina-serve
 
-# 或使用交互式 CLI
+# 或使用交互式 CLI（thumb 为等效快捷命令）
 thumbelina
+# 或
+thumb
 
 # 启动前端开发服务器
 cd frontend && npm run dev
@@ -77,15 +79,15 @@ cd frontend && npm run dev
 ```
 ┌─────────────────────────────────────────────────────┐
 │  React 前端 (Vite)                                  │
-│  WebSocket /ws/chat · HTTP /api/chat                │
+│  WebSocket /ws/chat · HTTP /api/v1/chat             │
 └──────────────────────┬──────────────────────────────┘
                        │
 ┌──────────────────────▼──────────────────────────────┐
 │  FastAPI 应用 (api/app.py)                          │
 │  ┌──────────┐ ┌──────────────┐ ┌──────────────────┐ │
 │  │ Lifespan │ │ 路由         │ │ WebSocket        │ │
-│  │ (初始化) │ │ /api/chat    │ │ /ws/chat         │ │
-│  │          │ │ /api/convos  │ │                  │ │
+│  │ (初始化) │ │ /api/v1/chat │ │ /ws/chat         │ │
+│  │          │ │ /api/v1/conv…│ │                  │ │
 │  └──────────┘ └──────┬───────┘ └────────┬─────────┘ │
 └──────────────────────┼─────────────────┼────────────┘
                        │                 │
@@ -139,10 +141,10 @@ thumbelina/
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/health` | 健康检查 |
-| POST | `/api/chat` | 发送消息，获取代理响应 |
-| GET | `/api/conversations` | 列出所有对话 |
-| GET | `/api/conversations/{id}` | 获取对话详情及消息 |
-| DELETE | `/api/conversations/{id}` | 删除对话 |
+| POST | `/api/v1/chat` | 发送消息，获取代理响应 |
+| GET | `/api/v1/conversations` | 列出所有对话 |
+| GET | `/api/v1/conversations/{id}` | 获取对话详情及消息 |
+| DELETE | `/api/v1/conversations/{id}` | 删除对话 |
 | WS | `/ws/chat` | WebSocket 实时聊天 |
 
 ## 开发指南
@@ -190,6 +192,15 @@ llm:
   provider: openai          # openai | anthropic | ollama
   model: gpt-4o             # 模型标识
   api_key: ${OPENAI_API_KEY} # 支持 ${VAR} 环境变量替换
+  request_timeout: null     # LLM 请求超时秒数，null = 不限制
+
+auth:
+  secret_key: ""            # JWT 签名密钥，非空时启用 Bearer 认证
+
+rate_limit:
+  enabled: false            # 是否启用速率限制
+  max_requests: 60          # 每窗口最大请求数
+  window_seconds: 60        # 时间窗口秒数
 
 memory:
   database_url: sqlite:///thumbelina.db

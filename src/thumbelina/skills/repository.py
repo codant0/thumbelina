@@ -38,8 +38,8 @@ class SkillRepository:
         Database URL. Use ":memory:" for in-memory SQLite.
     """
 
-    def __init__(self, db_url: str) -> None:
-        if db_url == ":memory:":
+    def __init__(self, db_url: str = "sqlite:///thumbelina.db") -> None:
+        if db_url == ":memory:" or db_url == "sqlite:///:memory:" or db_url.startswith("sqlite:///:memory:"):
             self.engine = create_engine(
                 "sqlite:///:memory:",
                 connect_args={"check_same_thread": False},
@@ -48,7 +48,7 @@ class SkillRepository:
         else:
             self.engine = create_engine(db_url, pool_pre_ping=True)
         Base.metadata.create_all(self.engine)
-        self.SessionLocal = sessionmaker(bind=self.engine)
+        self.SessionLocal = sessionmaker(bind=self.engine, expire_on_commit=False)
 
     def _record_to_skill(self, record: SkillRecord) -> Skill:
         """Convert a database record to a Skill object."""

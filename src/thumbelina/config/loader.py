@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from pathlib import Path
@@ -11,6 +12,8 @@ import yaml
 
 from thumbelina.config.defaults import DEFAULT_CONFIG
 from thumbelina.config.models import AppConfig
+
+logger = logging.getLogger(__name__)
 
 _ENV_VAR_PATTERN = re.compile(r"\$\{(\w+)\}")
 
@@ -23,7 +26,15 @@ def _substitute_env_vars(value: str) -> str:
 
     def _replace(match: re.Match[str]) -> str:
         var_name = match.group(1)
-        return os.environ.get(var_name, match.group(0))
+        resolved = os.environ.get(var_name)
+        if resolved is None:
+            logger.warning(
+                "Environment variable %s is not set — leaving ${%s} as-is",
+                var_name,
+                var_name,
+            )
+            return match.group(0)
+        return resolved
 
     return _ENV_VAR_PATTERN.sub(_replace, value)
 
