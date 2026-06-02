@@ -46,6 +46,11 @@ class Conversation(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+    summary: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        default=None,
+    )
 
     # Relationship to messages
     messages: Mapped[list[Message]] = relationship(

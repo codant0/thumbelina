@@ -129,3 +129,20 @@ class MemoryManager:
             True if the conversation was deleted, False if not found.
         """
         return await self.repository.delete_conversation(conversation_id)
+
+    async def set_summary(self, conversation_id: str, summary: str) -> bool:
+        """Set the summary for a conversation.
+
+        Parameters
+        ----------
+        conversation_id:
+            ID of the conversation to set summary for.
+        summary:
+            Summary text.
+
+        Returns
+        -------
+        bool
+            True if set successfully, False if conversation not found.
+        """
+        return await self.repository.set_summary(conversation_id, summary)

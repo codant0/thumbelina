@@ -176,6 +176,7 @@ class ConversationRepository:
                     "id": conv.id,
                     "created_at": conv.created_at.isoformat(),
                     "updated_at": conv.updated_at.isoformat(),
+                    "summary": conv.summary,
                 }
                 for conv in conversations
             ]
@@ -202,6 +203,7 @@ class ConversationRepository:
                 "id": conversation.id,
                 "created_at": conversation.created_at.isoformat(),
                 "updated_at": conversation.updated_at.isoformat(),
+                "summary": conversation.summary,
             }
 
     async def get_conversation(self, conversation_id: str) -> dict[str, Any] | None:
@@ -245,3 +247,30 @@ class ConversationRepository:
             True if the conversation was deleted, False if not found.
         """
         return await asyncio.to_thread(self._delete_conversation_sync, conversation_id)
+
+    def _set_summary_sync(self, conversation_id: str, summary: str) -> bool:
+        """Synchronous implementation of set_summary."""
+        with self._get_session() as session:
+            conversation = session.get(Conversation, conversation_id)
+            if conversation is None:
+                return False
+            conversation.summary = summary
+            session.commit()
+            return True
+
+    async def set_summary(self, conversation_id: str, summary: str) -> bool:
+        """Set the summary for a conversation.
+
+        Parameters
+        ----------
+        conversation_id:
+            ID of the conversation to set summary for.
+        summary:
+            Summary text.
+
+        Returns
+        -------
+        bool
+            True if set successfully, False if conversation not found.
+        """
+        return await asyncio.to_thread(self._set_summary_sync, conversation_id, summary)
