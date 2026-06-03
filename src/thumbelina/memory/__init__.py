@@ -3,6 +3,7 @@
 from thumbelina.memory.manager import MemoryManager
 from thumbelina.memory.models import Base, Conversation, Message
 from thumbelina.memory.repository import ConversationRepository
+from thumbelina.memory.user_profile import UserPreference, UserProfile
 
 __all__ = [
     "Base",
@@ -10,4 +11,6 @@ __all__ = [
     "ConversationRepository",
     "MemoryManager",
     "Message",
+    "UserPreference",
+    "UserProfile",
 ]

@@ -6,9 +6,8 @@ import logging
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage
-from langchain_core.tools import BaseTool
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.tools import BaseTool, tool
 from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
@@ -17,8 +16,176 @@ from thumbelina.agent.nodes import call_model, tool_node
 from thumbelina.agent.state import AgentState
 from thumbelina.llm.base import LLMProvider
 from thumbelina.memory.manager import MemoryManager
+from thumbelina.memory.profiler import UserProfiler
+from thumbelina.scheduler.scheduler import ScheduledTask, TaskScheduler
+from thumbelina.scheduler.time_parser import TimeParser
+from thumbelina.skills.application import SkillApplicationEngine
+from thumbelina.skills.composition_engine import CompositionEngine
+from thumbelina.subagents.manager import SubagentManager
 
 logger = logging.getLogger(__name__)
+
+
+def _make_subagent_tools(manager: SubagentManager) -> list[BaseTool]:
+    """Create LangChain tools that wrap SubagentManager operations.
+
+    Parameters
+    ----------
+    manager:
+        The SubagentManager instance to delegate to.
+
+    Returns
+    -------
+    list[BaseTool]
+        List of tool-callable functions.
+    """
+
+    @tool
+    async def create_subagent(task: str) -> str:
+        """Create and run a subagent to execute a task asynchronously."""
+        try:
+            agent = await manager.create_agent(task)
+            await manager.run_agent(agent.id)
+            return (
+                f"Subagent created with ID {agent.id}. "
+                f"Task: {task}. Status: {agent.status.value}"
+            )
+        except RuntimeError as exc:
+            return f"Failed to create subagent: {exc}"
+
+    @tool
+    async def list_subagents() -> str:
+        """List all subagents and their current status."""
+        agents = await manager.list_agents()
+        if not agents:
+            return "No subagents found."
+        lines = []
+        for a in agents:
+            line = f"- ID: {a.id}, Task: {a.task}, Status: {a.status.value}"
+            if a.result:
+                line += f", Result: {a.result}"
+            if a.error:
+                line += f", Error: {a.error}"
+            lines.append(line)
+        return "\n".join(lines)
+
+    return [create_subagent, list_subagents]
+
+
+def _make_scheduler_tools(scheduler: TaskScheduler) -> list[BaseTool]:
+    """Create LangChain tools that wrap TaskScheduler operations.
+
+    Parameters
+    ----------
+    scheduler:
+        The TaskScheduler instance to delegate to.
+
+    Returns
+    -------
+    list[BaseTool]
+        List of tool-callable functions.
+    """
+    time_parser = TimeParser()
+
+    @tool
+    async def schedule_task(description: str, time_expression: str) -> str:
+        """Schedule a task for a future time."""
+        parsed_time = time_parser.parse(time_expression)
+        if parsed_time is None:
+            return f"Could not parse time expression: {time_expression}"
+
+        task = ScheduledTask(
+            description=description,
+            scheduled_time=parsed_time,
+        )
+        await scheduler.add_task(task)
+        return (
+            f"Task scheduled with ID {task.id}. "
+            f"Description: {description}. "
+            f"Scheduled for: {parsed_time.isoformat()}"
+        )
+
+    @tool
+    async def list_scheduled_tasks() -> str:
+        """List all scheduled tasks and their status."""
+        tasks = await scheduler.list_tasks()
+        if not tasks:
+            return "No scheduled tasks found."
+        lines = []
+        for t in tasks:
+            lines.append(
+                f"- ID: {t.id}, Description: {t.description}, "
+                f"Scheduled: {t.scheduled_time.isoformat()}, Status: {t.status.value}"
+            )
+        return "\n".join(lines)
+
+    return [schedule_task, list_scheduled_tasks]
+
+
+def _make_composition_tools(engine: CompositionEngine) -> list[BaseTool]:
+    """Create LangChain tools that wrap CompositionEngine operations.
+
+    Parameters
+    ----------
+    engine:
+        The CompositionEngine instance to delegate to.
+
+    Returns
+    -------
+    list[BaseTool]
+        List of tool-callable functions.
+    """
+
+    @tool
+    async def create_skill_composition(
+        skill_ids: str, name: str, description: str
+    ) -> str:
+        """Create a skill composition that chains multiple skills into a workflow.
+
+        Args:
+            skill_ids: Comma-separated list of skill IDs to chain together.
+            name: Name for the composition.
+            description: Description of what the composition does.
+        """
+        ids = [s.strip() for s in skill_ids.split(",") if s.strip()]
+        if not ids:
+            return "No skill IDs provided."
+        try:
+            composition = await engine.create_composition(
+                skill_ids=ids, name=name, description=description
+            )
+            return (
+                f"Composition created with ID {composition.id}. "
+                f"Name: {name}. Skills: {len(ids)}."
+            )
+        except Exception as exc:
+            return f"Failed to create composition: {exc}"
+
+    @tool
+    async def list_skill_compositions() -> str:
+        """List all skill compositions and their details."""
+        compositions = await engine.composition_repo.list_all()
+        if not compositions:
+            return "No skill compositions found."
+        lines = []
+        for c in compositions:
+            lines.append(
+                f"- ID: {c.id}, Name: {c.name}, "
+                f"Skills: {len(c.skill_ids)}, "
+                f"Usage: {c.usage_count}"
+            )
+        return "\n".join(lines)
+
+    @tool
+    async def execute_skill_composition(user_input: str) -> str:
+        """Find and execute a matching skill composition for the given input."""
+        composition = await engine.match_composition(user_input)
+        if composition is None:
+            return "No matching composition found for the input."
+        result = await engine.execute_composition(composition, user_input)
+        return result
+
+    return [create_skill_composition, list_skill_compositions, execute_skill_composition]
 
 
 class ThumbelinaAgent:
@@ -32,6 +199,18 @@ class ThumbelinaAgent:
         Optional list of tools the agent can use.
     memory_manager:
         Optional memory manager for conversation persistence.
+    request_timeout:
+        Optional timeout for LLM requests in seconds.
+    skill_engine:
+        Optional skill application engine for matching and applying skills.
+    subagent_manager:
+        Optional subagent manager for creating and running subagents.
+    scheduler:
+        Optional task scheduler for scheduling future tasks.
+    composition_engine:
+        Optional composition engine for creating and executing skill compositions.
+    user_profiler:
+        Optional user profiler for building user profiles from conversations.
     """
 
     def __init__(
@@ -40,34 +219,41 @@ class ThumbelinaAgent:
         tools: list[BaseTool] | None = None,
         memory_manager: MemoryManager | None = None,
         request_timeout: float | None = None,
+        skill_engine: SkillApplicationEngine | None = None,
+        subagent_manager: SubagentManager | None = None,
+        scheduler: TaskScheduler | None = None,
+        composition_engine: CompositionEngine | None = None,
+        user_profiler: UserProfiler | None = None,
     ) -> None:
         self.llm_provider = llm_provider
         self.llm = llm_provider.chat_model
-        self.tools: list[BaseTool] = tools or []
         self.memory_manager = memory_manager
         self.request_timeout = request_timeout
+        self.skill_engine = skill_engine
+        self.subagent_manager = subagent_manager
+        self.scheduler = scheduler
+        self.composition_engine = composition_engine
+        self.user_profiler = user_profiler
         self.current_conversation_id: str | None = None
+
+        # Build the combined tools list
+        self.tools: list[BaseTool] = list(tools) if tools else []
+        if self.subagent_manager is not None:
+            self.tools.extend(_make_subagent_tools(self.subagent_manager))
+        if self.scheduler is not None:
+            self.tools.extend(_make_scheduler_tools(self.scheduler))
+        if self.composition_engine is not None:
+            self.tools.extend(_make_composition_tools(self.composition_engine))
+
         self.graph = self._build_graph()
 
     def _build_graph(self) -> CompiledStateGraph:
-        """Build and compile the LangGraph agent graph.
-
-        Returns
-        -------
-        CompiledStateGraph
-            The compiled agent graph.
-        """
-        # Create the graph with our state schema
+        """Build and compile the LangGraph agent graph."""
         graph = StateGraph(AgentState)
-
-        # Add the agent node (calls the LLM)
         graph.add_node("agent", self._call_model_node)
 
-        # Add tools node if tools are provided
         if self.tools:
             graph.add_node("tools", self._tool_node_node)
-
-            # Conditional edges: agent -> tools or end
             graph.add_conditional_edges(
                 "agent",
                 should_continue,
@@ -76,17 +262,11 @@ class ThumbelinaAgent:
                     END: END,
                 },
             )
-
-            # After tools, go back to agent
             graph.add_edge("tools", "agent")
         else:
-            # No tools: agent -> end
             graph.add_edge("agent", END)
 
-        # Set entry point
         graph.set_entry_point("agent")
-
-        # Compile the graph
         return graph.compile()
 
     async def _call_model_node(self, state: AgentState) -> dict[str, list[AIMessage]]:
@@ -110,15 +290,7 @@ class ThumbelinaAgent:
                 )
 
     async def _persist_message(self, role: str, content: str) -> None:
-        """Persist a message to memory if enabled.
-
-        Parameters
-        ----------
-        role:
-            Role of the message sender (user, assistant, system).
-        content:
-            Content of the message.
-        """
+        """Persist a message to memory if enabled."""
         if self.memory_manager and self.current_conversation_id:
             try:
                 await self.memory_manager.add_message(
@@ -129,44 +301,61 @@ class ThumbelinaAgent:
             except Exception:
                 logger.warning("Failed to persist message to memory", exc_info=True)
 
+    async def _get_skill_context(self, user_input: str) -> str | None:
+        """Attempt to find and apply a matching skill for the user input."""
+        if self.skill_engine is None:
+            return None
+        try:
+            matches = await self.skill_engine.find_matching_skills(user_input)
+            if matches:
+                context = await self.skill_engine.apply_skill(matches[0], user_input)
+                return context
+        except Exception:
+            logger.warning("Skill matching failed", exc_info=True)
+        return None
+
+    async def _get_user_context(self, user_id: str = "default") -> str | None:
+        """Get user profile context for injection into the agent."""
+        if self.user_profiler is None:
+            return None
+        try:
+            return await self.user_profiler.get_user_context(user_id)
+        except Exception:
+            logger.warning("Failed to get user context", exc_info=True)
+        return None
+
     def clone(self) -> ThumbelinaAgent:
-        """Create an independent clone sharing the same LLM provider and memory manager.
-
-        Each clone has its own compiled graph and conversation tracking,
-        making it safe for concurrent use (e.g., per-WebSocket-connection).
-
-        Returns
-        -------
-        ThumbelinaAgent
-            A new agent instance with isolated graph state.
-        """
+        """Create an independent clone sharing the same LLM provider and memory manager."""
         return ThumbelinaAgent(
             llm_provider=self.llm_provider,
             tools=list(self.tools),
             memory_manager=self.memory_manager,
             request_timeout=self.request_timeout,
+            skill_engine=self.skill_engine,
+            subagent_manager=self.subagent_manager,
+            scheduler=self.scheduler,
+            composition_engine=self.composition_engine,
+            user_profiler=self.user_profiler,
         )
 
     async def run(self, user_input: str) -> str:
-        """Run the agent with user input and return the response.
-
-        Parameters
-        ----------
-        user_input:
-            The user's message.
-
-        Returns
-        -------
-        str
-            The agent's response.
-        """
+        """Run the agent with user input and return the response."""
         await self._ensure_conversation()
         await self._persist_message("user", user_input)
 
-        initial_state: AgentState = {"messages": [HumanMessage(content=user_input)]}
+        # Check for matching skills and prepend context if found
+        initial_messages: list[Any] = []
+        user_context = await self._get_user_context()
+        if user_context:
+            initial_messages.append(SystemMessage(content=user_context))
+        skill_context = await self._get_skill_context(user_input)
+        if skill_context:
+            initial_messages.append(SystemMessage(content=skill_context))
+        initial_messages.append(HumanMessage(content=user_input))
+
+        initial_state: AgentState = {"messages": initial_messages}
         result = await self.graph.ainvoke(initial_state)
 
-        # Get the last AI message
         last_message = result["messages"][-1]
         response = str(last_message.content)
 
@@ -175,26 +364,24 @@ class ThumbelinaAgent:
         return response
 
     async def stream(self, user_input: str) -> AsyncGenerator[str, None]:
-        """Stream the agent's response.
-
-        Parameters
-        ----------
-        user_input:
-            The user's message.
-
-        Yields
-        ------
-        str
-            Incremental text chunks of the response.
-        """
+        """Stream the agent's response."""
         await self._ensure_conversation()
         await self._persist_message("user", user_input)
 
-        initial_state: AgentState = {"messages": [HumanMessage(content=user_input)]}
+        # Check for matching skills and prepend context if found
+        initial_messages: list[Any] = []
+        user_context = await self._get_user_context()
+        if user_context:
+            initial_messages.append(SystemMessage(content=user_context))
+        skill_context = await self._get_skill_context(user_input)
+        if skill_context:
+            initial_messages.append(SystemMessage(content=skill_context))
+        initial_messages.append(HumanMessage(content=user_input))
+
+        initial_state: AgentState = {"messages": initial_messages}
         full_response = ""
 
         async for event in self.graph.astream(initial_state):
-            # Each event is a dict with node name as key and state update as value
             for node_name, state_update in event.items():
                 if "messages" in state_update:
                     for message in state_update["messages"]:
@@ -205,3 +392,4 @@ class ThumbelinaAgent:
 
         if full_response:
             await self._persist_message("assistant", full_response)
+

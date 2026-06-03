@@ -103,53 +103,53 @@ class TestMessageConversion:
     """Tests for the _to_langchain_messages helper."""
 
     def test_convert_user_message(self):
-        from thumbelina.llm.base import _to_langchain_messages
-
         from langchain_core.messages import HumanMessage
 
-        result = _to_langchain_messages([{"role": "user", "content": "hello"}])
+        from thumbelina.llm.base import LLMProvider
+
+        result = LLMProvider._to_langchain_messages([{"role": "user", "content": "hello"}])
         assert len(result) == 1
         assert isinstance(result[0], HumanMessage)
         assert result[0].content == "hello"
 
     def test_convert_assistant_message(self):
-        from thumbelina.llm.base import _to_langchain_messages
-
         from langchain_core.messages import AIMessage
 
-        result = _to_langchain_messages([{"role": "assistant", "content": "hi"}])
+        from thumbelina.llm.base import LLMProvider
+
+        result = LLMProvider._to_langchain_messages([{"role": "assistant", "content": "hi"}])
         assert len(result) == 1
         assert isinstance(result[0], AIMessage)
         assert result[0].content == "hi"
 
     def test_convert_system_message(self):
-        from thumbelina.llm.base import _to_langchain_messages
-
         from langchain_core.messages import SystemMessage
 
-        result = _to_langchain_messages([{"role": "system", "content": "behave"}])
+        from thumbelina.llm.base import LLMProvider
+
+        result = LLMProvider._to_langchain_messages([{"role": "system", "content": "behave"}])
         assert len(result) == 1
         assert isinstance(result[0], SystemMessage)
         assert result[0].content == "behave"
 
     def test_convert_multiple_messages(self):
-        from thumbelina.llm.base import _to_langchain_messages
-
         from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+        from thumbelina.llm.base import LLMProvider
 
         messages = [
             {"role": "system", "content": "behave"},
             {"role": "user", "content": "hello"},
             {"role": "assistant", "content": "hi"},
         ]
-        result = _to_langchain_messages(messages)
+        result = LLMProvider._to_langchain_messages(messages)
         assert len(result) == 3
         assert isinstance(result[0], SystemMessage)
         assert isinstance(result[1], HumanMessage)
         assert isinstance(result[2], AIMessage)
 
     def test_unknown_role_raises(self):
-        from thumbelina.llm.base import _to_langchain_messages
+        from thumbelina.llm.base import LLMProvider
 
         with pytest.raises(ValueError, match="Unknown role"):
-            _to_langchain_messages([{"role": "ghost", "content": "boo"}])
+            LLMProvider._to_langchain_messages([{"role": "ghost", "content": "boo"}])

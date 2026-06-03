@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 
@@ -17,9 +16,10 @@ class TestShouldContinue:
 
     def test_returns_end_when_no_tool_calls(self):
         """should_continue should return END when AI has no tool calls."""
+        from langgraph.graph import END
+
         from thumbelina.agent.edges import should_continue
         from thumbelina.agent.state import AgentState
-        from langgraph.graph import END
 
         state: AgentState = {"messages": [AIMessage(content="Just a response")]}
         result = should_continue(state)
@@ -42,9 +42,10 @@ class TestShouldContinue:
 
     def test_handles_multiple_messages(self):
         """should_continue should check only the last message."""
+        from langgraph.graph import END
+
         from thumbelina.agent.edges import should_continue
         from thumbelina.agent.state import AgentState
-        from langgraph.graph import END
 
         messages = [
             HumanMessage(content="Hi"),
@@ -71,7 +72,8 @@ class TestEdgeConstants:
 
     def test_end_constant_exists(self):
         """END constant should be defined and match langgraph's END."""
-        from thumbelina.agent.edges import END
         from langgraph.graph import END as LangGraphEND
+
+        from thumbelina.agent.edges import END
 
         assert END == LangGraphEND

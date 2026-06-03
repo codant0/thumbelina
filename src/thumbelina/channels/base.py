@@ -1,0 +1,55 @@
+"""Channel abstract base class for IM integrations."""
+
+from __future__ import annotations
+
+import logging
+from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
+
+logger = logging.getLogger(__name__)
+
+# Type alias: a handler that receives (user_id, text) and returns a response.
+MessageHandler = Callable[[str, str], Awaitable[str]]
+
+
+class Channel(ABC):
+    """Abstract base class for all IM channel implementations.
+
+    Subclasses must implement ``start``, ``stop``, and ``send_message``.
+    Use ``set_handler`` to register an async callback that processes
+    incoming messages and returns a response string.
+    """
+
+    def __init__(self) -> None:
+        self._handler: MessageHandler | None = None
+
+    def set_handler(self, handler: MessageHandler) -> None:
+        """Register a message-handling callback.
+
+        Parameters
+        ----------
+        handler:
+            An async callable ``(user_id: str, text: str) -> str`` that
+            processes an incoming message and returns the response text.
+        """
+        self._handler = handler
+
+    @abstractmethod
+    async def start(self) -> None:
+        """Start the channel connection."""
+
+    @abstractmethod
+    async def stop(self) -> None:
+        """Stop the channel connection."""
+
+    @abstractmethod
+    async def send_message(self, user_id: str, text: str) -> None:
+        """Send a message to a specific user.
+
+        Parameters
+        ----------
+        user_id:
+            The target user identifier.
+        text:
+            The message text to send.
+        """

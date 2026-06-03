@@ -222,3 +222,202 @@ class TestScheduledTask:
         assert TaskStatus.RUNNING == "running"
         assert TaskStatus.COMPLETED == "completed"
         assert TaskStatus.CANCELLED == "cancelled"
+
+    def test_task_default_condition(self):
+        """Condition should default to None."""
+        task = ScheduledTask(id="t1", description="Test", scheduled_time=datetime.now())
+        assert task.condition is None
+
+    def test_task_with_condition(self):
+        """Should store a condition string."""
+        task = ScheduledTask(
+            id="t1",
+            description="Watch file",
+            scheduled_time=datetime.now(),
+            condition="file_changed:/tmp/data.csv",
+        )
+        assert task.condition == "file_changed:/tmp/data.csv"
+
+
+class TestConditionalTasks:
+    """Tests for condition-based task scheduling."""
+
+    @pytest.mark.asyncio
+    async def test_condition_met_executes_task(self):
+        """Should execute task when condition returns True."""
+
+        async def always_true(c: str) -> bool:
+            return True
+
+        scheduler = TaskScheduler(check_condition=always_true)
+
+        past_task = ScheduledTask(
+            id="cond-1",
+            description="Conditional task",
+            scheduled_time=datetime.now() - timedelta(hours=1),
+            condition="file_changed:/tmp/test",
+        )
+        await scheduler.add_task(past_task)
+
+        executed: list[str] = []
+
+        async def callback(task: ScheduledTask) -> None:
+            executed.append(task.id)
+
+        await scheduler.start(on_due_task=callback)
+        await asyncio.sleep(0.2)
+        await scheduler.stop()
+
+        assert "cond-1" in executed
+        updated = await scheduler.get_task("cond-1")
+        assert updated.status == TaskStatus.COMPLETED
+
+    @pytest.mark.asyncio
+    async def test_condition_not_met_skips_task(self):
+        """Should skip task when condition returns False."""
+
+        async def always_false(c: str) -> bool:
+            return False
+
+        scheduler = TaskScheduler(check_condition=always_false)
+
+        past_task = ScheduledTask(
+            id="cond-2",
+            description="Conditional task",
+            scheduled_time=datetime.now() - timedelta(hours=1),
+            condition="file_changed:/tmp/test",
+        )
+        await scheduler.add_task(past_task)
+
+        executed: list[str] = []
+
+        async def callback(task: ScheduledTask) -> None:
+            executed.append(task.id)
+
+        await scheduler.start(on_due_task=callback)
+        await asyncio.sleep(0.2)
+        await scheduler.stop()
+
+        assert "cond-2" not in executed
+        updated = await scheduler.get_task("cond-2")
+        assert updated.status == TaskStatus.PENDING
+
+    @pytest.mark.asyncio
+    async def test_condition_check_receives_condition_string(self):
+        """Should pass the condition string to the check callback."""
+        received_conditions: list[str] = []
+
+        async def checker(condition: str) -> bool:
+            received_conditions.append(condition)
+            return True
+
+        scheduler = TaskScheduler(check_condition=checker)
+
+        task = ScheduledTask(
+            id="cond-3",
+            description="Test",
+            scheduled_time=datetime.now() - timedelta(hours=1),
+            condition="file_changed:/data.csv",
+        )
+        await scheduler.add_task(task)
+
+        await scheduler.start()
+        await asyncio.sleep(0.2)
+        await scheduler.stop()
+
+        assert "file_changed:/data.csv" in received_conditions
+
+    @pytest.mark.asyncio
+    async def test_no_condition_ignores_check_callback(self):
+        """Time-based tasks (no condition) should execute without check_condition."""
+        check_called = []
+
+        async def checker(condition: str) -> bool:
+            check_called.append(condition)
+            return True
+
+        scheduler = TaskScheduler(check_condition=checker)
+
+        task = ScheduledTask(
+            id="time-1",
+            description="Time-based task",
+            scheduled_time=datetime.now() - timedelta(hours=1),
+            # No condition set
+        )
+        await scheduler.add_task(task)
+
+        executed: list[str] = []
+
+        async def callback(t: ScheduledTask) -> None:
+            executed.append(t.id)
+
+        await scheduler.start(on_due_task=callback)
+        await asyncio.sleep(0.2)
+        await scheduler.stop()
+
+        assert "time-1" in executed
+        assert len(check_called) == 0
+
+    @pytest.mark.asyncio
+    async def test_condition_check_error_continues(self):
+        """Should continue processing other tasks when condition check raises."""
+        call_count = 0
+
+        async def checker(condition: str) -> bool:
+            nonlocal call_count
+            call_count += 1
+            raise RuntimeError("check failed")
+
+        scheduler = TaskScheduler(check_condition=checker)
+
+        cond_task = ScheduledTask(
+            id="err-1",
+            description="Will fail condition check",
+            scheduled_time=datetime.now() - timedelta(hours=1),
+            condition="bad_condition",
+        )
+        time_task = ScheduledTask(
+            id="time-1",
+            description="Time-based",
+            scheduled_time=datetime.now() - timedelta(hours=1),
+        )
+        await scheduler.add_task(cond_task)
+        await scheduler.add_task(time_task)
+
+        executed: list[str] = []
+
+        async def callback(t: ScheduledTask) -> None:
+            executed.append(t.id)
+
+        await scheduler.start(on_due_task=callback)
+        await asyncio.sleep(0.2)
+        await scheduler.stop()
+
+        # The condition task should not be executed, but the time task should
+        assert "err-1" not in executed
+        assert "time-1" in executed
+
+    @pytest.mark.asyncio
+    async def test_scheduler_without_check_condition(self):
+        """Tasks with conditions still execute on time when no check_condition is set."""
+        scheduler = TaskScheduler()  # No check_condition
+
+        task = ScheduledTask(
+            id="no-check",
+            description="Condition task without checker",
+            scheduled_time=datetime.now() - timedelta(hours=1),
+            condition="file_changed:/tmp/test",
+        )
+        await scheduler.add_task(task)
+
+        executed: list[str] = []
+
+        async def callback(t: ScheduledTask) -> None:
+            executed.append(t.id)
+
+        await scheduler.start(on_due_task=callback)
+        await asyncio.sleep(0.2)
+        await scheduler.stop()
+
+        # Without check_condition, condition is ignored and task runs on time
+        assert "no-check" in executed

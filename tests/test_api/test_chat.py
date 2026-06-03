@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 
 def test_chat_endpoint_exists(client):
     """POST /api/v1/chat should exist."""

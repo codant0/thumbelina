@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from thumbelina.subagents.manager import SubagentManager
 from thumbelina.subagents.base import Subagent, SubagentStatus
+from thumbelina.subagents.manager import SubagentManager
 
 
 @pytest.fixture

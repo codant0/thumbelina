@@ -16,8 +16,8 @@ class TestCreateProvider:
         assert isinstance(provider, OpenAIProvider)
 
     def test_create_anthropic_provider(self):
-        from thumbelina.llm.factory import create_provider
         from thumbelina.llm.anthropic import AnthropicProvider
+        from thumbelina.llm.factory import create_provider
 
         provider = create_provider("anthropic", api_key="test-key")
         assert isinstance(provider, AnthropicProvider)

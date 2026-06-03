@@ -41,6 +41,10 @@ class ScheduledTask:
         Current status of the task.
     result:
         Result of the task execution.
+    condition:
+        Optional condition string for condition-based tasks
+        (e.g., ``"file_changed:/path/to/file"``).  When set, the task
+        is only executed when the ``check_condition`` callback returns True.
     """
 
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -48,19 +52,31 @@ class ScheduledTask:
     scheduled_time: datetime = field(default_factory=datetime.now)
     status: TaskStatus = TaskStatus.PENDING
     result: str | None = None
+    condition: str | None = None
 
 
 class TaskScheduler:
     """Scheduler for managing and executing scheduled tasks.
 
+    Parameters
+    ----------
+    check_condition:
+        Optional async callback that evaluates a condition string and
+        returns ``True`` when the condition is satisfied.  Used for
+        condition-based tasks (those with a ``condition`` field set).
+
     Call :meth:`start` to begin the background polling loop, and
     :meth:`stop` to shut it down gracefully.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        check_condition: Callable[[str], Awaitable[bool]] | None = None,
+    ) -> None:
         self._tasks: dict[str, ScheduledTask] = {}
         self._running = False
         self._poll_task: asyncio.Task[None] | None = None
+        self._check_condition = check_condition
 
     @property
     def running(self) -> bool:
@@ -140,10 +156,28 @@ class TaskScheduler:
         self,
         on_due_task: Callable[[ScheduledTask], Awaitable[None]] | None,
     ) -> None:
-        """Internal: periodically check for and execute due tasks."""
+        """Internal: periodically check for and execute due tasks.
+
+        For condition-based tasks (those with a ``condition`` field), the
+        ``check_condition`` callback is called instead of relying solely on
+        the scheduled time.  The task is only executed when the condition
+        returns ``True``.
+        """
         while self._running:
             due = await self.get_due_tasks()
             for task in due:
+                # 条件任务：仅在条件满足时执行
+                if task.condition and self._check_condition is not None:
+                    try:
+                        condition_met = await self._check_condition(task.condition)
+                    except Exception as exc:
+                        logger.warning(
+                            "Condition check failed for task %s: %s", task.id, exc
+                        )
+                        continue
+                    if not condition_met:
+                        continue
+
                 task.status = TaskStatus.RUNNING
                 try:
                     if on_due_task is not None:

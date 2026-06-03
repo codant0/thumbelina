@@ -16,13 +16,17 @@ class RateLimiter:
         Maximum number of requests per window.
     window_seconds:
         Time window in seconds.
+    cleanup_interval:
+        How often to clean up expired entries (seconds).
     """
 
-    def __init__(self, max_requests: int, window_seconds: int) -> None:
+    def __init__(self, max_requests: int, window_seconds: int, cleanup_interval: int = 60) -> None:
         self.max_requests = max_requests
         self.window_seconds = window_seconds
         self._requests: dict[str, list[float]] = defaultdict(list)
         self._lock = threading.Lock()
+        self._last_cleanup = time.time()
+        self._cleanup_interval = cleanup_interval
 
     def _clean_old_requests(self, key: str) -> None:
         """Remove requests outside the window (caller must hold lock)."""
@@ -32,6 +36,25 @@ class RateLimiter:
         ]
         if not self._requests[key]:
             del self._requests[key]
+
+    def _cleanup_all_expired(self) -> None:
+        """Clean up all expired entries (caller must hold lock)."""
+        now = time.time()
+        cutoff = now - self.window_seconds
+        keys_to_delete = []
+
+        for key, timestamps in self._requests.items():
+            # Filter out expired timestamps
+            self._requests[key] = [t for t in timestamps if t > cutoff]
+            # Mark empty keys for deletion
+            if not self._requests[key]:
+                keys_to_delete.append(key)
+
+        # Delete empty keys
+        for key in keys_to_delete:
+            del self._requests[key]
+
+        self._last_cleanup = now
 
     def is_allowed(self, key: str) -> bool:
         """Check if a request is allowed.
@@ -47,6 +70,10 @@ class RateLimiter:
             True if request is allowed, False if rate limit exceeded.
         """
         with self._lock:
+            # 定期清理所有过期条目
+            if time.time() - self._last_cleanup > self._cleanup_interval:
+                self._cleanup_all_expired()
+
             self._clean_old_requests(key)
             if len(self._requests.get(key, [])) >= self.max_requests:
                 return False

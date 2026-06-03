@@ -1,8 +1,15 @@
+export interface ToolCall {
+  name: string
+  args: Record<string, unknown>
+  result?: string
+}
+
 export interface Message {
   id: string
   role: 'user' | 'assistant' | 'system'
   content: string
   timestamp: string
+  toolCalls?: ToolCall[]
 }
 
 export interface Conversation {

@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from thumbelina.memory.repository import ConversationRepository
+from thumbelina.memory.search import SearchEngine
+from thumbelina.memory.vector.base import VectorStore
 
 # Maximum content length for messages (100KB)
 MAX_CONTENT_LENGTH = 100_000
@@ -17,10 +19,18 @@ class MemoryManager:
     ----------
     db_url:
         SQLAlchemy database URL (e.g., "sqlite:///thumbelina.db").
+    vector_store:
+        Optional vector store for semantic search capabilities.
     """
 
-    def __init__(self, db_url: str) -> None:
+    def __init__(
+        self,
+        db_url: str,
+        vector_store: VectorStore | None = None,
+    ) -> None:
         self.repository = ConversationRepository(db_url)
+        self._vector_store = vector_store
+        self._search_engine = SearchEngine(self.repository, vector_store)
 
     def close(self) -> None:
         """Close the repository and release resources."""
@@ -146,3 +156,24 @@ class MemoryManager:
             True if set successfully, False if conversation not found.
         """
         return await self.repository.set_summary(conversation_id, summary)
+
+    async def search(
+        self,
+        query: str,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Search messages using hybrid keyword + semantic search.
+
+        Parameters
+        ----------
+        query:
+            Text to search for.
+        limit:
+            Maximum number of results.
+
+        Returns
+        -------
+        list[dict[str, Any]]
+            List of matching message dicts.
+        """
+        return await self._search_engine.hybrid_search(query, limit=limit)

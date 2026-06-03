@@ -15,6 +15,11 @@ def mock_agent():
     """Create a mock ThumbelinaAgent."""
     agent = MagicMock()
     agent.run = AsyncMock(return_value="Agent response")
+
+    async def _stream(*args, **kwargs):
+        yield "Agent response"
+
+    agent.stream = _stream
     agent.current_conversation_id = None
     agent.memory_manager = None
     # clone() returns a new mock (memory_manager=None is safe for clone)
@@ -53,6 +58,11 @@ def mock_memory():
     memory.delete_conversation = AsyncMock(side_effect=delete_conversation)
     memory.add_message = AsyncMock()
     memory.close = MagicMock()
+
+    # Mock repository with ping method
+    memory.repository = MagicMock()
+    memory.repository.ping = AsyncMock(return_value=True)
+
     return memory
 
 

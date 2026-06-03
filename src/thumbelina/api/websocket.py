@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
@@ -9,6 +11,9 @@ from thumbelina.agent.graph import ThumbelinaAgent
 from thumbelina.api.schemas import WebSocketMessage
 
 router = APIRouter(tags=["websocket"])
+
+# WebSocket 消息大小限制 (1MB)
+MAX_MESSAGE_SIZE = 1024 * 1024
 
 
 @router.websocket("/ws/chat")
@@ -36,7 +41,20 @@ async def websocket_chat(websocket: WebSocket) -> None:
 
     try:
         while True:
-            data = await websocket.receive_json()
+            # 接收原始文本消息以检查大小
+            raw_text = await websocket.receive_text()
+
+            # 检查消息大小
+            if len(raw_text.encode("utf-8")) > MAX_MESSAGE_SIZE:
+                await websocket.send_json({"error": "Message too large"})
+                continue
+
+            # 解析 JSON
+            try:
+                data = json.loads(raw_text)
+            except json.JSONDecodeError:
+                await websocket.send_json({"error": "Invalid JSON"})
+                continue
 
             # Validate incoming message via Pydantic schema
             try:
@@ -54,11 +72,9 @@ async def websocket_chat(websocket: WebSocket) -> None:
             if cid:
                 agent.current_conversation_id = cid
 
-            response_text = await agent.run(parsed.message)
-            await websocket.send_json({
-                "response": response_text,
-                "conversation_id": cid,
-            })
+            async for chunk in agent.stream(parsed.message):
+                await websocket.send_json({"chunk": chunk, "conversation_id": cid})
+            await websocket.send_json({"done": True, "conversation_id": cid})
 
     except WebSocketDisconnect:
         pass

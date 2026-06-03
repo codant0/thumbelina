@@ -11,6 +11,19 @@ from thumbelina.memory.manager import MemoryManager
 router = APIRouter(tags=["conversations"])
 
 
+@router.get("/conversations/search/{query}")
+async def search_conversations(
+    query: str,
+    memory: MemoryManager = Depends(get_memory_manager),
+) -> list[dict]:
+    """Search messages across all conversations.
+
+    Uses hybrid keyword + semantic search when a vector store
+    is configured, falling back to keyword-only search otherwise.
+    """
+    return await memory.search(query)
+
+
 @router.get("/conversations", response_model=list[ConversationSchema])
 async def list_conversations(
     memory: MemoryManager = Depends(get_memory_manager),

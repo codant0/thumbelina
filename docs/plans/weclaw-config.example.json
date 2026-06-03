@@ -1,0 +1,10 @@
+{
+  "default_agent": "thumbelina",
+  "agents": {
+    "thumbelina": {
+      "type": "http",
+      "endpoint": "http://127.0.0.1:8000/api/v1/wechat/incoming",
+      "model": "thumbelina:main"
+    }
+  }
+}

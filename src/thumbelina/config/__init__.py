@@ -5,12 +5,23 @@ and environment variable overrides.
 """
 
 from thumbelina.config.loader import load_config
-from thumbelina.config.models import AppConfig, LLMConfig, LoggingConfig, MemoryConfig
+from thumbelina.config.models import (
+    AppConfig,
+    ChannelsConfig,
+    LLMConfig,
+    LoggingConfig,
+    MemoryConfig,
+    QQChannelConfig,
+    WeChatChannelConfig,
+)
 
 __all__ = [
     "AppConfig",
+    "ChannelsConfig",
     "LLMConfig",
     "LoggingConfig",
     "MemoryConfig",
+    "QQChannelConfig",
+    "WeChatChannelConfig",
     "load_config",
 ]

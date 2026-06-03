@@ -6,7 +6,7 @@ import json
 import os
 import re
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
@@ -93,7 +93,7 @@ class BackupManager:
 
                 name = backup_id
                 try:
-                    with open(filepath, "r", encoding="utf-8") as f:
+                    with open(filepath, encoding="utf-8") as f:
                         raw = json.load(f)
                     if isinstance(raw, dict) and "_thumbelina_backup" in raw:
                         name = raw["_thumbelina_backup"].get("name", backup_id)
@@ -126,7 +126,7 @@ class BackupManager:
         if not os.path.exists(filepath):
             return None
 
-        with open(filepath, "r", encoding="utf-8") as f:
+        with open(filepath, encoding="utf-8") as f:
             raw = json.load(f)
 
         if isinstance(raw, dict) and "_thumbelina_backup" in raw:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -11,16 +12,41 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from thumbelina.agent.graph import ThumbelinaAgent
-from thumbelina.api.routes import chat, conversations
+from thumbelina.api.routes import chat, conversations, data, plugins, skills, tasks, wechat
 from thumbelina.api.websocket import router as ws_router
 from thumbelina.config import AppConfig, load_config
 from thumbelina.llm.factory import create_provider
 from thumbelina.memory.manager import MemoryManager
+from thumbelina.notifications import NotificationManager
 from thumbelina.security.auth import AuthService
 from thumbelina.security.rate_limit import RateLimiter
 
+logger = logging.getLogger(__name__)
+
 # Paths exempt from authentication
 _AUTH_WHITELIST = frozenset({"/health", "/docs", "/openapi.json", "/redoc"})
+
+
+def require_roles(
+    request: Request,
+    allowed_roles: list[str],
+) -> bool:
+    """Check that the authenticated user has at least one of the required roles.
+
+    Parameters
+    ----------
+    request:
+        The incoming request (must have ``user_roles`` set by auth middleware).
+    allowed_roles:
+        Roles that are permitted to access the resource.
+
+    Returns
+    -------
+    bool
+        *True* if the user has a matching role, *False* otherwise.
+    """
+    user_roles: list[str] = getattr(request.state, "user_roles", [])
+    return any(role in allowed_roles for role in user_roles)
 
 
 class _AuthMiddleware(BaseHTTPMiddleware):
@@ -29,9 +55,15 @@ class _AuthMiddleware(BaseHTTPMiddleware):
     Attached only when ``config.auth.secret_key`` is non-empty.
     """
 
-    def __init__(self, app, auth_service: AuthService) -> None:
+    def __init__(
+        self,
+        app,
+        auth_service: AuthService,
+        required_roles: list[str] | None = None,
+    ) -> None:
         super().__init__(app)
         self._auth = auth_service
+        self._required_roles = required_roles
 
     async def dispatch(self, request: Request, call_next):
         if request.url.path in _AUTH_WHITELIST:
@@ -54,6 +86,14 @@ class _AuthMiddleware(BaseHTTPMiddleware):
 
         request.state.user_id = payload.user_id
         request.state.user_roles = payload.roles
+
+        # Global role check (when required_roles is configured)
+        if self._required_roles and not require_roles(request, self._required_roles):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Insufficient permissions"},
+            )
+
         return await call_next(request)
 
 
@@ -84,21 +124,153 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     memory = MemoryManager(config.memory.database_url)
     app.state.memory_manager = memory
 
-    llm_provider = create_provider(
-        config.llm.provider,
-        model=config.llm.model,
-        api_key=config.llm.api_key,
-    )
+    llm_kwargs = {
+        "model": config.llm.model,
+        "api_key": config.llm.api_key,
+    }
+    if config.llm.base_url:
+        llm_kwargs["base_url"] = config.llm.base_url
+
+    llm_provider = create_provider(config.llm.provider, **llm_kwargs)
+
+    # Initialize feedback repository
+    feedback_repo = None
+    try:
+        from thumbelina.memory.feedback_repo import FeedbackRepository
+        feedback_repo = FeedbackRepository(db_url=config.memory.database_url)
+        app.state.feedback_repo = feedback_repo
+    except Exception:
+        logger.debug("Feedback repository not initialized", exc_info=True)
+
+    # Initialize optional subsystems
+    skill_engine = None
+    skill_repo = None
+    try:
+        from thumbelina.skills.application import SkillApplicationEngine
+        from thumbelina.skills.repository import SkillRepository
+        skill_repo = SkillRepository(db_url=config.memory.database_url)
+        skill_engine = SkillApplicationEngine(
+            repository=skill_repo,
+            llm_provider=llm_provider,
+            feedback_repo=feedback_repo,
+        )
+    except Exception:
+        logger.debug("Skill engine not initialized", exc_info=True)
+
+    composition_engine = None
+    try:
+        from thumbelina.skills.composition_engine import CompositionEngine
+        from thumbelina.skills.composition_repo import CompositionRepository
+        if skill_repo is None:
+            from thumbelina.skills.repository import SkillRepository
+            skill_repo = SkillRepository(db_url=config.memory.database_url)
+        comp_repo = CompositionRepository(db_url=config.memory.database_url)
+        composition_engine = CompositionEngine(
+            composition_repo=comp_repo,
+            skill_repo=skill_repo,
+            llm_provider=llm_provider,
+        )
+    except Exception:
+        logger.debug("Composition engine not initialized", exc_info=True)
+
+    subagent_manager = None
+    try:
+        from thumbelina.subagents.manager import SubagentManager
+        subagent_manager = SubagentManager(llm_provider=llm_provider)
+    except Exception:
+        logger.debug("Subagent manager not initialized", exc_info=True)
+
+    # 通知管理器
+    notification_manager = NotificationManager()
+    app.state.notification_manager = notification_manager
+
+    scheduler = None
+    try:
+        from thumbelina.scheduler.scheduler import TaskScheduler
+        scheduler = TaskScheduler()
+
+        # 任务完成时广播通知
+        async def _on_due_task(task):
+            await notification_manager.broadcast({
+                "type": "task_completed",
+                "task_id": task.id,
+                "description": task.description,
+            })
+
+        await scheduler.start(on_due_task=_on_due_task)
+    except Exception:
+        logger.debug("Scheduler not initialized", exc_info=True)
+
+    # Initialize user profiler
+    user_profiler = None
+    try:
+        from thumbelina.memory.profiler import UserProfiler
+        from thumbelina.memory.user_profile_repo import UserProfileRepository
+        profile_repo = UserProfileRepository(db_url=config.memory.database_url)
+        user_profiler = UserProfiler(
+            llm_provider=llm_provider,
+            profile_repo=profile_repo,
+        )
+        app.state.user_profiler = user_profiler
+    except Exception:
+        logger.debug("User profiler not initialized", exc_info=True)
+
+    # Load plugins from configured directories (with sandbox validation)
+    if config.plugin_dirs:
+        from thumbelina.plugins.manager import PluginManager
+        from thumbelina.plugins.sandbox import PluginSandbox
+        from thumbelina.plugins.sandboxed_loader import SandboxedPluginLoader
+
+        sandbox = PluginSandbox()
+        loader = SandboxedPluginLoader(sandbox=sandbox)
+        plugin_manager = PluginManager(sandboxed_loader=loader)
+
+        for plugin_dir in config.plugin_dirs:
+            try:
+                loaded = await plugin_manager.load_plugins_from_directory(plugin_dir)
+                if loaded:
+                    logger.info("Loaded %d plugins from %s", loaded, plugin_dir)
+            except Exception:
+                logger.warning("Failed to load plugins from %s", plugin_dir, exc_info=True)
+        app.state.plugin_manager = plugin_manager
+
+    from thumbelina.tools import get_all_tools
 
     agent = ThumbelinaAgent(
         llm_provider=llm_provider,
+        tools=get_all_tools(),
         memory_manager=memory,
         request_timeout=config.llm.request_timeout,
+        skill_engine=skill_engine,
+        subagent_manager=subagent_manager,
+        scheduler=scheduler,
+        composition_engine=composition_engine,
+        user_profiler=user_profiler,
     )
     app.state.agent = agent
 
+    # Initialize WeChat channel if enabled
+    wechat_channel = None
+    if config.channels.wechat.enabled:
+        try:
+            from thumbelina.channels.wechat_channel import WeChatChannel
+
+            wechat_channel = WeChatChannel(
+                config=config.channels.wechat,
+                agent=agent,
+            )
+            await wechat_channel.start()
+            app.state.wechat_channel = wechat_channel
+            logger.info("WeChat channel initialized")
+        except Exception:
+            logger.debug("WeChat channel not initialized", exc_info=True)
+
     yield
 
+    if wechat_channel:
+        await wechat_channel.stop()
+    if scheduler:
+        await scheduler.stop()
     memory.close()
 
 
@@ -142,16 +314,60 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # Add auth middleware when a secret key is configured
     if config.auth.secret_key:
         auth_service = AuthService(secret_key=config.auth.secret_key)
-        app.add_middleware(_AuthMiddleware, auth_service=auth_service)
+        required_roles = config.auth.required_roles or None
+        app.add_middleware(
+            _AuthMiddleware,
+            auth_service=auth_service,
+            required_roles=required_roles,
+        )
+
+    # Global exception handlers
+    @app.exception_handler(Exception)
+    async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+        """Handle uncaught exceptions."""
+        logger.error(f"Unhandled exception: {exc}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Internal server error"}
+        )
+
+    @app.exception_handler(ValueError)
+    async def value_error_handler(request: Request, exc: ValueError) -> JSONResponse:
+        """Handle value errors."""
+        logger.warning(f"Value error: {exc}")
+        return JSONResponse(
+            status_code=400,
+            content={"detail": str(exc)}
+        )
 
     # Health check endpoint
     @app.get("/health")
     async def health() -> dict[str, str]:
-        return {"status": "ok"}
+        """Detailed health check."""
+        checks = {
+            "status": "ok",
+            "version": "0.1.0",
+        }
+
+        # Check database connectivity
+        try:
+            memory = app.state.memory_manager
+            await memory.repository.ping()
+            checks["database"] = "ok"
+        except Exception:
+            checks["database"] = "error"
+            checks["status"] = "degraded"
+
+        return checks
 
     # Include routers
     app.include_router(chat.router, prefix="/api/v1")
     app.include_router(conversations.router, prefix="/api/v1")
+    app.include_router(data.router, prefix="/api/v1")
+    app.include_router(tasks.router, prefix="/api/v1")
+    app.include_router(skills.router, prefix="/api/v1")
+    app.include_router(plugins.router, prefix="/api/v1")
+    app.include_router(wechat.router, prefix="/api/v1")
     app.include_router(ws_router)
 
     return app

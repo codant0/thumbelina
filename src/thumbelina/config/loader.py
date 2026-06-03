@@ -75,7 +75,9 @@ def _load_yaml_file(path: str) -> dict[str, Any]:
     if data is None:
         return {}
     if not isinstance(data, dict):
-        raise ValueError(f"Configuration file must contain a YAML mapping, got {type(data).__name__}")
+        raise ValueError(
+            f"Configuration file must contain a YAML mapping, got {type(data).__name__}"
+        )
     return data
 
 

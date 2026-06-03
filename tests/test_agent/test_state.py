@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-import pytest
-
 
 class TestAgentState:
     """Tests for the AgentState TypedDict."""
 
     def test_agent_state_is_typeddict(self):
         """AgentState should be a TypedDict."""
+
         from thumbelina.agent.state import AgentState
-        from typing import TypedDict
 
         assert isinstance(AgentState, type)
         # Check it has the __annotations__ attribute (TypedDicts do)
@@ -26,8 +24,8 @@ class TestAgentState:
 
     def test_messages_field_is_list(self):
         """Messages field should be a list type."""
+
         from thumbelina.agent.state import AgentState
-        from langchain_core.messages import BaseMessage
 
         annotations = AgentState.__annotations__
         msg_type = annotations["messages"]
@@ -36,8 +34,9 @@ class TestAgentState:
 
     def test_agent_state_can_be_created(self):
         """Should be able to create an AgentState dict."""
-        from thumbelina.agent.state import AgentState
         from langchain_core.messages import HumanMessage
+
+        from thumbelina.agent.state import AgentState
 
         state: AgentState = {"messages": [HumanMessage(content="hello")]}
         assert len(state["messages"]) == 1

@@ -4,29 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any
+from datetime import datetime
 
-from sqlalchemy import Column, Float, Integer, String, Text, create_engine
-from sqlalchemy.orm import Session, declarative_base, sessionmaker
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from thumbelina.memory.models import Base, SkillRecord
 from thumbelina.skills.models import Skill
-
-Base = declarative_base()
-
-
-class SkillRecord(Base):
-    """SQLAlchemy model for skill storage."""
-
-    __tablename__ = "skills"
-
-    id = Column(String(36), primary_key=True)
-    name = Column(String(200), nullable=False)
-    description = Column(Text, nullable=False)
-    trigger_conditions = Column(Text, nullable=False)  # JSON array
-    steps = Column(Text, nullable=False)  # JSON array
-    version = Column(Integer, default=1)
-    success_rate = Column(Float, default=0.0)
 
 
 class SkillRepository:
@@ -50,6 +35,10 @@ class SkillRepository:
         Base.metadata.create_all(self.engine)
         self.SessionLocal = sessionmaker(bind=self.engine, expire_on_commit=False)
 
+    def close(self) -> None:
+        """Dispose of the database engine and release connections."""
+        self.engine.dispose()
+
     def _record_to_skill(self, record: SkillRecord) -> Skill:
         """Convert a database record to a Skill object."""
         return Skill(
@@ -60,6 +49,7 @@ class SkillRepository:
             steps=json.loads(record.steps),
             version=record.version,
             success_rate=record.success_rate,
+            created_at=record.created_at if record.created_at else datetime.now(),
         )
 
     async def save(self, skill: Skill) -> None:
@@ -102,7 +92,8 @@ class SkillRepository:
         """List all skills."""
         def _list():
             with self.SessionLocal() as session:
-                records = session.query(SkillRecord).all()
+                stmt = select(SkillRecord)
+                records = session.execute(stmt).scalars().all()
                 return [self._record_to_skill(r) for r in records]
 
         return await asyncio.to_thread(_list)
@@ -124,10 +115,11 @@ class SkillRepository:
         """Search skills by name or description."""
         def _search():
             with self.SessionLocal() as session:
-                records = session.query(SkillRecord).filter(
+                stmt = select(SkillRecord).where(
                     SkillRecord.name.contains(query)
                     | SkillRecord.description.contains(query)
-                ).all()
+                )
+                records = session.execute(stmt).scalars().all()
                 return [self._record_to_skill(r) for r in records]
 
         return await asyncio.to_thread(_search)

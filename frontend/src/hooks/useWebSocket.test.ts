@@ -76,7 +76,7 @@ describe('useWebSocket', () => {
     expect(result.current.isConnected).toBe(true)
   })
 
-  it('should send messages through WebSocket', async () => {
+  it('should send messages through WebSocket as JSON', async () => {
     const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat'))
 
     await act(async () => {
@@ -89,10 +89,11 @@ describe('useWebSocket', () => {
       result.current.sendMessage('Hello')
     })
 
-    expect(MockWebSocket.instances[0].sentMessages).toContain('Hello')
+    const sent = JSON.parse(MockWebSocket.instances[0].sentMessages[0])
+    expect(sent.message).toBe('Hello')
   })
 
-  it('should receive messages from WebSocket', async () => {
+  it('should receive streaming chunks from WebSocket', async () => {
     const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat'))
 
     await act(async () => {
@@ -100,10 +101,56 @@ describe('useWebSocket', () => {
     })
 
     act(() => {
-      MockWebSocket.instances[0].simulateMessage('Response message')
+      MockWebSocket.instances[0].simulateMessage(JSON.stringify({ chunk: 'Hello ' }))
     })
 
-    expect(result.current.messages).toContain('Response message')
+    expect(result.current.messages).toHaveLength(1)
+    expect(result.current.messages[0].role).toBe('assistant')
+    expect(result.current.messages[0].content).toBe('Hello ')
+
+    act(() => {
+      MockWebSocket.instances[0].simulateMessage(JSON.stringify({ chunk: 'world' }))
+    })
+
+    expect(result.current.messages[0].content).toBe('Hello world')
+
+    act(() => {
+      MockWebSocket.instances[0].simulateMessage(JSON.stringify({ done: true }))
+    })
+
+    expect(result.current.isStreaming).toBe(false)
+  })
+
+  it('should handle legacy response field', async () => {
+    const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat'))
+
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    })
+
+    act(() => {
+      MockWebSocket.instances[0].simulateMessage(JSON.stringify({ response: 'Complete response' }))
+    })
+
+    expect(result.current.messages).toHaveLength(1)
+    expect(result.current.messages[0].role).toBe('assistant')
+    expect(result.current.messages[0].content).toBe('Complete response')
+  })
+
+  it('should handle error messages', async () => {
+    const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat'))
+
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    })
+
+    act(() => {
+      MockWebSocket.instances[0].simulateMessage(JSON.stringify({ error: 'Something went wrong' }))
+    })
+
+    expect(result.current.messages).toHaveLength(1)
+    expect(result.current.messages[0].role).toBe('system')
+    expect(result.current.messages[0].content).toContain('Something went wrong')
   })
 
   it('should clean up WebSocket on unmount', async () => {

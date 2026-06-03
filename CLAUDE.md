@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Thumbelina is a personal AI agent assistant built with **FastAPI** (backend) and **LangGraph** (agent framework), with a **React** frontend. It features a model-agnostic LLM provider layer, conversation memory with skill extraction, sub-agent orchestration, task scheduling, and a plugin system.
+Thumbelina is a personal AI agent assistant built with **FastAPI** (backend) and **LangGraph** (agent framework), with a **React** frontend. It features a model-agnostic LLM provider layer, conversation memory with skill extraction, skill composition, user profiling, sub-agent orchestration, task scheduling with conditional triggers, a plugin system with sandbox and dependency resolution, QQ Bot and WeChat ClawBot channels, and built-in tools.
 
 ## Common Commands
 
@@ -39,10 +39,21 @@ npm run build        # TypeScript check + Vite build
 ### Request Flow
 
 ```
-Frontend (React/Vite) ──WebSocket/HTTP──> FastAPI (api/app.py)
+Frontend (React/Vite) --WebSocket/HTTP--> FastAPI (api/app.py)
     ├── /api/chat      → api/routes/chat.py → ThumbelinaAgent.run()
-    ├── /ws/chat       → api/websocket.py   → ThumbelinaAgent.run()
+    ├── /ws/chat       → api/websocket.py   → ThumbelinaAgent.run() (streaming)
     ├── /api/conversations → CRUD on MemoryManager
+    ├── /api/conversations/search/{query} → MemoryManager.search()
+    ├── /api/tasks     → TaskScheduler.list_tasks()
+    ├── /api/subagents → SubagentManager.list()
+    ├── /api/skills    → SkillRepository.list_all()
+    ├── /api/skills/stats → SkillRepository + analytics
+    ├── /api/compositions → CompositionRepository.list_all()
+    ├── /api/feedback  → FeedbackRepository CRUD + stats
+    ├── /api/data/export|delete → MemoryManager export/delete
+    ├── /api/user/profile → UserProfiler.get_user_context()
+    ├── /api/plugins   → PluginManager + sandbox report
+    ├── /api/wechat/*  → WeChatChannel (WeClaw bridge)
     └── /health
 ```
 
@@ -50,29 +61,63 @@ Frontend (React/Vite) ──WebSocket/HTTP──> FastAPI (api/app.py)
 
 `ThumbelinaAgent` builds a LangGraph `StateGraph` with an "agent" node (calls LLM) and optionally a "tools" node. The `should_continue` edge function checks for tool calls. The agent supports `run()` (single response) and `stream()` (yielding chunks).
 
+Integrated subsystems:
+- **Skills**: `_get_skill_context()` injects matching skills as SystemMessage
+- **User Profiler**: `_get_user_context()` injects user preferences as SystemMessage
+- **Sub-agents**: `_make_subagent_tools()` exposes `create_subagent` and `list_subagents` tools
+- **Scheduler**: `_make_scheduler_tools()` exposes `schedule_task` and `list_scheduled_tasks` tools
+- **Compositions**: `_make_composition_tools()` exposes `create_skill_composition`, `list_skill_compositions`, `execute_skill_composition` tools
+
 ### LLM Provider Abstraction (`llm/`)
 
-`LLMProvider` ABC with `chat()`, `stream()`, `chat_sync()` methods. Concrete providers: `OpenAIProvider`, `AnthropicProvider`, `OllamaProvider` — all wrapping LangChain chat models. `create_provider(name)` factory with lazy imports.
+`LLMProvider` ABC with `chat()`, `stream()`, `chat_sync()` methods. Concrete providers: `OpenAIProvider`, `AnthropicProvider`, `OllamaProvider` -- all wrapping LangChain chat models. `create_provider(name)` factory with lazy imports.
 
 ### Memory System (`memory/`)
 
-SQLAlchemy ORM (`Conversation`, `Message`) with `ConversationRepository` wrapping sync calls via `asyncio.to_thread`. `MemoryManager` adds validation (100KB content limit). Additional: `SearchEngine` (keyword search), `Summarizer` (LLM-based), `vector/` (ChromaDB).
+SQLAlchemy ORM (`Conversation`, `Message`, `SkillRecord`, `CompositionRecord`, `FeedbackRecord`, `UserProfile`, `UserPreference`) with `ConversationRepository` wrapping sync calls via `asyncio.to_thread`. `MemoryManager` adds validation (100KB content limit) and a `search()` method for hybrid keyword + semantic search. Additional modules:
+- `SearchEngine` — keyword, semantic, and hybrid search
+- `Summarizer` — LLM-based conversation summarization
+- `vector/` — ChromaDB vector store
+- `profiler.py` — `UserProfiler` analyzes conversations to build user preference profiles
+- `feedback_repo.py` — `FeedbackRepository` for user ratings with skill score adjustment
+- `user_profile.py` + `user_profile_repo.py` — `UserProfile` and `UserPreference` models
 
-### Dependency Injection (`api/deps.py`)
+### Channels (`channels/`)
 
-FastAPI `Depends()` pattern reading from `app.state`. `get_memory_manager(request)` and `get_agent(request)` pull instances initialized during the lifespan in `api/app.py`.
+- `Channel` ABC — `start()`, `stop()`, `send_message()`, `set_handler()`
+- `QQChannel` — wraps `botpy.Client` (qq-botpy SDK), runs in daemon thread, handles guild/group/C2C messages
+- `WeChatChannel` — uses WeClaw HTTP API bridge (`httpx.AsyncClient`), webhook receiver at `/api/v1/wechat/incoming`
+- `config.py` — `QQChannelConfig`, `WeChatChannelConfig`, `ChannelsConfig`
 
-### Configuration (`config/`)
+### Skills System (`skills/`)
 
-Layered merge: defaults → YAML file → `THUMBELINA_*` env vars (double-underscore nesting). Supports `${VAR}` substitution in YAML. Pydantic models validate the final config (`AppConfig`).
+- `SkillExtractor` — LLM-based extraction from conversations
+- `SkillRepository` — SQLAlchemy persistence with CRUD + search
+- `SkillApplicationEngine` — keyword + LLM matching, integrated with `FeedbackRepository` for score adjustment
+- `CompositionEngine` — skill workflow chaining, LLM-assisted suggestion
+
+### Plugin System (`plugins/`)
+
+- `PluginManager` — register/unregister/list by type (TOOL/SKILL/CHANNEL/PROVIDER)
+- `sandbox.py` — `PluginSandbox` with AST-based static analysis, module whitelist/blacklist, resource limits
+- `sandboxed_loader.py` — `SandboxedPluginLoader` with advisory/strict modes
+- `dependency.py` — `PluginMetadata` parsing (docstring + dict formats), semver version comparison
+- `resolver.py` — `DependencyResolver` with Kahn's topological sort, circular/missing dep detection
+
+### Sub-agents (`subagents/`)
+
+- `SubagentManager` — create/list/cancel with concurrency limits
+- `MonitorAgent` — interval-based monitoring loop
+- `WorkerAgent` — task execution with progress tracking
+- `MessageQueue` — async inter-agent messaging
+- `SharedState` — lock-protected KV store
 
 ### Other Modules
 
-- **skills/**: `SkillExtractor` (LLM-based extraction from conversations), `SkillApplicationEngine` (keyword + LLM matching), `SkillRepository` (SQLAlchemy persistence)
-- **subagents/**: `SubagentManager` (create/list/cancel), `MessageQueue` (async inter-agent messaging), `SharedState` (lock-protected KV store)
-- **scheduler/**: `TaskScheduler` (in-memory task management), `TimeParser` (dateparser + Chinese recurring patterns)
-- **security/**: `AuthService` (JWT HS256 via PyJWT, min 32-byte key), `RateLimiter` (sliding window with auto-cleanup)
-- **plugins/**: `PluginManager` (register/unregister/list by type)
+- **tools/**: Built-in tools (file operations, web requests, shell commands, data processing — JSON/CSV/text analysis/regex search)
+- **scheduler/**: `TaskScheduler` (in-memory task management), `TimeParser` (dateparser + Chinese recurring patterns), conditional triggers with `check_condition` callback
+- **notifications/**: `NotificationManager` — WebSocket broadcast for task completion and system events
+- **security/**: `AuthService` (JWT HS256 via PyJWT, min 32-byte key), `RateLimiter` (sliding window with auto-cleanup), role-based access control via `required_roles` config and per-route `require_roles()` helper
 - **backup/**: `BackupManager` (JSON file backups with metadata envelope, UUID-validated paths)
 
 ## Key Patterns
@@ -82,7 +127,11 @@ Layered merge: defaults → YAML file → `THUMBELINA_*` env vars (double-unders
 - **Testing**: `pytest` + `pytest-asyncio` + `httpx`. API tests use a shared `conftest.py` fixture that creates a `TestClient` with mocked `ThumbelinaAgent` and `MemoryManager` injected via lifespan.
 - **Ruff rules**: E, F, I, N, W, UP. Line length 100. Target Python 3.11.
 - **Mypy**: Strict mode enabled.
+- **Streaming**: WebSocket responses stream token-by-token via `ThumbelinaAgent.stream()`.
+- **Optional dependencies**: `botpy` (QQ SDK) and ChromaDB are imported lazily with `try/except ImportError` guards.
 
 ## Configuration
 
-Default config in `thumbelina.yaml`. LLM provider defaults to `openai/gpt-4o`. Memory defaults to `sqlite:///thumbelina.db`. API key resolved from `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` env vars.
+Example config in `thumbelina.yaml.example`. Copy to `thumbelina.yaml` and edit with your settings. LLM provider defaults to `openai/gpt-4o`. Memory defaults to `sqlite:///thumbelina.db`. API key resolved from `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` env vars.
+
+Channel configuration: `channels.qq` (qq-botpy SDK) and `channels.wechat` (WeClaw HTTP bridge) are disabled by default. Enable by setting `enabled: true` and providing required credentials.

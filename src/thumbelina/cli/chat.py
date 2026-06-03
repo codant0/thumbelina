@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 from typing import Any
 
 from prompt_toolkit import PromptSession
@@ -144,24 +145,86 @@ def run_chat(provider: str, model: str | None = None) -> None:
     model:
         Optional model name to use.
     """
-    config = load_config()
+    # 加载配置文件
+    config_path = "thumbelina.yaml" if Path("thumbelina.yaml").exists() else None
+    config = load_config(config_path)
 
     kwargs: dict[str, Any] = {}
-    if provider == "openai" and config.llm.api_key:
+    if config.llm.api_key:
         kwargs["api_key"] = config.llm.api_key
-    elif provider == "anthropic" and config.llm.api_key:
-        kwargs["api_key"] = config.llm.api_key
-    if model:
-        kwargs["model"] = model
+    if config.llm.base_url:
+        kwargs["base_url"] = config.llm.base_url
+    # 命令行参数优先，否则使用配置文件中的 model
+    kwargs["model"] = model or config.llm.model
 
     llm_provider = create_provider(provider, **kwargs)
 
     memory_manager = MemoryManager(db_url=config.memory.database_url)
 
+    # Initialize feedback repository
+    feedback_repo = None
+    try:
+        from thumbelina.memory.feedback_repo import FeedbackRepository
+        feedback_repo = FeedbackRepository(db_url=config.memory.database_url)
+    except Exception:
+        pass
+
+    # Initialize optional subsystems
+    skill_engine = None
+    skill_repo = None
+    try:
+        from thumbelina.skills.application import SkillApplicationEngine
+        from thumbelina.skills.repository import SkillRepository
+        skill_repo = SkillRepository(db_url=config.memory.database_url)
+        skill_engine = SkillApplicationEngine(
+            repository=skill_repo,
+            llm_provider=llm_provider,
+            feedback_repo=feedback_repo,
+        )
+    except Exception:
+        pass
+
+    composition_engine = None
+    try:
+        from thumbelina.skills.composition_engine import CompositionEngine
+        from thumbelina.skills.composition_repo import CompositionRepository
+        if skill_repo is None:
+            from thumbelina.skills.repository import SkillRepository
+            skill_repo = SkillRepository(db_url=config.memory.database_url)
+        comp_repo = CompositionRepository(db_url=config.memory.database_url)
+        composition_engine = CompositionEngine(
+            composition_repo=comp_repo,
+            skill_repo=skill_repo,
+            llm_provider=llm_provider,
+        )
+    except Exception:
+        pass
+
+    subagent_manager = None
+    try:
+        from thumbelina.subagents.manager import SubagentManager
+        subagent_manager = SubagentManager(llm_provider=llm_provider)
+    except Exception:
+        pass
+
+    scheduler = None
+    try:
+        from thumbelina.scheduler.scheduler import TaskScheduler
+        scheduler = TaskScheduler()
+    except Exception:
+        pass
+
+    from thumbelina.tools import get_all_tools
+
     agent = ThumbelinaAgent(
         llm_provider=llm_provider,
+        tools=get_all_tools(),
         memory_manager=memory_manager,
         request_timeout=config.llm.request_timeout,
+        skill_engine=skill_engine,
+        subagent_manager=subagent_manager,
+        scheduler=scheduler,
+        composition_engine=composition_engine,
     )
 
     session = ChatSession(agent=agent)

@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
 from typing import Any
 
-from sqlalchemy import create_engine, or_, select
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -46,6 +45,22 @@ class ConversationRepository:
     def close(self) -> None:
         """Dispose of the database engine and release connections."""
         self.engine.dispose()
+
+    def _ping_sync(self) -> bool:
+        """Synchronous implementation of ping."""
+        with self._get_session() as session:
+            session.execute(text("SELECT 1"))
+            return True
+
+    async def ping(self) -> bool:
+        """Check if database connection is alive.
+
+        Returns
+        -------
+        bool
+            True if connection is alive.
+        """
+        return await asyncio.to_thread(self._ping_sync)
 
     def _create_conversation_sync(self) -> str:
         """Synchronous implementation of create_conversation."""
@@ -278,9 +293,12 @@ class ConversationRepository:
     def _search_messages_sync(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
         """Synchronous implementation of search_messages."""
         with self._get_session() as session:
+            # 使用参数化查询防止 SQL 注入
+            search_pattern = f"%{query}%"
             stmt = (
                 select(Message)
-                .where(Message.content.ilike(f"%{query}%"))
+                .where(text("content LIKE :pattern"))
+                .params(pattern=search_pattern)
                 .order_by(Message.created_at.desc())
                 .limit(limit)
             )

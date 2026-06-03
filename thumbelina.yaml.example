@@ -1,0 +1,35 @@
+# Thumbelina default configuration
+# Override values with THUMBELINA_* environment variables
+
+llm:
+  provider: openai
+  model: gpt-4o
+  api_key: ${OPENAI_API_KEY}
+  # base_url: https://api.openai.com/v1  # Optional: custom API endpoint for OpenAI-compatible providers
+  # request_timeout: null                 # Optional: LLM request timeout in seconds
+
+auth:
+  secret_key: ""             # JWT signing key; Bearer auth enabled when non-empty
+  # required_roles: []       # Global role list; empty = all authenticated users allowed
+
+rate_limit:
+  enabled: false
+  max_requests: 60
+  window_seconds: 60
+
+memory:
+  database_url: sqlite:///thumbelina.db
+
+logging:
+  level: INFO
+
+channels:
+  qq:
+    enabled: false
+    app_id: ""
+    app_secret: ""
+  wechat:
+    enabled: false
+    weclaw_api_url: "http://127.0.0.1:18011"
+    weclaw_token: ""
+    webhook_secret: ""

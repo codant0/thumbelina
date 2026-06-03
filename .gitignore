@@ -38,3 +38,7 @@ qdrant_data/
 # OS
 .DS_Store
 Thumbs.db
+/local_plan
+/thumbelina.yaml
+/.codegraph
+/.reasonix

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
@@ -62,9 +62,10 @@ class TestToolNode:
     @pytest.mark.asyncio
     async def test_tool_node_processes_tool_calls(self):
         """tool_node should execute tool calls and return tool messages."""
+        from langchain_core.messages import ToolMessage
+
         from thumbelina.agent.nodes import tool_node
         from thumbelina.agent.state import AgentState
-        from langchain_core.messages import ToolMessage
 
         # Create a mock tool with async ainvoke
         mock_tool = MagicMock()
