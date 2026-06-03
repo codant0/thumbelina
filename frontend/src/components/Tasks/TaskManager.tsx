@@ -27,32 +27,28 @@ export function TaskManager() {
   const [tasks, setTasks] = useState<ScheduledTask[]>([])
   const [error, setError] = useState('')
 
-  useEffect(() => {
-    let active = true
-
-    const fetchData = async () => {
-      try {
-        const [agentsRes, tasksRes] = await Promise.all([
-          fetch('/api/v1/subagents'),
-          fetch('/api/v1/tasks'),
-        ])
-        if (!active) return
-        if (agentsRes.ok) {
-          setSubagents(await agentsRes.json())
-        }
-        if (tasksRes.ok) {
-          setTasks(await tasksRes.json())
-        }
-        setError('')
-      } catch {
-        if (active) setError('Failed to fetch data')
+  const fetchData = async () => {
+    try {
+      const [agentsRes, tasksRes] = await Promise.all([
+        fetch('/api/v1/subagents'),
+        fetch('/api/v1/tasks'),
+      ])
+      if (agentsRes.ok) {
+        setSubagents(await agentsRes.json())
       }
+      if (tasksRes.ok) {
+        setTasks(await tasksRes.json())
+      }
+      setError('')
+    } catch {
+      setError('Failed to fetch data')
     }
+  }
 
+  useEffect(() => {
     void fetchData()
     const interval = setInterval(() => void fetchData(), 5000)
     return () => {
-      active = false
       clearInterval(interval)
     }
   }, [])
