@@ -113,7 +113,8 @@ class TaskScheduler:
         """Get tasks that are due to run."""
         now = datetime.now()
         return [
-            task for task in self._tasks.values()
+            task
+            for task in self._tasks.values()
             if task.status == TaskStatus.PENDING and task.scheduled_time <= now
         ]
 
@@ -171,9 +172,7 @@ class TaskScheduler:
                     try:
                         condition_met = await self._check_condition(task.condition)
                     except Exception as exc:
-                        logger.warning(
-                            "Condition check failed for task %s: %s", task.id, exc
-                        )
+                        logger.warning("Condition check failed for task %s: %s", task.id, exc)
                         continue
                     if not condition_met:
                         continue

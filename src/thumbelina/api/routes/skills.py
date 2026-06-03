@@ -84,14 +84,15 @@ async def skill_stats(
     date_buckets: dict[str, list[dict]] = defaultdict(list)
     for s in skills:
         date_key = s.created_at.strftime("%Y-%m-%d") if s.created_at else "unknown"
-        date_buckets[date_key].append({
-            "id": s.id,
-            "name": s.name,
-            "success_rate": round(s.success_rate, 2),
-        })
+        date_buckets[date_key].append(
+            {
+                "id": s.id,
+                "name": s.name,
+                "success_rate": round(s.success_rate, 2),
+            }
+        )
     timeline = [
-        {"date": date, "skills": skill_list}
-        for date, skill_list in sorted(date_buckets.items())
+        {"date": date, "skills": skill_list} for date, skill_list in sorted(date_buckets.items())
     ]
 
     # --- Top skills by version (proxy for maturity / usage iterations) ---

@@ -19,7 +19,7 @@ class TestParseJson:
 
     @pytest.mark.asyncio
     async def test_parse_array(self):
-        result = await parse_json.ainvoke({"text": '[1, 2, 3]'})
+        result = await parse_json.ainvoke({"text": "[1, 2, 3]"})
         assert "array" in result.lower() or "list" in result.lower()
 
     @pytest.mark.asyncio
@@ -36,7 +36,7 @@ class TestParseJson:
 
     @pytest.mark.asyncio
     async def test_parse_empty_object(self):
-        result = await parse_json.ainvoke({"text": '{}'})
+        result = await parse_json.ainvoke({"text": "{}"})
         assert "empty" in result.lower() or "object" in result.lower()
 
 

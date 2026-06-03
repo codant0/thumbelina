@@ -64,9 +64,7 @@ def channel(wechat_config: WeChatChannelConfig, mock_agent: MagicMock) -> WeChat
 
 
 @pytest.fixture
-def started_channel(
-    wechat_config: WeChatChannelConfig, mock_agent: MagicMock
-) -> WeChatChannel:
+def started_channel(wechat_config: WeChatChannelConfig, mock_agent: MagicMock) -> WeChatChannel:
     """Create a WeChatChannel instance with a mocked httpx client."""
     ch = WeChatChannel(config=wechat_config, agent=mock_agent)
     ch._client = MagicMock(spec=httpx.AsyncClient)
@@ -182,12 +180,8 @@ class TestWeChatChannelSend:
         assert started_channel._client.post.await_count == 2
 
     @pytest.mark.asyncio
-    async def test_send_message_retries_on_timeout(
-        self, started_channel: WeChatChannel
-    ) -> None:
-        started_channel._client.post = AsyncMock(
-            side_effect=httpx.TimeoutException("Timed out")
-        )
+    async def test_send_message_retries_on_timeout(self, started_channel: WeChatChannel) -> None:
+        started_channel._client.post = AsyncMock(side_effect=httpx.TimeoutException("Timed out"))
 
         with pytest.raises(httpx.TimeoutException):
             await started_channel.send_message("wxid_user1", "Hello!")
@@ -248,9 +242,7 @@ class TestWeChatChannelIncoming:
     async def test_handle_image_message(
         self, started_channel: WeChatChannel, mock_agent: MagicMock
     ) -> None:
-        result = await started_channel.handle_incoming(
-            "wxid_user1", "", msg_type="image"
-        )
+        result = await started_channel.handle_incoming("wxid_user1", "", msg_type="image")
 
         mock_agent.run.assert_not_awaited()
         assert "image" in result.lower()
@@ -285,9 +277,7 @@ class TestWeChatChannelStatus:
         assert status["connected"] is True
 
     @pytest.mark.asyncio
-    async def test_status_connection_refused(
-        self, started_channel: WeChatChannel
-    ) -> None:
+    async def test_status_connection_refused(self, started_channel: WeChatChannel) -> None:
         started_channel._client.get = AsyncMock(
             side_effect=httpx.ConnectError("Connection refused")
         )
@@ -351,9 +341,7 @@ class TestWeChatWebhookEndpoints:
             with TestClient(app, raise_server_exceptions=False) as client:
                 yield client, mock_channel
 
-    def test_incoming_webhook(
-        self, client_with_channel: tuple[TestClient, MagicMock]
-    ) -> None:
+    def test_incoming_webhook(self, client_with_channel: tuple[TestClient, MagicMock]) -> None:
         client, mock_channel = client_with_channel
 
         resp = client.post(
@@ -366,9 +354,7 @@ class TestWeChatWebhookEndpoints:
         assert data["response"] == "Agent says hi"
         mock_channel.handle_incoming.assert_awaited_once()
 
-    def test_send_endpoint(
-        self, client_with_channel: tuple[TestClient, MagicMock]
-    ) -> None:
+    def test_send_endpoint(self, client_with_channel: tuple[TestClient, MagicMock]) -> None:
         client, mock_channel = client_with_channel
 
         resp = client.post(
@@ -381,9 +367,7 @@ class TestWeChatWebhookEndpoints:
         assert data["sent"] is True
         mock_channel.send_message.assert_awaited_once()
 
-    def test_status_endpoint(
-        self, client_with_channel: tuple[TestClient, MagicMock]
-    ) -> None:
+    def test_status_endpoint(self, client_with_channel: tuple[TestClient, MagicMock]) -> None:
         client, mock_channel = client_with_channel
 
         resp = client.get("/api/v1/wechat/status")
@@ -421,9 +405,7 @@ class TestWeChatWebhookEndpoints:
                 )
                 assert resp.status_code == 404
 
-    def test_incoming_voice_type(
-        self, client_with_channel: tuple[TestClient, MagicMock]
-    ) -> None:
+    def test_incoming_voice_type(self, client_with_channel: tuple[TestClient, MagicMock]) -> None:
         client, mock_channel = client_with_channel
 
         resp = client.post(

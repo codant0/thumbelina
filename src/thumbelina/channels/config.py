@@ -29,12 +29,8 @@ class WeChatChannelConfig(BaseModel):
         default="http://127.0.0.1:18011",
         description="WeClaw API base URL",
     )
-    weclaw_token: str = Field(
-        default="", description="WeClaw authentication token"
-    )
-    webhook_secret: str = Field(
-        default="", description="Webhook signature verification secret"
-    )
+    weclaw_token: str = Field(default="", description="WeClaw authentication token")
+    webhook_secret: str = Field(default="", description="Webhook signature verification secret")
 
 
 class ChannelsConfig(BaseModel):

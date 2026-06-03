@@ -314,9 +314,7 @@ class UserProfileRepository:
         list[dict[str, Any]]
             List of preference dictionaries ordered by confidence score descending.
         """
-        return await asyncio.to_thread(
-            self._get_preferences_sync, user_id, category
-        )
+        return await asyncio.to_thread(self._get_preferences_sync, user_id, category)
 
     def _delete_preference_sync(
         self,
@@ -362,9 +360,7 @@ class UserProfileRepository:
         bool
             True if the preference was deleted, False if not found.
         """
-        return await asyncio.to_thread(
-            self._delete_preference_sync, user_id, category, key
-        )
+        return await asyncio.to_thread(self._delete_preference_sync, user_id, category, key)
 
     def _delete_all_preferences_sync(self, user_id: str) -> int:
         """Synchronous implementation of delete_all_preferences."""

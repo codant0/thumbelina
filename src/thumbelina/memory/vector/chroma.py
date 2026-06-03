@@ -68,12 +68,14 @@ class ChromaVectorStore(VectorStore):
 
         results = []
         for i in range(len(result["ids"][0])):
-            results.append({
-                "id": result["ids"][0][i],
-                "text": result["documents"][0][i],
-                "score": result["distances"][0][i] if result["distances"] else 0.0,
-                "metadata": result["metadatas"][0][i] if result["metadatas"] else {},
-            })
+            results.append(
+                {
+                    "id": result["ids"][0][i],
+                    "text": result["documents"][0][i],
+                    "score": result["distances"][0][i] if result["distances"] else 0.0,
+                    "metadata": result["metadatas"][0][i] if result["metadatas"] else {},
+                }
+            )
         return results
 
     async def delete(self, doc_id: str) -> bool:

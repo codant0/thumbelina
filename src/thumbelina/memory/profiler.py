@@ -77,9 +77,7 @@ class UserProfiler:
             return None
 
         try:
-            conversation_text = "\n".join(
-                f"{m['role']}: {m['content']}" for m in messages
-            )
+            conversation_text = "\n".join(f"{m['role']}: {m['content']}" for m in messages)
             prompt = [
                 {"role": "system", "content": ANALYSIS_PROMPT},
                 {"role": "user", "content": conversation_text},
@@ -189,10 +187,7 @@ class UserProfiler:
             # Communication style and expertise
             style = profile["communication_style"]
             level = profile["expertise_level"]
-            parts.append(
-                f"User communication style: {style}. "
-                f"Expertise level: {level}."
-            )
+            parts.append(f"User communication style: {style}. Expertise level: {level}.")
 
             # Group preferences by category
             by_category: dict[str, list[dict[str, Any]]] = {}

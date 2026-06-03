@@ -76,7 +76,7 @@ class _AuthMiddleware(BaseHTTPMiddleware):
                 content={"detail": "Missing or invalid Authorization header"},
             )
 
-        token = auth_header[len("Bearer "):]
+        token = auth_header[len("Bearer ") :]
         payload = self._auth.verify_token(token)
         if payload is None:
             return JSONResponse(
@@ -137,6 +137,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     feedback_repo = None
     try:
         from thumbelina.memory.feedback_repo import FeedbackRepository
+
         feedback_repo = FeedbackRepository(db_url=config.memory.database_url)
         app.state.feedback_repo = feedback_repo
     except Exception:
@@ -148,6 +149,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         from thumbelina.skills.application import SkillApplicationEngine
         from thumbelina.skills.repository import SkillRepository
+
         skill_repo = SkillRepository(db_url=config.memory.database_url)
         skill_engine = SkillApplicationEngine(
             repository=skill_repo,
@@ -161,8 +163,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         from thumbelina.skills.composition_engine import CompositionEngine
         from thumbelina.skills.composition_repo import CompositionRepository
+
         if skill_repo is None:
             from thumbelina.skills.repository import SkillRepository
+
             skill_repo = SkillRepository(db_url=config.memory.database_url)
         comp_repo = CompositionRepository(db_url=config.memory.database_url)
         composition_engine = CompositionEngine(
@@ -176,6 +180,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     subagent_manager = None
     try:
         from thumbelina.subagents.manager import SubagentManager
+
         subagent_manager = SubagentManager(llm_provider=llm_provider)
     except Exception:
         logger.debug("Subagent manager not initialized", exc_info=True)
@@ -187,15 +192,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     scheduler = None
     try:
         from thumbelina.scheduler.scheduler import TaskScheduler
+
         scheduler = TaskScheduler()
 
         # 任务完成时广播通知
         async def _on_due_task(task):
-            await notification_manager.broadcast({
-                "type": "task_completed",
-                "task_id": task.id,
-                "description": task.description,
-            })
+            await notification_manager.broadcast(
+                {
+                    "type": "task_completed",
+                    "task_id": task.id,
+                    "description": task.description,
+                }
+            )
 
         await scheduler.start(on_due_task=_on_due_task)
     except Exception:
@@ -206,6 +214,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         from thumbelina.memory.profiler import UserProfiler
         from thumbelina.memory.user_profile_repo import UserProfileRepository
+
         profile_repo = UserProfileRepository(db_url=config.memory.database_url)
         user_profiler = UserProfiler(
             llm_provider=llm_provider,
@@ -326,19 +335,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
         """Handle uncaught exceptions."""
         logger.error(f"Unhandled exception: {exc}", exc_info=True)
-        return JSONResponse(
-            status_code=500,
-            content={"detail": "Internal server error"}
-        )
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
     @app.exception_handler(ValueError)
     async def value_error_handler(request: Request, exc: ValueError) -> JSONResponse:
         """Handle value errors."""
         logger.warning(f"Value error: {exc}")
-        return JSONResponse(
-            status_code=400,
-            content={"detail": str(exc)}
-        )
+        return JSONResponse(status_code=400, content={"detail": str(exc)})
 
     # Health check endpoint
     @app.get("/health")

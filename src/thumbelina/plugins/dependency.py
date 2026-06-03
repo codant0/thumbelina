@@ -59,6 +59,7 @@ class PluginMetadata:
 # Version utilities
 # ---------------------------------------------------------------------------
 
+
 def _parse_version(version: str) -> tuple[int, ...]:
     """Parse a semver version string into a tuple of ints.
 
@@ -143,10 +144,7 @@ def satisfies_version(version: str, constraint: str) -> bool:
         base_parsed = _parse_version(base)
         ver_parsed = _parse_version(version)
         # Must be >= base and same major version
-        return (
-            ver_parsed >= base_parsed
-            and ver_parsed[0] == base_parsed[0]
-        )
+        return ver_parsed >= base_parsed and ver_parsed[0] == base_parsed[0]
 
     # Exact match (== prefix or bare version)
     if constraint.startswith("=="):
@@ -223,11 +221,7 @@ def _parse_docstring_metadata(docstring: str) -> PluginMetadata | None:
         description=(match.group("desc") or "").strip(),
         author=(match.group("author") or "").strip(),
         dependencies=_parse_dep_string(match.group("deps") or ""),
-        conflicts=[
-            c.strip()
-            for c in (match.group("conflicts") or "").split(",")
-            if c.strip()
-        ],
+        conflicts=[c.strip() for c in (match.group("conflicts") or "").split(",") if c.strip()],
     )
 
 

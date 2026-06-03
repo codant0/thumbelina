@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 # Configuration dataclasses
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ResourceLimits:
     """Resource limits for sandboxed plugin execution.
@@ -63,89 +64,98 @@ class SandboxViolation:
 # Default module sets
 # ---------------------------------------------------------------------------
 
-DEFAULT_ALLOWED_MODULES: frozenset[str] = frozenset({
-    "os.path",
-    "json",
-    "re",
-    "math",
-    "datetime",
-    "typing",
-    "collections",
-    "functools",
-    "itertools",
-    "pathlib",
-    "urllib.parse",
-    "hashlib",
-    "base64",
-    # Common safe modules for plugins
-    "logging",
-    "copy",
-    "textwrap",
-    "string",
-    "abc",
-    "enum",
-    "dataclasses",
-    "uuid",
-    "time",
-    "decimal",
-    "statistics",
-    "contextlib",
-    "io",
-    "struct",
-})
+DEFAULT_ALLOWED_MODULES: frozenset[str] = frozenset(
+    {
+        "os.path",
+        "json",
+        "re",
+        "math",
+        "datetime",
+        "typing",
+        "collections",
+        "functools",
+        "itertools",
+        "pathlib",
+        "urllib.parse",
+        "hashlib",
+        "base64",
+        # Common safe modules for plugins
+        "logging",
+        "copy",
+        "textwrap",
+        "string",
+        "abc",
+        "enum",
+        "dataclasses",
+        "uuid",
+        "time",
+        "decimal",
+        "statistics",
+        "contextlib",
+        "io",
+        "struct",
+    }
+)
 
-DEFAULT_BLOCKED_MODULES: frozenset[str] = frozenset({
-    "subprocess",
-    "shutil",
-    "socket",
-    "ctypes",
-    "importlib",
-    "sys",
-    "signal",
-    "multiprocessing",
-    "threading",
-    "webbrowser",
-    "pty",
-    "fcntl",
-    "termios",
-    "tty",
-})
+DEFAULT_BLOCKED_MODULES: frozenset[str] = frozenset(
+    {
+        "subprocess",
+        "shutil",
+        "socket",
+        "ctypes",
+        "importlib",
+        "sys",
+        "signal",
+        "multiprocessing",
+        "threading",
+        "webbrowser",
+        "pty",
+        "fcntl",
+        "termios",
+        "tty",
+    }
+)
 
 # Patterns that are considered dangerous when called directly
-_DANGEROUS_CALLS: frozenset[str] = frozenset({
-    "eval",
-    "exec",
-    "compile",
-    "__import__",
-    "globals",
-    "locals",
-    "vars",
-    "dir",
-    "getattr",
-    "setattr",
-    "delattr",
-    "breakpoint",
-    "exit",
-    "quit",
-})
+_DANGEROUS_CALLS: frozenset[str] = frozenset(
+    {
+        "eval",
+        "exec",
+        "compile",
+        "__import__",
+        "globals",
+        "locals",
+        "vars",
+        "dir",
+        "getattr",
+        "setattr",
+        "delattr",
+        "breakpoint",
+        "exit",
+        "quit",
+    }
+)
 
 # Patterns that are dangerous when used as attribute access
-_DANGEROUS_ATTR_COMBINATIONS: frozenset[str] = frozenset({
-    "os.system",
-    "os.popen",
-    "os.exec*",
-    "os.spawn*",
-    "os.remove",
-    "os.unlink",
-    "os.rmdir",
-    "os.rename",
-    "os.replace",
-})
+_DANGEROUS_ATTR_COMBINATIONS: frozenset[str] = frozenset(
+    {
+        "os.system",
+        "os.popen",
+        "os.exec*",
+        "os.spawn*",
+        "os.remove",
+        "os.unlink",
+        "os.rmdir",
+        "os.rename",
+        "os.replace",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
 # Static analysis helpers
 # ---------------------------------------------------------------------------
+
 
 def _get_imported_modules(tree: ast.AST) -> list[tuple[str, int | None]]:
     """Extract all imported module names from an AST.
@@ -178,12 +188,19 @@ def _get_dangerous_calls(tree: ast.AST) -> list[tuple[str, int | None]]:
             elif isinstance(node.func, ast.Attribute):
                 # Check if it's a method call on a dangerous pattern
                 attr_name = node.func.attr
-                if attr_name in {"system", "popen", "remove", "unlink", "rmdir",
-                                 "rename", "replace", "exec*", "spawn*"}:
+                if attr_name in {
+                    "system",
+                    "popen",
+                    "remove",
+                    "unlink",
+                    "rmdir",
+                    "rename",
+                    "replace",
+                    "exec*",
+                    "spawn*",
+                }:
                     if isinstance(node.func.value, ast.Name):
-                        calls.append(
-                            (f"{node.func.value.id}.{attr_name}", node.lineno)
-                        )
+                        calls.append((f"{node.func.value.id}.{attr_name}", node.lineno))
     return calls
 
 
@@ -211,9 +228,7 @@ def _check_open_write_mode(tree: ast.AST) -> list[tuple[str, int | None]]:
         for arg in node.args[1:]:  # Skip the filename argument
             if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                 if any(m in arg.value for m in ("w", "a", "x", "+")):
-                    issues.append(
-                        (f"open() with write mode '{arg.value}'", node.lineno)
-                    )
+                    issues.append((f"open() with write mode '{arg.value}'", node.lineno))
         for kw in node.keywords:
             if kw.arg == "mode" and isinstance(kw.value, ast.Constant):
                 if isinstance(kw.value.value, str):
@@ -238,12 +253,8 @@ def _check_dangerous_patterns(tree: ast.AST) -> list[tuple[str, int | None]]:
             if isinstance(node.func, ast.Name) and node.func.id == "getattr":
                 if len(node.args) >= 2:
                     second_arg = node.args[1]
-                    if isinstance(second_arg, ast.Constant) and isinstance(
-                        second_arg.value, str
-                    ):
-                        if second_arg.value.startswith("__") and second_arg.value.endswith(
-                            "__"
-                        ):
+                    if isinstance(second_arg, ast.Constant) and isinstance(second_arg.value, str):
+                        if second_arg.value.startswith("__") and second_arg.value.endswith("__"):
                             issues.append(
                                 (
                                     f"getattr() with dunder attribute '{second_arg.value}'",
@@ -257,6 +268,7 @@ def _check_dangerous_patterns(tree: ast.AST) -> list[tuple[str, int | None]]:
 # ---------------------------------------------------------------------------
 # PluginSandbox
 # ---------------------------------------------------------------------------
+
 
 class PluginSandbox:
     """Sandbox for validating and restricting plugin execution.
@@ -344,10 +356,7 @@ class PluginSandbox:
                     )
                 )
             # Check if the module (or its top-level) is in allowed list
-            elif (
-                module_name not in self.allowed_modules
-                and top_level not in self.allowed_modules
-            ):
+            elif module_name not in self.allowed_modules and top_level not in self.allowed_modules:
                 violations.append(
                     SandboxViolation(
                         violation_type="warning",

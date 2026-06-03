@@ -46,9 +46,7 @@ class SkillApplicationEngine:
         self.llm_provider = llm_provider
         self.feedback_repo = feedback_repo
 
-    async def _adjust_score_by_feedback(
-        self, skill_id: str, base_score: float
-    ) -> float:
+    async def _adjust_score_by_feedback(self, skill_id: str, base_score: float) -> float:
         """Adjust a skill's matching score based on user feedback ratings.
 
         Higher-rated skills receive a score boost, lower-rated skills receive
@@ -87,9 +85,7 @@ class SkillApplicationEngine:
             adjustment = (avg - 3.0) / 2.0 * confidence * 0.2
             return base_score + adjustment
         except Exception:
-            logger.warning(
-                "Failed to get feedback for skill %s", skill_id, exc_info=True
-            )
+            logger.warning("Failed to get feedback for skill %s", skill_id, exc_info=True)
             return base_score
 
     async def find_matching_skills(self, user_input: str) -> list[Skill]:
@@ -132,9 +128,7 @@ class SkillApplicationEngine:
             # Adjust scores by feedback
             adjusted: list[tuple[Skill, float]] = []
             for skill, base_score in matched:
-                new_score = await self._adjust_score_by_feedback(
-                    skill.id, base_score
-                )
+                new_score = await self._adjust_score_by_feedback(skill.id, base_score)
                 adjusted.append((skill, new_score))
             # Sort by adjusted score descending
             adjusted.sort(key=lambda x: x[1], reverse=True)
@@ -150,9 +144,11 @@ class SkillApplicationEngine:
                 user_input=user_input,
                 skills_list=skills_list,
             )
-            response = await self.llm_provider.chat([
-                {"role": "user", "content": prompt},
-            ])
+            response = await self.llm_provider.chat(
+                [
+                    {"role": "user", "content": prompt},
+                ]
+            )
             skill_name = response.strip()
             if skill_name:
                 for skill in all_skills:
@@ -178,12 +174,8 @@ class SkillApplicationEngine:
         str
             Context string to help the agent respond.
         """
-        steps_text = "\n".join(f"  {i+1}. {step}" for i, step in enumerate(skill.steps))
-        return (
-            f"参考技能: {skill.name}\n"
-            f"描述: {skill.description}\n"
-            f"步骤:\n{steps_text}"
-        )
+        steps_text = "\n".join(f"  {i + 1}. {step}" for i, step in enumerate(skill.steps))
+        return f"参考技能: {skill.name}\n描述: {skill.description}\n步骤:\n{steps_text}"
 
     async def record_usage(self, skill_id: str, success: bool) -> None:
         """Record a skill usage and update success rate.

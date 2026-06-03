@@ -13,10 +13,12 @@ from thumbelina.skills.extractor import SkillExtractor
 def mock_llm():
     """Create a mock LLM provider."""
     provider = MagicMock()
-    provider.chat = AsyncMock(return_value=(
-        '{"name": "test_skill", "description": "A test skill",'
-        ' "trigger_conditions": ["test"], "steps": ["step 1"]}'
-    ))
+    provider.chat = AsyncMock(
+        return_value=(
+            '{"name": "test_skill", "description": "A test skill",'
+            ' "trigger_conditions": ["test"], "steps": ["step 1"]}'
+        )
+    )
     return provider
 
 

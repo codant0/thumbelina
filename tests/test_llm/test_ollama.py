@@ -67,10 +67,12 @@ class TestOllamaProvider:
 
         with patch.object(provider, "_model") as mock_model:
             mock_model.ainvoke = AsyncMock(return_value=mock_response)
-            await provider.chat([
-                {"role": "system", "content": "behave"},
-                {"role": "user", "content": "hello"},
-            ])
+            await provider.chat(
+                [
+                    {"role": "system", "content": "behave"},
+                    {"role": "user", "content": "hello"},
+                ]
+            )
 
             called_messages = mock_model.ainvoke.call_args[0][0]
             assert len(called_messages) == 2

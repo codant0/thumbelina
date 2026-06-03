@@ -17,12 +17,12 @@ class TestVectorStore:
 
     def test_vector_store_has_add_method(self):
         """VectorStore should define an add method."""
-        assert hasattr(VectorStore, 'add')
+        assert hasattr(VectorStore, "add")
 
     def test_vector_store_has_search_method(self):
         """VectorStore should define a search method."""
-        assert hasattr(VectorStore, 'search')
+        assert hasattr(VectorStore, "search")
 
     def test_vector_store_has_delete_method(self):
         """VectorStore should define a delete method."""
-        assert hasattr(VectorStore, 'delete')
+        assert hasattr(VectorStore, "delete")

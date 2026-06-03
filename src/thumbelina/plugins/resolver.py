@@ -88,9 +88,7 @@ class DependencyResolver:
         # If not all plugins are in load_order, there's a cycle
         if len(load_order) < len(plugins):
             remaining = set(plugins) - set(load_order)
-            errors.append(
-                f"Circular dependency detected among: {', '.join(sorted(remaining))}"
-            )
+            errors.append(f"Circular dependency detected among: {', '.join(sorted(remaining))}")
 
         return load_order, errors
 
@@ -119,9 +117,7 @@ class DependencyResolver:
                     pair = tuple(sorted([name, conflict_name]))
                     if pair not in seen:
                         seen.add(pair)
-                        errors.append(
-                            f"Plugin '{name}' conflicts with '{conflict_name}'"
-                        )
+                        errors.append(f"Plugin '{name}' conflicts with '{conflict_name}'")
         return errors
 
     def check_missing_dependencies(
@@ -148,12 +144,10 @@ class DependencyResolver:
                 if dep.name not in available:
                     if dep.optional:
                         errors.append(
-                            f"Optional dependency '{dep.name}' of plugin "
-                            f"'{name}' is not available"
+                            f"Optional dependency '{dep.name}' of plugin '{name}' is not available"
                         )
                     else:
                         errors.append(
-                            f"Plugin '{name}' requires '{dep.name}' "
-                            f"which is not available"
+                            f"Plugin '{name}' requires '{dep.name}' which is not available"
                         )
         return errors

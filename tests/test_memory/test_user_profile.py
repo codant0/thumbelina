@@ -119,9 +119,7 @@ class TestUserPreferenceModel:
         assert pref.confidence_score == 0.8
 
     def test_repr(self, db_session: Session):
-        pref = UserPreference(
-            user_id="user1", category="topic", key="lang", value="Python"
-        )
+        pref = UserPreference(user_id="user1", category="topic", key="lang", value="Python")
         db_session.add(pref)
         db_session.commit()
         assert "topic" in repr(pref)
@@ -181,9 +179,7 @@ class TestUserProfileRepository:
 
     @pytest.mark.asyncio
     async def test_upsert_preference_new(self, repo: UserProfileRepository):
-        pref = await repo.upsert_preference(
-            "user1", "topic", "language", "Python", 0.9
-        )
+        pref = await repo.upsert_preference("user1", "topic", "language", "Python", 0.9)
         assert pref["category"] == "topic"
         assert pref["key"] == "language"
         assert pref["value"] == "Python"
@@ -192,20 +188,14 @@ class TestUserProfileRepository:
     @pytest.mark.asyncio
     async def test_upsert_preference_higher_confidence(self, repo: UserProfileRepository):
         await repo.upsert_preference("user1", "topic", "language", "Python", 0.5)
-        updated = await repo.upsert_preference(
-            "user1", "topic", "language", "Rust", 0.8
-        )
+        updated = await repo.upsert_preference("user1", "topic", "language", "Rust", 0.8)
         assert updated["value"] == "Rust"
         assert updated["confidence_score"] == 0.8
 
     @pytest.mark.asyncio
-    async def test_upsert_preference_lower_confidence_keeps_old(
-        self, repo: UserProfileRepository
-    ):
+    async def test_upsert_preference_lower_confidence_keeps_old(self, repo: UserProfileRepository):
         await repo.upsert_preference("user1", "topic", "language", "Python", 0.8)
-        updated = await repo.upsert_preference(
-            "user1", "topic", "language", "Rust", 0.3
-        )
+        updated = await repo.upsert_preference("user1", "topic", "language", "Rust", 0.3)
         assert updated["value"] == "Python"  # kept old value
         assert updated["confidence_score"] == 0.8  # kept old confidence
 

@@ -75,8 +75,6 @@ async def tool_node(state: AgentState, tools: list[BaseTool]) -> dict[str, list[
 
         if tool_name in tool_map:
             result = await tool_map[tool_name].ainvoke(tool_args)
-            tool_messages.append(
-                ToolMessage(content=str(result), tool_call_id=tool_call_id)
-            )
+            tool_messages.append(ToolMessage(content=str(result), tool_call_id=tool_call_id))
 
     return {"messages": tool_messages}

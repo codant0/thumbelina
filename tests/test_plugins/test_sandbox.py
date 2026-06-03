@@ -350,13 +350,15 @@ class TestSandboxedPluginLoader:
     def test_validate_safe_file(self, loader, tmp_path):
         """Should validate a safe plugin file as valid."""
         plugin_file = tmp_path / "safe_plugin.py"
-        plugin_file.write_text(textwrap.dedent("""\
+        plugin_file.write_text(
+            textwrap.dedent("""\
             import json
             import re
 
             def register(manager):
                 pass
-        """))
+        """)
+        )
         result = loader.validate_file(str(plugin_file))
         assert result.is_valid is True
         assert result.violations == []
@@ -365,12 +367,14 @@ class TestSandboxedPluginLoader:
     def test_validate_unsafe_file(self, loader, tmp_path):
         """Should detect violations in an unsafe plugin file."""
         plugin_file = tmp_path / "unsafe_plugin.py"
-        plugin_file.write_text(textwrap.dedent("""\
+        plugin_file.write_text(
+            textwrap.dedent("""\
             import subprocess
 
             def register(manager):
                 eval("x")
-        """))
+        """)
+        )
         result = loader.validate_file(str(plugin_file))
         assert len(result.violations) >= 2
 
@@ -383,24 +387,28 @@ class TestSandboxedPluginLoader:
     def test_strict_mode_rejects_warnings(self, strict_loader, tmp_path):
         """In strict mode, warnings should cause validation failure."""
         plugin_file = tmp_path / "warning_plugin.py"
-        plugin_file.write_text(textwrap.dedent("""\
+        plugin_file.write_text(
+            textwrap.dedent("""\
             import requests
 
             def register(manager):
                 pass
-        """))
+        """)
+        )
         result = strict_loader.validate_file(str(plugin_file))
         assert result.is_valid is False
 
     def test_results_tracked(self, loader, tmp_path):
         """Validation results should be tracked per plugin."""
         plugin_file = tmp_path / "tracked_plugin.py"
-        plugin_file.write_text(textwrap.dedent("""\
+        plugin_file.write_text(
+            textwrap.dedent("""\
             import json
 
             def register(manager):
                 pass
-        """))
+        """)
+        )
         loader.validate_file(str(plugin_file))
         results = loader.results
         assert "tracked_plugin" in results
@@ -408,12 +416,14 @@ class TestSandboxedPluginLoader:
     def test_get_report(self, loader, tmp_path):
         """get_report() should return serialisable results."""
         plugin_file = tmp_path / "report_plugin.py"
-        plugin_file.write_text(textwrap.dedent("""\
+        plugin_file.write_text(
+            textwrap.dedent("""\
             import json
 
             def register(manager):
                 pass
-        """))
+        """)
+        )
         loader.validate_file(str(plugin_file))
         report = loader.get_report()
         assert isinstance(report, list)
@@ -426,7 +436,8 @@ class TestSandboxedPluginLoader:
     async def test_load_plugins_advisory_mode(self, loader, tmp_path):
         """Advisory mode should load plugins with warnings."""
         plugin_file = tmp_path / "warn_plugin.py"
-        plugin_file.write_text(textwrap.dedent("""\
+        plugin_file.write_text(
+            textwrap.dedent("""\
             from thumbelina.plugins.base import Plugin, PluginType
 
             import requests  # non-whitelisted but not blocked
@@ -440,7 +451,8 @@ class TestSandboxedPluginLoader:
                     version="1.0.0",
                 )
                 await manager.register(plugin)
-        """))
+        """)
+        )
         manager = PluginManager()
         loaded = await loader.load_plugins_from_directory(str(tmp_path), manager)
         assert loaded == 1
@@ -452,7 +464,8 @@ class TestSandboxedPluginLoader:
     async def test_load_plugins_strict_mode_blocks(self, tmp_path):
         """Strict mode should reject plugins with violations."""
         plugin_file = tmp_path / "bad_plugin.py"
-        plugin_file.write_text(textwrap.dedent("""\
+        plugin_file.write_text(
+            textwrap.dedent("""\
             from thumbelina.plugins.base import Plugin, PluginType
             import subprocess
 
@@ -465,7 +478,8 @@ class TestSandboxedPluginLoader:
                     version="1.0.0",
                 )
                 await manager.register(plugin)
-        """))
+        """)
+        )
         strict = SandboxedPluginLoader(strict_mode=True)
         manager = PluginManager()
         loaded = await strict.load_plugins_from_directory(str(tmp_path), manager)
@@ -505,7 +519,8 @@ class TestPluginManagerSandboxIntegration:
     async def test_manager_with_sandbox_loader(self, loader, tmp_path):
         """PluginManager with sandboxed loader should validate before loading."""
         plugin_file = tmp_path / "good_plugin.py"
-        plugin_file.write_text(textwrap.dedent("""\
+        plugin_file.write_text(
+            textwrap.dedent("""\
             from thumbelina.plugins.base import Plugin, PluginType
 
             async def register(manager):
@@ -517,7 +532,8 @@ class TestPluginManagerSandboxIntegration:
                     version="1.0.0",
                 )
                 await manager.register(plugin)
-        """))
+        """)
+        )
         manager = PluginManager(sandboxed_loader=loader)
         loaded = await manager.load_plugins_from_directory(str(tmp_path))
         assert loaded == 1

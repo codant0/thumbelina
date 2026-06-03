@@ -95,7 +95,7 @@ def _env_overrides() -> dict[str, Any]:
             continue
 
         # Remove prefix and split on double-underscore
-        rest = key[len(prefix):].lower()
+        rest = key[len(prefix) :].lower()
         parts = rest.split("__")
 
         # Build nested dict

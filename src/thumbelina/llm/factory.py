@@ -52,9 +52,7 @@ def create_provider(name: str, **kwargs: Any) -> LLMProvider:
     cls = registry.get(key)
     if cls is None:
         available = ", ".join(sorted(registry.keys()))
-        raise ValueError(
-            f"Unknown provider: {name!r}. Available providers: {available}"
-        )
+        raise ValueError(f"Unknown provider: {name!r}. Available providers: {available}")
     return cls(**kwargs)
 
 

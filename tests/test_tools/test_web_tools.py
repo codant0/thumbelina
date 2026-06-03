@@ -32,6 +32,7 @@ async def test_fetch_url_not_installed():
         import importlib
 
         import thumbelina.tools.web_tools
+
         importlib.reload(thumbelina.tools.web_tools)
         result = await thumbelina.tools.web_tools.fetch_url.ainvoke({"url": "https://example.com"})
         assert "not installed" in result

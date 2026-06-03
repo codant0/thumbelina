@@ -46,9 +46,7 @@ async def list_plugins(request: Request) -> JSONResponse:
         if plugin.name in sandbox_lookup:
             plugin_info["sandbox"] = {
                 "is_valid": sandbox_lookup[plugin.name].get("is_valid", True),
-                "violation_count": len(
-                    sandbox_lookup[plugin.name].get("violations", [])
-                ),
+                "violation_count": len(sandbox_lookup[plugin.name].get("violations", [])),
             }
         result.append(plugin_info)
 
@@ -63,9 +61,7 @@ async def sandbox_report(request: Request) -> JSONResponse:
     """
     plugin_manager = _get_plugin_manager(request)
     if plugin_manager is None:
-        return JSONResponse(
-            content={"message": "Plugin manager not available", "report": []}
-        )
+        return JSONResponse(content={"message": "Plugin manager not available", "report": []})
 
     report = plugin_manager.get_sandbox_report()
     return JSONResponse(content={"report": report})

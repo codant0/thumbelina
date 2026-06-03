@@ -50,9 +50,7 @@ class SubagentManager:
             If maximum number of agents is reached.
         """
         if len(self._agents) >= self.max_agents:
-            raise RuntimeError(
-                f"Maximum number of agents ({self.max_agents}) reached"
-            )
+            raise RuntimeError(f"Maximum number of agents ({self.max_agents}) reached")
 
         agent = Subagent(task=task)
         self._agents[agent.id] = agent

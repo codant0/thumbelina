@@ -61,9 +61,7 @@ class TestSaveAndGet:
     """Tests for save and get operations."""
 
     @pytest.mark.asyncio
-    async def test_save_and_get(
-        self, repo: FeedbackRepository, sample_feedback: Feedback
-    ) -> None:
+    async def test_save_and_get(self, repo: FeedbackRepository, sample_feedback: Feedback) -> None:
         saved = await repo.save(sample_feedback)
         assert saved.id == sample_feedback.id
         assert saved.rating == 4
@@ -105,9 +103,7 @@ class TestListByConversation:
     """Tests for listing feedback by conversation."""
 
     @pytest.mark.asyncio
-    async def test_list_by_conversation(
-        self, repo: FeedbackRepository
-    ) -> None:
+    async def test_list_by_conversation(self, repo: FeedbackRepository) -> None:
         fb1 = Feedback(conversation_id="conv-1", message_index=0, rating=3)
         fb2 = Feedback(conversation_id="conv-1", message_index=1, rating=5)
         fb3 = Feedback(conversation_id="conv-2", message_index=0, rating=2)
@@ -123,9 +119,7 @@ class TestListByConversation:
         assert results[1].message_index == 1
 
     @pytest.mark.asyncio
-    async def test_list_by_conversation_empty(
-        self, repo: FeedbackRepository
-    ) -> None:
+    async def test_list_by_conversation_empty(self, repo: FeedbackRepository) -> None:
         results = await repo.list_by_conversation("no-such-conv")
         assert results == []
 
@@ -140,15 +134,9 @@ class TestListBySkill:
 
     @pytest.mark.asyncio
     async def test_list_by_skill(self, repo: FeedbackRepository) -> None:
-        fb1 = Feedback(
-            conversation_id="conv-1", message_index=0, rating=5, skill_id="s1"
-        )
-        fb2 = Feedback(
-            conversation_id="conv-2", message_index=0, rating=3, skill_id="s1"
-        )
-        fb3 = Feedback(
-            conversation_id="conv-3", message_index=0, rating=4, skill_id="s2"
-        )
+        fb1 = Feedback(conversation_id="conv-1", message_index=0, rating=5, skill_id="s1")
+        fb2 = Feedback(conversation_id="conv-2", message_index=0, rating=3, skill_id="s1")
+        fb3 = Feedback(conversation_id="conv-3", message_index=0, rating=4, skill_id="s2")
         await repo.save(fb1)
         await repo.save(fb2)
         await repo.save(fb3)
@@ -158,9 +146,7 @@ class TestListBySkill:
         assert all(r.skill_id == "s1" for r in results)
 
     @pytest.mark.asyncio
-    async def test_list_by_skill_empty(
-        self, repo: FeedbackRepository
-    ) -> None:
+    async def test_list_by_skill_empty(self, repo: FeedbackRepository) -> None:
         results = await repo.list_by_skill("nonexistent")
         assert results == []
 
@@ -184,24 +170,10 @@ class TestAverageRating:
         assert stats["average_rating"] == pytest.approx(3.67, abs=0.01)
 
     @pytest.mark.asyncio
-    async def test_average_rating_by_skill(
-        self, repo: FeedbackRepository
-    ) -> None:
-        await repo.save(
-            Feedback(
-                conversation_id="c1", message_index=0, rating=5, skill_id="s1"
-            )
-        )
-        await repo.save(
-            Feedback(
-                conversation_id="c2", message_index=0, rating=3, skill_id="s1"
-            )
-        )
-        await repo.save(
-            Feedback(
-                conversation_id="c3", message_index=0, rating=1, skill_id="s2"
-            )
-        )
+    async def test_average_rating_by_skill(self, repo: FeedbackRepository) -> None:
+        await repo.save(Feedback(conversation_id="c1", message_index=0, rating=5, skill_id="s1"))
+        await repo.save(Feedback(conversation_id="c2", message_index=0, rating=3, skill_id="s1"))
+        await repo.save(Feedback(conversation_id="c3", message_index=0, rating=1, skill_id="s2"))
 
         stats = await repo.get_average_rating(skill_id="s1")
         assert stats["count"] == 2
@@ -209,9 +181,7 @@ class TestAverageRating:
         assert stats["skill_id"] == "s1"
 
     @pytest.mark.asyncio
-    async def test_average_rating_no_data(
-        self, repo: FeedbackRepository
-    ) -> None:
+    async def test_average_rating_no_data(self, repo: FeedbackRepository) -> None:
         stats = await repo.get_average_rating()
         assert stats["count"] == 0
         assert stats["average_rating"] == 0.0
@@ -282,9 +252,7 @@ class TestSkillScoringIntegration:
         assert result == 0.8
 
     @pytest.mark.asyncio
-    async def test_adjust_score_positive_feedback(
-        self, repo: FeedbackRepository
-    ) -> None:
+    async def test_adjust_score_positive_feedback(self, repo: FeedbackRepository) -> None:
         """High ratings should boost the score."""
 
         from thumbelina.skills.application import SkillApplicationEngine
@@ -324,9 +292,7 @@ class TestSkillScoringIntegration:
         assert result == pytest.approx(0.58, abs=0.001)
 
     @pytest.mark.asyncio
-    async def test_adjust_score_negative_feedback(
-        self, repo: FeedbackRepository
-    ) -> None:
+    async def test_adjust_score_negative_feedback(self, repo: FeedbackRepository) -> None:
         """Low ratings should penalize the score."""
         from thumbelina.skills.application import SkillApplicationEngine
 
@@ -356,9 +322,7 @@ class TestSkillScoringIntegration:
         assert result == pytest.approx(0.46, abs=0.001)
 
     @pytest.mark.asyncio
-    async def test_adjust_score_no_feedback_for_skill(
-        self, repo: FeedbackRepository
-    ) -> None:
+    async def test_adjust_score_no_feedback_for_skill(self, repo: FeedbackRepository) -> None:
         """Skills with no feedback keep their base score."""
         from thumbelina.skills.application import SkillApplicationEngine
 

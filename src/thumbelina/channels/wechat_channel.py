@@ -53,9 +53,7 @@ class WeChatChannel(Channel):
             headers=headers,
             timeout=httpx.Timeout(_READ_TIMEOUT, connect=_CONNECT_TIMEOUT),
         )
-        logger.info(
-            "WeChat channel started (WeClaw API: %s)", self._config.weclaw_api_url
-        )
+        logger.info("WeChat channel started (WeClaw API: %s)", self._config.weclaw_api_url)
 
     async def stop(self) -> None:
         """Close the httpx client."""

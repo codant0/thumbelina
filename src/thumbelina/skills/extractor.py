@@ -52,9 +52,7 @@ class SkillExtractor:
             return None
 
         try:
-            conversation_text = "\n".join(
-                f"{m['role']}: {m['content']}" for m in messages
-            )
+            conversation_text = "\n".join(f"{m['role']}: {m['content']}" for m in messages)
             prompt = [
                 {"role": "system", "content": EXTRACT_PROMPT},
                 {"role": "user", "content": conversation_text},

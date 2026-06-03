@@ -138,9 +138,7 @@ class TestUserProfiler:
         await profiler.profile_repo.update_profile(
             "user1", communication_style="technical", expertise_level="advanced"
         )
-        await profiler.profile_repo.upsert_preference(
-            "user1", "topic", "interest_0", "Python", 0.9
-        )
+        await profiler.profile_repo.upsert_preference("user1", "topic", "interest_0", "Python", 0.9)
         await profiler.profile_repo.upsert_preference(
             "user1", "language", "preferred", "English", 0.7
         )
@@ -187,9 +185,7 @@ class TestUserProfiler:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_analyze_conversation_updates_existing_profile(
-        self, profiler, mock_llm_provider
-    ):
+    async def test_analyze_conversation_updates_existing_profile(self, profiler, mock_llm_provider):
         # Create initial profile
         await profiler.profile_repo.get_or_create_profile("user1")
         await profiler.profile_repo.update_profile(

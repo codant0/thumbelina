@@ -55,9 +55,7 @@ def test_cors_allows_all_origins(test_config):
 
     app = create_app(test_config)
     # Verify CORS middleware is present
-    middleware_classes = [
-        m.cls.__name__ for m in app.user_middleware
-    ]
+    middleware_classes = [m.cls.__name__ for m in app.user_middleware]
     assert "CORSMiddleware" in middleware_classes
 
 

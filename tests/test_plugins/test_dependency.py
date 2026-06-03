@@ -64,14 +64,14 @@ class TestParseMetadataDict:
 
     def test_parse_dict_basic(self):
         """Should parse __plugin_meta__ dict."""
-        source = textwrap.dedent('''\
+        source = textwrap.dedent("""\
             __plugin_meta__ = {
                 "name": "my_plugin",
                 "version": "3.1.0",
                 "description": "A test plugin",
                 "author": "Bob",
             }
-        ''')
+        """)
         meta = parse_plugin_metadata(source)
         assert meta.name == "my_plugin"
         assert meta.version == "3.1.0"
@@ -80,13 +80,13 @@ class TestParseMetadataDict:
 
     def test_parse_dict_with_dependencies_as_strings(self):
         """Should parse string dependencies from dict."""
-        source = textwrap.dedent('''\
+        source = textwrap.dedent("""\
             __plugin_meta__ = {
                 "name": "child",
                 "version": "1.0.0",
                 "dependencies": ["parent", "helper"],
             }
-        ''')
+        """)
         meta = parse_plugin_metadata(source)
         assert len(meta.dependencies) == 2
         assert meta.dependencies[0].name == "parent"
@@ -94,7 +94,7 @@ class TestParseMetadataDict:
 
     def test_parse_dict_with_dependencies_as_dicts(self):
         """Should parse dict dependencies with constraints."""
-        source = textwrap.dedent('''\
+        source = textwrap.dedent("""\
             __plugin_meta__ = {
                 "name": "child",
                 "version": "1.0.0",
@@ -103,7 +103,7 @@ class TestParseMetadataDict:
                     {"name": "optional_dep", "optional": True},
                 ],
             }
-        ''')
+        """)
         meta = parse_plugin_metadata(source)
         assert len(meta.dependencies) == 2
         assert meta.dependencies[0].name == "parent"
@@ -113,13 +113,13 @@ class TestParseMetadataDict:
 
     def test_parse_dict_with_conflicts(self):
         """Should parse conflicts from dict."""
-        source = textwrap.dedent('''\
+        source = textwrap.dedent("""\
             __plugin_meta__ = {
                 "name": "conflicting",
                 "version": "1.0.0",
                 "conflicts": ["other_plugin"],
             }
-        ''')
+        """)
         meta = parse_plugin_metadata(source)
         assert meta.conflicts == ["other_plugin"]
 
@@ -146,11 +146,11 @@ class TestParseMetadataGraceful:
 
     def test_dict_without_name(self):
         """Dict without 'name' key should fall through to docstring check."""
-        source = textwrap.dedent('''\
+        source = textwrap.dedent("""\
             __plugin_meta__ = {
                 "version": "1.0.0",
             }
-        ''')
+        """)
         meta = parse_plugin_metadata(source)
         # __plugin_meta__ has no name, so should fall through
         assert meta.name == ""
@@ -255,11 +255,13 @@ class TestDependencyResolver:
         """Simple A -> B -> C chain should produce [C, B, A] order."""
         plugins = {
             "A": PluginMetadata(
-                name="A", version="1.0.0",
+                name="A",
+                version="1.0.0",
                 dependencies=[PluginDependency(name="B")],
             ),
             "B": PluginMetadata(
-                name="B", version="1.0.0",
+                name="B",
+                version="1.0.0",
                 dependencies=[PluginDependency(name="C")],
             ),
             "C": PluginMetadata(name="C", version="1.0.0"),
@@ -274,18 +276,21 @@ class TestDependencyResolver:
         """Diamond: A -> B, A -> C, B -> D, C -> D."""
         plugins = {
             "A": PluginMetadata(
-                name="A", version="1.0.0",
+                name="A",
+                version="1.0.0",
                 dependencies=[
                     PluginDependency(name="B"),
                     PluginDependency(name="C"),
                 ],
             ),
             "B": PluginMetadata(
-                name="B", version="1.0.0",
+                name="B",
+                version="1.0.0",
                 dependencies=[PluginDependency(name="D")],
             ),
             "C": PluginMetadata(
-                name="C", version="1.0.0",
+                name="C",
+                version="1.0.0",
                 dependencies=[PluginDependency(name="D")],
             ),
             "D": PluginMetadata(name="D", version="1.0.0"),
@@ -302,11 +307,13 @@ class TestDependencyResolver:
         """Circular A -> B -> A should be detected."""
         plugins = {
             "A": PluginMetadata(
-                name="A", version="1.0.0",
+                name="A",
+                version="1.0.0",
                 dependencies=[PluginDependency(name="B")],
             ),
             "B": PluginMetadata(
-                name="B", version="1.0.0",
+                name="B",
+                version="1.0.0",
                 dependencies=[PluginDependency(name="A")],
             ),
         }
@@ -318,7 +325,8 @@ class TestDependencyResolver:
         """Missing dependency should be reported."""
         plugins = {
             "A": PluginMetadata(
-                name="A", version="1.0.0",
+                name="A",
+                version="1.0.0",
                 dependencies=[PluginDependency(name="nonexistent")],
             ),
         }
@@ -329,7 +337,8 @@ class TestDependencyResolver:
         """Conflicting plugins should be detected."""
         plugins = {
             "A": PluginMetadata(
-                name="A", version="1.0.0",
+                name="A",
+                version="1.0.0",
                 conflicts=["B"],
             ),
             "B": PluginMetadata(name="B", version="1.0.0"),
@@ -343,7 +352,8 @@ class TestDependencyResolver:
         """Optional missing dependency should be a warning, not block loading."""
         plugins = {
             "A": PluginMetadata(
-                name="A", version="1.0.0",
+                name="A",
+                version="1.0.0",
                 dependencies=[
                     PluginDependency(name="optional_dep", optional=True),
                 ],
@@ -380,7 +390,8 @@ class TestDependencyResolver:
         plugins = {
             "lib": PluginMetadata(name="lib", version="2.0.0"),
             "app": PluginMetadata(
-                name="app", version="1.0.0",
+                name="app",
+                version="1.0.0",
                 dependencies=[
                     PluginDependency(name="lib", version_constraint=">=1.0.0"),
                 ],
@@ -395,7 +406,8 @@ class TestDependencyResolver:
         plugins = {
             "lib": PluginMetadata(name="lib", version="0.5.0"),
             "app": PluginMetadata(
-                name="app", version="1.0.0",
+                name="app",
+                version="1.0.0",
                 dependencies=[
                     PluginDependency(name="lib", version_constraint=">=1.0.0"),
                 ],
@@ -409,22 +421,26 @@ class TestDependencyResolver:
         # A -> B, A -> C, B -> D, C -> D, D -> E
         plugins = {
             "A": PluginMetadata(
-                name="A", version="1.0.0",
+                name="A",
+                version="1.0.0",
                 dependencies=[
                     PluginDependency(name="B"),
                     PluginDependency(name="C"),
                 ],
             ),
             "B": PluginMetadata(
-                name="B", version="1.0.0",
+                name="B",
+                version="1.0.0",
                 dependencies=[PluginDependency(name="D")],
             ),
             "C": PluginMetadata(
-                name="C", version="1.0.0",
+                name="C",
+                version="1.0.0",
                 dependencies=[PluginDependency(name="D")],
             ),
             "D": PluginMetadata(
-                name="D", version="1.0.0",
+                name="D",
+                version="1.0.0",
                 dependencies=[PluginDependency(name="E")],
             ),
             "E": PluginMetadata(name="E", version="1.0.0"),
@@ -443,15 +459,18 @@ class TestDependencyResolver:
         """Three-way circular dependency A -> B -> C -> A should be detected."""
         plugins = {
             "A": PluginMetadata(
-                name="A", version="1.0.0",
+                name="A",
+                version="1.0.0",
                 dependencies=[PluginDependency(name="B")],
             ),
             "B": PluginMetadata(
-                name="B", version="1.0.0",
+                name="B",
+                version="1.0.0",
                 dependencies=[PluginDependency(name="C")],
             ),
             "C": PluginMetadata(
-                name="C", version="1.0.0",
+                name="C",
+                version="1.0.0",
                 dependencies=[PluginDependency(name="A")],
             ),
         }
@@ -470,7 +489,8 @@ class TestDependencyResolver:
         plugins = {
             "lib": PluginMetadata(name="lib", version="1.5.0"),
             "app": PluginMetadata(
-                name="app", version="1.0.0",
+                name="app",
+                version="1.0.0",
                 dependencies=[
                     PluginDependency(name="lib", version_constraint="^1.0.0"),
                 ],

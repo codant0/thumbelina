@@ -175,9 +175,7 @@ class CompositionEngine:
         results: list[str] = []
 
         for i, skill in enumerate(skills):
-            steps_text = "\n".join(
-                f"  {j+1}. {step}" for j, step in enumerate(skill.steps)
-            )
+            steps_text = "\n".join(f"  {j + 1}. {step}" for j, step in enumerate(skill.steps))
             prompt_text = (
                 f"技能组合 '{composition.name}' — 步骤 {i + 1}/{len(skills)}\n"
                 f"当前技能: {skill.name}\n"
@@ -188,9 +186,11 @@ class CompositionEngine:
             )
 
             try:
-                step_result = await provider.chat([
-                    {"role": "user", "content": prompt_text},
-                ])
+                step_result = await provider.chat(
+                    [
+                        {"role": "user", "content": prompt_text},
+                    ]
+                )
                 accumulated_output = step_result
                 results.append(f"[步骤 {i + 1}] {skill.name}: {step_result}")
             except Exception:
@@ -200,9 +200,7 @@ class CompositionEngine:
                     composition.name,
                     exc_info=True,
                 )
-                results.append(
-                    f"[步骤 {i + 1}] {skill.name}: 执行失败"
-                )
+                results.append(f"[步骤 {i + 1}] {skill.name}: 执行失败")
                 break
 
         return "\n\n".join(results)
@@ -228,12 +226,8 @@ class CompositionEngine:
         if not all_skills:
             return []
 
-        skills_list = "\n".join(
-            f"- {s.name}: {s.description}" for s in all_skills
-        )
-        history_text = "\n".join(
-            f"{m['role']}: {m['content']}" for m in conversation_history
-        )
+        skills_list = "\n".join(f"- {s.name}: {s.description}" for s in all_skills)
+        history_text = "\n".join(f"{m['role']}: {m['content']}" for m in conversation_history)
 
         prompt = SUGGEST_PROMPT.format(
             skills_list=skills_list,
@@ -243,9 +237,11 @@ class CompositionEngine:
         try:
             import json
 
-            response = await self.llm_provider.chat([
-                {"role": "user", "content": prompt},
-            ])
+            response = await self.llm_provider.chat(
+                [
+                    {"role": "user", "content": prompt},
+                ]
+            )
             data = json.loads(response)
             return data.get("suggestions", [])
         except Exception:

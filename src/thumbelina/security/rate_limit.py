@@ -31,9 +31,7 @@ class RateLimiter:
     def _clean_old_requests(self, key: str) -> None:
         """Remove requests outside the window (caller must hold lock)."""
         cutoff = time.time() - self.window_seconds
-        self._requests[key] = [
-            t for t in self._requests[key] if t > cutoff
-        ]
+        self._requests[key] = [t for t in self._requests[key] if t > cutoff]
         if not self._requests[key]:
             del self._requests[key]
 

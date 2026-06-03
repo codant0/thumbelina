@@ -65,13 +65,15 @@ class TestSkillRepository:
     async def test_list_skills(self, repo, sample_skill):
         """Should be able to list all skills."""
         await repo.save(sample_skill)
-        await repo.save(Skill(
-            id="skill-2",
-            name="another_skill",
-            description="Another skill",
-            trigger_conditions=[],
-            steps=[],
-        ))
+        await repo.save(
+            Skill(
+                id="skill-2",
+                name="another_skill",
+                description="Another skill",
+                trigger_conditions=[],
+                steps=[],
+            )
+        )
 
         skills = await repo.list_all()
         assert len(skills) == 2
@@ -120,18 +122,33 @@ class TestSkillRepository:
     @pytest.mark.asyncio
     async def test_search_by_name(self, repo):
         """Should be able to search skills by name."""
-        await repo.save(Skill(
-            id="s1", name="python_list", description="Python lists",
-            trigger_conditions=[], steps=[],
-        ))
-        await repo.save(Skill(
-            id="s2", name="python_dict", description="Python dicts",
-            trigger_conditions=[], steps=[],
-        ))
-        await repo.save(Skill(
-            id="s3", name="javascript_array", description="JS arrays",
-            trigger_conditions=[], steps=[],
-        ))
+        await repo.save(
+            Skill(
+                id="s1",
+                name="python_list",
+                description="Python lists",
+                trigger_conditions=[],
+                steps=[],
+            )
+        )
+        await repo.save(
+            Skill(
+                id="s2",
+                name="python_dict",
+                description="Python dicts",
+                trigger_conditions=[],
+                steps=[],
+            )
+        )
+        await repo.save(
+            Skill(
+                id="s3",
+                name="javascript_array",
+                description="JS arrays",
+                trigger_conditions=[],
+                steps=[],
+            )
+        )
 
         results = await repo.search("python")
         assert len(results) == 2

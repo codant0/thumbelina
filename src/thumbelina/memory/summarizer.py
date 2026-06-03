@@ -9,9 +9,7 @@ from thumbelina.llm.base import LLMProvider
 
 logger = logging.getLogger(__name__)
 
-SUMMARY_PROMPT = (
-    "请用1-2句话总结以下对话的主要内容，简洁概括用户的问题和得到的回答。"
-)
+SUMMARY_PROMPT = "请用1-2句话总结以下对话的主要内容，简洁概括用户的问题和得到的回答。"
 
 
 class Summarizer:
@@ -43,9 +41,7 @@ class Summarizer:
             return ""
 
         try:
-            conversation_text = "\n".join(
-                f"{m['role']}: {m['content']}" for m in messages
-            )
+            conversation_text = "\n".join(f"{m['role']}: {m['content']}" for m in messages)
             prompt = [
                 {"role": "system", "content": SUMMARY_PROMPT},
                 {"role": "user", "content": conversation_text},

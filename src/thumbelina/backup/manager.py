@@ -100,12 +100,14 @@ class BackupManager:
                 except (json.JSONDecodeError, OSError):
                     pass
 
-                backups.append(BackupInfo(
-                    id=backup_id,
-                    name=name,
-                    created_at=datetime.fromtimestamp(stat.st_mtime),
-                    size_bytes=stat.st_size,
-                ))
+                backups.append(
+                    BackupInfo(
+                        id=backup_id,
+                        name=name,
+                        created_at=datetime.fromtimestamp(stat.st_mtime),
+                        size_bytes=stat.st_size,
+                    )
+                )
         return sorted(backups, key=lambda b: b.created_at, reverse=True)
 
     async def restore_backup(self, backup_id: str) -> dict[str, Any] | None:

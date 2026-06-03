@@ -149,9 +149,7 @@ class TestMessageHandling:
         reply_func.assert_awaited_once_with("custom reply")
 
     @pytest.mark.asyncio
-    async def test_empty_message_ignored(
-        self, channel: QQChannel, mock_agent: MagicMock
-    ) -> None:
+    async def test_empty_message_ignored(self, channel: QQChannel, mock_agent: MagicMock) -> None:
         """Messages that are empty after cleaning are not forwarded."""
         reply_func = AsyncMock()
         await channel._handle_message(
@@ -289,9 +287,7 @@ class TestLifecycle:
     """Tests for start/stop lifecycle."""
 
     @pytest.mark.asyncio
-    async def test_start_without_botpy(
-        self, channel: QQChannel
-    ) -> None:
+    async def test_start_without_botpy(self, channel: QQChannel) -> None:
         """start() gracefully handles missing qq-botpy dependency."""
         with patch.dict("sys.modules", {"botpy": None}):
             # Should not raise, just log a warning
@@ -309,7 +305,7 @@ class TestLifecycle:
     async def test_create_client_missing_botpy(self, channel: QQChannel) -> None:
         """_create_client raises ImportError when botpy is not installed."""
 
-        real_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__
+        real_import = __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
 
         def _mock_import(name, *args, **kwargs):
             if name == "botpy":

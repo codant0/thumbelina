@@ -165,6 +165,7 @@ def run_chat(provider: str, model: str | None = None) -> None:
     feedback_repo = None
     try:
         from thumbelina.memory.feedback_repo import FeedbackRepository
+
         feedback_repo = FeedbackRepository(db_url=config.memory.database_url)
     except Exception:
         pass
@@ -175,6 +176,7 @@ def run_chat(provider: str, model: str | None = None) -> None:
     try:
         from thumbelina.skills.application import SkillApplicationEngine
         from thumbelina.skills.repository import SkillRepository
+
         skill_repo = SkillRepository(db_url=config.memory.database_url)
         skill_engine = SkillApplicationEngine(
             repository=skill_repo,
@@ -188,8 +190,10 @@ def run_chat(provider: str, model: str | None = None) -> None:
     try:
         from thumbelina.skills.composition_engine import CompositionEngine
         from thumbelina.skills.composition_repo import CompositionRepository
+
         if skill_repo is None:
             from thumbelina.skills.repository import SkillRepository
+
             skill_repo = SkillRepository(db_url=config.memory.database_url)
         comp_repo = CompositionRepository(db_url=config.memory.database_url)
         composition_engine = CompositionEngine(
@@ -203,6 +207,7 @@ def run_chat(provider: str, model: str | None = None) -> None:
     subagent_manager = None
     try:
         from thumbelina.subagents.manager import SubagentManager
+
         subagent_manager = SubagentManager(llm_provider=llm_provider)
     except Exception:
         pass
@@ -210,6 +215,7 @@ def run_chat(provider: str, model: str | None = None) -> None:
     scheduler = None
     try:
         from thumbelina.scheduler.scheduler import TaskScheduler
+
         scheduler = TaskScheduler()
     except Exception:
         pass

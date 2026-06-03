@@ -142,9 +142,7 @@ class PluginManager:
 
         # --- Delegation to sandboxed loader when available ---
         if self._sandboxed_loader is not None:
-            return await self._sandboxed_loader.load_plugins_from_directory(
-                directory, self
-            )
+            return await self._sandboxed_loader.load_plugins_from_directory(directory, self)
 
         # --- Phase 1: discover all plugin files and parse metadata ---
         discovered: list[tuple[str, str, str, PluginMetadata]] = []

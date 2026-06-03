@@ -147,9 +147,7 @@ class FeedbackRepository:
         """
         return await asyncio.to_thread(self._get_sync, feedback_id)
 
-    def _list_by_conversation_sync(
-        self, conversation_id: str
-    ) -> list[Feedback]:
+    def _list_by_conversation_sync(self, conversation_id: str) -> list[Feedback]:
         """Synchronous implementation of list_by_conversation."""
         with self.SessionLocal() as session:
             stmt = (
@@ -160,9 +158,7 @@ class FeedbackRepository:
             records = session.execute(stmt).scalars().all()
             return [self._record_to_feedback(r) for r in records]
 
-    async def list_by_conversation(
-        self, conversation_id: str
-    ) -> list[Feedback]:
+    async def list_by_conversation(self, conversation_id: str) -> list[Feedback]:
         """List all feedback for a conversation.
 
         Parameters
@@ -175,9 +171,7 @@ class FeedbackRepository:
         list[Feedback]
             List of feedback records ordered by message index.
         """
-        return await asyncio.to_thread(
-            self._list_by_conversation_sync, conversation_id
-        )
+        return await asyncio.to_thread(self._list_by_conversation_sync, conversation_id)
 
     def _list_by_skill_sync(self, skill_id: str) -> list[Feedback]:
         """Synchronous implementation of list_by_skill."""
@@ -208,9 +202,7 @@ class FeedbackRepository:
     def _list_all_sync(self) -> list[Feedback]:
         """Synchronous implementation of list_all."""
         with self.SessionLocal() as session:
-            stmt = select(FeedbackRecord).order_by(
-                FeedbackRecord.created_at.desc()
-            )
+            stmt = select(FeedbackRecord).order_by(FeedbackRecord.created_at.desc())
             records = session.execute(stmt).scalars().all()
             return [self._record_to_feedback(r) for r in records]
 
@@ -224,9 +216,7 @@ class FeedbackRepository:
         """
         return await asyncio.to_thread(self._list_all_sync)
 
-    def _get_average_rating_sync(
-        self, skill_id: str | None = None
-    ) -> dict[str, Any]:
+    def _get_average_rating_sync(self, skill_id: str | None = None) -> dict[str, Any]:
         """Synchronous implementation of get_average_rating."""
         with self.SessionLocal() as session:
             query = select(
@@ -246,9 +236,7 @@ class FeedbackRepository:
                 "skill_id": skill_id,
             }
 
-    async def get_average_rating(
-        self, skill_id: str | None = None
-    ) -> dict[str, Any]:
+    async def get_average_rating(self, skill_id: str | None = None) -> dict[str, Any]:
         """Get the average rating, optionally filtered by skill.
 
         Parameters

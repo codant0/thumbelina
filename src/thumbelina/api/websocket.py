@@ -34,9 +34,7 @@ async def websocket_chat(websocket: WebSocket) -> None:
 
     # Create a default conversation for this WebSocket session
     default_conversation_id: str | None = (
-        await agent.memory_manager.create_conversation()
-        if agent.memory_manager
-        else None
+        await agent.memory_manager.create_conversation() if agent.memory_manager else None
     )
 
     try:

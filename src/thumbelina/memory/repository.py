@@ -127,9 +127,7 @@ class ConversationRepository:
         ValueError
             If the conversation does not exist or role is invalid.
         """
-        return await asyncio.to_thread(
-            self._add_message_sync, conversation_id, role, content
-        )
+        return await asyncio.to_thread(self._add_message_sync, conversation_id, role, content)
 
     def _get_messages_sync(self, conversation_id: str) -> list[dict[str, Any]]:
         """Synchronous implementation of get_messages."""
@@ -316,9 +314,7 @@ class ConversationRepository:
                 for msg in messages
             ]
 
-    async def search_messages(
-        self, query: str, limit: int = 20
-    ) -> list[dict[str, Any]]:
+    async def search_messages(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
         """Search messages by keyword using SQL LIKE.
 
         Parameters

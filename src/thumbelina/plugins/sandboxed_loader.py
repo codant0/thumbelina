@@ -73,20 +73,22 @@ class SandboxedPluginLoader:
         """Return a serialisable validation report for all processed plugins."""
         report: list[dict[str, object]] = []
         for result in self._results.values():
-            report.append({
-                "plugin_name": result.plugin_name,
-                "file_path": result.file_path,
-                "is_valid": result.is_valid,
-                "loaded": result.loaded,
-                "violations": [
-                    {
-                        "type": v.violation_type,
-                        "message": v.message,
-                        "line": v.line,
-                    }
-                    for v in result.violations
-                ],
-            })
+            report.append(
+                {
+                    "plugin_name": result.plugin_name,
+                    "file_path": result.file_path,
+                    "is_valid": result.is_valid,
+                    "loaded": result.loaded,
+                    "violations": [
+                        {
+                            "type": v.violation_type,
+                            "message": v.message,
+                            "line": v.line,
+                        }
+                        for v in result.violations
+                    ],
+                }
+            )
         return report
 
     def validate_file(self, file_path: str) -> PluginValidationResult:
@@ -245,8 +247,6 @@ class SandboxedPluginLoader:
                 else:
                     logger.warning("Plugin %s has no register() function", file_path)
             except Exception:
-                logger.warning(
-                    "Failed to load plugin from %s", file_path, exc_info=True
-                )
+                logger.warning("Failed to load plugin from %s", file_path, exc_info=True)
 
         return loaded

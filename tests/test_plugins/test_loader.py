@@ -202,9 +202,7 @@ class TestLoadPluginsFromDirectory:
     @pytest.mark.asyncio
     async def test_example_plugin_loads(self):
         """The example plugin at plugins/examples should load correctly."""
-        example_dir = os.path.join(
-            os.path.dirname(__file__), "..", "..", "plugins", "examples"
-        )
+        example_dir = os.path.join(os.path.dirname(__file__), "..", "..", "plugins", "examples")
         if not os.path.isdir(example_dir):
             pytest.skip("Example plugin directory not found")
 

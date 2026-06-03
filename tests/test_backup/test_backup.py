@@ -141,6 +141,7 @@ class TestBackupManager:
         """Should restore old-format backups (plain JSON without envelope)."""
         # Write an old-format backup directly
         import uuid
+
         backup_id = str(uuid.uuid4())
         filepath = os.path.join(backup_dir, f"{backup_id}.json")
         with open(filepath, "w", encoding="utf-8") as f:

@@ -326,9 +326,7 @@ class TestCompositionEngine:
         assert mock_llm.chat.call_count == 3
 
     @pytest.mark.asyncio
-    async def test_execute_composition_increments_usage(
-        self, engine, skill_repo, sample_skills
-    ):
+    async def test_execute_composition_increments_usage(self, engine, skill_repo, sample_skills):
         """Executing a composition should increment its usage count."""
         for skill in sample_skills:
             await skill_repo.save(skill)
@@ -422,9 +420,7 @@ class TestCompositionEngine:
         assert suggestions == []
 
     @pytest.mark.asyncio
-    async def test_suggest_compositions_llm_failure(
-        self, engine, skill_repo, sample_skills
-    ):
+    async def test_suggest_compositions_llm_failure(self, engine, skill_repo, sample_skills):
         """Should handle LLM failure gracefully during suggestion."""
         for skill in sample_skills:
             await skill_repo.save(skill)

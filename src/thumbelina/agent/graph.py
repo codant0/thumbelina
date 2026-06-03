@@ -47,8 +47,7 @@ def _make_subagent_tools(manager: SubagentManager) -> list[BaseTool]:
             agent = await manager.create_agent(task)
             await manager.run_agent(agent.id)
             return (
-                f"Subagent created with ID {agent.id}. "
-                f"Task: {task}. Status: {agent.status.value}"
+                f"Subagent created with ID {agent.id}. Task: {task}. Status: {agent.status.value}"
             )
         except RuntimeError as exc:
             return f"Failed to create subagent: {exc}"
@@ -137,9 +136,7 @@ def _make_composition_tools(engine: CompositionEngine) -> list[BaseTool]:
     """
 
     @tool
-    async def create_skill_composition(
-        skill_ids: str, name: str, description: str
-    ) -> str:
+    async def create_skill_composition(skill_ids: str, name: str, description: str) -> str:
         """Create a skill composition that chains multiple skills into a workflow.
 
         Args:
@@ -155,8 +152,7 @@ def _make_composition_tools(engine: CompositionEngine) -> list[BaseTool]:
                 skill_ids=ids, name=name, description=description
             )
             return (
-                f"Composition created with ID {composition.id}. "
-                f"Name: {name}. Skills: {len(ids)}."
+                f"Composition created with ID {composition.id}. Name: {name}. Skills: {len(ids)}."
             )
         except Exception as exc:
             return f"Failed to create composition: {exc}"
@@ -170,9 +166,7 @@ def _make_composition_tools(engine: CompositionEngine) -> list[BaseTool]:
         lines = []
         for c in compositions:
             lines.append(
-                f"- ID: {c.id}, Name: {c.name}, "
-                f"Skills: {len(c.skill_ids)}, "
-                f"Usage: {c.usage_count}"
+                f"- ID: {c.id}, Name: {c.name}, Skills: {len(c.skill_ids)}, Usage: {c.usage_count}"
             )
         return "\n".join(lines)
 
@@ -392,4 +386,3 @@ class ThumbelinaAgent:
 
         if full_response:
             await self._persist_message("assistant", full_response)
-

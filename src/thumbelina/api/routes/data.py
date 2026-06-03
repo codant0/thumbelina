@@ -47,9 +47,7 @@ def _feedback_to_response(fb: Feedback) -> FeedbackResponse:
         comment=fb.comment,
         skill_id=fb.skill_id,
         created_at=(
-            fb.created_at.isoformat()
-            if hasattr(fb.created_at, "isoformat")
-            else str(fb.created_at)
+            fb.created_at.isoformat() if hasattr(fb.created_at, "isoformat") else str(fb.created_at)
         ),
     )
 

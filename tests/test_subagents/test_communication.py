@@ -173,6 +173,7 @@ class TestSharedState:
     @pytest.mark.asyncio
     async def test_concurrent_set_and_get(self, state):
         """Concurrent set and get should not corrupt data."""
+
         async def writer(n: int) -> None:
             for i in range(n):
                 await state.set(f"key-{i}", i)

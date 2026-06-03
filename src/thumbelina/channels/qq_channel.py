@@ -81,8 +81,7 @@ class QQChannel(Channel):
             import botpy
         except ImportError:
             raise ImportError(
-                "qq-botpy is required for the QQ channel. "
-                "Install it with: pip install qq-botpy"
+                "qq-botpy is required for the QQ channel. Install it with: pip install qq-botpy"
             )
 
         channel = self
@@ -97,12 +96,8 @@ class QQChannel(Channel):
             async def on_at_message_create(self, message: Any) -> None:
                 """Handle guild @messages."""
                 await channel._handle_message(
-                    user_id=message.author.id
-                    if hasattr(message, "author")
-                    else "unknown",
-                    content=message.content
-                    if hasattr(message, "content")
-                    else "",
+                    user_id=message.author.id if hasattr(message, "author") else "unknown",
+                    content=message.content if hasattr(message, "content") else "",
                     reply_func=lambda text: message.reply(content=text),
                     source="guild",
                     guild_id=getattr(message, "guild_id", None),
@@ -111,12 +106,8 @@ class QQChannel(Channel):
             async def on_group_at_message_create(self, message: Any) -> None:
                 """Handle group @messages."""
                 await channel._handle_message(
-                    user_id=message.author.id
-                    if hasattr(message, "author")
-                    else "unknown",
-                    content=message.content
-                    if hasattr(message, "content")
-                    else "",
+                    user_id=message.author.id if hasattr(message, "author") else "unknown",
+                    content=message.content if hasattr(message, "content") else "",
                     reply_func=lambda text: message.reply(content=text),
                     source="group",
                     group_id=getattr(message, "group_openid", None),
@@ -125,12 +116,8 @@ class QQChannel(Channel):
             async def on_c2c_message_create(self, message: Any) -> None:
                 """Handle private (C2C) messages."""
                 await channel._handle_message(
-                    user_id=message.author.id
-                    if hasattr(message, "author")
-                    else "unknown",
-                    content=message.content
-                    if hasattr(message, "content")
-                    else "",
+                    user_id=message.author.id if hasattr(message, "author") else "unknown",
+                    content=message.content if hasattr(message, "content") else "",
                     reply_func=lambda text: message.reply(content=text),
                     source="c2c",
                 )
@@ -199,9 +186,7 @@ class QQChannel(Channel):
             if response:
                 await reply_func(response)
         except Exception:
-            logger.error(
-                "Error processing QQ message from %s", user_id, exc_info=True
-            )
+            logger.error("Error processing QQ message from %s", user_id, exc_info=True)
 
     async def start(self) -> None:
         """Start the QQ Bot connection in a background thread.
@@ -212,9 +197,7 @@ class QQChannel(Channel):
         try:
             self._client = self._create_client()
         except ImportError:
-            logger.warning(
-                "Cannot start QQ channel: qq-botpy is not installed."
-            )
+            logger.warning("Cannot start QQ channel: qq-botpy is not installed.")
             return
 
         def _run_bot() -> None:
@@ -226,9 +209,7 @@ class QQChannel(Channel):
             except Exception:
                 logger.error("QQ Bot client exited with error", exc_info=True)
 
-        self._thread = threading.Thread(
-            target=_run_bot, name="qq-bot", daemon=True
-        )
+        self._thread = threading.Thread(target=_run_bot, name="qq-bot", daemon=True)
         self._thread.start()
         logger.info("QQ Bot channel started (appid=%s)", self._config.app_id)
 
@@ -260,9 +241,7 @@ class QQChannel(Channel):
         logs the attempt. Actual implementation depends on the botpy
         API for post-group-message or post-c2c-message.
         """
-        logger.info(
-            "Sending QQ message to %s: %s", user_id, text[:100]
-        )
+        logger.info("Sending QQ message to %s: %s", user_id, text[:100])
         # botpy proactive messaging requires specific API calls
         # that depend on the message source (guild/group/c2c).
         # This is logged for now; actual sending is handled per-event.

@@ -11,9 +11,7 @@ class MessageQueue:
     """Async message queue for inter-agent communication."""
 
     def __init__(self) -> None:
-        self._queues: dict[str, asyncio.Queue[dict[str, Any]]] = defaultdict(
-            asyncio.Queue
-        )
+        self._queues: dict[str, asyncio.Queue[dict[str, Any]]] = defaultdict(asyncio.Queue)
 
     async def send(self, to: str, content: str, sender: str = "") -> None:
         """Send a message to an agent.

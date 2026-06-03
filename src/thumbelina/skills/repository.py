@@ -24,7 +24,11 @@ class SkillRepository:
     """
 
     def __init__(self, db_url: str = "sqlite:///thumbelina.db") -> None:
-        if db_url == ":memory:" or db_url == "sqlite:///:memory:" or db_url.startswith("sqlite:///:memory:"):
+        if (
+            db_url == ":memory:"
+            or db_url == "sqlite:///:memory:"
+            or db_url.startswith("sqlite:///:memory:")
+        ):
             self.engine = create_engine(
                 "sqlite:///:memory:",
                 connect_args={"check_same_thread": False},
@@ -54,6 +58,7 @@ class SkillRepository:
 
     async def save(self, skill: Skill) -> None:
         """Save or update a skill."""
+
         def _save():
             with self.SessionLocal() as session:
                 record = session.get(SkillRecord, skill.id)
@@ -81,6 +86,7 @@ class SkillRepository:
 
     async def get(self, skill_id: str) -> Skill | None:
         """Get a skill by ID."""
+
         def _get():
             with self.SessionLocal() as session:
                 record = session.get(SkillRecord, skill_id)
@@ -90,6 +96,7 @@ class SkillRepository:
 
     async def list_all(self) -> list[Skill]:
         """List all skills."""
+
         def _list():
             with self.SessionLocal() as session:
                 stmt = select(SkillRecord)
@@ -100,6 +107,7 @@ class SkillRepository:
 
     async def delete(self, skill_id: str) -> bool:
         """Delete a skill."""
+
         def _delete():
             with self.SessionLocal() as session:
                 record = session.get(SkillRecord, skill_id)
@@ -113,11 +121,11 @@ class SkillRepository:
 
     async def search(self, query: str) -> list[Skill]:
         """Search skills by name or description."""
+
         def _search():
             with self.SessionLocal() as session:
                 stmt = select(SkillRecord).where(
-                    SkillRecord.name.contains(query)
-                    | SkillRecord.description.contains(query)
+                    SkillRecord.name.contains(query) | SkillRecord.description.contains(query)
                 )
                 records = session.execute(stmt).scalars().all()
                 return [self._record_to_skill(r) for r in records]
