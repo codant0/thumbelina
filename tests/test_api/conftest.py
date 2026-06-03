@@ -30,10 +30,21 @@ def mock_agent():
 @pytest.fixture
 def mock_memory():
     """Create a mock MemoryManager."""
-    conv = {"id": "test-conv-id", "created_at": "2026-01-01", "updated_at": "2026-01-01", "summary": None}
+    conv = {
+        "id": "test-conv-id",
+        "created_at": "2026-01-01",
+        "updated_at": "2026-01-01",
+        "summary": None,
+    }
     conversations = {"test-conv-id": conv}
     messages = [
-        {"id": "msg-1", "conversation_id": "test-conv-id", "role": "user", "content": "Hello", "created_at": "2026-01-01"},
+        {
+            "id": "msg-1",
+            "conversation_id": "test-conv-id",
+            "role": "user",
+            "content": "Hello",
+            "created_at": "2026-01-01",
+        },
     ]
 
     async def get_conversation(conv_id: str):

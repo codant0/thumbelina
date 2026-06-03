@@ -11,7 +11,6 @@ from fastapi.testclient import TestClient
 from thumbelina.channels.config import WeChatChannelConfig
 from thumbelina.channels.wechat_channel import WeChatChannel
 
-
 # ------------------------------------------------------------------
 # Fixtures
 # ------------------------------------------------------------------

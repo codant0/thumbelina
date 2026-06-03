@@ -43,7 +43,11 @@ class TestCallModelNode:
         mock_llm = AsyncMock()
         mock_llm.ainvoke.return_value = AIMessage(content="response")
 
-        messages = [HumanMessage(content="Hi"), AIMessage(content="Hello"), HumanMessage(content="How are you?")]
+        messages = [
+            HumanMessage(content="Hi"),
+            AIMessage(content="Hello"),
+            HumanMessage(content="How are you?"),
+        ]
         state: AgentState = {"messages": messages}
         await call_model(state, mock_llm)
 

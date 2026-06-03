@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from thumbelina.channels.config import QQChannelConfig
 from thumbelina.channels.qq_channel import QQChannel, _clean_message_content
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -311,7 +308,6 @@ class TestLifecycle:
     @pytest.mark.asyncio
     async def test_create_client_missing_botpy(self, channel: QQChannel) -> None:
         """_create_client raises ImportError when botpy is not installed."""
-        import sys
 
         real_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__
 

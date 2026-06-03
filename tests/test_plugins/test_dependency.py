@@ -15,7 +15,6 @@ from thumbelina.plugins.dependency import (
 )
 from thumbelina.plugins.resolver import DependencyResolver
 
-
 # ---------------------------------------------------------------------------
 # Metadata parsing tests
 # ---------------------------------------------------------------------------

@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class PluginType(str, Enum):
+class PluginType(StrEnum):
     """Type of plugin."""
 
     TOOL = "tool"

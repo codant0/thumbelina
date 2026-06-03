@@ -72,7 +72,7 @@ class TestEdgeConstants:
 
     def test_end_constant_exists(self):
         """END constant should be defined and match langgraph's END."""
-        from langgraph.graph import END as LangGraphEND
+        from langgraph.graph import END as LangGraphEND  # noqa: N811
 
         from thumbelina.agent.edges import END
 

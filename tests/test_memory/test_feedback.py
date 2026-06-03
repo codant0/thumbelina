@@ -286,7 +286,6 @@ class TestSkillScoringIntegration:
         self, repo: FeedbackRepository
     ) -> None:
         """High ratings should boost the score."""
-        from unittest.mock import AsyncMock
 
         from thumbelina.skills.application import SkillApplicationEngine
 

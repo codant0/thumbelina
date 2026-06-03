@@ -61,8 +61,14 @@ class TestPluginManager:
     @pytest.mark.asyncio
     async def test_list_plugins(self, manager):
         """Should list all plugins."""
-        p1 = Plugin(id="p1", name="Plugin 1", description="desc", plugin_type=PluginType.TOOL, version="1.0")
-        p2 = Plugin(id="p2", name="Plugin 2", description="desc", plugin_type=PluginType.SKILL, version="1.0")
+        p1 = Plugin(
+            id="p1", name="Plugin 1", description="desc",
+            plugin_type=PluginType.TOOL, version="1.0",
+        )
+        p2 = Plugin(
+            id="p2", name="Plugin 2", description="desc",
+            plugin_type=PluginType.SKILL, version="1.0",
+        )
         await manager.register(p1)
         await manager.register(p2)
 
@@ -93,8 +99,14 @@ class TestPluginManager:
     @pytest.mark.asyncio
     async def test_list_by_type(self, manager):
         """Should be able to list plugins by type."""
-        p1 = Plugin(id="p1", name="Tool 1", description="desc", plugin_type=PluginType.TOOL, version="1.0")
-        p2 = Plugin(id="p2", name="Skill 1", description="desc", plugin_type=PluginType.SKILL, version="1.0")
+        p1 = Plugin(
+            id="p1", name="Tool 1", description="desc",
+            plugin_type=PluginType.TOOL, version="1.0",
+        )
+        p2 = Plugin(
+            id="p2", name="Skill 1", description="desc",
+            plugin_type=PluginType.SKILL, version="1.0",
+        )
         await manager.register(p1)
         await manager.register(p2)
 

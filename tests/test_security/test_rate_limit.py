@@ -24,8 +24,8 @@ class TestRateLimiter:
 
     def test_limiter_creates_instance(self):
         """Should create a RateLimiter."""
-        l = RateLimiter(max_requests=10, window_seconds=60)
-        assert l is not None
+        limiter = RateLimiter(max_requests=10, window_seconds=60)
+        assert limiter is not None
 
     def test_allow_request(self, limiter):
         """Should allow requests within limit."""
