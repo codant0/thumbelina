@@ -46,7 +46,7 @@ export function TaskManager() {
   }
 
   useEffect(() => {
-    void fetchData()
+    void fetchData() // eslint-disable-line react-hooks/set-state-in-effect
     const interval = setInterval(() => void fetchData(), 5000)
     return () => {
       clearInterval(interval)
