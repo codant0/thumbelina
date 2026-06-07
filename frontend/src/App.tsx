@@ -6,6 +6,7 @@ import { TaskManager } from './components/Tasks/TaskManager'
 import { MemoryViewer } from './components/Memory/MemoryViewer'
 import { DreamViewer } from './components/Dream/DreamViewer'
 import { SettingsPanel } from './components/Settings/SettingsPanel'
+import { PluginsPage } from './components/Plugins/PluginsPage'
 import type { Conversation } from './types/chat'
 import './App.css'
 
@@ -33,6 +34,16 @@ function App() {
     setSelectedId(undefined)
   }, [])
 
+  const handleDelete = useCallback(async (id: string) => {
+    try {
+      const res = await fetch(`/api/v1/conversations/${id}`, { method: 'DELETE' })
+      if (res.ok) {
+        setConversations(prev => prev.filter(c => c.id !== id))
+        if (selectedId === id) setSelectedId(undefined)
+      }
+    } catch { /* ignore */ }
+  }, [selectedId])
+
   const renderPage = () => {
     switch (activePage) {
       case 'tasks':
@@ -43,6 +54,8 @@ function App() {
         return <DreamViewer />
       case 'settings':
         return <SettingsPanel />
+      case 'plugins':
+        return <PluginsPage />
       case 'chat':
       default:
         return (
@@ -51,6 +64,7 @@ function App() {
               conversations={conversations}
               onSelect={handleSelect}
               onNew={handleNewConversation}
+              onDelete={handleDelete}
               selectedId={selectedId}
             />
             <ChatWindow

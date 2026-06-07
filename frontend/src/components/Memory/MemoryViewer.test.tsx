@@ -39,4 +39,14 @@ describe('MemoryViewer', () => {
     render(<MemoryViewer />)
     expect(screen.getByTestId('load-skills-button')).toBeInTheDocument()
   })
+
+  it('should render compositions list', () => {
+    render(<MemoryViewer />)
+    expect(screen.getByTestId('compositions-list')).toBeInTheDocument()
+  })
+
+  it('should render load compositions button', () => {
+    render(<MemoryViewer />)
+    expect(screen.getByTestId('load-compositions-button')).toBeInTheDocument()
+  })
 })

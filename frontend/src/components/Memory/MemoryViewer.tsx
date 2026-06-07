@@ -16,12 +16,24 @@ interface Skill {
   success_rate: number
 }
 
+interface Composition {
+  id: string
+  name: string
+  description: string
+  skill_ids: string[]
+  trigger_patterns: string[]
+  usage_count: number
+  created_at: string
+}
+
 export function MemoryViewer() {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchResult[]>([])
   const [skills, setSkills] = useState<Skill[]>([])
+  const [compositions, setCompositions] = useState<Composition[]>([])
   const [searching, setSearching] = useState(false)
   const [skillsLoaded, setSkillsLoaded] = useState(false)
+  const [compositionsLoaded, setCompositionsLoaded] = useState(false)
   const [error, setError] = useState('')
 
   const handleSearch = useCallback(async () => {
@@ -48,6 +60,16 @@ export function MemoryViewer() {
       if (res.ok) {
         setSkills(await res.json())
         setSkillsLoaded(true)
+      }
+    } catch { /* ignore */ }
+  }, [])
+
+  const handleLoadCompositions = useCallback(async () => {
+    try {
+      const res = await fetch('/api/v1/compositions')
+      if (res.ok) {
+        setCompositions(await res.json())
+        setCompositionsLoaded(true)
       }
     } catch { /* ignore */ }
   }, [])
@@ -124,6 +146,46 @@ export function MemoryViewer() {
                     <span className="badge badge-neutral" title={skill.trigger_conditions.join(', ')}>
                       {skill.trigger_conditions.length} triggers
                     </span>
+                  )}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* Skill Compositions */}
+      <div className="card">
+        <div className="card-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>Skill Compositions</span>
+          <button
+            className="btn btn-ghost btn-sm"
+            data-testid="load-compositions-button"
+            onClick={handleLoadCompositions}
+            disabled={compositionsLoaded}
+          >
+            {compositionsLoaded ? 'Loaded' : 'Load Compositions'}
+          </button>
+        </div>
+        <div data-testid="compositions-list">
+          {compositions.length === 0 && compositionsLoaded ? (
+            <p style={{ color: 'var(--text-secondary)', fontSize: 12, padding: '8px 0' }}>No compositions found</p>
+          ) : (
+            compositions.map(comp => (
+              <div key={comp.id} className="task-item" data-testid="composition-item" style={{ alignItems: 'flex-start' }}>
+                <div className="task-info">
+                  <div className="task-title">{comp.name}</div>
+                  <div className="task-meta">
+                    <span className="badge badge-neutral">{comp.skill_ids.length} skills</span>
+                    <span className="badge badge-neutral">used {comp.usage_count}x</span>
+                    {comp.trigger_patterns.length > 0 && (
+                      <span className="badge badge-neutral" title={comp.trigger_patterns.join(', ')}>
+                        {comp.trigger_patterns.length} triggers
+                      </span>
+                    )}
+                  </div>
+                  {comp.description && (
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>{comp.description}</div>
                   )}
                 </div>
               </div>

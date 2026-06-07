@@ -4,10 +4,11 @@ interface SidebarProps {
   conversations: Conversation[]
   onSelect: (id: string) => void
   onNew?: () => void
+  onDelete?: (id: string) => void
   selectedId?: string
 }
 
-export function Sidebar({ conversations, onSelect, onNew, selectedId }: SidebarProps) {
+export function Sidebar({ conversations, onSelect, onNew, onDelete, selectedId }: SidebarProps) {
   return (
     <aside className="sidebar" data-testid="sidebar">
       <div className="sidebar-header">
@@ -40,6 +41,17 @@ export function Sidebar({ conversations, onSelect, onNew, selectedId }: SidebarP
                     })
                   : ''}
               </div>
+              {onDelete && (
+                <button
+                  className="btn btn-ghost btn-sm sidebar-delete"
+                  data-testid="delete-conversation"
+                  title="Delete conversation"
+                  aria-label="Delete conversation"
+                  onClick={e => { e.stopPropagation(); onDelete(conv.id) }}
+                >
+                  &times;
+                </button>
+              )}
             </div>
           ))
         )}

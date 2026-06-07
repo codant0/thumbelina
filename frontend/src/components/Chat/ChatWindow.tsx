@@ -92,7 +92,7 @@ export function ChatWindow({ conversationId, onConversationCreated }: ChatWindow
           <p className="empty-hint">Type a message below to begin</p>
         </div>
       ) : (
-        <MessageList messages={messages} waitingForReply={waitingForReply} />
+        <MessageList messages={messages} waitingForReply={waitingForReply} conversationId={conversationId ?? lastConversationId ?? undefined} />
       )}
       <InputBox onSend={handleSend} disabled={!isConnected || isStreaming} />
     </div>
