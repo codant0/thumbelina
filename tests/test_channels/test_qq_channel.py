@@ -363,3 +363,38 @@ class TestSendMessage:
     async def test_send_message_with_empty_text(self, channel: QQChannel) -> None:
         """send_message handles empty text gracefully."""
         await channel.send_message("user-1", "")
+
+
+# ---------------------------------------------------------------------------
+# check_status
+# ---------------------------------------------------------------------------
+
+
+class TestCheckStatus:
+    """Tests for the check_status method."""
+
+    @pytest.mark.asyncio
+    async def test_not_started(self, channel: QQChannel) -> None:
+        """Returns disconnected when client is None."""
+        assert channel._client is None
+        result = await channel.check_status()
+        assert result == {"connected": False, "error": "Channel not started"}
+
+    @pytest.mark.asyncio
+    async def test_thread_not_running(self, channel: QQChannel) -> None:
+        """Returns disconnected when thread is dead."""
+        channel._client = MagicMock()
+        channel._thread = None
+        result = await channel.check_status()
+        assert result == {"connected": False, "error": "Bot thread not running"}
+
+    @pytest.mark.asyncio
+    async def test_ready_event_set(self, channel: QQChannel) -> None:
+        """Returns connected when _ready event is set."""
+        channel._client = MagicMock()
+        mock_thread = MagicMock()
+        mock_thread.is_alive.return_value = True
+        channel._thread = mock_thread
+        channel._ready.set()
+        result = await channel.check_status()
+        assert result == {"connected": True}

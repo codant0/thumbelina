@@ -17,6 +17,7 @@ from thumbelina.api.routes import (
     conversations,
     data,
     plugins,
+    qq,
     skills,
     tasks,
     wechat,
@@ -285,8 +286,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception:
             logger.debug("WeChat channel not initialized", exc_info=True)
 
+    # Initialize QQ channel if enabled
+    qq_channel = None
+    if config.channels.qq.enabled:
+        try:
+            from thumbelina.channels.qq_channel import QQChannel
+
+            qq_channel = QQChannel(
+                config=config.channels.qq,
+                agent=agent,
+            )
+            await qq_channel.start()
+            app.state.qq_channel = qq_channel
+            logger.info("QQ channel initialized")
+        except Exception:
+            logger.debug("QQ channel not initialized", exc_info=True)
+
     yield
 
+    if qq_channel:
+        await qq_channel.stop()
     if wechat_channel:
         await wechat_channel.stop()
     if scheduler:
@@ -391,6 +410,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(skills.router, prefix="/api/v1")
     app.include_router(plugins.router, prefix="/api/v1")
     app.include_router(wechat.router, prefix="/api/v1")
+    app.include_router(qq.router, prefix="/api/v1")
     app.include_router(ws_router)
 
     return app

@@ -20,6 +20,7 @@ class ConfigResponse(BaseModel):
     auth_enabled: bool
     rate_limit_enabled: bool
     streaming_enabled: bool
+    channels: ChannelConfigResponse
 
 
 class ConfigUpdateRequest(BaseModel):
@@ -27,6 +28,29 @@ class ConfigUpdateRequest(BaseModel):
 
     llm: dict[str, str | bool | None] = Field(default_factory=dict)
     rate_limit: dict[str, bool] = Field(default_factory=dict)
+
+
+class QQChannelInfo(BaseModel):
+    """QQ channel configuration info (read-only)."""
+
+    enabled: bool
+    app_id: str
+    allowed_guilds: list[str]
+    allowed_groups: list[str]
+
+
+class WeChatChannelInfo(BaseModel):
+    """WeChat channel configuration info (read-only)."""
+
+    enabled: bool
+    weclaw_api_url: str
+
+
+class ChannelConfigResponse(BaseModel):
+    """Channel configuration snapshot."""
+
+    qq: QQChannelInfo
+    wechat: WeChatChannelInfo
 
 
 @router.get("/config", response_model=ConfigResponse)
@@ -40,6 +64,18 @@ async def get_config(request: Request) -> ConfigResponse:
         auth_enabled=bool(config.auth.secret_key),
         rate_limit_enabled=config.rate_limit.enabled,
         streaming_enabled=config.llm.streaming_enabled,
+        channels=ChannelConfigResponse(
+            qq=QQChannelInfo(
+                enabled=config.channels.qq.enabled,
+                app_id=config.channels.qq.app_id,
+                allowed_guilds=config.channels.qq.allowed_guilds,
+                allowed_groups=config.channels.qq.allowed_groups,
+            ),
+            wechat=WeChatChannelInfo(
+                enabled=config.channels.wechat.enabled,
+                weclaw_api_url=config.channels.wechat.weclaw_api_url,
+            ),
+        ),
     )
 
 

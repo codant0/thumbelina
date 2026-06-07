@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import HTTPException, Request
 
 from thumbelina.agent.graph import ThumbelinaAgent
+from thumbelina.channels.qq_channel import QQChannel
 from thumbelina.channels.wechat_channel import WeChatChannel
 from thumbelina.memory.feedback_repo import FeedbackRepository
 from thumbelina.memory.manager import MemoryManager
@@ -41,5 +42,19 @@ def get_wechat_channel(request: Request) -> WeChatChannel:
         raise HTTPException(
             status_code=404,
             detail="WeChat channel is not enabled or not initialized",
+        )
+    return channel
+
+
+def get_qq_channel(request: Request) -> QQChannel:
+    """Get the QQChannel from app.state.
+
+    Raises 404 if the QQ channel is not initialized.
+    """
+    channel = getattr(request.app.state, "qq_channel", None)
+    if channel is None:
+        raise HTTPException(
+            status_code=404,
+            detail="QQ channel is not enabled or not initialized",
         )
     return channel

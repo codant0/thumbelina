@@ -224,6 +224,14 @@ class QQChannel(Channel):
         self._thread = None
         logger.info("QQ Bot channel stopped.")
 
+    async def check_status(self) -> dict[str, Any]:
+        """Check whether the QQ Bot is connected."""
+        if self._client is None:
+            return {"connected": False, "error": "Channel not started"}
+        if self._thread is None or not self._thread.is_alive():
+            return {"connected": False, "error": "Bot thread not running"}
+        return {"connected": self._ready.is_set()}
+
     async def send_message(self, user_id: str, text: str) -> None:
         """Send a proactive message to a QQ user.
 

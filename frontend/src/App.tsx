@@ -7,6 +7,7 @@ import { MemoryViewer } from './components/Memory/MemoryViewer'
 import { DreamViewer } from './components/Dream/DreamViewer'
 import { SettingsPanel } from './components/Settings/SettingsPanel'
 import { PluginsPage } from './components/Plugins/PluginsPage'
+import { ChannelsPage } from './components/Channels/ChannelsPage'
 import type { Conversation } from './types/chat'
 import './App.css'
 
@@ -56,6 +57,8 @@ function App() {
         return <SettingsPanel />
       case 'plugins':
         return <PluginsPage />
+      case 'channels':
+        return <ChannelsPage />
       case 'chat':
       default:
         return (

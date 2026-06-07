@@ -1,4 +1,4 @@
-export type Page = 'chat' | 'tasks' | 'memory' | 'dream' | 'settings' | 'plugins'
+export type Page = 'chat' | 'tasks' | 'memory' | 'dream' | 'settings' | 'plugins' | 'channels'
 
 interface HeaderProps {
   activePage: Page
@@ -12,6 +12,7 @@ const links: { page: Page; label: string }[] = [
   { page: 'dream', label: 'Dream' },
   { page: 'settings', label: 'Settings' },
   { page: 'plugins', label: 'Plugins' },
+  { page: 'channels', label: 'Channels' },
 ]
 
 export function Header({ activePage, onNavigate }: HeaderProps) {
