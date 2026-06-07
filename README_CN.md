@@ -24,7 +24,7 @@
 - **流式 WebSocket** — 通过 WebSocket 连接实现实时逐 token 流式响应
 - **安全机制** — JWT 认证（HS256）、滑动窗口限流、基于角色的访问控制、数据导出/删除
 - **备份恢复** — 基于 JSON 的备份，支持元数据信封
-- **Web 界面** — React 19 + TypeScript 前端，包含聊天、任务、记忆、设置、梦境五个页面
+- **Web 界面** — React 19 + TypeScript 前端，包含聊天、任务、记忆、设置、插件、频道、梦境七个页面
 - **Docker** — 容器化部署，支持 docker-compose
 
 ## 快速开始
@@ -95,7 +95,7 @@ docker-compose up -d
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │  React 前端 (Vite)                                           │
-│  聊天 · 任务 · 记忆 · 设置 · 梦境                            │
+│  聊天 · 任务 · 记忆 · 设置 · 插件 · 频道 · 梦境              │
 │  WebSocket /ws/chat (流式) · HTTP /api/v1/*                  │
 └───────────────────────────┬──────────────────────────────────┘
                             │
@@ -108,6 +108,10 @@ docker-compose up -d
 │  │          │ │ /api/v1/tasks│ │                  │          │
 │  │          │ │ /api/v1/skills│ │                 │          │
 │  │          │ │ /api/v1/data │ │                  │          │
+│  │          │ │ /api/v1/config│ │                │          │
+│  │          │ │ /api/v1/feedback│ │              │          │
+│  │          │ │ /api/v1/plugins│ │               │          │
+│  │          │ │ /api/v1/qq   │ │                  │          │
 │  │          │ │ /api/v1/wechat│ │                 │          │
 │  └──────────┘ └──────┬───────┘ └────────┬─────────┘          │
 └───────────────────────┼─────────────────┼────────────────────┘
@@ -165,11 +169,13 @@ thumbelina/
 ├── frontend/                # React 19 + TypeScript + Vite
 │   └── src/
 │       ├── components/
+│       │   ├── Channels/    # ChannelsPage（QQ/微信配置与状态）
 │       │   ├── Chat/        # ChatWindow, InputBox, MessageList
 │       │   ├── Dream/       # 技能演化可视化
 │       │   ├── Layout/      # Header, Sidebar
 │       │   ├── Memory/      # MemoryViewer（搜索 + 技能浏览）
-│       │   ├── Settings/    # SettingsPanel（LLM 配置）
+│       │   ├── Plugins/     # PluginsPage（插件列表 + 沙箱报告）
+│       │   ├── Settings/    # SettingsPanel（LLM 配置、数据管理）
 │       │   └── Tasks/       # TaskManager（子代理 + 定时任务）
 │       ├── hooks/           # useWebSocket 自定义 Hook
 │       └── types/           # TypeScript 接口定义
@@ -205,6 +211,9 @@ thumbelina/
 | GET | `/api/v1/plugins` | 列出已加载插件（含沙箱状态） |
 | GET | `/api/v1/plugins/sandbox-report` | 插件沙箱验证报告 |
 | GET | `/api/v1/plugins/dependencies` | 插件依赖图 |
+| GET | `/api/v1/config` | 获取当前配置快照 |
+| POST | `/api/v1/config` | 更新运行时配置 |
+| GET | `/api/v1/qq/status` | 检查 QQ Bot 连接状态 |
 | POST | `/api/v1/wechat/incoming` | WeClaw webhook（接收微信消息） |
 | POST | `/api/v1/wechat/send` | 通过 WeClaw 发送消息 |
 | GET | `/api/v1/wechat/status` | 检查 WeClaw 连接状态 |
@@ -286,6 +295,9 @@ llm:
   api_key: ${OPENAI_API_KEY} # 支持 ${VAR} 环境变量替换
   base_url: null            # 自定义 API 端点 URL
   request_timeout: null     # LLM 请求超时秒数
+  streaming_enabled: true   # 启用 WebSocket 流式响应
+
+cors_origins: ["*"]         # CORS 允许的来源；生产环境应限制域名
 
 auth:
   secret_key: ""            # JWT 签名密钥，非空时启用 Bearer 认证

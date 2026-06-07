@@ -24,7 +24,7 @@ An AI-powered personal assistant built with [FastAPI](https://fastapi.tiangolo.c
 - **Streaming WebSocket** — Real-time token-by-token responses over WebSocket connections
 - **Security** — JWT authentication (HS256), sliding-window rate limiting, role-based access control, and data export/deletion
 - **Backup & Recovery** — JSON-based backup with metadata envelopes
-- **Web UI** — React 19 + TypeScript frontend with Chat, Tasks, Memory, Settings, and Dream pages
+- **Web UI** — React 19 + TypeScript frontend with Chat, Tasks, Memory, Settings, Plugins, Channels, and Dream pages
 - **Docker** — Containerized deployment with docker-compose
 
 ## Quick Start
@@ -95,7 +95,7 @@ docker-compose up -d
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │  React Frontend (Vite)                                       │
-│  Chat · Tasks · Memory · Settings · Dream                    │
+│  Chat · Tasks · Memory · Settings · Plugins · Channels · Dream│
 │  WebSocket /ws/chat (streaming) · HTTP /api/v1/*             │
 └───────────────────────────┬──────────────────────────────────┘
                             │
@@ -108,6 +108,10 @@ docker-compose up -d
 │  │          │ │ /api/v1/tasks│ │                  │          │
 │  │          │ │ /api/v1/skills│ │                 │          │
 │  │          │ │ /api/v1/data │ │                  │          │
+│  │          │ │ /api/v1/config│ │                │          │
+│  │          │ │ /api/v1/feedback│ │              │          │
+│  │          │ │ /api/v1/plugins│ │               │          │
+│  │          │ │ /api/v1/qq   │ │                  │          │
 │  │          │ │ /api/v1/wechat│ │                 │          │
 │  └──────────┘ └──────┬───────┘ └────────┬─────────┘          │
 └───────────────────────┼─────────────────┼────────────────────┘
@@ -165,11 +169,13 @@ thumbelina/
 ├── frontend/                # React 19 + TypeScript + Vite
 │   └── src/
 │       ├── components/
+│       │   ├── Channels/    # ChannelsPage (QQ/WeChat config & status)
 │       │   ├── Chat/        # ChatWindow, InputBox, MessageList
 │       │   ├── Dream/       # Skill evolution visualization
 │       │   ├── Layout/      # Header, Sidebar
 │       │   ├── Memory/      # MemoryViewer (search + skill browser)
-│       │   ├── Settings/    # SettingsPanel (LLM config)
+│       │   ├── Plugins/     # PluginsPage (plugin list + sandbox report)
+│       │   ├── Settings/    # SettingsPanel (LLM config, data management)
 │       │   └── Tasks/       # TaskManager (subagents + scheduled tasks)
 │       ├── hooks/           # useWebSocket custom hook
 │       └── types/           # TypeScript interfaces
@@ -205,6 +211,9 @@ thumbelina/
 | GET | `/api/v1/plugins` | List loaded plugins with sandbox status |
 | GET | `/api/v1/plugins/sandbox-report` | Plugin sandbox validation report |
 | GET | `/api/v1/plugins/dependencies` | Plugin dependency graph |
+| GET | `/api/v1/config` | Current configuration snapshot |
+| POST | `/api/v1/config` | Update runtime configuration |
+| GET | `/api/v1/qq/status` | Check QQ Bot connection status |
 | POST | `/api/v1/wechat/incoming` | WeClaw webhook (incoming WeChat messages) |
 | POST | `/api/v1/wechat/send` | Send message via WeClaw |
 | GET | `/api/v1/wechat/status` | Check WeClaw connectivity |
@@ -286,6 +295,9 @@ llm:
   api_key: ${OPENAI_API_KEY} # Supports ${VAR} env substitution
   base_url: null            # Custom API endpoint URL
   request_timeout: null     # LLM request timeout in seconds
+  streaming_enabled: true   # Enable WebSocket streaming responses
+
+cors_origins: ["*"]         # CORS allowed origins; restrict in production
 
 auth:
   secret_key: ""            # JWT signing key; Bearer auth enabled when non-empty

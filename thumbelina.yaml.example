@@ -7,6 +7,9 @@ llm:
   api_key: ${OPENAI_API_KEY}
   # base_url: https://api.openai.com/v1  # Optional: custom API endpoint for OpenAI-compatible providers
   # request_timeout: null                 # Optional: LLM request timeout in seconds
+  # streaming_enabled: true               # Optional: enable WebSocket streaming responses
+
+# cors_origins: ["*"]                     # Optional: CORS allowed origins; restrict in production
 
 auth:
   secret_key: ""             # JWT signing key; Bearer auth enabled when non-empty
