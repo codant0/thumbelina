@@ -29,9 +29,7 @@ export function MemoryViewer() {
     setSearching(true)
     setError('')
     try {
-      const res = await fetch(
-        `/api/v1/conversations/search/${encodeURIComponent(query.trim())}`,
-      )
+      const res = await fetch(`/api/v1/conversations/search/${encodeURIComponent(query.trim())}`)
       if (res.ok) {
         setResults(await res.json())
       } else {
@@ -51,29 +49,27 @@ export function MemoryViewer() {
         setSkills(await res.json())
         setSkillsLoaded(true)
       }
-    } catch {
-      // ignore
-    }
+    } catch { /* ignore */ }
   }, [])
 
   return (
-    <div data-testid="memory-viewer">
-      <h2>Memory Viewer</h2>
+    <div className="page-container" data-testid="memory-viewer">
+      <div className="page-title">Memory</div>
 
-      <section>
-        <h3>Search Conversations</h3>
-        <div>
+      <div className="card">
+        <div className="card-title">Search Conversations</div>
+        <div className="search-bar">
           <input
             type="text"
+            className="form-input"
             data-testid="search-input"
             placeholder="Search messages..."
             value={query}
             onChange={e => setQuery(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter') handleSearch()
-            }}
+            onKeyDown={e => { if (e.key === 'Enter') void handleSearch() }}
           />
           <button
+            className="btn btn-primary"
             data-testid="search-button"
             onClick={handleSearch}
             disabled={searching}
@@ -81,53 +77,60 @@ export function MemoryViewer() {
             {searching ? 'Searching...' : 'Search'}
           </button>
         </div>
-        {error && <p data-testid="search-error">{error}</p>}
+        {error && <p data-testid="search-error" style={{ color: 'var(--error)', fontSize: 12, marginBottom: 8 }}>{error}</p>}
         <div data-testid="search-results">
           {results.length === 0 && query && !searching ? (
-            <p>No results found</p>
+            <p style={{ color: 'var(--text-secondary)', fontSize: 12, padding: '8px 0' }}>No results found</p>
           ) : (
             results.map((r, i) => (
-              <div key={i} data-testid="search-result-item">
-                <span>{r.role}</span>
-                <p>{r.content}</p>
-                <small>Conversation: {r.conversation_id}</small>
+              <div key={i} data-testid="search-result-item" className="task-item" style={{ marginBottom: 6, alignItems: 'flex-start' }}>
+                <div className="task-info">
+                  <div className="task-title" style={{ whiteSpace: 'pre-wrap', overflow: 'visible', textOverflow: 'unset' }}>{r.content}</div>
+                  <div className="task-meta">
+                    <span className={`badge ${r.role === 'user' ? 'badge-neutral' : 'badge-success'}`}>{r.role}</span>
+                    <span>Conv: {r.conversation_id.slice(0, 8)}</span>
+                  </div>
+                </div>
               </div>
             ))
           )}
         </div>
-      </section>
+      </div>
 
-      <section>
-        <h3>Skills</h3>
-        <button
-          data-testid="load-skills-button"
-          onClick={handleLoadSkills}
-          disabled={skillsLoaded}
-        >
-          {skillsLoaded ? 'Skills Loaded' : 'Load Skills'}
-        </button>
-        <div data-testid="skills-list">
+      <div className="card">
+        <div className="card-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>Skills</span>
+          <button
+            className="btn btn-ghost btn-sm"
+            data-testid="load-skills-button"
+            onClick={handleLoadSkills}
+            disabled={skillsLoaded}
+          >
+            {skillsLoaded ? 'Loaded' : 'Load Skills'}
+          </button>
+        </div>
+        <div className="skill-grid" data-testid="skills-list">
           {skills.length === 0 && skillsLoaded ? (
-            <p>No skills found</p>
+            <p style={{ color: 'var(--text-secondary)', fontSize: 12, padding: '8px 0' }}>No skills found</p>
           ) : (
             skills.map(skill => (
-              <div key={skill.id} data-testid="skill-item">
-                <strong>{skill.name}</strong>
-                <p>{skill.description}</p>
-                <div>
-                  <span>Triggers: {skill.trigger_conditions.join(', ')}</span>
-                </div>
-                <div>
-                  <span>Success rate: {(skill.success_rate * 100).toFixed(0)}%</span>
-                </div>
-                <div>
-                  <span>Version: {skill.version}</span>
+              <div key={skill.id} className="skill-card" data-testid="skill-item">
+                <div className="skill-name">{skill.name}</div>
+                <div className="skill-desc">{skill.description}</div>
+                <div className="skill-meta">
+                  <span className="badge badge-neutral">v{skill.version}</span>
+                  <span className="badge badge-success">{(skill.success_rate * 100).toFixed(0)}%</span>
+                  {skill.trigger_conditions.length > 0 && (
+                    <span className="badge badge-neutral" title={skill.trigger_conditions.join(', ')}>
+                      {skill.trigger_conditions.length} triggers
+                    </span>
+                  )}
                 </div>
               </div>
             ))
           )}
         </div>
-      </section>
+      </div>
     </div>
   )
 }

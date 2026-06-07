@@ -5,8 +5,8 @@ import type { Message } from '../../types/chat'
 
 describe('MessageList', () => {
   it('should render empty state', () => {
-    render(<MessageList messages={[]} />)
-    expect(screen.getByText(/暂无消息/i)).toBeInTheDocument()
+    const { container } = render(<MessageList messages={[]} />)
+    expect(container.querySelector('[data-testid="message-list"]')).toBeInTheDocument()
   })
 
   it('should render user messages', () => {

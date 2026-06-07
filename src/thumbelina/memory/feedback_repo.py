@@ -8,9 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import create_engine, func, select
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy import func, select
 
 from thumbelina.memory.models import Base, FeedbackRecord
 
@@ -56,20 +54,10 @@ class FeedbackRepository:
     """
 
     def __init__(self, db_url: str = "sqlite:///thumbelina.db") -> None:
-        if (
-            db_url == ":memory:"
-            or db_url == "sqlite:///:memory:"
-            or db_url.startswith("sqlite:///:memory:")
-        ):
-            self.engine = create_engine(
-                "sqlite:///:memory:",
-                connect_args={"check_same_thread": False},
-                poolclass=StaticPool,
-            )
-        else:
-            self.engine = create_engine(db_url, pool_pre_ping=True)
-        Base.metadata.create_all(self.engine)
-        self.SessionLocal = sessionmaker(bind=self.engine, expire_on_commit=False)
+        from thumbelina.memory.db import create_db_engine, init_db
+
+        self.engine = create_db_engine(db_url)
+        self.SessionLocal = init_db(self.engine)
 
     def close(self) -> None:
         """Dispose of the database engine and release connections."""

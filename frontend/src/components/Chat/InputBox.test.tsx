@@ -6,12 +6,12 @@ import { InputBox } from './InputBox'
 describe('InputBox', () => {
   it('should render input field', () => {
     render(<InputBox onSend={vi.fn()} />)
-    expect(screen.getByPlaceholderText(/输入消息/i)).toBeInTheDocument()
+    expect(screen.getByPlaceholderText(/Type a message/i)).toBeInTheDocument()
   })
 
   it('should render send button', () => {
     render(<InputBox onSend={vi.fn()} />)
-    expect(screen.getByRole('button', { name: /发送/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Send/i })).toBeInTheDocument()
   })
 
   it('should call onSend with message text', async () => {
@@ -20,9 +20,9 @@ describe('InputBox', () => {
 
     render(<InputBox onSend={onSend} />)
 
-    const input = screen.getByPlaceholderText(/输入消息/i)
+    const input = screen.getByPlaceholderText(/Type a message/i)
     await user.type(input, 'Hello world')
-    await user.click(screen.getByRole('button', { name: /发送/i }))
+    await user.click(screen.getByRole('button', { name: /Send/i }))
 
     expect(onSend).toHaveBeenCalledWith('Hello world')
   })
@@ -33,9 +33,9 @@ describe('InputBox', () => {
 
     render(<InputBox onSend={onSend} />)
 
-    const input = screen.getByPlaceholderText(/输入消息/i)
+    const input = screen.getByPlaceholderText(/Type a message/i)
     await user.type(input, 'Hello')
-    await user.click(screen.getByRole('button', { name: /发送/i }))
+    await user.click(screen.getByRole('button', { name: /Send/i }))
 
     expect(input).toHaveValue('')
   })
@@ -46,7 +46,7 @@ describe('InputBox', () => {
 
     render(<InputBox onSend={onSend} />)
 
-    await user.click(screen.getByRole('button', { name: /发送/i }))
+    await user.click(screen.getByRole('button', { name: /Send/i }))
 
     expect(onSend).not.toHaveBeenCalled()
   })
@@ -57,7 +57,7 @@ describe('InputBox', () => {
 
     render(<InputBox onSend={onSend} />)
 
-    const input = screen.getByPlaceholderText(/输入消息/i)
+    const input = screen.getByPlaceholderText(/Type a message/i)
     await user.type(input, 'Hello{enter}')
 
     expect(onSend).toHaveBeenCalledWith('Hello')
@@ -66,7 +66,7 @@ describe('InputBox', () => {
   it('should be disabled when disabled prop is true', () => {
     render(<InputBox onSend={vi.fn()} disabled />)
 
-    expect(screen.getByPlaceholderText(/输入消息/i)).toBeDisabled()
-    expect(screen.getByRole('button', { name: /发送/i })).toBeDisabled()
+    expect(screen.getByPlaceholderText(/Type a message/i)).toBeDisabled()
+    expect(screen.getByRole('button', { name: /Send/i })).toBeDisabled()
   })
 })

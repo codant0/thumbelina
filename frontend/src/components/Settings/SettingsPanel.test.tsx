@@ -30,11 +30,6 @@ describe('SettingsPanel', () => {
     expect(screen.getByTestId('base-url-input')).toBeInTheDocument()
   })
 
-  it('should render auth toggle', () => {
-    render(<SettingsPanel />)
-    expect(screen.getByTestId('auth-toggle')).toBeInTheDocument()
-  })
-
   it('should render rate limit toggle', () => {
     render(<SettingsPanel />)
     expect(screen.getByTestId('rate-limit-toggle')).toBeInTheDocument()

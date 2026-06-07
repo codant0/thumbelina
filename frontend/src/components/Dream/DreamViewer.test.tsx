@@ -39,7 +39,7 @@ describe('DreamViewer', () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(() => new Promise(() => {}))
     render(<DreamViewer />)
     expect(screen.getByTestId('dream-loading')).toBeInTheDocument()
-    expect(screen.getByText('Loading dream data...')).toBeInTheDocument()
+    expect(screen.getByText('Loading...')).toBeInTheDocument()
   })
 
   it('should render error state on fetch failure', async () => {
@@ -84,7 +84,7 @@ describe('DreamViewer', () => {
       expect(screen.getByTestId('stat-total')).toBeInTheDocument()
     })
     expect(screen.getByText('3')).toBeInTheDocument()
-    expect(screen.getByText('Total Skills')).toBeInTheDocument()
+    expect(screen.getByText('Skills')).toBeInTheDocument()
   })
 
   it('should render timeline entries', async () => {

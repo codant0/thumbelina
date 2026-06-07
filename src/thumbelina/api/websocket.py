@@ -67,12 +67,25 @@ async def websocket_chat(websocket: WebSocket) -> None:
 
             # Use client-supplied conversation_id, or fall back to default
             cid = parsed.conversation_id or default_conversation_id
+            if cid and agent.memory_manager:
+                existing = await agent.memory_manager.get_conversation(cid)
+                if existing is None:
+                    await websocket.send_json({"error": f"Conversation not found: {cid}"})
+                    continue
             if cid:
                 agent.current_conversation_id = cid
 
-            async for chunk in agent.stream(parsed.message):
-                await websocket.send_json({"chunk": chunk, "conversation_id": cid})
-            await websocket.send_json({"done": True, "conversation_id": cid})
+            try:
+                streaming = websocket.app.state.config.llm.streaming_enabled
+                if streaming:
+                    async for chunk in agent.stream(parsed.message):
+                        await websocket.send_json({"chunk": chunk, "conversation_id": cid})
+                else:
+                    response = await agent.run(parsed.message)
+                    await websocket.send_json({"response": response, "conversation_id": cid})
+                await websocket.send_json({"done": True, "conversation_id": cid, "streaming_mode": streaming})
+            except Exception as exc:
+                await websocket.send_json({"error": str(exc), "conversation_id": cid})
 
     except WebSocketDisconnect:
         pass

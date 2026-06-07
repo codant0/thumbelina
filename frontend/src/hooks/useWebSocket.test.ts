@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { useWebSocket } from './useWebSocket'
 
@@ -55,6 +55,7 @@ describe('useWebSocket', () => {
 
   afterEach(() => {
     globalThis.WebSocket = originalWebSocket
+    vi.useRealTimers()
   })
 
   it('should connect to WebSocket on mount', () => {
@@ -93,55 +94,58 @@ describe('useWebSocket', () => {
     expect(sent.message).toBe('Hello')
   })
 
-  it('should receive streaming chunks from WebSocket', async () => {
+  it('should receive streaming chunks and display via typewriter', async () => {
+    vi.useFakeTimers()
     const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat'))
 
     await act(async () => {
-      await new Promise(resolve => setTimeout(resolve, 10))
+      vi.advanceTimersByTime(10)
     })
 
     act(() => {
-      MockWebSocket.instances[0].simulateMessage(JSON.stringify({ chunk: 'Hello ' }))
+      MockWebSocket.instances[0].simulateMessage(JSON.stringify({ chunk: 'Hello world' }))
     })
 
     expect(result.current.messages).toHaveLength(1)
     expect(result.current.messages[0].role).toBe('assistant')
-    expect(result.current.messages[0].content).toBe('Hello ')
 
-    act(() => {
-      MockWebSocket.instances[0].simulateMessage(JSON.stringify({ chunk: 'world' }))
+    // Advance typewriter to reveal all characters
+    await act(async () => {
+      vi.advanceTimersByTime(500)
     })
-
     expect(result.current.messages[0].content).toBe('Hello world')
 
+    // Send done
     act(() => {
       MockWebSocket.instances[0].simulateMessage(JSON.stringify({ done: true }))
     })
-
+    await act(async () => {
+      vi.advanceTimersByTime(100)
+    })
     expect(result.current.isStreaming).toBe(false)
   })
 
-  it('should handle legacy response field', async () => {
+  it('should handle non-streaming response immediately', async () => {
     const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat'))
 
     await act(async () => {
-      await new Promise(resolve => setTimeout(resolve, 10))
+      await new Promise(resolve => setTimeout(resolve, 50))
     })
 
     act(() => {
-      MockWebSocket.instances[0].simulateMessage(JSON.stringify({ response: 'Complete response' }))
+      MockWebSocket.instances[0].simulateMessage(JSON.stringify({ response: 'Hello' }))
     })
 
     expect(result.current.messages).toHaveLength(1)
     expect(result.current.messages[0].role).toBe('assistant')
-    expect(result.current.messages[0].content).toBe('Complete response')
+    expect(result.current.messages[0].content).toBe('Hello')
   })
 
   it('should handle error messages', async () => {
     const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat'))
 
     await act(async () => {
-      await new Promise(resolve => setTimeout(resolve, 10))
+      await new Promise(resolve => setTimeout(resolve, 50))
     })
 
     act(() => {
@@ -157,7 +161,7 @@ describe('useWebSocket', () => {
     const { unmount } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat'))
 
     await act(async () => {
-      await new Promise(resolve => setTimeout(resolve, 10))
+      await new Promise(resolve => setTimeout(resolve, 50))
     })
 
     unmount()

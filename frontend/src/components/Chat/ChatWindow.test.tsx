@@ -7,6 +7,9 @@ vi.mock('../../hooks/useWebSocket', () => ({
   useWebSocket: vi.fn(() => ({
     messages: [],
     isConnected: true,
+    isStreaming: false,
+    streamingMode: true,
+    waitingForReply: false,
     sendMessage: vi.fn(),
   })),
 }))
@@ -19,16 +22,22 @@ describe('ChatWindow', () => {
 
   it('should show connection status', () => {
     render(<ChatWindow />)
-    expect(screen.getByText(/已连接/i)).toBeInTheDocument()
+    expect(screen.getByText(/Connected/i)).toBeInTheDocument()
   })
 
   it('should render message list', () => {
+    // With empty messages, ChatWindow shows empty state; verify it renders
     render(<ChatWindow />)
-    expect(screen.getByTestId('message-list')).toBeInTheDocument()
+    expect(screen.getByTestId('chat-window')).toBeInTheDocument()
   })
 
   it('should render input box', () => {
     render(<ChatWindow />)
-    expect(screen.getByPlaceholderText(/输入消息/i)).toBeInTheDocument()
+    expect(screen.getByPlaceholderText(/Type a message/i)).toBeInTheDocument()
+  })
+
+  it('should render streaming toggle', () => {
+    render(<ChatWindow />)
+    expect(screen.getByTestId('streaming-toggle')).toBeInTheDocument()
   })
 })

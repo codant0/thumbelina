@@ -7,21 +7,30 @@ import { MemoryViewer } from './components/Memory/MemoryViewer'
 import { DreamViewer } from './components/Dream/DreamViewer'
 import { SettingsPanel } from './components/Settings/SettingsPanel'
 import type { Conversation } from './types/chat'
+import './App.css'
 
 function App() {
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [selectedId, setSelectedId] = useState<string | undefined>()
   const [activePage, setActivePage] = useState<Page>('chat')
 
-  useEffect(() => {
+  const fetchConversations = useCallback(() => {
     fetch('/api/v1/conversations')
       .then(res => res.json())
       .then(setConversations)
       .catch(() => {})
   }, [])
 
+  useEffect(() => {
+    fetchConversations()
+  }, [fetchConversations])
+
   const handleSelect = useCallback((id: string) => {
     setSelectedId(id)
+  }, [])
+
+  const handleNewConversation = useCallback(() => {
+    setSelectedId(undefined)
   }, [])
 
   const renderPage = () => {
@@ -38,17 +47,27 @@ function App() {
       default:
         return (
           <>
-            <Sidebar conversations={conversations} onSelect={handleSelect} />
-            <ChatWindow conversationId={selectedId} />
+            <Sidebar
+              conversations={conversations}
+              onSelect={handleSelect}
+              onNew={handleNewConversation}
+              selectedId={selectedId}
+            />
+            <ChatWindow
+              conversationId={selectedId}
+              onConversationCreated={fetchConversations}
+            />
           </>
         )
     }
   }
 
   return (
-    <div>
+    <div className="app">
       <Header activePage={activePage} onNavigate={setActivePage} />
-      {renderPage()}
+      <div className="app-body">
+        {renderPage()}
+      </div>
     </div>
   )
 }

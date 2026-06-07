@@ -12,7 +12,18 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from thumbelina.agent.graph import ThumbelinaAgent
-from thumbelina.api.routes import chat, conversations, data, plugins, skills, tasks, wechat
+from thumbelina.api.routes import (
+    chat,
+    conversations,
+    data,
+    plugins,
+    skills,
+    tasks,
+    wechat,
+)
+from thumbelina.api.routes import (
+    config as config_routes,
+)
 from thumbelina.api.websocket import router as ws_router
 from thumbelina.config import AppConfig, load_config
 from thumbelina.llm.factory import create_provider
@@ -141,7 +152,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         feedback_repo = FeedbackRepository(db_url=config.memory.database_url)
         app.state.feedback_repo = feedback_repo
     except Exception:
-        logger.debug("Feedback repository not initialized", exc_info=True)
+        logger.warning("Feedback repository not initialized", exc_info=True)
 
     # Initialize optional subsystems
     skill_engine = None
@@ -157,7 +168,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             feedback_repo=feedback_repo,
         )
     except Exception:
-        logger.debug("Skill engine not initialized", exc_info=True)
+        logger.warning("Skill engine not initialized", exc_info=True)
 
     composition_engine = None
     try:
@@ -280,6 +291,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await wechat_channel.stop()
     if scheduler:
         await scheduler.stop()
+    if feedback_repo:
+        feedback_repo.close()
+    if skill_repo:
+        skill_repo.close()
+    if composition_engine:
+        composition_engine.composition_repo.close()
+    if user_profiler:
+        user_profiler.profile_repo.close()
     memory.close()
 
 
@@ -306,7 +325,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # Add CORS middleware
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=config.cors_origins,
         allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -365,6 +384,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     # Include routers
     app.include_router(chat.router, prefix="/api/v1")
+    app.include_router(config_routes.router, prefix="/api/v1")
     app.include_router(conversations.router, prefix="/api/v1")
     app.include_router(data.router, prefix="/api/v1")
     app.include_router(tasks.router, prefix="/api/v1")

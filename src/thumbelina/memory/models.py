@@ -2,17 +2,88 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, func, text
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+logger = logging.getLogger(__name__)
 
 
 class Base(DeclarativeBase):
     """Base class for all SQLAlchemy models."""
 
     pass
+
+
+def ensure_schema(engine: Engine) -> None:
+    """Add any missing columns to existing tables.
+
+    ``Base.metadata.create_all`` only creates tables that do not yet exist.
+    When a new column is added to an ORM model after the database file was
+    first created, ``create_all`` silently skips it.  This function inspects
+    every table defined on ``Base.metadata`` and issues ``ALTER TABLE ADD
+    COLUMN`` for each column that is present in the model but absent from the
+    live schema.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    inspector = sa_inspect(engine)
+
+    for table_name, table_obj in Base.metadata.tables.items():
+        try:
+            existing = {col["name"] for col in inspector.get_columns(table_name)}
+        except Exception:
+            # Table doesn't exist yet — ``create_all`` will handle it.
+            continue
+
+        for column in table_obj.columns:
+            if column.name in existing:
+                continue
+
+            col_type = column.type.compile(dialect=engine.dialect)
+            nullable = ""
+            default = ""
+
+            if column.server_default is not None and hasattr(column.server_default, "arg"):
+                arg = column.server_default.arg
+                # TextClause exposes the raw SQL via .text
+                default_val = arg.text if hasattr(arg, "text") else str(arg)
+                default = f" DEFAULT {default_val}"
+                if not column.nullable:
+                    nullable = " NOT NULL"
+            elif column.default is not None:
+                # Python-side default — safe to leave NULL for existing rows.
+                nullable = " NULL"
+            elif not column.nullable:
+                # NOT NULL with no default: provide a type-appropriate
+                # fallback so existing rows don't cause the ALTER to fail.
+                type_str = col_type.upper()
+                if "INT" in type_str:
+                    default = " DEFAULT 0"
+                elif "FLOAT" in type_str or "REAL" in type_str:
+                    default = " DEFAULT 0.0"
+                elif "BOOL" in type_str:
+                    default = " DEFAULT 0"
+                else:
+                    default = " DEFAULT ''"
+                nullable = " NOT NULL"
+
+            ddl = f"ALTER TABLE {table_name} ADD COLUMN {column.name} {col_type}{nullable}{default}"
+            try:
+                with engine.begin() as conn:
+                    conn.execute(text(ddl))
+                logger.info("Schema migration: added %s.%s", table_name, column.name)
+            except Exception:
+                # Column may have been added by a concurrent process.
+                logger.debug(
+                    "Skipped adding %s.%s (already exists?)",
+                    table_name,
+                    column.name,
+                )
 
 
 class Conversation(Base):

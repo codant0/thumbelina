@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -185,7 +186,25 @@ class TaskScheduler:
                 except Exception as exc:
                     logger.warning("Scheduled task %s failed: %s", task.id, exc)
                     task.status = TaskStatus.CANCELLED
-            await asyncio.sleep(_POLL_INTERVAL)
+            # Calculate dynamic sleep interval based on nearest pending task
+            next_wake = _POLL_INTERVAL  # default
+            if self._tasks:
+                pending_times = [
+                    t.scheduled_time.timestamp()
+                    for t in self._tasks.values()
+                    if t.status == TaskStatus.PENDING
+                ]
+                if pending_times:
+                    now_ts = time.time()
+                    nearest = min(pending_times)
+                    # Sleep until next task is due, but cap at 60s and floor at 1s
+                    next_wake = max(1.0, min(60.0, nearest - now_ts))
+                elif not any(
+                    t.status == TaskStatus.RUNNING for t in self._tasks.values()
+                ):
+                    # No pending tasks and nothing running — sleep longer
+                    next_wake = 30.0
+            await asyncio.sleep(next_wake)
             # Re-check after sleep — stop() may have been called during sleep
             if not self._running:
                 break

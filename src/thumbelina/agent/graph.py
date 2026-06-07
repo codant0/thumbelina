@@ -375,11 +375,11 @@ class ThumbelinaAgent:
         initial_state: AgentState = {"messages": initial_messages}
         full_response = ""
 
-        async for event in self.graph.astream(initial_state):
+        async for event in self.graph.astream(initial_state, stream_mode="updates"):
             for node_name, state_update in event.items():
                 if "messages" in state_update:
                     for message in state_update["messages"]:
-                        if isinstance(message, AIMessage) and message.content:
+                        if isinstance(message, AIMessage) and message.content and not message.tool_calls:
                             chunk = str(message.content)
                             full_response += chunk
                             yield chunk

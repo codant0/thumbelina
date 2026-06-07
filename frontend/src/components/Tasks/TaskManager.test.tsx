@@ -34,7 +34,7 @@ describe('TaskManager', () => {
 
   it('should show empty state for subagents', () => {
     render(<TaskManager />)
-    expect(screen.getByText('No subagents')).toBeInTheDocument()
+    expect(screen.getByText('No active subagents')).toBeInTheDocument()
   })
 
   it('should show empty state for tasks', () => {

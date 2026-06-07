@@ -34,6 +34,6 @@ describe('Sidebar', () => {
 
   it('should show empty state when no conversations', () => {
     render(<Sidebar conversations={[]} onSelect={vi.fn()} />)
-    expect(screen.getByText(/暂无对话/i)).toBeInTheDocument()
+    expect(screen.getByText(/No conversations yet/i)).toBeInTheDocument()
   })
 })

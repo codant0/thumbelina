@@ -1,24 +1,99 @@
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import { useWebSocket } from '../../hooks/useWebSocket'
 import { MessageList } from './MessageList'
 import { InputBox } from './InputBox'
 
 interface ChatWindowProps {
   conversationId?: string
+  onConversationCreated?: () => void
 }
 
-export function ChatWindow({ conversationId }: ChatWindowProps) {
-  const { messages, isConnected, isStreaming, sendMessage } = useWebSocket(
-    `ws://${window.location.host}/ws/chat`
-  )
+export function ChatWindow({ conversationId, onConversationCreated }: ChatWindowProps) {
+  const wsUrl = useMemo(() => {
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    return `${wsProtocol}//${window.location.host}/ws/chat`
+  }, [])
+
+  const { messages, isConnected, isStreaming, streamingMode: wsStreamingMode, waitingForReply, lastConversationId, sendMessage } = useWebSocket(wsUrl)
+  const [streamingMode, setStreamingMode] = useState(true)
+  const [toggling, setToggling] = useState(false)
+
+  // Sync from WebSocket when backend reports mode
+  useEffect(() => {
+    setStreamingMode(wsStreamingMode)
+  }, [wsStreamingMode])
+
+  // Fetch initial config
+  useEffect(() => {
+    fetch('/api/v1/config')
+      .then(res => res.ok ? res.json() : null)
+      .then(data => { if (data?.streaming_enabled !== undefined) setStreamingMode(data.streaming_enabled) })
+      .catch(() => {})
+  }, [])
+
+  // Refresh conversation list when the server assigns a conversation ID
+  useEffect(() => {
+    if (lastConversationId) onConversationCreated?.()
+  }, [lastConversationId, onConversationCreated])
 
   const handleSend = (text: string) => {
     sendMessage(text, conversationId)
   }
 
+  const toggleStreaming = useCallback(async () => {
+    const next = !streamingMode
+    setToggling(true)
+    try {
+      await fetch('/api/v1/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ llm: { streaming_enabled: next } }),
+      })
+      setStreamingMode(next)
+    } catch {
+      // keep current state on failure
+    } finally {
+      setToggling(false)
+    }
+  }, [streamingMode])
+
+  const statusText = isConnected
+    ? isStreaming
+      ? 'Generating...'
+      : 'Connected'
+    : 'Disconnected'
+
+  const statusClass = isConnected
+    ? isStreaming
+      ? 'streaming'
+      : 'connected'
+    : 'disconnected'
+
   return (
-    <div data-testid="chat-window">
-      <div>{isConnected ? (isStreaming ? '正在回复...' : '已连接') : '未连接'}</div>
-      <MessageList messages={messages} />
+    <div className="chat-area" data-testid="chat-window">
+      <div className="chat-status">
+        <span className={`dot ${statusClass}`} />
+        <span>{statusText}</span>
+        <button
+          className="streaming-toggle"
+          data-testid="streaming-toggle"
+          onClick={toggleStreaming}
+          disabled={isStreaming || toggling}
+          title={streamingMode ? 'Streaming on — typewriter effect' : 'Streaming off — instant reply'}
+        >
+          <span className={`toggle-dot ${streamingMode ? 'on' : 'off'}`} />
+          <span>Stream</span>
+        </button>
+      </div>
+      {messages.length === 0 ? (
+        <div className="empty-state">
+          <div className="empty-icon">&#9993;</div>
+          <p>Start a conversation</p>
+          <p className="empty-hint">Type a message below to begin</p>
+        </div>
+      ) : (
+        <MessageList messages={messages} waitingForReply={waitingForReply} />
+      )}
       <InputBox onSend={handleSend} disabled={!isConnected || isStreaming} />
     </div>
   )

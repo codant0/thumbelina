@@ -14,12 +14,12 @@ interface ScheduledTask {
   status: string
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  completed: 'green',
-  running: 'yellow',
-  failed: 'red',
-  pending: 'gray',
-  cancelled: 'gray',
+const STATUS_BADGE: Record<string, string> = {
+  completed: 'badge-success',
+  running: 'badge-warning',
+  failed: 'badge-error',
+  pending: 'badge-neutral',
+  cancelled: 'badge-neutral',
 }
 
 export function TaskManager() {
@@ -33,12 +33,8 @@ export function TaskManager() {
         fetch('/api/v1/subagents'),
         fetch('/api/v1/tasks'),
       ])
-      if (agentsRes.ok) {
-        setSubagents(await agentsRes.json())
-      }
-      if (tasksRes.ok) {
-        setTasks(await tasksRes.json())
-      }
+      if (agentsRes.ok) setSubagents(await agentsRes.json())
+      if (tasksRes.ok) setTasks(await tasksRes.json())
       setError('')
     } catch {
       setError('Failed to fetch data')
@@ -47,94 +43,88 @@ export function TaskManager() {
 
   useEffect(() => {
     void fetchData() // eslint-disable-line react-hooks/set-state-in-effect
-    const interval = setInterval(() => void fetchData(), 5000)
-    return () => {
-      clearInterval(interval)
-    }
+    const interval = setInterval(() => void fetchData(), 10000)
+    return () => clearInterval(interval)
   }, [])
 
   const handleCancelSubagent = async (id: string) => {
     try {
       await fetch(`/api/v1/subagents/${id}/cancel`, { method: 'POST' })
-      fetchData()
-    } catch {
-      // ignore
-    }
+      void fetchData()
+    } catch { /* ignore */ }
   }
 
   const handleCancelTask = async (id: string) => {
     try {
       await fetch(`/api/v1/tasks/${id}/cancel`, { method: 'POST' })
-      fetchData()
-    } catch {
-      // ignore
-    }
+      void fetchData()
+    } catch { /* ignore */ }
   }
 
   return (
-    <div data-testid="task-manager">
-      <h2>Task Manager</h2>
-      {error && <p data-testid="task-error">{error}</p>}
+    <div className="page-container" data-testid="task-manager">
+      <div className="page-title">Task Manager</div>
+      {error && <p data-testid="task-error" style={{ color: 'var(--error)', fontSize: 12, marginBottom: 12 }}>{error}</p>}
 
-      <section>
-        <h3>Subagents</h3>
-        <div data-testid="subagent-list">
+      <div className="card">
+        <div className="card-title">Subagents</div>
+        <div className="task-list" data-testid="subagent-list">
           {subagents.length === 0 ? (
-            <p>No subagents</p>
+            <p style={{ color: 'var(--text-secondary)', fontSize: 12, padding: '8px 0' }}>No active subagents</p>
           ) : (
             subagents.map(agent => (
-              <div key={agent.id} data-testid="subagent-item">
-                <span>{agent.task}</span>
-                <span
-                  data-testid="subagent-status"
-                  style={{ color: STATUS_COLORS[agent.status] ?? 'gray' }}
-                >
-                  {agent.status}
-                </span>
-                {agent.result && <span>{agent.result}</span>}
+              <div key={agent.id} className="task-item" data-testid="subagent-item">
+                <div className="task-info">
+                  <div className="task-title">{agent.task}</div>
+                  <div className="task-meta">
+                    <span className={`badge ${STATUS_BADGE[agent.status] ?? 'badge-neutral'}`} data-testid="subagent-status">
+                      {agent.status}
+                    </span>
+                    {agent.result && <span>{agent.result}</span>}
+                  </div>
+                </div>
                 {(agent.status === 'running' || agent.status === 'pending') && (
-                  <button
-                    data-testid="cancel-subagent"
-                    onClick={() => handleCancelSubagent(agent.id)}
-                  >
-                    Cancel
-                  </button>
+                  <div className="task-actions">
+                    <button className="btn btn-danger btn-sm" data-testid="cancel-subagent" onClick={() => handleCancelSubagent(agent.id)}>
+                      Cancel
+                    </button>
+                  </div>
                 )}
               </div>
             ))
           )}
         </div>
-      </section>
+      </div>
 
-      <section>
-        <h3>Scheduled Tasks</h3>
-        <div data-testid="task-list">
+      <div className="card">
+        <div className="card-title">Scheduled Tasks</div>
+        <div className="task-list" data-testid="task-list">
           {tasks.length === 0 ? (
-            <p>No scheduled tasks</p>
+            <p style={{ color: 'var(--text-secondary)', fontSize: 12, padding: '8px 0' }}>No scheduled tasks</p>
           ) : (
             tasks.map(task => (
-              <div key={task.id} data-testid="task-item">
-                <span>{task.description}</span>
-                <span>{new Date(task.scheduled_time).toLocaleString()}</span>
-                <span
-                  data-testid="task-status"
-                  style={{ color: STATUS_COLORS[task.status] ?? 'gray' }}
-                >
-                  {task.status}
-                </span>
+              <div key={task.id} className="task-item" data-testid="task-item">
+                <div className="task-info">
+                  <div className="task-title">{task.description}</div>
+                  <div className="task-meta">
+                    <span className={`badge ${STATUS_BADGE[task.status] ?? 'badge-neutral'}`} data-testid="task-status">
+                      {task.status}
+                    </span>
+                    <span>{new Date(task.scheduled_time).toLocaleString()}</span>
+                  </div>
+                </div>
                 {(task.status === 'running' || task.status === 'pending') && (
-                  <button
-                    data-testid="cancel-task"
-                    onClick={() => handleCancelTask(task.id)}
-                  >
-                    Cancel
-                  </button>
+                  <div className="task-actions">
+                    <button className="btn btn-danger btn-sm" data-testid="cancel-task" onClick={() => handleCancelTask(task.id)}>
+                      Cancel
+                    </button>
+                  </div>
                 )}
               </div>
             ))
           )}
         </div>
-      </section>
+      </div>
     </div>
   )
 }

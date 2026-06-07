@@ -126,6 +126,12 @@ def _resolve_api_key(config: dict[str, Any]) -> dict[str, Any]:
     return config
 
 
+def _discover_config_file() -> str | None:
+    """Auto-discover thumbelina.yaml in the current working directory."""
+    candidate = Path("thumbelina.yaml")
+    return str(candidate) if candidate.exists() else None
+
+
 def load_config(config_path: str | None = None) -> AppConfig:
     """Load configuration from file and environment variables.
 
@@ -135,16 +141,19 @@ def load_config(config_path: str | None = None) -> AppConfig:
     3. Default values
 
     Parameters
-    ----------
     config_path:
-        Path to a YAML configuration file. If None, only defaults and
-        environment variables are used.
+        Path to a YAML configuration file. If None, auto-discovers
+        ``thumbelina.yaml`` in the current working directory.
 
     Returns
     -------
     AppConfig
         The loaded and validated configuration.
     """
+    # Auto-discover config file if not explicitly provided
+    if config_path is None:
+        config_path = _discover_config_file()
+
     # Start with defaults
     config = DEFAULT_CONFIG.copy()
 

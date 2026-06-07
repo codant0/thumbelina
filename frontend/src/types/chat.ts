@@ -16,6 +16,7 @@ export interface Conversation {
   id: string
   created_at: string
   updated_at: string
+  summary?: string | null
   messages?: Message[]
 }
 

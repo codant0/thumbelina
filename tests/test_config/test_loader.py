@@ -9,13 +9,19 @@ import pytest
 import yaml
 
 
+def _no_discovery():
+    """Patch target: disable auto-discovery of thumbelina.yaml."""
+    return None
+
+
 class TestLoadConfig:
     """Tests for load_config function."""
 
     def test_load_default_config(self):
         from thumbelina.config.loader import load_config
 
-        cfg = load_config()
+        with patch("thumbelina.config.loader._discover_config_file", _no_discovery):
+            cfg = load_config()
         assert cfg.llm.provider == "openai"
         assert cfg.llm.model == "gpt-4o"
         assert cfg.memory.database_url == "sqlite:///thumbelina.db"
@@ -119,7 +125,10 @@ class TestLoadConfig:
         from thumbelina.config.loader import load_config
 
         env = {"THUMBELINA_LLM__PROVIDER": "ollama", "THUMBELINA_LLM__MODEL": "llama3"}
-        with patch.dict(os.environ, env, clear=False):
+        with (
+            patch.dict(os.environ, env, clear=False),
+            patch("thumbelina.config.loader._discover_config_file", _no_discovery),
+        ):
             cfg = load_config()
         assert cfg.llm.provider == "ollama"
         assert cfg.llm.model == "llama3"
@@ -177,5 +186,18 @@ class TestLoadConfig:
     def test_load_none_path(self):
         from thumbelina.config.loader import load_config
 
-        cfg = load_config(None)
+        with patch("thumbelina.config.loader._discover_config_file", _no_discovery):
+            cfg = load_config(None)
         assert cfg.llm.provider == "openai"
+
+    def test_auto_discover_config_file(self, tmp_path, monkeypatch):
+        from thumbelina.config.loader import load_config
+
+        config_data = {"llm": {"provider": "ollama", "model": "llama3"}}
+        config_file = tmp_path / "thumbelina.yaml"
+        config_file.write_text(yaml.dump(config_data))
+        monkeypatch.chdir(tmp_path)
+
+        cfg = load_config()
+        assert cfg.llm.provider == "ollama"
+        assert cfg.llm.model == "llama3"

@@ -5,9 +5,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from thumbelina.memory.models import Base
 from thumbelina.memory.user_profile import UserPreference, UserProfile
@@ -23,16 +22,10 @@ class UserProfileRepository:
     """
 
     def __init__(self, db_url: str) -> None:
-        if db_url == "sqlite:///:memory:" or db_url.startswith("sqlite:///:memory:"):
-            self.engine = create_engine(
-                db_url,
-                connect_args={"check_same_thread": False},
-                poolclass=StaticPool,
-            )
-        else:
-            self.engine = create_engine(db_url, pool_pre_ping=True)
-        Base.metadata.create_all(self.engine)
-        self.SessionLocal = sessionmaker(bind=self.engine, expire_on_commit=False)
+        from thumbelina.memory.db import create_db_engine, init_db
+
+        self.engine = create_db_engine(db_url)
+        self.SessionLocal = init_db(self.engine)
 
     def _get_session(self) -> Session:
         """Get a new database session."""

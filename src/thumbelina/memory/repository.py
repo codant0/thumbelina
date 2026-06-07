@@ -5,9 +5,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from sqlalchemy import create_engine, select, text
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy import select, text
+from sqlalchemy.orm import Session, joinedload
 
 from thumbelina.memory.models import Base, Conversation, Message
 
@@ -25,18 +24,10 @@ class ConversationRepository:
     """
 
     def __init__(self, db_url: str) -> None:
-        # For SQLite in-memory databases, use StaticPool to share the connection
-        # and allow cross-thread access
-        if db_url == "sqlite:///:memory:" or db_url.startswith("sqlite:///:memory:"):
-            self.engine = create_engine(
-                db_url,
-                connect_args={"check_same_thread": False},
-                poolclass=StaticPool,
-            )
-        else:
-            self.engine = create_engine(db_url, pool_pre_ping=True)
-        Base.metadata.create_all(self.engine)
-        self.SessionLocal = sessionmaker(bind=self.engine, expire_on_commit=False)
+        from thumbelina.memory.db import create_db_engine, init_db
+
+        self.engine = create_db_engine(db_url)
+        self.SessionLocal = init_db(self.engine)
 
     def _get_session(self) -> Session:
         """Get a new database session."""
@@ -204,6 +195,41 @@ class ConversationRepository:
         """
         return await asyncio.to_thread(self._get_conversations_sync)
 
+    def _get_all_conversations_with_messages_sync(self) -> list[dict[str, Any]]:
+        """Synchronous implementation of get_all_conversations_with_messages."""
+        with self._get_session() as session:
+            stmt = (
+                select(Conversation)
+                .options(joinedload(Conversation.messages))
+                .order_by(Conversation.created_at.desc())
+            )
+            result = session.execute(stmt)
+            conversations = result.unique().scalars().all()
+
+            return [
+                {
+                    "id": conv.id,
+                    "created_at": conv.created_at.isoformat(),
+                    "updated_at": conv.updated_at.isoformat(),
+                    "summary": conv.summary,
+                    "messages": [
+                        {
+                            "id": msg.id,
+                            "conversation_id": msg.conversation_id,
+                            "role": msg.role,
+                            "content": msg.content,
+                            "created_at": msg.created_at.isoformat(),
+                        }
+                        for msg in conv.messages
+                    ],
+                }
+                for conv in conversations
+            ]
+
+    async def get_all_conversations_with_messages(self) -> list[dict[str, Any]]:
+        """Get all conversations with their messages in a single query."""
+        return await asyncio.to_thread(self._get_all_conversations_with_messages_sync)
+
     def _get_conversation_sync(self, conversation_id: str) -> dict[str, Any] | None:
         """Synchronous implementation of get_conversation."""
         with self._get_session() as session:
@@ -291,12 +317,12 @@ class ConversationRepository:
     def _search_messages_sync(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
         """Synchronous implementation of search_messages."""
         with self._get_session() as session:
-            # 使用参数化查询防止 SQL 注入
-            search_pattern = f"%{query}%"
+            # 使用参数化查询防止 SQL 注入，转义 LIKE 通配符
+            escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            search_pattern = f"%{escaped}%"
             stmt = (
                 select(Message)
-                .where(text("content LIKE :pattern"))
-                .params(pattern=search_pattern)
+                .where(Message.content.like(search_pattern, escape="\\"))
                 .order_by(Message.created_at.desc())
                 .limit(limit)
             )

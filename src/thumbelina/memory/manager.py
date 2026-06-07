@@ -110,6 +110,10 @@ class MemoryManager:
         """
         return await self.repository.get_conversations()
 
+    async def get_all_conversations_with_messages(self) -> list[dict[str, Any]]:
+        """Get all conversations with their messages."""
+        return await self.repository.get_all_conversations_with_messages()
+
     async def get_conversation(self, conversation_id: str) -> dict[str, Any] | None:
         """Get a single conversation by ID.
 

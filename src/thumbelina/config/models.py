@@ -27,6 +27,10 @@ class LLMConfig(BaseModel):
         default=None,
         description="Timeout in seconds for each LLM request. None = no timeout.",
     )
+    streaming_enabled: bool = Field(
+        default=True,
+        description="Enable streaming responses. When false, full response is sent at once.",
+    )
 
 
 class MemoryConfig(BaseModel):
@@ -85,6 +89,10 @@ class AppConfig(BaseModel):
     auth: AuthConfig = Field(default_factory=AuthConfig)
     rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
+    cors_origins: list[str] = Field(
+        default_factory=lambda: ["*"],
+        description="Allowed CORS origins. Use ['*'] for development only.",
+    )
     plugin_dirs: list[str] = Field(
         default_factory=list,
         description="Directories to scan for plugins at startup",
