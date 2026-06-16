@@ -280,21 +280,24 @@ class ILinkClient:
         )
 
         # iLink returns 200 even on auth errors — check the JSON body
-        if resp.status_code == 200:
-            data = resp.json()
-            errcode = data.get("errcode", 0)
-            if errcode == -14:
-                logger.error(
-                    "iLink session expired (errcode=-14) — re-authenticate via QR code"
-                )
-                raise httpx.HTTPStatusError(
-                    "Session expired",
-                    request=resp.request,
-                    response=resp,
-                )
-
         resp.raise_for_status()
         data = resp.json()
+        errcode = data.get("errcode", 0)
+        if errcode == -14:
+            logger.error(
+                "iLink session expired (errcode=-14) — re-authenticate via QR code"
+            )
+            raise httpx.HTTPStatusError(
+                "Session expired",
+                request=resp.request,
+                response=resp,
+            )
+        if errcode != 0:
+            logger.warning(
+                "iLink getupdates returned errcode=%s: %s",
+                errcode,
+                data.get("errmsg", ""),
+            )
 
         new_sync = data.get("sync_buffer", sync_buffer)
         raw_msgs = data.get("messages") or []
@@ -344,7 +347,15 @@ class ILinkClient:
             headers=self._headers(),
         )
         resp.raise_for_status()
-        return resp.json()  # type: ignore[no-any-return]
+        data = resp.json()
+        errcode = data.get("errcode", 0)
+        if errcode != 0:
+            logger.warning(
+                "iLink sendmessage returned errcode=%s: %s",
+                errcode,
+                data.get("errmsg", ""),
+            )
+        return data  # type: ignore[no-any-return]
 
     # ── Lifecycle ──────────────────────────────────────────────────
 

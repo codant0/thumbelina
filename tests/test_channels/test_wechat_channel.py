@@ -135,6 +135,77 @@ class TestWeChatChannelLifecycle:
         await channel.stop()
         assert channel._ilink is None
 
+    @pytest.mark.asyncio
+    async def test_start_loads_saved_credentials_when_token_empty(
+        self, mock_agent: MagicMock, tmp_path
+    ) -> None:
+        """start() should load credentials from ~/.weclaw/accounts/ when bot_token is empty."""
+        import json
+
+        config = WeChatChannelConfig(
+            enabled=True,
+            bot_token="",
+            ilink_bot_id="bot@id",
+            ilink_user_id="user@id",
+            ilink_base_url="https://ilinkai.weixin.qq.com",
+        )
+        ch = WeChatChannel(config=config, agent=mock_agent)
+
+        # Create a fake credentials file
+        accounts_dir = tmp_path / ".weclaw" / "accounts"
+        accounts_dir.mkdir(parents=True)
+        cred_file = accounts_dir / "bot-id.json"
+        cred_file.write_text(
+            json.dumps({
+                "bot_token": "saved-token-123",
+                "ilink_bot_id": "bot@id",
+                "baseurl": "https://ilinkai.weixin.qq.com",
+                "ilink_user_id": "user@id",
+            }),
+            encoding="utf-8",
+        )
+
+        mock_ilink = AsyncMock()
+        mock_ilink.close = AsyncMock()
+
+        with (
+            patch("thumbelina.channels.wechat_qrcode._accounts_dir", return_value=accounts_dir),
+            patch(
+                "thumbelina.channels.wechat_qrcode.ILinkClient",
+                return_value=mock_ilink,
+            ),
+            patch("asyncio.create_task") as mock_create_task,
+        ):
+            mock_task = MagicMock()
+            mock_task.cancel = MagicMock()
+            mock_task.__await__ = MagicMock(return_value=iter([]))
+            mock_create_task.return_value = mock_task
+            await ch.start()
+            assert config.bot_token == "saved-token-123"
+            assert ch._ilink is mock_ilink
+
+    @pytest.mark.asyncio
+    async def test_start_raises_when_no_token_and_no_saved_creds(
+        self, mock_agent: MagicMock, tmp_path
+    ) -> None:
+        """start() should raise RuntimeError when no token and no saved credentials."""
+        config = WeChatChannelConfig(
+            enabled=True,
+            bot_token="",
+            ilink_bot_id="bot@id",
+            ilink_user_id="user@id",
+        )
+        ch = WeChatChannel(config=config, agent=mock_agent)
+
+        empty_dir = tmp_path / "empty_accounts"
+        empty_dir.mkdir()
+
+        with (
+            patch("thumbelina.channels.wechat_qrcode._accounts_dir", return_value=empty_dir),
+            pytest.raises(RuntimeError, match="no bot_token"),
+        ):
+            await ch.start()
+
 
 # ------------------------------------------------------------------
 # Sending tests

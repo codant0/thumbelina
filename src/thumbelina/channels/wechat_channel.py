@@ -59,6 +59,18 @@ class WeChatChannel(Channel):
         """Create the iLink client, ensure a WeChat conversation, and start polling."""
         from thumbelina.channels.wechat_qrcode import ILinkClient
 
+        # If bot_token is empty but ilink_bot_id is set, try loading saved
+        # credentials from ~/.weclaw/accounts/{bot_id}.json.  This happens
+        # after a restart when the YAML config has been stripped of secrets.
+        if not self._config.bot_token and self._config.ilink_bot_id:
+            await self._load_saved_credentials()
+
+        if not self._config.bot_token:
+            raise RuntimeError(
+                "WeChat channel cannot start: no bot_token. "
+                "Scan the QR code again to authenticate."
+            )
+
         self._ilink = ILinkClient(
             bot_token=self._config.bot_token,
             ilink_bot_id=self._config.ilink_bot_id,
@@ -73,6 +85,47 @@ class WeChatChannel(Channel):
             "WeChat channel started (iLink direct, bot=%s)",
             self._config.ilink_bot_id,
         )
+
+    async def _load_saved_credentials(self) -> None:
+        """Load iLink credentials from ``~/.weclaw/accounts/{bot_id}.json``.
+
+        Called during :meth:`start` when ``bot_token`` is empty but
+        ``ilink_bot_id`` is available (typical after a restart when the
+        YAML config has been stripped of secrets).
+        """
+        from thumbelina.channels.wechat_qrcode import (
+            _accounts_dir,
+            _normalize_id,
+        )
+
+        bot_id = _normalize_id(self._config.ilink_bot_id)
+        cred_path = _accounts_dir() / f"{bot_id}.json"
+
+        if not cred_path.exists():
+            logger.warning("No saved credentials at %s", cred_path)
+            return
+
+        try:
+            import json
+
+            data = json.loads(cred_path.read_text(encoding="utf-8"))
+            self._config.bot_token = data.get("bot_token", "")
+            self._config.ilink_bot_id = data.get(
+                "ilink_bot_id", self._config.ilink_bot_id
+            )
+            self._config.ilink_user_id = data.get(
+                "ilink_user_id", self._config.ilink_user_id
+            )
+            base_url = data.get("baseurl", "")
+            if base_url:
+                self._config.ilink_base_url = base_url
+
+            logger.info(
+                "Loaded saved iLink credentials for bot %s",
+                self._config.ilink_bot_id,
+            )
+        except Exception:
+            logger.warning("Failed to load saved credentials from %s", cred_path, exc_info=True)
 
     async def _ensure_wechat_conversation(self) -> None:
         """Create or reuse a pinned '微信聊天' conversation for the agent."""
@@ -192,7 +245,13 @@ class WeChatChannel(Channel):
             return f"[{msg_type} message received -- currently only text is supported]"
 
         try:
+            logger.debug(
+                "Calling agent.run() for user %s (conv=%s)",
+                user_id,
+                self._agent.current_conversation_id,
+            )
             response = await self._agent.run(text)
+            logger.debug("Agent returned %d chars for user %s", len(response), user_id)
             return response
         except Exception:
             logger.exception("Agent failed to process message from %s", user_id)
@@ -226,7 +285,11 @@ class WeChatChannel(Channel):
 
     async def _poll_loop(self) -> None:
         """Continuously long-poll iLink for messages and dispatch them."""
-        logger.info("iLink poll loop started")
+        logger.info(
+            "iLink poll loop started (bot=%s, base_url=%s)",
+            self._config.ilink_bot_id,
+            self._config.ilink_base_url,
+        )
         consecutive_errors = 0
         max_consecutive = 5
 
@@ -276,7 +339,20 @@ class WeChatChannel(Channel):
         from thumbelina.channels.wechat_qrcode import extract_text
 
         # Only process finished messages from users
-        if msg.message_type != 1 or msg.message_state != 2:
+        if msg.message_type != 1:
+            logger.debug(
+                "Skipping message %s: message_type=%d (not user)",
+                msg.message_id,
+                msg.message_type,
+            )
+            return
+
+        if msg.message_state != 2:
+            logger.debug(
+                "Skipping message %s: message_state=%d (not finished)",
+                msg.message_id,
+                msg.message_state,
+            )
             return
 
         text = extract_text(msg)
@@ -291,11 +367,23 @@ class WeChatChannel(Channel):
             text,
         )
 
-        response = await self.handle_incoming(
-            user_id=msg.from_user_id,
-            text=text,
-            msg_type="text",
-        )
+        try:
+            response = await self.handle_incoming(
+                user_id=msg.from_user_id,
+                text=text,
+                msg_type="text",
+            )
+        except Exception:
+            logger.exception("handle_incoming failed for message %s", msg.message_id)
+            response = "Sorry, I encountered an error processing your message."
+
+        if not response:
+            logger.warning(
+                "Empty response for message %s from %s — skipping send",
+                msg.message_id,
+                msg.from_user_id,
+            )
+            return
 
         try:
             await self.send_message(msg.from_user_id, response)
