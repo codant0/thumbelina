@@ -302,6 +302,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception:
             logger.debug("QQ channel not initialized", exc_info=True)
 
+    # Store subsystem references for runtime hot-swap access
+    app.state.skill_engine = skill_engine
+    app.state.composition_engine = composition_engine
+    app.state.subagent_manager = subagent_manager
+
+    # Initialize runtime configuration manager
+    from thumbelina.config.runtime_manager import RuntimeConfigManager
+
+    runtime_manager = RuntimeConfigManager(
+        config=config,
+        config_path=getattr(app.state, "config_path", None),
+    )
+    app.state.runtime_config_manager = runtime_manager
+
     yield
 
     if qq_channel:
@@ -335,11 +349,16 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     FastAPI
         The configured FastAPI application instance.
     """
+    config_path: str | None = None
     if config is None:
-        config = load_config()
+        from thumbelina.config.loader import resolve_config_path
+
+        config_path = resolve_config_path()
+        config = load_config(config_path)
 
     app = FastAPI(title="Thumbelina API", version="0.1.0", lifespan=lifespan)
     app.state.config = config
+    app.state.config_path = config_path
 
     # Add CORS middleware
     app.add_middleware(

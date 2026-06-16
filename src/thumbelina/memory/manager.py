@@ -36,15 +36,24 @@ class MemoryManager:
         """Close the repository and release resources."""
         self.repository.close()
 
-    async def create_conversation(self) -> str:
+    async def create_conversation(
+        self, name: str | None = None, pinned: bool = False
+    ) -> str:
         """Create a new conversation.
+
+        Parameters
+        ----------
+        name:
+            Optional human-readable name for the conversation.
+        pinned:
+            Whether to pin the conversation to the top of the list.
 
         Returns
         -------
         str
             The ID of the newly created conversation.
         """
-        return await self.repository.create_conversation()
+        return await self.repository.create_conversation(name=name, pinned=pinned)
 
     async def add_message(
         self,

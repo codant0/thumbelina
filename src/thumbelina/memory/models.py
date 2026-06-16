@@ -56,8 +56,22 @@ def ensure_schema(engine: Engine) -> None:
                 if not column.nullable:
                     nullable = " NOT NULL"
             elif column.default is not None:
-                # Python-side default — safe to leave NULL for existing rows.
-                nullable = " NULL"
+                # Python-side default — derive a SQL DEFAULT so existing rows
+                # get a sensible value instead of NULL.
+                default_arg = column.default.arg if hasattr(column.default, "arg") else None
+                if default_arg is not None and not callable(default_arg):
+                    # Literal value (e.g. False, 0, "")
+                    type_str = col_type.upper()
+                    if "BOOL" in type_str:
+                        default = f" DEFAULT {1 if default_arg else 0}"
+                    elif isinstance(default_arg, str):
+                        default = f" DEFAULT '{default_arg}'"
+                    else:
+                        default = f" DEFAULT {default_arg}"
+                    nullable = " NOT NULL"
+                else:
+                    # Callable default — leave NULL for existing rows.
+                    nullable = " NULL"
             elif not column.nullable:
                 # NOT NULL with no default: provide a type-appropriate
                 # fallback so existing rows don't cause the ALTER to fail.
@@ -93,6 +107,10 @@ class Conversation(Base):
     ----------
     id:
         Unique identifier for the conversation.
+    name:
+        Human-readable name (e.g. "微信聊天").
+    pinned:
+        Whether this conversation is pinned to the top of the list.
     created_at:
         Timestamp when the conversation was created.
     updated_at:
@@ -107,6 +125,14 @@ class Conversation(Base):
         String(36),
         primary_key=True,
         default=lambda: str(uuid.uuid4()),
+    )
+    name: Mapped[str | None] = mapped_column(
+        String(200),
+        nullable=True,
+        default=None,
+    )
+    pinned: Mapped[bool] = mapped_column(
+        default=False,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime,

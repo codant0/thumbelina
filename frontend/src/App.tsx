@@ -18,28 +18,49 @@ function App() {
 
   const fetchConversations = useCallback(() => {
     fetch('/api/v1/conversations')
-      .then(res => res.json())
-      .then(setConversations)
-      .catch(() => {})
+      .then(res => {
+        if (!res.ok) return []
+        return res.json()
+      })
+      .then(data => setConversations(Array.isArray(data) ? data : []))
+      .catch(() => setConversations([]))
   }, [])
 
   useEffect(() => {
     fetchConversations()
   }, [fetchConversations])
 
+  // Refresh conversation list when notified by other components (e.g. WeChat QR confirm)
+  useEffect(() => {
+    const handler = () => fetchConversations()
+    window.addEventListener('conversations-updated', handler)
+    return () => window.removeEventListener('conversations-updated', handler)
+  }, [fetchConversations])
+
   const handleSelect = useCallback((id: string) => {
     setSelectedId(id)
   }, [])
 
-  const handleNewConversation = useCallback(() => {
-    setSelectedId(undefined)
+  const handleNewConversation = useCallback(async () => {
+    try {
+      const res = await fetch('/api/v1/conversations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      if (res.ok) {
+        const conv: Conversation = await res.json()
+        setSelectedId(conv.id)
+        setConversations(prev => [conv, ...(Array.isArray(prev) ? prev : [])])
+      }
+    } catch { /* ignore */ }
   }, [])
 
   const handleDelete = useCallback(async (id: string) => {
     try {
       const res = await fetch(`/api/v1/conversations/${id}`, { method: 'DELETE' })
       if (res.ok) {
-        setConversations(prev => prev.filter(c => c.id !== id))
+        setConversations(prev => Array.isArray(prev) ? prev.filter(c => c.id !== id) : [])
         if (selectedId === id) setSelectedId(undefined)
       }
     } catch { /* ignore */ }

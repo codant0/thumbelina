@@ -241,6 +241,16 @@ class ThumbelinaAgent:
 
         self.graph = self._build_graph()
 
+    def swap_provider(self, new_provider: LLMProvider) -> None:
+        """Hot-swap the LLM provider at runtime.
+
+        Updates both ``llm_provider`` and the underlying LangChain
+        ``chat_model`` so that subsequent graph invocations use the new
+        model.  The compiled graph does **not** need to be rebuilt.
+        """
+        self.llm_provider = new_provider
+        self.llm = new_provider.chat_model
+
     def _build_graph(self) -> CompiledStateGraph:
         """Build and compile the LangGraph agent graph."""
         graph = StateGraph(AgentState)

@@ -132,6 +132,17 @@ def _discover_config_file() -> str | None:
     return str(candidate) if candidate.exists() else None
 
 
+def resolve_config_path(config_path: str | None = None) -> str | None:
+    """Return the resolved config file path.
+
+    If *config_path* is ``None``, attempts auto-discovery of
+    ``thumbelina.yaml`` in the current working directory.
+    """
+    if config_path is None:
+        return _discover_config_file()
+    return config_path
+
+
 def load_config(config_path: str | None = None) -> AppConfig:
     """Load configuration from file and environment variables.
 

@@ -33,6 +33,9 @@ channels:
     app_secret: ""
   wechat:
     enabled: false
-    weclaw_api_url: "http://127.0.0.1:18011"
-    weclaw_token: ""
+    # Credentials are populated automatically after QR code login.
+    # bot_token: ""
+    # ilink_bot_id: ""
+    # ilink_user_id: ""
+    # ilink_base_url: "https://ilinkai.weixin.qq.com"
     webhook_secret: ""

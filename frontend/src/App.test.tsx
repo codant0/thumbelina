@@ -7,7 +7,9 @@ vi.mock('./hooks/useWebSocket', () => ({
   useWebSocket: vi.fn(() => ({
     messages: [],
     isConnected: true,
+    lastConversationId: null,
     sendMessage: vi.fn(),
+    clearMessages: vi.fn(),
   })),
 }))
 

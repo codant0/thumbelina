@@ -5,7 +5,7 @@ from __future__ import annotations
 import hmac
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -15,6 +15,18 @@ from thumbelina.channels.wechat_channel import WeChatChannel
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["wechat"])
+
+# Lazy singleton — created on first use, shared across requests.
+_qrcode_manager = None
+
+
+def _get_qrcode_manager():
+    global _qrcode_manager
+    if _qrcode_manager is None:
+        from thumbelina.channels.wechat_qrcode import WeChatQRCodeManager
+
+        _qrcode_manager = WeChatQRCodeManager()
+    return _qrcode_manager
 
 
 # ------------------------------------------------------------------
@@ -110,3 +122,160 @@ def _verify_signature(secret: str, body: bytes, signature: str) -> bool:
         return False
     expected = hmac.new(secret.encode(), body, "sha256").hexdigest()
     return hmac.compare_digest(expected, signature)
+
+
+# ------------------------------------------------------------------
+# QR Code Login schemas
+# ------------------------------------------------------------------
+
+
+class ConfirmLoginRequest(BaseModel):
+    """Request body for POST /wechat/qrcode/confirm."""
+
+    bot_token: str = Field(description="Bot token from iLink")
+    ilink_bot_id: str = Field(description="iLink bot ID")
+    base_url: str = Field(description="iLink base URL")
+    ilink_user_id: str = Field(description="iLink user ID")
+
+
+# ------------------------------------------------------------------
+# QR Code Login routes
+# ------------------------------------------------------------------
+
+
+@router.post("/wechat/qrcode")
+async def get_wechat_qrcode() -> JSONResponse:
+    """Fetch a new QR code for WeChat login.
+
+    Returns the QR code ID and content to render as a QR code image.
+    The client should then poll ``GET /wechat/qrcode/status``.
+    """
+    manager = _get_qrcode_manager()
+    try:
+        result = await manager.fetch_qrcode()
+    except Exception as exc:
+        logger.exception("Failed to fetch QR code from iLink")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to fetch QR code: {exc}",
+        ) from exc
+
+    return JSONResponse(
+        content={
+            "qrcode": result.qrcode,
+            "qrcode_img_content": result.qrcode_img_content,
+        }
+    )
+
+
+@router.get("/wechat/qrcode/status")
+async def wechat_qrcode_status(
+    qrcode: str = Query(..., description="QR code ID to poll"),
+) -> JSONResponse:
+    """Poll the scan status of a QR code.
+
+    This endpoint performs a single long-poll (~40 s).  The client
+    should call it repeatedly until the status is ``confirmed`` or
+    ``expired``.
+    """
+    manager = _get_qrcode_manager()
+    try:
+        result = await manager.poll_status(qrcode)
+    except Exception as exc:
+        logger.exception("Failed to poll QR status from iLink")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to poll status: {exc}",
+        ) from exc
+
+    body: dict = {"status": result.status}
+    if result.credentials is not None:
+        body["credentials"] = {
+            "bot_token": result.credentials.bot_token,
+            "ilink_bot_id": result.credentials.ilink_bot_id,
+            "base_url": result.credentials.base_url,
+            "ilink_user_id": result.credentials.ilink_user_id,
+        }
+
+    return JSONResponse(content=body)
+
+
+@router.post("/wechat/qrcode/confirm")
+async def confirm_wechat_login(
+    body: ConfirmLoginRequest,
+    request: Request,
+) -> JSONResponse:
+    """Save credentials and enable the WeChat channel.
+
+    The client calls this after receiving ``status=confirmed`` from the
+    poll endpoint.  This saves the credentials to ``~/.weclaw/accounts/``
+    and hot-enables the WeChat channel via the runtime config manager.
+    """
+    from thumbelina.channels.wechat_qrcode import WeChatCredentials
+
+    creds = WeChatCredentials(
+        bot_token=body.bot_token,
+        ilink_bot_id=body.ilink_bot_id,
+        base_url=body.base_url,
+        ilink_user_id=body.ilink_user_id,
+    )
+
+    manager = _get_qrcode_manager()
+    try:
+        saved_path = manager.save_credentials(creds)
+    except OSError as exc:
+        logger.exception("Failed to save credentials")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save credentials: {exc}",
+        ) from exc
+
+    # Auto-enable and start the WeChat channel via runtime config manager
+    from thumbelina.channels.config import WeChatChannelConfig
+
+    config = request.app.state.config
+    new_channel_config = WeChatChannelConfig(
+        enabled=True,
+        bot_token=body.bot_token,
+        ilink_bot_id=body.ilink_bot_id,
+        ilink_user_id=body.ilink_user_id,
+        ilink_base_url=body.base_url,
+        webhook_secret=config.channels.wechat.webhook_secret,
+    )
+
+    runtime_manager = getattr(request.app.state, "runtime_config_manager", None)
+    agent = getattr(request.app.state, "agent", None)
+    connected = False
+
+    if runtime_manager is not None and agent is not None:
+        try:
+            connected = await runtime_manager.swap_channel(
+                channel_name="wechat",
+                new_config=new_channel_config,
+                app_state=request.app.state,
+                agent=agent,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to auto-start WeChat channel after login",
+                exc_info=True,
+            )
+            # Still mark as enabled in config even if start failed
+            config.channels.wechat.enabled = True
+    else:
+        config.channels.wechat.enabled = True
+
+    logger.info(
+        "WeChat login confirmed for bot %s — channel enabled, connected=%s",
+        body.ilink_bot_id,
+        connected,
+    )
+
+    return JSONResponse(
+        content={
+            "status": "ok",
+            "bot_id": body.ilink_bot_id,
+            "credentials_path": saved_path,
+            "connected": connected,
+        }
+    )

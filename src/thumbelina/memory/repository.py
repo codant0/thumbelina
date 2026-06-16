@@ -53,24 +53,33 @@ class ConversationRepository:
         """
         return await asyncio.to_thread(self._ping_sync)
 
-    def _create_conversation_sync(self) -> str:
+    def _create_conversation_sync(self, name: str | None = None, pinned: bool = False) -> str:
         """Synchronous implementation of create_conversation."""
         with self._get_session() as session:
-            conversation = Conversation()
+            conversation = Conversation(name=name, pinned=pinned)
             session.add(conversation)
             session.commit()
             session.refresh(conversation)
             return conversation.id
 
-    async def create_conversation(self) -> str:
+    async def create_conversation(
+        self, name: str | None = None, pinned: bool = False
+    ) -> str:
         """Create a new conversation.
+
+        Parameters
+        ----------
+        name:
+            Optional human-readable name for the conversation.
+        pinned:
+            Whether to pin the conversation to the top of the list.
 
         Returns
         -------
         str
             The ID of the newly created conversation.
         """
-        return await asyncio.to_thread(self._create_conversation_sync)
+        return await asyncio.to_thread(self._create_conversation_sync, name, pinned)
 
     def _add_message_sync(
         self,
@@ -171,13 +180,18 @@ class ConversationRepository:
     def _get_conversations_sync(self) -> list[dict[str, Any]]:
         """Synchronous implementation of get_conversations."""
         with self._get_session() as session:
-            stmt = select(Conversation).order_by(Conversation.created_at.desc())
+            stmt = select(Conversation).order_by(
+                Conversation.pinned.desc(),
+                Conversation.updated_at.desc(),
+            )
             result = session.execute(stmt)
             conversations = result.scalars().all()
 
             return [
                 {
                     "id": conv.id,
+                    "name": conv.name,
+                    "pinned": conv.pinned,
                     "created_at": conv.created_at.isoformat(),
                     "updated_at": conv.updated_at.isoformat(),
                     "summary": conv.summary,
@@ -209,6 +223,8 @@ class ConversationRepository:
             return [
                 {
                     "id": conv.id,
+                    "name": conv.name,
+                    "pinned": conv.pinned,
                     "created_at": conv.created_at.isoformat(),
                     "updated_at": conv.updated_at.isoformat(),
                     "summary": conv.summary,
@@ -240,6 +256,8 @@ class ConversationRepository:
 
             return {
                 "id": conversation.id,
+                "name": conversation.name,
+                "pinned": conversation.pinned,
                 "created_at": conversation.created_at.isoformat(),
                 "updated_at": conversation.updated_at.isoformat(),
                 "summary": conversation.summary,

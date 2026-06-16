@@ -32,7 +32,7 @@ export function Sidebar({ conversations, onSelect, onNew, onDelete, selectedId }
               className={`sidebar-item${selectedId === conv.id ? ' active' : ''}`}
               onClick={() => onSelect(conv.id)}
             >
-              <div className="item-title">{conv.summary || conv.id.slice(0, 8)}</div>
+              <div className="item-title">{conv.name || conv.summary || conv.id.slice(0, 8)}</div>
               <div className="item-date">
                 {conv.updated_at
                   ? new Date(conv.updated_at).toLocaleDateString(undefined, {

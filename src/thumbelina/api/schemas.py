@@ -35,6 +35,8 @@ class ConversationSchema(BaseModel):
     """Schema for a conversation summary."""
 
     id: str
+    name: str | None = None
+    pinned: bool = False
     created_at: str
     updated_at: str
     summary: str | None = None
@@ -44,6 +46,8 @@ class ConversationDetailSchema(BaseModel):
     """Schema for a conversation with messages."""
 
     id: str
+    name: str | None = None
+    pinned: bool = False
     created_at: str
     updated_at: str
     summary: str | None = None

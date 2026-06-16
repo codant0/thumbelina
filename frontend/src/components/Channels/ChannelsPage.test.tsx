@@ -10,8 +10,8 @@ describe('ChannelsPage', () => {
       if (urlString.includes('/api/v1/config')) {
         return Promise.resolve(new Response(JSON.stringify({
           channels: {
-            qq: { enabled: true, app_id: 'test-qq-id', allowed_guilds: ['guild-1'], allowed_groups: [] },
-            wechat: { enabled: false, weclaw_api_url: 'http://127.0.0.1:18011' },
+            qq: { enabled: true, app_id: 'test-qq-id', app_secret_set: false, allowed_guilds: ['guild-1'], allowed_groups: [] },
+            wechat: { enabled: false, ilink_bot_id: '', bot_token_set: false },
           },
         }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       }
@@ -75,10 +75,10 @@ describe('ChannelsPage', () => {
     })
   })
 
-  it('should show WeChat disabled message', async () => {
+  it('should show WeChat QR code login button when disabled', async () => {
     render(<ChannelsPage />)
     await waitFor(() => {
-      expect(screen.getByText(/not enabled/)).toBeTruthy()
+      expect(screen.getByTestId('wechat-qrcode-button')).toBeTruthy()
     })
   })
 })

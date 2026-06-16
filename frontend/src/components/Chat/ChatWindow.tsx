@@ -14,7 +14,7 @@ export function ChatWindow({ conversationId, onConversationCreated }: ChatWindow
     return `${wsProtocol}//${window.location.host}/ws/chat`
   }, [])
 
-  const { messages, isConnected, isStreaming, streamingMode: wsStreamingMode, waitingForReply, lastConversationId, sendMessage } = useWebSocket(wsUrl)
+  const { messages, isConnected, isStreaming, streamingMode: wsStreamingMode, waitingForReply, lastConversationId, sendMessage, clearMessages } = useWebSocket(wsUrl)
   const [streamingMode, setStreamingMode] = useState(true)
   const [toggling, setToggling] = useState(false)
 
@@ -22,6 +22,11 @@ export function ChatWindow({ conversationId, onConversationCreated }: ChatWindow
   useEffect(() => {
     setStreamingMode(wsStreamingMode)
   }, [wsStreamingMode])
+
+  // Clear messages when switching conversations
+  useEffect(() => {
+    clearMessages()
+  }, [conversationId, clearMessages])
 
   // Fetch initial config
   useEffect(() => {

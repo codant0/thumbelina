@@ -4,6 +4,7 @@ interface ConfigData {
   provider: string
   model: string
   base_url: string
+  api_key: string
   rate_limit_enabled: boolean
 }
 
@@ -27,6 +28,7 @@ export function SettingsPanel() {
     provider: 'openai',
     model: 'gpt-4o',
     base_url: '',
+    api_key: '',
     rate_limit_enabled: false,
   })
   const [saving, setSaving] = useState(false)
@@ -52,6 +54,7 @@ export function SettingsPanel() {
             provider: data.provider ?? 'openai',
             model: data.model ?? 'gpt-4o',
             base_url: data.base_url ?? '',
+            api_key: '',
             rate_limit_enabled: data.rate_limit_enabled ?? false,
           })
         }
@@ -73,33 +76,48 @@ export function SettingsPanel() {
       .finally(() => setProfileLoading(false))
   }, [])
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setSaving(true)
     setMessage('')
-    fetch('/api/v1/config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        llm: {
+    try {
+      const res = await fetch('/api/v1/config/llm', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           provider: config.provider,
           model: config.model,
           base_url: config.base_url || null,
-        },
-        rate_limit: { enabled: config.rate_limit_enabled },
-      }),
-    })
-      .then(res => {
-        if (res.ok) {
-          setMessage('Settings saved')
-          setIsError(false)
-        } else {
-          setMessage('Failed to save')
-          setIsError(true)
-        }
+          api_key: config.api_key || '',
+        }),
       })
-      .catch(() => { setMessage('Failed to save'); setIsError(true) })
-      .finally(() => setSaving(false))
+      if (res.ok) {
+        const data = await res.json()
+        setMessage(`Switched to ${data.provider}/${data.model}`)
+        setIsError(false)
+        setConfig(prev => ({ ...prev, api_key: '' }))
+      } else {
+        const err = await res.json().catch(() => null)
+        setMessage(err?.detail || 'Failed to switch provider')
+        setIsError(true)
+      }
+    } catch {
+      setMessage('Network error')
+      setIsError(true)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleRateLimitToggle = async (enabled: boolean) => {
+    setConfig(prev => ({ ...prev, rate_limit_enabled: enabled }))
+    try {
+      await fetch('/api/v1/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rate_limit: { enabled } }),
+      })
+    } catch { /* ignore */ }
   }
 
   const handleExport = useCallback(async () => {
@@ -191,19 +209,31 @@ export function SettingsPanel() {
             />
           </div>
           <div className="form-group">
+            <label className="form-label" htmlFor="api_key">API Key</label>
+            <input
+              id="api_key"
+              type="password"
+              className="form-input"
+              data-testid="api-key-input"
+              value={config.api_key}
+              onChange={e => setConfig({ ...config, api_key: e.target.value })}
+              placeholder="Leave empty to keep current key"
+            />
+          </div>
+          <div className="form-group">
             <label className="form-checkbox">
               <input
                 type="checkbox"
                 data-testid="rate-limit-toggle"
                 checked={config.rate_limit_enabled}
-                onChange={e => setConfig({ ...config, rate_limit_enabled: e.target.checked })}
+                onChange={e => handleRateLimitToggle(e.target.checked)}
               />
               Enable Rate Limiting
             </label>
           </div>
           <div className="settings-actions">
             <button type="submit" className="btn btn-primary" disabled={saving} data-testid="save-button">
-              {saving ? 'Saving...' : 'Save Changes'}
+              {saving ? 'Switching...' : 'Switch Model'}
             </button>
           </div>
         </form>

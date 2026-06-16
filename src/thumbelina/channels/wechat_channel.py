@@ -1,11 +1,20 @@
-"""WeChat ClawBot channel -- bridges Thumbelina to WeChat via WeClaw HTTP API."""
+"""WeChat channel — direct iLink long-polling integration.
+
+Connects directly to WeChat's iLink bot API to receive messages via
+long-polling and send replies, without requiring the WeClaw sidecar.
+Credentials are obtained from the QR code login flow and stored in
+``~/.weclaw/accounts/``.
+
+All WeChat messages are routed to a single pinned conversation named
+"微信聊天" so they appear at the top of the conversation list in the
+Web UI.
+"""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
-
-import httpx
 
 from thumbelina.agent.graph import ThumbelinaAgent
 from thumbelina.channels.base import Channel
@@ -13,19 +22,19 @@ from thumbelina.channels.config import WeChatChannelConfig
 
 logger = logging.getLogger(__name__)
 
-# Default timeouts (seconds)
-_CONNECT_TIMEOUT = 5.0
-_READ_TIMEOUT = 30.0
-_MAX_RETRIES = 2
+_WECHAT_CONVERSATION_NAME = "微信聊天"
+
+# How often to log a polling summary (every N cycles)
+_LOG_EVERY_N_POLLS = 100
 
 
 class WeChatChannel(Channel):
-    """WeChat channel backed by WeClaw HTTP bridge.
+    """WeChat channel using direct iLink long-polling.
 
     Parameters
     ----------
     config:
-        WeChat-specific configuration (API URL, token, etc.).
+        WeChat-specific configuration including iLink credentials.
     agent:
         The Thumbelina agent used to process incoming messages.
     """
@@ -37,29 +46,85 @@ class WeChatChannel(Channel):
     ) -> None:
         self._config = config
         self._agent = agent
-        self._client: httpx.AsyncClient | None = None
+        self._ilink: Any = None  # ILinkClient, imported lazily
+        self._poll_task: asyncio.Task[None] | None = None
+        self._sync_buffer: str = ""
+        self._poll_count: int = 0
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
-        """Initialize the httpx client for sending messages to WeClaw."""
-        headers: dict[str, str] = {}
-        if self._config.weclaw_token:
-            headers["Authorization"] = f"Bearer {self._config.weclaw_token}"
-        self._client = httpx.AsyncClient(
-            base_url=self._config.weclaw_api_url,
-            headers=headers,
-            timeout=httpx.Timeout(_READ_TIMEOUT, connect=_CONNECT_TIMEOUT),
+        """Create the iLink client, ensure a WeChat conversation, and start polling."""
+        from thumbelina.channels.wechat_qrcode import ILinkClient
+
+        self._ilink = ILinkClient(
+            bot_token=self._config.bot_token,
+            ilink_bot_id=self._config.ilink_bot_id,
+            ilink_user_id=self._config.ilink_user_id,
+            base_url=self._config.ilink_base_url,
         )
-        logger.info("WeChat channel started (WeClaw API: %s)", self._config.weclaw_api_url)
+
+        await self._ensure_wechat_conversation()
+
+        self._poll_task = asyncio.create_task(self._poll_loop())
+        logger.info(
+            "WeChat channel started (iLink direct, bot=%s)",
+            self._config.ilink_bot_id,
+        )
+
+    async def _ensure_wechat_conversation(self) -> None:
+        """Create or reuse a pinned '微信聊天' conversation for the agent."""
+        mm = self._agent.memory_manager
+        if mm is None:
+            logger.warning("No memory manager — WeChat messages will not be persisted")
+            return
+
+        try:
+            # Check if a conversation with this name already exists
+            existing_id = await self._find_wechat_conversation(mm)
+            if existing_id:
+                self._agent.current_conversation_id = existing_id
+                logger.info("Reusing existing WeChat conversation %s", existing_id)
+                return
+
+            # Create a new pinned conversation
+            conv_id = await mm.create_conversation(
+                name=_WECHAT_CONVERSATION_NAME,
+                pinned=True,
+            )
+            self._agent.current_conversation_id = conv_id
+            logger.info("Created WeChat conversation %s", conv_id)
+        except Exception:
+            logger.exception("Failed to ensure WeChat conversation")
+
+    @staticmethod
+    async def _find_wechat_conversation(mm: Any) -> str | None:
+        """Find an existing conversation named '微信聊天'."""
+        try:
+            conversations = await mm.get_conversations()
+            for conv in conversations:
+                if conv.get("name") == _WECHAT_CONVERSATION_NAME:
+                    return conv["id"]
+        except Exception:
+            logger.warning("Failed to search for existing WeChat conversation", exc_info=True)
+        return None
 
     async def stop(self) -> None:
-        """Close the httpx client."""
-        if self._client:
-            await self._client.aclose()
-            self._client = None
+        """Cancel the poll loop and close the iLink client."""
+        if self._poll_task is not None:
+            self._poll_task.cancel()
+            try:
+                await self._poll_task
+            except asyncio.CancelledError:
+                pass
+            self._poll_task = None
+
+        if self._ilink is not None:
+            await self._ilink.close()
+            self._ilink = None
+
         logger.info("WeChat channel stopped")
 
     # ------------------------------------------------------------------
@@ -67,55 +132,31 @@ class WeChatChannel(Channel):
     # ------------------------------------------------------------------
 
     async def send_message(self, user_id: str, text: str) -> dict[str, Any]:
-        """Send a text message to a WeChat user via WeClaw.
+        """Send a text message to a WeChat user via iLink sendmessage.
 
         Parameters
         ----------
         user_id:
-            WeChat user identifier (e.g. ``wxid_xxxx``).
+            WeChat user identifier.
         text:
             Message body.
 
         Returns
         -------
         dict
-            Parsed JSON response from WeClaw.
+            Parsed JSON response from iLink.
 
         Raises
         ------
-        httpx.ConnectError
-            If WeClaw is not reachable.
-        httpx.TimeoutException
-            If the request times out after retries.
         RuntimeError
             If the channel has not been started.
         """
-        if self._client is None:
+        if self._ilink is None:
             raise RuntimeError("WeChatChannel has not been started")
-
-        payload = {"to": user_id, "text": text}
-        last_exc: Exception | None = None
-
-        for attempt in range(1, _MAX_RETRIES + 1):
-            try:
-                resp = await self._client.post("/api/send", json=payload)
-                resp.raise_for_status()
-                return resp.json()  # type: ignore[no-any-return]
-            except (httpx.ConnectError, httpx.TimeoutException) as exc:
-                last_exc = exc
-                logger.warning(
-                    "WeClaw send attempt %d/%d failed: %s",
-                    attempt,
-                    _MAX_RETRIES,
-                    exc,
-                )
-
-        # All retries exhausted
-        assert last_exc is not None
-        raise last_exc
+        return await self._ilink.send_message(user_id, text)
 
     # ------------------------------------------------------------------
-    # Receiving (called by the webhook route)
+    # Receiving (called by the poll loop)
     # ------------------------------------------------------------------
 
     async def handle_incoming(
@@ -124,7 +165,9 @@ class WeChatChannel(Channel):
         text: str,
         msg_type: str = "text",
     ) -> str:
-        """Process an incoming message from WeClaw and return a response.
+        """Process an incoming message and return an agent response.
+
+        All messages are routed to the shared "微信聊天" conversation.
 
         Parameters
         ----------
@@ -160,22 +203,106 @@ class WeChatChannel(Channel):
     # ------------------------------------------------------------------
 
     async def check_status(self) -> dict[str, Any]:
-        """Check whether WeClaw is reachable.
+        """Check whether the iLink poll loop is running.
 
         Returns
         -------
         dict
             Status dict with ``connected`` key and optional ``error``.
         """
-        if self._client is None:
+        if self._poll_task is None:
             return {"connected": False, "error": "Channel not started"}
+        if self._poll_task.done():
+            exc = self._poll_task.exception()
+            return {
+                "connected": False,
+                "error": f"Poll loop stopped: {exc}" if exc else "Poll loop stopped",
+            }
+        return {"connected": True}
+
+    # ------------------------------------------------------------------
+    # Internal: background polling loop
+    # ------------------------------------------------------------------
+
+    async def _poll_loop(self) -> None:
+        """Continuously long-poll iLink for messages and dispatch them."""
+        logger.info("iLink poll loop started")
+        consecutive_errors = 0
+        max_consecutive = 5
+
+        while True:
+            try:
+                messages, self._sync_buffer = await self._ilink.getupdates(
+                    self._sync_buffer,
+                )
+                consecutive_errors = 0
+                self._poll_count += 1
+
+                if messages:
+                    logger.info("Received %d message(s) from iLink", len(messages))
+                    for msg in messages:
+                        await self._process_message(msg)
+
+                if self._poll_count % _LOG_EVERY_N_POLLS == 0:
+                    logger.debug(
+                        "iLink poll cycle %d completed (%d messages this cycle)",
+                        self._poll_count,
+                        len(messages),
+                    )
+
+            except asyncio.CancelledError:
+                raise  # propagate cancellation
+
+            except Exception as exc:
+                consecutive_errors += 1
+                logger.warning(
+                    "iLink poll error (%d/%d): %s",
+                    consecutive_errors,
+                    max_consecutive,
+                    exc,
+                )
+                if consecutive_errors >= max_consecutive:
+                    logger.error(
+                        "Too many consecutive iLink errors — "
+                        "the bot session may have expired. "
+                        "Re-authenticate via QR code to resume."
+                    )
+                # Back off before retrying
+                backoff = min(3.0 * (2 ** (consecutive_errors - 1)), 60.0)
+                await asyncio.sleep(backoff)
+
+    async def _process_message(self, msg: Any) -> None:
+        """Process a single incoming iLink message."""
+        from thumbelina.channels.wechat_qrcode import extract_text
+
+        # Only process finished messages from users
+        if msg.message_type != 1 or msg.message_state != 2:
+            return
+
+        text = extract_text(msg)
+        if not text:
+            logger.debug("Ignoring non-text message %s", msg.message_id)
+            return
+
+        logger.info(
+            "Processing message %s from %s: %.80s",
+            msg.message_id,
+            msg.from_user_id,
+            text,
+        )
+
+        response = await self.handle_incoming(
+            user_id=msg.from_user_id,
+            text=text,
+            msg_type="text",
+        )
 
         try:
-            resp = await self._client.get("/health")
-            return {"connected": resp.status_code == 200}
-        except httpx.ConnectError:
-            return {"connected": False, "error": "Connection refused"}
-        except httpx.TimeoutException:
-            return {"connected": False, "error": "Timeout"}
-        except Exception as exc:
-            return {"connected": False, "error": str(exc)}
+            await self.send_message(msg.from_user_id, response)
+            logger.info("Replied to %s (%.60s)", msg.from_user_id, response)
+        except Exception:
+            logger.exception(
+                "Failed to send reply to %s for message %s",
+                msg.from_user_id,
+                msg.message_id,
+            )

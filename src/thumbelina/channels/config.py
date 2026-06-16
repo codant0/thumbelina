@@ -22,15 +22,25 @@ class QQChannelConfig(BaseModel):
 
 
 class WeChatChannelConfig(BaseModel):
-    """WeChat ClawBot channel configuration."""
+    """WeChat channel configuration.
+
+    After QR code login, the iLink credential fields (``bot_token``,
+    ``ilink_bot_id``, ``ilink_user_id``) are populated automatically.
+    The channel uses these to long-poll iLink directly — no WeClaw
+    sidecar required.
+    """
 
     enabled: bool = Field(default=False, description="Enable WeChat channel")
-    weclaw_api_url: str = Field(
-        default="http://127.0.0.1:18011",
-        description="WeClaw API base URL",
+    bot_token: str = Field(default="", description="iLink bot token from QR login")
+    ilink_bot_id: str = Field(default="", description="iLink bot ID")
+    ilink_user_id: str = Field(default="", description="iLink user ID")
+    ilink_base_url: str = Field(
+        default="https://ilinkai.weixin.qq.com",
+        description="iLink API base URL",
     )
-    weclaw_token: str = Field(default="", description="WeClaw authentication token")
-    webhook_secret: str = Field(default="", description="Webhook signature verification secret")
+    webhook_secret: str = Field(
+        default="", description="Webhook signature verification secret"
+    )
 
 
 class ChannelsConfig(BaseModel):
