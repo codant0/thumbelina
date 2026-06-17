@@ -275,16 +275,34 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if config.channels.wechat.enabled:
         try:
             from thumbelina.channels.wechat_channel import WeChatChannel
+            from thumbelina.api.websocket import broadcast_chat_message
+
+            async def _on_wechat_message(cid: str, user_text: str, response: str, source: str = "wechat") -> None:
+                await broadcast_chat_message({
+                    "channel_message": {
+                        "channel": "wechat",
+                        "conversation_id": cid,
+                        "user_message": user_text,
+                        "response": response,
+                        "source": source,
+                    }
+                })
 
             wechat_channel = WeChatChannel(
                 config=config.channels.wechat,
                 agent=agent,
+                on_message_callback=_on_wechat_message,
             )
             await wechat_channel.start()
             app.state.wechat_channel = wechat_channel
-            logger.info("WeChat channel initialized")
+            # Cache the WeChat conversation ID for fast lookup in the WS handler
+            app.state.wechat_conversation_id = wechat_channel._agent.current_conversation_id
+            logger.info(
+                "WeChat channel initialized (conversation=%s)",
+                app.state.wechat_conversation_id,
+            )
         except Exception:
-            logger.debug("WeChat channel not initialized", exc_info=True)
+            logger.warning("WeChat channel not initialized", exc_info=True)
 
     # Initialize QQ channel if enabled
     qq_channel = None
@@ -307,14 +325,38 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.composition_engine = composition_engine
     app.state.subagent_manager = subagent_manager
 
+    # Initialize config repository for database-backed configuration
+    from thumbelina.config.config_repo import ConfigRepository
+
+    config_repo = ConfigRepository(db_url=config.memory.database_url)
+    app.state.config_repo = config_repo
+
+    # Import YAML config to database on first startup (if DB is empty)
+    from thumbelina.config.loader import import_yaml_to_db
+
+    config_path = getattr(app.state, "config_path", None)
+    try:
+        if await config_repo.is_empty():
+            imported = import_yaml_to_db(config_path, config.memory.database_url)
+            if imported:
+                logger.info("Imported %d config keys from YAML to database", imported)
+        else:
+            logger.debug("Database already contains config — skipping YAML import")
+    except Exception:
+        logger.warning("Failed to import YAML config to database", exc_info=True)
+
     # Initialize runtime configuration manager
     from thumbelina.config.runtime_manager import RuntimeConfigManager
 
     runtime_manager = RuntimeConfigManager(
         config=config,
         config_path=getattr(app.state, "config_path", None),
+        config_repo=config_repo,
     )
     app.state.runtime_config_manager = runtime_manager
+
+    # Load configuration overrides from database
+    await runtime_manager.load_from_database()
 
     yield
 
@@ -332,6 +374,30 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         composition_engine.composition_repo.close()
     if user_profiler:
         user_profiler.profile_repo.close()
+    if config_repo:
+        config_repo.close()
+
+    if qq_channel:
+        await qq_channel.stop()
+    if wechat_channel:
+        await wechat_channel.stop()
+    if scheduler:
+        await scheduler.stop()
+    if feedback_repo:
+        feedback_repo.close()
+    if skill_repo:
+        skill_repo.close()
+    if composition_engine:
+        composition_engine.composition_repo.close()
+    if user_profiler:
+        user_profiler.profile_repo.close()
+
+    # Close QR code manager if it was initialized
+    from thumbelina.api.routes.wechat import _qrcode_manager
+
+    if _qrcode_manager is not None:
+        await _qrcode_manager.close()
+
     memory.close()
 
 
@@ -397,8 +463,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     @app.exception_handler(ValueError)
     async def value_error_handler(request: Request, exc: ValueError) -> JSONResponse:
         """Handle value errors."""
-        logger.warning(f"Value error: {exc}")
-        return JSONResponse(status_code=400, content={"detail": str(exc)})
+        logger.warning("Value error: %s", exc)
+        return JSONResponse(status_code=400, content={"detail": "Invalid request"})
 
     # Health check endpoint
     @app.get("/health")

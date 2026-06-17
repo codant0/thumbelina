@@ -312,3 +312,38 @@ class FeedbackRecord(Base):
             f"<FeedbackRecord(id={self.id!r}, conversation_id={self.conversation_id!r}, "
             f"rating={self.rating!r})>"
         )
+
+
+class SystemConfig(Base):
+    """SQLAlchemy model for system configuration storage.
+
+    Stores key-value configuration pairs with category grouping.
+    Sensitive fields (api_key, app_secret, etc.) are NOT stored here —
+    they continue to be managed via environment variables.
+    """
+
+    __tablename__ = "system_config"
+
+    key: Mapped[str] = mapped_column(
+        String(100),
+        primary_key=True,
+        comment="Dotted config path, e.g. 'llm.provider'",
+    )
+    value: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        comment="Serialized config value",
+    )
+    category: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        comment="Config category: llm, channel, auth, rate_limit, etc.",
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    def __repr__(self) -> str:
+        return f"<SystemConfig(key={self.key!r}, category={self.category!r})>"

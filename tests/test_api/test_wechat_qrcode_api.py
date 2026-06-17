@@ -166,7 +166,7 @@ class TestConfirmLogin:
             # Mock runtime config manager on app.state
             mock_runtime = AsyncMock()
 
-            async def fake_swap(channel_name, new_config, app_state, agent):
+            async def fake_swap(channel_name, new_config, app_state, agent, on_message_callback=None):
                 app_state.config.channels.wechat.enabled = True
                 app_state.config.channels.wechat.bot_token = new_config.bot_token
                 app_state.config.channels.wechat.ilink_bot_id = new_config.ilink_bot_id

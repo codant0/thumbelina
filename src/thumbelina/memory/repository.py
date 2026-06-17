@@ -191,7 +191,7 @@ class ConversationRepository:
                 {
                     "id": conv.id,
                     "name": conv.name,
-                    "pinned": conv.pinned,
+                    "pinned": conv.pinned or False,
                     "created_at": conv.created_at.isoformat(),
                     "updated_at": conv.updated_at.isoformat(),
                     "summary": conv.summary,
@@ -224,7 +224,7 @@ class ConversationRepository:
                 {
                     "id": conv.id,
                     "name": conv.name,
-                    "pinned": conv.pinned,
+                    "pinned": conv.pinned or False,
                     "created_at": conv.created_at.isoformat(),
                     "updated_at": conv.updated_at.isoformat(),
                     "summary": conv.summary,
@@ -257,7 +257,7 @@ class ConversationRepository:
             return {
                 "id": conversation.id,
                 "name": conversation.name,
-                "pinned": conversation.pinned,
+                "pinned": conversation.pinned or False,
                 "created_at": conversation.created_at.isoformat(),
                 "updated_at": conversation.updated_at.isoformat(),
                 "summary": conversation.summary,

@@ -1,29 +1,6 @@
+@import './styles/themes.css';
+
 :root {
-  --bg: #09090b;
-  --bg-surface: #111113;
-  --bg-elevated: #18181b;
-  --bg-hover: #1e1e22;
-  --bg-active: #27272a;
-  --text: #71717a;
-  --text-secondary: #52525b;
-  --text-primary: #d4d4d8;
-  --text-heading: #fafafa;
-  --border: #27272a;
-  --border-subtle: #1e1e22;
-  --accent: #818cf8;
-  --accent-hover: #a5b4fc;
-  --accent-muted: rgba(129, 140, 248, 0.12);
-  --accent-border: rgba(129, 140, 248, 0.25);
-  --success: #4ade80;
-  --success-muted: rgba(74, 222, 128, 0.10);
-  --warning: #fbbf24;
-  --warning-muted: rgba(251, 191, 36, 0.10);
-  --error: #f87171;
-  --error-muted: rgba(248, 113, 113, 0.10);
-  --user-bubble: #3b3b4f;
-  --user-bubble-text: #e4e4e7;
-  --assistant-bubble: var(--bg-elevated);
-  --assistant-bubble-text: var(--text-primary);
   --radius: 8px;
   --radius-sm: 6px;
   --radius-lg: 12px;

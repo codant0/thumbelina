@@ -158,12 +158,17 @@ async def update_config(
     ``PUT /config/channels/{name}`` for full hot-swap.
     """
     config = request.app.state.config
+    manager = request.app.state.runtime_config_manager
 
     if "streaming_enabled" in body.llm:
         config.llm.streaming_enabled = bool(body.llm["streaming_enabled"])
+        if hasattr(manager, "_persist_to_db"):
+            await manager._persist_to_db("llm", "llm.streaming_enabled", config.llm.streaming_enabled)
 
     if "enabled" in body.rate_limit:
         config.rate_limit.enabled = body.rate_limit["enabled"]
+        if hasattr(manager, "_persist_to_db"):
+            await manager._persist_to_db("rate_limit", "rate_limit.enabled", config.rate_limit.enabled)
 
     return {"status": "ok"}
 
@@ -287,3 +292,43 @@ async def swap_channel(
         enabled=new_config.enabled,
         connected=connected,
     )
+
+
+# ── GET /config/export ───────────────────────────────────────────────
+
+
+@router.get("/config/export")
+async def export_config(
+    request: Request,
+    category: str | None = None,
+) -> dict[str, Any]:
+    """Export configuration from the database.
+
+    Parameters
+    ----------
+    category:
+        Optional category filter (e.g., "llm", "channel").
+    """
+    config_repo = getattr(request.app.state, "config_repo", None)
+    if config_repo is None:
+        raise HTTPException(status_code=503, detail="Config repository not available")
+
+    try:
+        return await config_repo.export_to_dict(category)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ── POST /config/reload ─────────────────────────────────────────────
+
+
+@router.post("/config/reload")
+async def reload_config(request: Request) -> dict[str, str]:
+    """Reload configuration from the database.
+
+    This applies any database overrides to the in-memory config.
+    """
+    manager = request.app.state.runtime_config_manager
+    if hasattr(manager, "load_from_database"):
+        await manager.load_from_database()
+    return {"status": "ok"}

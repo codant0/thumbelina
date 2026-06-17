@@ -1038,3 +1038,76 @@
   color: var(--success, #10b981);
   margin-left: 6px;
 }
+
+/* ===== Theme Toggle ===== */
+.theme-toggle-wrapper {
+  position: relative;
+}
+
+.theme-toggle-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.theme-toggle-btn:hover {
+  background: var(--bg-hover);
+}
+
+.theme-toggle-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.theme-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px;
+  min-width: 120px;
+  z-index: 50;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.theme-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-primary);
+  transition: background var(--transition);
+}
+
+.theme-option:hover {
+  background: var(--bg-hover);
+}
+
+.theme-option.active {
+  background: var(--accent-muted);
+  color: var(--accent);
+}
+
+.theme-option-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.theme-option-label {
+  flex: 1;
+  text-align: left;
+}

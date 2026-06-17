@@ -195,9 +195,9 @@ def _accounts_dir() -> Path:
 
 def _normalize_id(raw: str) -> str:
     """Replace filesystem-unsafe characters in bot ID."""
-    for ch in ("@", ".", ":"):
-        raw = raw.replace(ch, "-")
-    return raw
+    import re
+
+    return re.sub(r"[^\w\-]", "-", raw)
 
 
 # ── iLink Message Types ────────────────────────────────────────────

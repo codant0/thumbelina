@@ -6,15 +6,16 @@ import { InputBox } from './InputBox'
 interface ChatWindowProps {
   conversationId?: string
   onConversationCreated?: () => void
+  onDefaultConversation?: (id: string) => void
 }
 
-export function ChatWindow({ conversationId, onConversationCreated }: ChatWindowProps) {
+export function ChatWindow({ conversationId, onConversationCreated, onDefaultConversation }: ChatWindowProps) {
   const wsUrl = useMemo(() => {
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     return `${wsProtocol}//${window.location.host}/ws/chat`
   }, [])
 
-  const { messages, isConnected, isStreaming, streamingMode: wsStreamingMode, waitingForReply, lastConversationId, sendMessage, clearMessages } = useWebSocket(wsUrl)
+  const { messages, isConnected, isStreaming, streamingMode: wsStreamingMode, waitingForReply, lastConversationId, newConversationId, clearNewConversation, sendMessage, clearMessages, switchConversation, loadHistory } = useWebSocket(wsUrl, conversationId)
   const [streamingMode, setStreamingMode] = useState(true)
   const [toggling, setToggling] = useState(false)
 
@@ -23,10 +24,14 @@ export function ChatWindow({ conversationId, onConversationCreated }: ChatWindow
     setStreamingMode(wsStreamingMode)
   }, [wsStreamingMode])
 
-  // Clear messages when switching conversations
+  // Load history and notify backend when switching to an existing conversation
   useEffect(() => {
-    clearMessages()
-  }, [conversationId, clearMessages])
+    if (conversationId) {
+      switchConversation(conversationId)
+      clearMessages()
+      loadHistory(conversationId)
+    }
+  }, [conversationId, switchConversation, clearMessages, loadHistory])
 
   // Fetch initial config
   useEffect(() => {
@@ -36,10 +41,14 @@ export function ChatWindow({ conversationId, onConversationCreated }: ChatWindow
       .catch(() => {})
   }, [])
 
-  // Refresh conversation list when the server assigns a conversation ID
+  // Refresh sidebar and auto-select when a genuinely new conversation is created
   useEffect(() => {
-    if (lastConversationId) onConversationCreated?.()
-  }, [lastConversationId, onConversationCreated])
+    if (newConversationId) {
+      onConversationCreated?.()
+      onDefaultConversation?.(newConversationId)
+      clearNewConversation()
+    }
+  }, [newConversationId, onConversationCreated, onDefaultConversation, clearNewConversation])
 
   const handleSend = (text: string) => {
     sendMessage(text, conversationId)

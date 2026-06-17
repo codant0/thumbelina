@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Header, type Page } from './components/Layout/Header'
 import { Sidebar } from './components/Layout/Sidebar'
 import { ChatWindow } from './components/Chat/ChatWindow'
@@ -16,14 +16,26 @@ function App() {
   const [selectedId, setSelectedId] = useState<string | undefined>()
   const [activePage, setActivePage] = useState<Page>('chat')
 
+  // Track the latest fetch to discard stale responses
+  const latestFetchRef = useRef(0)
+
   const fetchConversations = useCallback(() => {
+    const fetchId = ++latestFetchRef.current
     fetch('/api/v1/conversations')
       .then(res => {
         if (!res.ok) return []
         return res.json()
       })
-      .then(data => setConversations(Array.isArray(data) ? data : []))
-      .catch(() => setConversations([]))
+      .then(data => {
+        if (fetchId === latestFetchRef.current) {
+          setConversations(Array.isArray(data) ? data : [])
+        }
+      })
+      .catch(() => {
+        if (fetchId === latestFetchRef.current) {
+          setConversations([])
+        }
+      })
   }, [])
 
   useEffect(() => {
@@ -39,6 +51,10 @@ function App() {
 
   const handleSelect = useCallback((id: string) => {
     setSelectedId(id)
+  }, [])
+
+  const handleDefaultConversation = useCallback((id: string) => {
+    setSelectedId(prev => prev ?? id)
   }, [])
 
   const handleNewConversation = useCallback(async () => {
@@ -94,6 +110,7 @@ function App() {
             <ChatWindow
               conversationId={selectedId}
               onConversationCreated={fetchConversations}
+              onDefaultConversation={handleDefaultConversation}
             />
           </>
         )

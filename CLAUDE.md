@@ -40,20 +40,26 @@ npm run build        # TypeScript check + Vite build
 
 ```
 Frontend (React/Vite) --WebSocket/HTTP--> FastAPI (api/app.py)
-    ├── /api/chat      → api/routes/chat.py → ThumbelinaAgent.run()
-    ├── /ws/chat       → api/websocket.py   → ThumbelinaAgent.run() (streaming)
-    ├── /api/conversations → CRUD on MemoryManager
-    ├── /api/conversations/search/{query} → MemoryManager.search()
-    ├── /api/tasks     → TaskScheduler.list_tasks()
-    ├── /api/subagents → SubagentManager.list()
-    ├── /api/skills    → SkillRepository.list_all()
-    ├── /api/skills/stats → SkillRepository + analytics
-    ├── /api/compositions → CompositionRepository.list_all()
-    ├── /api/feedback  → FeedbackRepository CRUD + stats
-    ├── /api/data/export|delete → MemoryManager export/delete
-    ├── /api/user/profile → UserProfiler.get_user_context()
-    ├── /api/plugins   → PluginManager + sandbox report
-    ├── /api/wechat/*  → WeChatChannel (WeClaw bridge)
+    ├── /api/v1/chat      → api/routes/chat.py → ThumbelinaAgent.run()
+    ├── /ws/chat          → api/websocket.py   → ThumbelinaAgent.run() (streaming)
+    ├── /api/v1/conversations → CRUD on MemoryManager
+    ├── /api/v1/conversations/search/{query} → MemoryManager.search()
+    ├── /api/v1/tasks     → TaskScheduler.list_tasks()
+    ├── /api/v1/tasks/{id}/cancel → TaskScheduler.cancel_task()
+    ├── /api/v1/subagents → SubagentManager.list()
+    ├── /api/v1/subagents/{id}/cancel → SubagentManager.cancel()
+    ├── /api/v1/skills    → SkillRepository.list_all()
+    ├── /api/v1/skills/stats → SkillRepository + analytics
+    ├── /api/v1/compositions → CompositionRepository.list_all()
+    ├── /api/v1/feedback  → FeedbackRepository CRUD + stats
+    ├── /api/v1/data/export|delete → MemoryManager export/delete
+    ├── /api/v1/user/profile → UserProfiler.get_user_context()
+    ├── /api/v1/plugins   → PluginManager + sandbox report
+    ├── /api/v1/config    → RuntimeConfigManager
+    ├── /api/v1/config/llm → Hot-swap LLM provider
+    ├── /api/v1/config/channels/{name} → Hot-swap channel config
+    ├── /api/v1/wechat/*  → WeChatChannel (iLink API)
+    ├── /api/v1/qq/*      → QQChannel
     └── /health
 ```
 

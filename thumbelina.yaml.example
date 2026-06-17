@@ -33,9 +33,8 @@ channels:
     app_secret: ""
   wechat:
     enabled: false
-    # Credentials are populated automatically after QR code login.
-    # bot_token: ""
-    # ilink_bot_id: ""
-    # ilink_user_id: ""
-    # ilink_base_url: "https://ilinkai.weixin.qq.com"
+    bot_token: ""              # Bot token from iLink (auto-populated after QR code login)
+    ilink_bot_id: ""           # iLink bot ID
+    ilink_user_id: ""          # iLink user ID
+    ilink_base_url: "https://ilinkai.weixin.qq.com"
     webhook_secret: ""

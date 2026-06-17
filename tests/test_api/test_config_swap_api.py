@@ -30,6 +30,7 @@ def client():
     mock_manager = MagicMock()
     mock_manager.swap_llm_provider = AsyncMock()
     mock_manager.swap_channel = AsyncMock(return_value=True)
+    mock_manager._persist_to_db = AsyncMock()
     app.state.runtime_config_manager = mock_manager
 
     # Inject mock agent
@@ -194,3 +195,60 @@ class TestPostConfigStillWorks:
             json={"llm": {"streaming_enabled": False}},
         )
         assert resp.status_code == 200
+
+
+class TestGetConfigExport:
+    """Tests for GET /config/export."""
+
+    def test_export_config_success(self, client):
+        """Export config returns database contents."""
+        # Mock the config_repo
+        mock_repo = MagicMock()
+        mock_repo.export_to_dict = AsyncMock(return_value={"llm": {"provider": "openai"}})
+        client.app.state.config_repo = mock_repo
+
+        resp = client.get("/api/v1/config/export")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["llm"]["provider"] == "openai"
+
+    def test_export_config_with_category(self, client):
+        """Export config with category filter."""
+        mock_repo = MagicMock()
+        mock_repo.export_to_dict = AsyncMock(return_value={"llm": {"provider": "openai"}})
+        client.app.state.config_repo = mock_repo
+
+        resp = client.get("/api/v1/config/export?category=llm")
+        assert resp.status_code == 200
+        mock_repo.export_to_dict.assert_called_once_with("llm")
+
+    def test_export_config_no_repo(self, client):
+        """Export config returns 503 when config_repo is not available."""
+        # Remove config_repo from app state
+        if hasattr(client.app.state, "config_repo"):
+            delattr(client.app.state, "config_repo")
+
+        resp = client.get("/api/v1/config/export")
+        assert resp.status_code == 503
+
+
+class TestPostConfigReload:
+    """Tests for POST /config/reload."""
+
+    def test_reload_config_success(self, client):
+        """Reload config returns success."""
+        # Add load_from_database as AsyncMock to the mock manager
+        client.app.state.runtime_config_manager.load_from_database = AsyncMock()
+
+        resp = client.post("/api/v1/config/reload")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+
+    def test_reload_config_calls_load_from_database(self, client):
+        """Reload config calls load_from_database on the manager."""
+        client.app.state.runtime_config_manager.load_from_database = AsyncMock()
+
+        resp = client.post("/api/v1/config/reload")
+        assert resp.status_code == 200
+        client.app.state.runtime_config_manager.load_from_database.assert_called_once()

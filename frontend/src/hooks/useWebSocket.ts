@@ -8,25 +8,43 @@ interface WsIncoming {
   conversation_id?: string
   error?: string
   streaming_mode?: boolean
+  connected?: boolean
+  conversation_switched?: boolean
+  conversation_created?: string
+  channel_message?: {
+    channel: string
+    conversation_id: string
+    user_message: string
+    response: string
+    source?: string
+  }
 }
 
 const CHARS_PER_TICK = 3
 const TICK_INTERVAL = 30
 
-export function useWebSocket(url: string) {
+export function useWebSocket(url: string, activeConversationId?: string) {
   const [messages, setMessages] = useState<Message[]>([])
   const [isConnected, setIsConnected] = useState(false)
   const [isStreaming, setIsStreaming] = useState(false)
   const [streamingMode, setStreamingMode] = useState(true)
   const [waitingForReply, setWaitingForReply] = useState(false)
   const [lastConversationId, setLastConversationId] = useState<string | null>(null)
+  const [newConversationId, setNewConversationId] = useState<string | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
+  const knownConversationsRef = useRef<Set<string>>(new Set())
+  const activeConversationRef = useRef<string | undefined>(activeConversationId)
   const bufferRef = useRef('')
   const displayedRef = useRef(0)
   const msgIdRef = useRef(0)
   const twMsgIdRef = useRef<string | null>(null)
   const twTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const streamDoneRef = useRef(false)
+
+  // Keep the active conversation ref in sync with the prop
+  useEffect(() => {
+    activeConversationRef.current = activeConversationId
+  }, [activeConversationId])
 
   const stopTypewriter = useCallback((finalId?: string) => {
     if (twTimerRef.current) clearInterval(twTimerRef.current)
@@ -65,7 +83,13 @@ export function useWebSocket(url: string) {
 
       if (data.error) {
         setWaitingForReply(false)
-        if (data.conversation_id) setLastConversationId(data.conversation_id)
+        if (data.conversation_id) {
+          setLastConversationId(data.conversation_id)
+          if (!knownConversationsRef.current.has(data.conversation_id)) {
+            knownConversationsRef.current.add(data.conversation_id)
+            setNewConversationId(data.conversation_id)
+          }
+        }
         setMessages(prev => [
           ...prev,
           {
@@ -82,10 +106,75 @@ export function useWebSocket(url: string) {
         setStreamingMode(data.streaming_mode)
       }
 
+      // Backend reports the default conversation created on connect
+      if (data.connected && data.conversation_id) {
+        knownConversationsRef.current.add(data.conversation_id)
+        setLastConversationId(data.conversation_id)
+        setNewConversationId(data.conversation_id)
+        return
+      }
+
+      // Conversation switch acknowledged
+      if (data.conversation_switched) {
+        return
+      }
+
+      // Backend created a conversation lazily (first message, no prior conversation)
+      if (data.conversation_created) {
+        knownConversationsRef.current.add(data.conversation_created)
+        setLastConversationId(data.conversation_created)
+        setNewConversationId(data.conversation_created)
+        return
+      }
+
+      // Cross-channel message (e.g. WeChat) — broadcast to all clients
+      if (data.channel_message) {
+        const cm = data.channel_message
+        if (cm.conversation_id) {
+          setLastConversationId(cm.conversation_id)
+          if (!knownConversationsRef.current.has(cm.conversation_id)) {
+            knownConversationsRef.current.add(cm.conversation_id)
+            setNewConversationId(cm.conversation_id)
+          }
+        }
+        // Only display messages if the user is currently viewing this conversation
+        if (cm.conversation_id && cm.conversation_id === activeConversationRef.current) {
+          const newMsgs: Message[] = []
+          // For external messages (source !== 'frontend'), show the user message
+          if (cm.source !== 'frontend' && cm.user_message) {
+            newMsgs.push({
+              id: String(msgIdRef.current++),
+              role: 'user',
+              content: cm.user_message,
+              timestamp: new Date().toISOString(),
+            })
+          }
+          // Always show the AI response
+          if (cm.response) {
+            newMsgs.push({
+              id: String(msgIdRef.current++),
+              role: 'assistant',
+              content: cm.response,
+              timestamp: new Date().toISOString(),
+            })
+          }
+          if (newMsgs.length > 0) {
+            setMessages(prev => [...prev, ...newMsgs])
+          }
+        }
+        return
+      }
+
       // Streaming chunk — buffer + typewriter reveal
       if (data.chunk !== undefined) {
         setWaitingForReply(false)
-        if (data.conversation_id) setLastConversationId(data.conversation_id)
+        if (data.conversation_id) {
+          setLastConversationId(data.conversation_id)
+          if (!knownConversationsRef.current.has(data.conversation_id)) {
+            knownConversationsRef.current.add(data.conversation_id)
+            setNewConversationId(data.conversation_id)
+          }
+        }
         setIsStreaming(true)
         streamDoneRef.current = false
         bufferRef.current += data.chunk
@@ -130,7 +219,13 @@ export function useWebSocket(url: string) {
 
       // Stream done
       if (data.done) {
-        if (data.conversation_id) setLastConversationId(data.conversation_id)
+        if (data.conversation_id) {
+          setLastConversationId(data.conversation_id)
+          if (!knownConversationsRef.current.has(data.conversation_id)) {
+            knownConversationsRef.current.add(data.conversation_id)
+            setNewConversationId(data.conversation_id)
+          }
+        }
         if (twTimerRef.current) {
           // Typewriter running — mark done, it will finalize when caught up
           streamDoneRef.current = true
@@ -153,7 +248,13 @@ export function useWebSocket(url: string) {
       // Non-streaming full response — display immediately
       if (data.response !== undefined) {
         setWaitingForReply(false)
-        if (data.conversation_id) setLastConversationId(data.conversation_id)
+        if (data.conversation_id) {
+          setLastConversationId(data.conversation_id)
+          if (!knownConversationsRef.current.has(data.conversation_id)) {
+            knownConversationsRef.current.add(data.conversation_id)
+            setNewConversationId(data.conversation_id)
+          }
+        }
         setMessages(prev => [
           ...prev,
           {
@@ -207,6 +308,31 @@ export function useWebSocket(url: string) {
     }
   }, [stopTypewriter])
 
+  const switchConversation = useCallback((conversationId: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ switch_conversation: conversationId }))
+    }
+  }, [])
+
+  const loadHistory = useCallback(async (conversationId: string) => {
+    try {
+      const res = await fetch(`/api/v1/conversations/${conversationId}`)
+      if (!res.ok) return
+      const data = await res.json()
+      if (Array.isArray(data.messages)) {
+        const history: Message[] = data.messages.map((m: { id: string; role: string; content: string; created_at: string }) => ({
+          id: m.id,
+          role: m.role as Message['role'],
+          content: m.content,
+          timestamp: m.created_at,
+        }))
+        setMessages(history)
+      }
+    } catch {
+      // ignore
+    }
+  }, [])
+
   const clearMessages = useCallback(() => {
     stopTypewriter()
     setMessages([])
@@ -216,5 +342,9 @@ export function useWebSocket(url: string) {
     setWaitingForReply(false)
   }, [stopTypewriter])
 
-  return { messages, isConnected, isStreaming, streamingMode, waitingForReply, lastConversationId, sendMessage, clearMessages }
+  const clearNewConversation = useCallback(() => {
+    setNewConversationId(null)
+  }, [])
+
+  return { messages, isConnected, isStreaming, streamingMode, waitingForReply, lastConversationId, newConversationId, clearNewConversation, sendMessage, clearMessages, switchConversation, loadHistory }
 }

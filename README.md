@@ -19,7 +19,7 @@ An AI-powered personal assistant built with [FastAPI](https://fastapi.tiangolo.c
 - **Task Scheduler** — Natural language time parsing (Chinese & English) with conditional triggers and notification broadcast
 - **Plugin System** — Register and manage tools, skills, channels, and providers with sandbox validation and dependency resolution
 - **QQ Bot Channel** — Connect via QQ official bot SDK (`qq-botpy`), supports guild, group, and private messages
-- **WeChat ClawBot Channel** — Connect via WeClaw HTTP bridge for personal WeChat account integration
+- **WeChat Channel** — Direct iLink long-polling integration for personal WeChat account, with QR code login
 - **Dream Visualization** — Skill evolution timeline, maturity charts, skill cloud, and category statistics
 - **Streaming WebSocket** — Real-time token-by-token responses over WebSocket connections
 - **Security** — JWT authentication (HS256), sliding-window rate limiting, role-based access control, and data export/deletion
@@ -65,9 +65,12 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
 Configuration priority (highest to lowest):
-1. Environment variables (`THUMBELINA_*` with `__` nesting, e.g. `THUMBELINA_LLM__PROVIDER`)
-2. YAML config file (`thumbelina.yaml`)
-3. Defaults in `thumbelina.yaml.example`
+1. Database overrides (via `POST /api/v1/config` or `PUT /api/v1/config/llm`)
+2. Environment variables (`THUMBELINA_*` with `__` nesting, e.g. `THUMBELINA_LLM__PROVIDER`)
+3. YAML config file (`thumbelina.yaml`)
+4. Defaults in `thumbelina.yaml.example`
+
+Sensitive fields (API keys, tokens) are never stored in the database — use environment variables.
 
 ### Running
 
@@ -191,14 +194,17 @@ thumbelina/
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/health` | Health check |
+| GET | `/health` | Health check (returns version + database status) |
 | POST | `/api/v1/chat` | Send a message, get an agent response |
 | GET | `/api/v1/conversations` | List all conversations |
+| POST | `/api/v1/conversations` | Create a new conversation |
 | GET | `/api/v1/conversations/search/{query}` | Search messages across conversations |
 | GET | `/api/v1/conversations/{id}` | Get conversation with messages |
 | DELETE | `/api/v1/conversations/{id}` | Delete a conversation |
 | GET | `/api/v1/tasks` | List scheduled tasks |
+| POST | `/api/v1/tasks/{id}/cancel` | Cancel a scheduled task |
 | GET | `/api/v1/subagents` | List active sub-agents |
+| POST | `/api/v1/subagents/{id}/cancel` | Cancel a running sub-agent |
 | GET | `/api/v1/skills` | List extracted skills |
 | GET | `/api/v1/skills/stats` | Skill usage statistics (for Dream visualization) |
 | GET | `/api/v1/compositions` | List skill compositions |
@@ -213,10 +219,17 @@ thumbelina/
 | GET | `/api/v1/plugins/dependencies` | Plugin dependency graph |
 | GET | `/api/v1/config` | Current configuration snapshot |
 | POST | `/api/v1/config` | Update runtime configuration |
+| PUT | `/api/v1/config/llm` | Hot-swap LLM provider/model |
+| PUT | `/api/v1/config/channels/{name}` | Hot-swap channel configuration |
+| GET | `/api/v1/config/export` | Export config from database |
+| POST | `/api/v1/config/reload` | Reload config from database |
 | GET | `/api/v1/qq/status` | Check QQ Bot connection status |
-| POST | `/api/v1/wechat/incoming` | WeClaw webhook (incoming WeChat messages) |
-| POST | `/api/v1/wechat/send` | Send message via WeClaw |
-| GET | `/api/v1/wechat/status` | Check WeClaw connectivity |
+| POST | `/api/v1/wechat/incoming` | iLink webhook (incoming WeChat messages) |
+| POST | `/api/v1/wechat/send` | Send message via iLink |
+| GET | `/api/v1/wechat/status` | Check iLink connectivity |
+| POST | `/api/v1/wechat/qrcode` | Fetch QR code for WeChat login |
+| GET | `/api/v1/wechat/qrcode/status` | Poll QR code scan status |
+| POST | `/api/v1/wechat/qrcode/confirm` | Confirm login and enable channel |
 | WS | `/ws/chat` | Real-time streaming chat via WebSocket |
 
 ## QQ Bot Setup
@@ -233,20 +246,30 @@ thumbelina/
    ```
 4. Start Thumbelina: `thumbelina-serve`
 
-## WeChat ClawBot Setup
+## WeChat Setup
 
-1. Install WeClaw: `curl -sSL https://raw.githubusercontent.com/fastclaw-ai/weclaw/main/install.sh | sh`
-2. Configure WeClaw to point to Thumbelina (see `docs/plans/weclaw-config.example.json`)
-3. Add to `thumbelina.yaml`:
-   ```yaml
-   channels:
-     wechat:
-       enabled: true
-       weclaw_api_url: "http://127.0.0.1:18011"
-   ```
-4. Start WeClaw: `weclaw start`
-5. Start Thumbelina: `thumbelina-serve`
-6. Scan QR code with WeChat to login
+WeChat integration uses the iLink API directly — no sidecar process required.
+
+### Option A: QR Code Login (Recommended)
+
+1. Start Thumbelina: `thumbelina-serve`
+2. Call `POST /api/v1/wechat/qrcode` to get a QR code
+3. Scan the QR code with WeChat
+4. Poll `GET /api/v1/wechat/qrcode/status` until status is `confirmed`
+5. Call `POST /api/v1/wechat/qrcode/confirm` to save credentials and enable the channel
+
+### Option B: Manual Configuration
+
+Add to `thumbelina.yaml`:
+```yaml
+channels:
+  wechat:
+    enabled: true
+    bot_token: "your_bot_token"
+    ilink_bot_id: "your_bot_id"
+    ilink_user_id: "your_user_id"
+    ilink_base_url: "https://ilinkai.weixin.qq.com"
+```
 
 ## Development
 
@@ -320,8 +343,10 @@ channels:
     allowed_groups: []
   wechat:
     enabled: false
-    weclaw_api_url: "http://127.0.0.1:18011"
-    weclaw_token: ""
+    bot_token: ""             # Bot token from iLink
+    ilink_bot_id: ""          # iLink bot ID
+    ilink_user_id: ""         # iLink user ID
+    ilink_base_url: "https://ilinkai.weixin.qq.com"
     webhook_secret: ""
 
 plugin_dirs: []             # Directories to scan for plugins

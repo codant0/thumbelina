@@ -4,7 +4,18 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
+    <title>Thumbelina</title>
+    <script>
+      // Apply theme before render to avoid flash
+      (function() {
+        var stored = localStorage.getItem('thumbelina-theme');
+        if (stored && ['dark', 'light', 'warm'].indexOf(stored) !== -1) {
+          document.documentElement.setAttribute('data-theme', stored);
+        } else {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

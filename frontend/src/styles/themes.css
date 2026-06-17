@@ -1,0 +1,86 @@
+/* ===== Dark Theme (Default) ===== */
+[data-theme="dark"] {
+  --bg: #09090b;
+  --bg-surface: #111113;
+  --bg-elevated: #18181b;
+  --bg-hover: #1e1e22;
+  --bg-active: #27272a;
+  --text: #71717a;
+  --text-secondary: #52525b;
+  --text-primary: #d4d4d8;
+  --text-heading: #fafafa;
+  --border: #27272a;
+  --border-subtle: #1e1e22;
+  --accent: #818cf8;
+  --accent-hover: #a5b4fc;
+  --accent-muted: rgba(129, 140, 248, 0.12);
+  --accent-border: rgba(129, 140, 248, 0.25);
+  --success: #4ade80;
+  --success-muted: rgba(74, 222, 128, 0.10);
+  --warning: #fbbf24;
+  --warning-muted: rgba(251, 191, 36, 0.10);
+  --error: #f87171;
+  --error-muted: rgba(248, 113, 113, 0.10);
+  --user-bubble: #3b3b4f;
+  --user-bubble-text: #e4e4e7;
+  --assistant-bubble: var(--bg-elevated);
+  --assistant-bubble-text: var(--text-primary);
+}
+
+/* ===== Light Theme ===== */
+[data-theme="light"] {
+  --bg: #fafafa;
+  --bg-surface: #ffffff;
+  --bg-elevated: #f4f4f5;
+  --bg-hover: #e4e4e7;
+  --bg-active: #d4d4d8;
+  --text: #71717a;
+  --text-secondary: #a1a1aa;
+  --text-primary: #18181b;
+  --text-heading: #09090b;
+  --border: #e4e4e7;
+  --border-subtle: #f4f4f5;
+  --accent: #6366f1;
+  --accent-hover: #4f46e5;
+  --accent-muted: rgba(99, 102, 241, 0.10);
+  --accent-border: rgba(99, 102, 241, 0.30);
+  --success: #22c55e;
+  --success-muted: rgba(34, 197, 94, 0.12);
+  --warning: #eab308;
+  --warning-muted: rgba(234, 179, 8, 0.12);
+  --error: #ef4444;
+  --error-muted: rgba(239, 68, 68, 0.12);
+  --user-bubble: #6366f1;
+  --user-bubble-text: #ffffff;
+  --assistant-bubble: #f4f4f5;
+  --assistant-bubble-text: #18181b;
+}
+
+/* ===== Warm Theme ===== */
+[data-theme="warm"] {
+  --bg: #1a1614;
+  --bg-surface: #231f1c;
+  --bg-elevated: #2d2825;
+  --bg-hover: #38322e;
+  --bg-active: #443d38;
+  --text: #a09890;
+  --text-secondary: #786e65;
+  --text-primary: #d9cfc5;
+  --text-heading: #f5efe9;
+  --border: #3d3630;
+  --border-subtle: #2d2825;
+  --accent: #e09f6a;
+  --accent-hover: #f0b88a;
+  --accent-muted: rgba(224, 159, 106, 0.15);
+  --accent-border: rgba(224, 159, 106, 0.30);
+  --success: #8cc084;
+  --success-muted: rgba(140, 192, 132, 0.12);
+  --warning: #e0b46a;
+  --warning-muted: rgba(224, 180, 106, 0.12);
+  --error: #d08080;
+  --error-muted: rgba(208, 128, 128, 0.12);
+  --user-bubble: #4a3d35;
+  --user-bubble-text: #f5efe9;
+  --assistant-bubble: var(--bg-elevated);
+  --assistant-bubble-text: var(--text-primary);
+}

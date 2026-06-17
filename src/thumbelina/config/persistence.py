@@ -34,7 +34,7 @@ def _build_dict(config: AppConfig) -> dict[str, Any]:
 
 
 def _strip_secrets(obj: Any) -> None:
-    """Recursively remove sensitive keys from a nested dict in-place."""
+    """Recursively blank out sensitive keys in a nested dict in-place."""
     if isinstance(obj, dict):
         for key in list(obj.keys()):
             if key in _SENSITIVE_FIELDS:

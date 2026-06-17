@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable, Coroutine
 from typing import Any
 
 from thumbelina.agent.graph import ThumbelinaAgent
@@ -43,6 +44,7 @@ class WeChatChannel(Channel):
         self,
         config: WeChatChannelConfig,
         agent: ThumbelinaAgent,
+        on_message_callback: Callable[[str, str, str, str], Coroutine[Any, Any, None]] | None = None,
     ) -> None:
         self._config = config
         self._agent = agent
@@ -50,6 +52,7 @@ class WeChatChannel(Channel):
         self._poll_task: asyncio.Task[None] | None = None
         self._sync_buffer: str = ""
         self._poll_count: int = 0
+        self._on_message_callback = on_message_callback
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -217,6 +220,7 @@ class WeChatChannel(Channel):
         user_id: str,
         text: str,
         msg_type: str = "text",
+        source: str = "wechat",
     ) -> str:
         """Process an incoming message and return an agent response.
 
@@ -230,6 +234,8 @@ class WeChatChannel(Channel):
             Message content.
         msg_type:
             Message type (``text``, ``voice``, ``image``).
+        source:
+            Origin of the message (``wechat`` or ``frontend``).
 
         Returns
         -------
@@ -252,6 +258,16 @@ class WeChatChannel(Channel):
             )
             response = await self._agent.run(text)
             logger.debug("Agent returned %d chars for user %s", len(response), user_id)
+
+            # Notify connected WebSocket clients
+            if self._on_message_callback and response:
+                cid = self._agent.current_conversation_id or ""
+                logger.info("Broadcasting message to WebSocket clients (source=%s, conv=%s)", source, cid)
+                try:
+                    await self._on_message_callback(cid, text, response, source)
+                except Exception:
+                    logger.warning("on_message_callback failed", exc_info=True)
+
             return response
         except Exception:
             logger.exception("Agent failed to process message from %s", user_id)

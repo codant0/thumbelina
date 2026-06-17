@@ -1,3 +1,5 @@
+import { ThemeToggle } from './ThemeToggle'
+
 export type Page = 'chat' | 'tasks' | 'memory' | 'dream' | 'settings' | 'plugins' | 'channels'
 
 interface HeaderProps {
@@ -34,6 +36,7 @@ export function Header({ activePage, onNavigate }: HeaderProps) {
           </button>
         ))}
       </nav>
+      <ThemeToggle />
     </header>
   )
 }

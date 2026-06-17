@@ -4,7 +4,13 @@ This package provides Pydantic-based configuration with YAML file support
 and environment variable overrides.
 """
 
-from thumbelina.config.loader import load_config, resolve_config_path
+from thumbelina.config.config_repo import ConfigRepository
+from thumbelina.config.loader import (
+    import_yaml_to_db,
+    load_config,
+    load_config_from_db,
+    resolve_config_path,
+)
 from thumbelina.config.models import (
     AppConfig,
     ChannelsConfig,
@@ -20,13 +26,16 @@ from thumbelina.config.runtime_manager import RuntimeConfigManager
 __all__ = [
     "AppConfig",
     "ChannelsConfig",
+    "ConfigRepository",
     "LLMConfig",
     "LoggingConfig",
     "MemoryConfig",
     "QQChannelConfig",
     "RuntimeConfigManager",
     "WeChatChannelConfig",
+    "import_yaml_to_db",
     "load_config",
+    "load_config_from_db",
     "resolve_config_path",
     "save_config",
 ]

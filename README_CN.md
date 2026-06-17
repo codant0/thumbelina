@@ -19,7 +19,7 @@
 - **任务调度器** — 自然语言时间解析（中英文），支持条件触发和通知广播
 - **插件系统** — 注册和管理工具、技能、渠道、提供商，支持沙箱验证和依赖解析
 - **QQ Bot 频道** — 通过 QQ 官方 Bot SDK（`qq-botpy`）接入，支持频道、群聊和私聊
-- **微信 ClawBot 频道** — 通过 WeClaw HTTP 桥接接入个人微信号
+- **微信频道** — 通过 iLink 直连长轮询接入个人微信号，支持扫码登录
 - **梦境可视化** — 技能演化时间线、成熟度图表、技能云和分类统计
 - **流式 WebSocket** — 通过 WebSocket 连接实现实时逐 token 流式响应
 - **安全机制** — JWT 认证（HS256）、滑动窗口限流、基于角色的访问控制、数据导出/删除
@@ -65,9 +65,12 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
 配置优先级（从高到低）：
-1. 环境变量（`THUMBELINA_*`，双下划线嵌套，如 `THUMBELINA_LLM__PROVIDER`）
-2. YAML 配置文件（`thumbelina.yaml`）
-3. `thumbelina.yaml.example` 中的默认值
+1. 数据库覆盖（通过 `POST /api/v1/config` 或 `PUT /api/v1/config/llm` 设置）
+2. 环境变量（`THUMBELINA_*`，双下划线嵌套，如 `THUMBELINA_LLM__PROVIDER`）
+3. YAML 配置文件（`thumbelina.yaml`）
+4. `thumbelina.yaml.example` 中的默认值
+
+敏感字段（API 密钥、Token 等）不存储在数据库中，请使用环境变量。
 
 ### 运行
 
@@ -191,14 +194,17 @@ thumbelina/
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/health` | 健康检查 |
+| GET | `/health` | 健康检查（返回版本 + 数据库状态） |
 | POST | `/api/v1/chat` | 发送消息，获取代理响应 |
 | GET | `/api/v1/conversations` | 列出所有对话 |
+| POST | `/api/v1/conversations` | 创建新对话 |
 | GET | `/api/v1/conversations/search/{query}` | 跨对话搜索消息 |
 | GET | `/api/v1/conversations/{id}` | 获取对话详情及消息 |
 | DELETE | `/api/v1/conversations/{id}` | 删除对话 |
 | GET | `/api/v1/tasks` | 列出定时任务 |
+| POST | `/api/v1/tasks/{id}/cancel` | 取消定时任务 |
 | GET | `/api/v1/subagents` | 列出活跃子代理 |
+| POST | `/api/v1/subagents/{id}/cancel` | 取消运行中的子代理 |
 | GET | `/api/v1/skills` | 列出已提取技能 |
 | GET | `/api/v1/skills/stats` | 技能使用统计（梦境可视化） |
 | GET | `/api/v1/compositions` | 列出技能组合 |
@@ -213,10 +219,17 @@ thumbelina/
 | GET | `/api/v1/plugins/dependencies` | 插件依赖图 |
 | GET | `/api/v1/config` | 获取当前配置快照 |
 | POST | `/api/v1/config` | 更新运行时配置 |
+| PUT | `/api/v1/config/llm` | 热切换 LLM 提供商/模型 |
+| PUT | `/api/v1/config/channels/{name}` | 热切换频道配置 |
+| GET | `/api/v1/config/export` | 从数据库导出配置 |
+| POST | `/api/v1/config/reload` | 从数据库重新加载配置 |
 | GET | `/api/v1/qq/status` | 检查 QQ Bot 连接状态 |
-| POST | `/api/v1/wechat/incoming` | WeClaw webhook（接收微信消息） |
-| POST | `/api/v1/wechat/send` | 通过 WeClaw 发送消息 |
-| GET | `/api/v1/wechat/status` | 检查 WeClaw 连接状态 |
+| POST | `/api/v1/wechat/incoming` | iLink webhook（接收微信消息） |
+| POST | `/api/v1/wechat/send` | 通过 iLink 发送消息 |
+| GET | `/api/v1/wechat/status` | 检查 iLink 连接状态 |
+| POST | `/api/v1/wechat/qrcode` | 获取微信登录二维码 |
+| GET | `/api/v1/wechat/qrcode/status` | 轮询二维码扫描状态 |
+| POST | `/api/v1/wechat/qrcode/confirm` | 确认登录并启用频道 |
 | WS | `/ws/chat` | WebSocket 流式实时聊天 |
 
 ## QQ Bot 接入
@@ -233,20 +246,30 @@ thumbelina/
    ```
 4. 启动 Thumbelina：`thumbelina-serve`
 
-## 微信 ClawBot 接入
+## 微信接入
 
-1. 安装 WeClaw：`curl -sSL https://raw.githubusercontent.com/fastclaw-ai/weclaw/main/install.sh | sh`
-2. 配置 WeClaw 指向 Thumbelina（参见 `docs/plans/weclaw-config.example.json`）
-3. 在 `thumbelina.yaml` 中添加：
-   ```yaml
-   channels:
-     wechat:
-       enabled: true
-       weclaw_api_url: "http://127.0.0.1:18011"
-   ```
-4. 启动 WeClaw：`weclaw start`
-5. 启动 Thumbelina：`thumbelina-serve`
-6. 微信扫码登录，开始对话
+微信集成直接使用 iLink API，无需额外的 sidecar 进程。
+
+### 方式 A：扫码登录（推荐）
+
+1. 启动 Thumbelina：`thumbelina-serve`
+2. 调用 `POST /api/v1/wechat/qrcode` 获取二维码
+3. 微信扫码
+4. 轮询 `GET /api/v1/wechat/qrcode/status` 直到状态为 `confirmed`
+5. 调用 `POST /api/v1/wechat/qrcode/confirm` 保存凭据并启用频道
+
+### 方式 B：手动配置
+
+在 `thumbelina.yaml` 中添加：
+```yaml
+channels:
+  wechat:
+    enabled: true
+    bot_token: "your_bot_token"
+    ilink_bot_id: "your_bot_id"
+    ilink_user_id: "your_user_id"
+    ilink_base_url: "https://ilinkai.weixin.qq.com"
+```
 
 ## 开发指南
 
@@ -320,8 +343,10 @@ channels:
     allowed_groups: []
   wechat:
     enabled: false
-    weclaw_api_url: "http://127.0.0.1:18011"
-    weclaw_token: ""
+    bot_token: ""             # iLink 机器人令牌
+    ilink_bot_id: ""          # iLink 机器人 ID
+    ilink_user_id: ""         # iLink 用户 ID
+    ilink_base_url: "https://ilinkai.weixin.qq.com"
     webhook_secret: ""
 
 plugin_dirs: []             # 插件扫描目录

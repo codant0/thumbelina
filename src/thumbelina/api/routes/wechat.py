@@ -249,21 +249,46 @@ async def confirm_wechat_login(
 
     if runtime_manager is not None and agent is not None:
         try:
+            from thumbelina.api.websocket import broadcast_chat_message
+
+            async def _on_wechat_message(cid: str, user_text: str, response: str, source: str = "wechat") -> None:
+                await broadcast_chat_message({
+                    "channel_message": {
+                        "channel": "wechat",
+                        "conversation_id": cid,
+                        "user_message": user_text,
+                        "response": response,
+                        "source": source,
+                    }
+                })
+
             connected = await runtime_manager.swap_channel(
                 channel_name="wechat",
                 new_config=new_channel_config,
                 app_state=request.app.state,
                 agent=agent,
+                on_message_callback=_on_wechat_message,
             )
         except Exception:
             logger.warning(
                 "Failed to auto-start WeChat channel after login",
                 exc_info=True,
             )
-            # Still mark as enabled in config even if start failed
-            config.channels.wechat.enabled = True
+            # swap_channel already persists the config before attempting to
+            # start, so ilink_bot_id is saved even on failure.  Nothing more
+            # to do here — the channel will retry on next restart.
     else:
-        config.channels.wechat.enabled = True
+        # No runtime manager — update in-memory config and persist directly
+        # so ilink_bot_id survives restart.
+        config.channels.wechat = new_channel_config
+        config_path = getattr(request.app.state, "config_path", None)
+        if config_path is not None:
+            try:
+                from thumbelina.config.persistence import save_config
+
+                save_config(config, config_path)
+            except Exception:
+                logger.warning("Failed to persist config after login", exc_info=True)
 
     logger.info(
         "WeChat login confirmed for bot %s — channel enabled, connected=%s",
