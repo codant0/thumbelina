@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Thumbelina is a personal AI agent assistant built with **FastAPI** (backend) and **LangGraph** (agent framework), with a **React** frontend. It features a model-agnostic LLM provider layer, conversation memory with skill extraction, skill composition, user profiling, sub-agent orchestration, task scheduling with conditional triggers, a plugin system with sandbox and dependency resolution, QQ Bot and WeChat ClawBot channels, and built-in tools.
+Thumbelina is a personal AI agent assistant built with **FastAPI** (backend) and **LangGraph** (agent framework), with a **React** frontend. It features a model-agnostic LLM provider layer, conversation memory with skill extraction, skill composition, user profiling, sub-agent orchestration, task scheduling with conditional triggers, a plugin system with sandbox and dependency resolution, QQ Bot and WeChat (via weixin-bot) channels, and built-in tools.
 
 ## Common Commands
 
@@ -92,7 +92,7 @@ SQLAlchemy ORM (`Conversation`, `Message`, `SkillRecord`, `CompositionRecord`, `
 
 - `Channel` ABC — `start()`, `stop()`, `send_message()`, `set_handler()`
 - `QQChannel` — wraps `botpy.Client` (qq-botpy SDK), runs in daemon thread, handles guild/group/C2C messages
-- `WeChatChannel` — uses WeClaw HTTP API bridge (`httpx.AsyncClient`), webhook receiver at `/api/v1/wechat/incoming`
+- `WeChatChannel` — direct iLink long-polling via [weixin-bot](https://github.com/epiral/weixin-bot) protocol, QR code login, `context_token` management
 - `config.py` — `QQChannelConfig`, `WeChatChannelConfig`, `ChannelsConfig`
 
 ### Skills System (`skills/`)
@@ -140,4 +140,4 @@ SQLAlchemy ORM (`Conversation`, `Message`, `SkillRecord`, `CompositionRecord`, `
 
 Example config in `thumbelina.yaml.example`. Copy to `thumbelina.yaml` and edit with your settings. LLM provider defaults to `openai/gpt-4o`. Memory defaults to `sqlite:///thumbelina.db`. API key resolved from `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` env vars.
 
-Channel configuration: `channels.qq` (qq-botpy SDK) and `channels.wechat` (WeClaw HTTP bridge) are disabled by default. Enable by setting `enabled: true` and providing required credentials.
+Channel configuration: `channels.qq` (qq-botpy SDK) and `channels.wechat` (weixin-bot protocol) are disabled by default. Enable by setting `enabled: true` and providing required credentials. WeChat channel follows the [weixin-bot protocol specification](https://github.com/epiral/weixin-bot/blob/main/docs/protocol-spec.md).

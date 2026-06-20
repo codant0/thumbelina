@@ -21,7 +21,7 @@ def config_with_channels():
     config.channels.qq.app_id = "test-qq-id"
     config.channels.qq.allowed_guilds = ["guild-1"]
     config.channels.wechat.enabled = True
-    config.channels.wechat.weclaw_api_url = "http://localhost:18011"
+    config.channels.wechat.ilink_bot_id = "test-bot-id"
     return config
 
 
@@ -45,7 +45,7 @@ class TestConfigIncludesChannels:
         assert channels["qq"]["enabled"] is False
         assert channels["wechat"]["enabled"] is False
         assert "app_secret" not in channels["qq"]
-        assert "weclaw_token" not in channels["wechat"]
+        assert "bot_token" not in channels["wechat"]
         assert "webhook_secret" not in channels["wechat"]
 
 

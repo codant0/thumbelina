@@ -1,17 +1,20 @@
 """WeChat QR code login via iLink API.
 
 Calls WeChat's public iLink endpoints to obtain a QR code and poll
-for scan status.  On success the credentials are saved into
-``~/.weclaw/accounts/`` so that WeClaw can pick them up directly.
+for scan status. On success the credentials are saved into
+``~/.weclaw/accounts/``.
+
+Protocol reference: https://github.com/epiral/weixin-bot/blob/main/docs/protocol-spec.md
 """
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import random
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -99,7 +102,10 @@ class WeChatQRCodeManager:
             If the iLink API is unreachable.
         """
         client = await self._get_client()
-        resp = await client.get(_QR_CODE_URL)
+        resp = await client.get(
+            _QR_CODE_URL,
+            headers={"SKRouteTag": "1001"},
+        )
         resp.raise_for_status()
         data = resp.json()
 
@@ -131,7 +137,13 @@ class WeChatQRCodeManager:
             If the iLink API returns a non-2xx status.
         """
         client = await self._get_client()
-        resp = await client.get(_QR_STATUS_URL + qrcode)
+        resp = await client.get(
+            _QR_STATUS_URL + qrcode,
+            headers={
+                "SKRouteTag": "1001",
+                "iLink-App-ClientVersion": "1",
+            },
+        )
         resp.raise_for_status()
         data = resp.json()
 
@@ -225,8 +237,9 @@ class ILMessage:
     """1=User, 2=Bot."""
     message_state: int
     """0=New, 1=Generating, 2=Finish."""
-    context_token: str
-    items: list[ILMessageItem]
+    context_token: str = ""
+    """Routing anchor for replies - must be passed back verbatim."""
+    items: list[ILMessageItem] = field(default_factory=list)
 
 
 # ── iLink Client ───────────────────────────────────────────────────
@@ -237,8 +250,8 @@ _DEFAULT_ILINK_BASE = "https://ilinkai.weixin.qq.com"
 class ILinkClient:
     """Direct WeChat iLink API client for long-polling and sending.
 
-    This replaces the WeClaw HTTP bridge by calling iLink endpoints
-    directly, using credentials obtained from the QR code login flow.
+    Implements the weixin-bot protocol for direct iLink API communication.
+    See: https://github.com/epiral/weixin-bot/blob/main/docs/protocol-spec.md
     """
 
     def __init__(
@@ -253,14 +266,22 @@ class ILinkClient:
         self.ilink_user_id = ilink_user_id
         self.base_url = base_url.rstrip("/")
         self._client: httpx.AsyncClient | None = None
-        self._uin = str(random.randint(100000000, 999999999))
+        # Generate X-WECHAT-UIN: base64 of random uint32 as decimal string
+        random_uin = str(random.randint(100000000, 999999999))
+        self._uin = base64.b64encode(random_uin.encode()).decode()
+
+    def _generate_uin(self) -> str:
+        """Generate a new X-WECHAT-UIN for each request (per protocol spec)."""
+        random_uin = str(random.randint(100000000, 999999999))
+        return base64.b64encode(random_uin.encode()).decode()
 
     def _headers(self) -> dict[str, str]:
         return {
             "Content-Type": "application/json",
             "AuthorizationType": "ilink_bot_token",
             "Authorization": f"Bearer {self.bot_token}",
-            "X-WECHAT-UIN": self._uin,
+            "X-WECHAT-UIN": self._generate_uin(),
+            "SKRouteTag": "1001",
         }
 
     # ── Receive (long-poll) ────────────────────────────────────────
@@ -273,16 +294,30 @@ class ILinkClient:
         Returns ``(messages, new_sync_buffer)``.
         """
         client = await self._get_client()
+
+        # Per protocol spec: use get_updates_buf and base_info
+        request_body = {
+            "get_updates_buf": sync_buffer,
+            "base_info": {
+                "bot_id": self.ilink_bot_id,
+                "user_id": self.ilink_user_id,
+            },
+        }
+
         resp = await client.post(
             f"{self.base_url}/ilink/bot/getupdates",
-            json={"sync_buffer": sync_buffer},
+            json=request_body,
             headers=self._headers(),
         )
 
         # iLink returns 200 even on auth errors — check the JSON body
         resp.raise_for_status()
         data = resp.json()
-        errcode = data.get("errcode", 0)
+
+        # Check for errors (protocol uses "ret" field)
+        ret = data.get("ret", 0)
+        errcode = data.get("errcode", ret)  # Support both formats
+
         if errcode == -14:
             logger.error(
                 "iLink session expired (errcode=-14) — re-authenticate via QR code"
@@ -296,11 +331,12 @@ class ILinkClient:
             logger.warning(
                 "iLink getupdates returned errcode=%s: %s",
                 errcode,
-                data.get("errmsg", ""),
+                data.get("errmsg", data.get("retmsg", "")),
             )
 
-        new_sync = data.get("sync_buffer", sync_buffer)
-        raw_msgs = data.get("messages") or []
+        # Protocol uses "get_updates_buf" for cursor
+        new_sync = data.get("get_updates_buf", data.get("sync_buffer", sync_buffer))
+        raw_msgs = data.get("msgs", data.get("messages")) or []
         messages: list[ILMessage] = []
 
         for raw in raw_msgs:
@@ -327,33 +363,58 @@ class ILinkClient:
 
     # ── Send ───────────────────────────────────────────────────────
 
-    async def send_message(self, user_id: str, text: str) -> dict[str, Any]:
-        """Send a text reply to a WeChat user via iLink sendmessage."""
+    async def send_message(
+        self,
+        user_id: str,
+        text: str,
+        context_token: str = "",
+    ) -> dict[str, Any]:
+        """Send a text reply to a WeChat user via iLink sendmessage.
+
+        Parameters
+        ----------
+        user_id:
+            Recipient's WeChat user ID.
+        text:
+            Message text content.
+        context_token:
+            Context token from the incoming message (required by protocol).
+        """
         client = await self._get_client()
+        client_id = f"weclaw-{int(time.time())}-{random.randint(1000, 9999)}"
+
+        # Per protocol spec: msg structure with context_token
+        msg_body = {
+            "from_user_id": self.ilink_bot_id,
+            "to_user_id": user_id,
+            "client_id": client_id,
+            "message_type": 2,  # BOT message type
+            "message_state": 2,  # FINISH state
+            "item_list": [
+                {"type": 1, "text_item": {"text": text}},
+            ],
+        }
+
+        # context_token is mandatory for message delivery
+        if context_token:
+            msg_body["context_token"] = context_token
+
         resp = await client.post(
             f"{self.base_url}/ilink/bot/sendmessage",
-            json={
-                "msg": {
-                    "from_user_id": self.ilink_bot_id,
-                    "to_user_id": user_id,
-                    "client_id": f"weclaw-{int(time.time())}",
-                    "message_type": 1,
-                    "message_state": 2,
-                    "item_list": [
-                        {"type": 1, "text_item": {"text": text}},
-                    ],
-                },
-            },
+            json={"msg": msg_body},
             headers=self._headers(),
         )
         resp.raise_for_status()
         data = resp.json()
-        errcode = data.get("errcode", 0)
+
+        # Check for errors
+        ret = data.get("ret", 0)
+        errcode = data.get("errcode", ret)
         if errcode != 0:
             logger.warning(
                 "iLink sendmessage returned errcode=%s: %s",
                 errcode,
-                data.get("errmsg", ""),
+                data.get("errmsg", data.get("retmsg", "")),
             )
         return data  # type: ignore[no-any-return]
 

@@ -37,4 +37,4 @@ channels:
     ilink_bot_id: ""           # iLink bot ID
     ilink_user_id: ""          # iLink user ID
     ilink_base_url: "https://ilinkai.weixin.qq.com"
-    webhook_secret: ""
+    # Protocol reference: https://github.com/epiral/weixin-bot/blob/main/docs/protocol-spec.md

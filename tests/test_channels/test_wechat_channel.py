@@ -224,10 +224,15 @@ class TestWeChatChannelSend:
         mock_ilink.send_message = AsyncMock(return_value={"status": "ok"})
         ch._ilink = mock_ilink
 
-        result = await ch.send_message("wxid_user1", "Hello!")
-
-        mock_ilink.send_message.assert_awaited_once_with("wxid_user1", "Hello!")
+        # With context_token
+        result = await ch.send_message("wxid_user1", "Hello!", context_token="ctx-123")
+        mock_ilink.send_message.assert_awaited_once_with("wxid_user1", "Hello!", "ctx-123")
         assert result == {"status": "ok"}
+
+        # Without context_token (uses empty string default)
+        mock_ilink.send_message.reset_mock()
+        result = await ch.send_message("wxid_user1", "Hello!")
+        mock_ilink.send_message.assert_awaited_once_with("wxid_user1", "Hello!", "")
 
 
 # ------------------------------------------------------------------

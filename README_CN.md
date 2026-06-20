@@ -19,7 +19,7 @@
 - **任务调度器** — 自然语言时间解析（中英文），支持条件触发和通知广播
 - **插件系统** — 注册和管理工具、技能、渠道、提供商，支持沙箱验证和依赖解析
 - **QQ Bot 频道** — 通过 QQ 官方 Bot SDK（`qq-botpy`）接入，支持频道、群聊和私聊
-- **微信频道** — 通过 iLink 直连长轮询接入个人微信号，支持扫码登录
+- **微信频道** — 通过 [weixin-bot](https://github.com/epiral/weixin-bot) 协议接入个人微信号，支持扫码登录
 - **梦境可视化** — 技能演化时间线、成熟度图表、技能云和分类统计
 - **流式 WebSocket** — 通过 WebSocket 连接实现实时逐 token 流式响应
 - **安全机制** — JWT 认证（HS256）、滑动窗口限流、基于角色的访问控制、数据导出/删除
@@ -156,7 +156,7 @@ thumbelina/
 │   ├── agent/               # LangGraph 代理（graph, nodes, edges, state）
 │   ├── api/                 # FastAPI 应用工厂、路由、WebSocket、依赖注入
 │   ├── backup/              # JSON 备份管理器
-│   ├── channels/            # IM 频道（QQ Bot、微信 ClawBot）
+│   ├── channels/            # IM 频道（QQ Bot、微信 via weixin-bot）
 │   ├── cli/                 # Click CLI + prompt_toolkit 聊天会话
 │   ├── config/              # YAML + 环境变量配置加载、Pydantic 模型
 │   ├── llm/                 # LLM 提供商抽象层（OpenAI, Anthropic, Ollama）
@@ -248,7 +248,7 @@ thumbelina/
 
 ## 微信接入
 
-微信集成直接使用 iLink API，无需额外的 sidecar 进程。
+微信集成使用 [weixin-bot](https://github.com/epiral/weixin-bot) 协议直接调用 iLink API，无需额外的 sidecar 进程。
 
 ### 方式 A：扫码登录（推荐）
 
@@ -270,6 +270,14 @@ channels:
     ilink_user_id: "your_user_id"
     ilink_base_url: "https://ilinkai.weixin.qq.com"
 ```
+
+### 协议参考
+
+本实现遵循 [weixin-bot 协议规范](https://github.com/epiral/weixin-bot/blob/main/docs/protocol-spec.md)：
+- 通过 `POST /ilink/bot/getupdates` 进行长轮询（约 35 秒）
+- `context_token` 是消息投递的必要条件（自动管理）
+- 会话过期（`errcode=-14`）需要重新扫码认证
+- `X-WECHAT-UIN` 必须是 base64 编码（按协议规范）
 
 ## 开发指南
 
@@ -367,7 +375,7 @@ logging:
 | 认证 | PyJWT (HS256) |
 | CLI | Click, prompt_toolkit |
 | 前端 | React 19, TypeScript, Vite |
-| IM 频道 | qq-botpy（QQ）、WeClaw（微信） |
+| IM 频道 | qq-botpy（QQ）、weixin-bot（微信） |
 | 测试 | pytest, pytest-asyncio, Vitest |
 | 代码检查 | Ruff, ESLint, mypy |
 | 容器 | Docker, docker-compose |

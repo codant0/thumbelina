@@ -1,9 +1,11 @@
 """WeChat channel — direct iLink long-polling integration.
 
 Connects directly to WeChat's iLink bot API to receive messages via
-long-polling and send replies, without requiring the WeClaw sidecar.
+long-polling and send replies, using the weixin-bot protocol.
 Credentials are obtained from the QR code login flow and stored in
 ``~/.weclaw/accounts/``.
+
+Protocol reference: https://github.com/epiral/weixin-bot/blob/main/docs/protocol-spec.md
 
 All WeChat messages are routed to a single pinned conversation named
 "微信聊天" so they appear at the top of the conversation list in the
@@ -53,6 +55,8 @@ class WeChatChannel(Channel):
         self._sync_buffer: str = ""
         self._poll_count: int = 0
         self._on_message_callback = on_message_callback
+        self._last_wechat_user_id: str | None = None  # Track last WeChat user for responses
+        self._last_context_token: str = ""  # Track context_token for replies
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -187,7 +191,12 @@ class WeChatChannel(Channel):
     # Sending
     # ------------------------------------------------------------------
 
-    async def send_message(self, user_id: str, text: str) -> dict[str, Any]:
+    async def send_message(
+        self,
+        user_id: str,
+        text: str,
+        context_token: str = "",
+    ) -> dict[str, Any]:
         """Send a text message to a WeChat user via iLink sendmessage.
 
         Parameters
@@ -196,6 +205,9 @@ class WeChatChannel(Channel):
             WeChat user identifier.
         text:
             Message body.
+        context_token:
+            Context token from the incoming message (required by protocol).
+            If not provided, uses the last received context_token.
 
         Returns
         -------
@@ -209,7 +221,17 @@ class WeChatChannel(Channel):
         """
         if self._ilink is None:
             raise RuntimeError("WeChatChannel has not been started")
-        return await self._ilink.send_message(user_id, text)
+
+        # Use provided context_token or fall back to last received one
+        effective_token = context_token or self._last_context_token
+        if not effective_token:
+            logger.warning(
+                "No context_token available for send_message to %s — "
+                "message may not be delivered",
+                user_id,
+            )
+
+        return await self._ilink.send_message(user_id, text, effective_token)
 
     # ------------------------------------------------------------------
     # Receiving (called by the poll loop)
@@ -259,8 +281,9 @@ class WeChatChannel(Channel):
             response = await self._agent.run(text)
             logger.debug("Agent returned %d chars for user %s", len(response), user_id)
 
-            # Notify connected WebSocket clients
-            if self._on_message_callback and response:
+            # Notify connected WebSocket clients (only for WeChat messages, not frontend)
+            # Frontend already receives the response directly via WebSocket
+            if self._on_message_callback and response and source == "wechat":
                 cid = self._agent.current_conversation_id or ""
                 logger.info("Broadcasting message to WebSocket clients (source=%s, conv=%s)", source, cid)
                 try:
@@ -383,6 +406,10 @@ class WeChatChannel(Channel):
             text,
         )
 
+        # Track the last WeChat user ID and context_token for sending responses
+        self._last_wechat_user_id = msg.from_user_id
+        self._last_context_token = msg.context_token  # Required by protocol
+
         try:
             response = await self.handle_incoming(
                 user_id=msg.from_user_id,
@@ -402,7 +429,11 @@ class WeChatChannel(Channel):
             return
 
         try:
-            await self.send_message(msg.from_user_id, response)
+            await self.send_message(
+                msg.from_user_id,
+                response,
+                context_token=msg.context_token,
+            )
             logger.info("Replied to %s (%.60s)", msg.from_user_id, response)
         except Exception:
             logger.exception(

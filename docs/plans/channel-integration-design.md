@@ -1,7 +1,8 @@
-# 频道集成设计文档 — QQ Bot & 微信 ClawBot
+# 频道集成设计文档 — QQ Bot & 微信 (weixin-bot)
 
 > 创建日期：2026-06-03
-> 状态：QQ Bot 已实施，微信 ClawBot 已实施
+> 更新日期：2026-06-20
+> 状态：QQ Bot 已实施，微信已实施（使用 weixin-bot 协议）
 
 ---
 
@@ -14,7 +15,7 @@ Thumbelina 已有 Web（FastAPI + WebSocket）和 CLI 两个交互频道。本�
 | 平台 | 方案 | 理由 |
 |------|------|------|
 | **QQ** | `qq-botpy` 官方 SDK（`tencent-connect/botpy`） | 腾讯官方 Python SDK，WebSocket 长连接，支持频道/群/私聊 |
-| **微信** | WeClaw HTTP 桥接（`fastclaw-ai/weclaw`） | 个人号接入，HTTP API 简单可靠，无需维护微信协议 |
+| **微信** | [weixin-bot](https://github.com/epiral/weixin-bot) 协议 | 直接调用 iLink API，无需 sidecar 进程，协议文档完善 |
 
 ---
 
@@ -27,7 +28,8 @@ src/thumbelina/channels/
 ├── __init__.py          # 导出所有频道
 ├── base.py              # Channel ABC
 ├── qq_channel.py        # QQ Bot 频道
-├── wechat_channel.py    # 微信 ClawBot 频道
+├── wechat_channel.py    # 微信频道（weixin-bot 协议）
+├── wechat_qrcode.py     # 微信 QR 码登录 + iLink 客户端
 └── config.py            # 频道配置模型
 ```
 
@@ -89,45 +91,65 @@ channels:
 
 **依赖**: `qq-botpy`（pip install qq-botpy）
 
-### 2.3 微信 ClawBot 频道
+### 2.3 微信频道（weixin-bot 协议）
 
-**接入方式**: WeClaw 桥接器（fastclaw-ai/weclaw），通过 HTTP API 通信
+**接入方式**: 直接调用 iLink API，使用 [weixin-bot](https://github.com/epiral/weixin-bot) 协议
+
+**协议参考**: https://github.com/epiral/weixin-bot/blob/main/docs/protocol-spec.md
 
 **架构**:
 ```
-用户发微信 → 微信服务器 → WeClaw 进程
-    → HTTP POST 到 Thumbelina webhook (/api/v1/wechat/incoming)
+用户发微信 → 微信服务器 → iLink API
+    → ILinkClient.getupdates() [长轮询 ~35s]
+    → WeChatChannel._process_message()
     → ThumbelinaAgent.run(text)
-    → HTTP POST 到 WeClaw API (127.0.0.1:18011/api/send)
+    → ILinkClient.send_message() [需要 context_token]
     → 用户收到回复
 ```
 
-**WeClaw 配置** (`~/.weclaw/config.json`):
+**关键协议细节**:
+
+1. **X-WECHAT-UIN**: 必须是 base64 编码的随机数字字符串
+2. **SKRouteTag**: 必须设置为 `1001`
+3. **context_token**: 每条消息都包含 context_token，回复时必须原样传回
+4. **get_updates_buf**: 长轮询游标，必须持久化，会话过期时清除
+5. **会话过期**: `errcode=-14` 表示会话过期，需要重新扫码认证
+
+**API 端点**:
+
+| 端点 | 方法 | 用途 |
+|------|------|------|
+| `/ilink/bot/get_bot_qrcode?bot_type=3` | GET | 获取登录二维码 |
+| `/ilink/bot/get_qrcode_status?qrcode=...` | GET | 轮询扫码状态 |
+| `/ilink/bot/getupdates` | POST | 长轮询接收消息 |
+| `/ilink/bot/sendmessage` | POST | 发送回复 |
+
+**请求头**:
+
 ```json
 {
-  "default_agent": "thumbelina",
-  "agents": {
-    "thumbelina": {
-      "type": "http",
-      "endpoint": "http://127.0.0.1:8000/api/v1/wechat/incoming",
-      "model": "thumbelina:main"
-    }
-  }
+  "Content-Type": "application/json",
+  "AuthorizationType": "ilink_bot_token",
+  "Authorization": "Bearer <bot_token>",
+  "X-WECHAT-UIN": "<base64_encoded_random_uint32>",
+  "SKRouteTag": "1001"
 }
 ```
 
-**Thumbelina 端**:
-- `POST /api/v1/wechat/incoming` — 接收 WeClaw 转发的消息
-- `POST /api/v1/wechat/send` — 主动发送消息（调用 WeClaw API）
+**凭据管理**:
+- 凭据保存在 `~/.weclaw/accounts/{bot_id}.json`
+- 包含 `bot_token`, `ilink_bot_id`, `ilink_user_id`, `baseurl`
+- 重启时自动加载保存的凭据
 
 **配置**:
 ```yaml
 channels:
   wechat:
     enabled: true
-    weclaw_api_url: "http://127.0.0.1:18011"
-    weclaw_token: ""  # 可选认证
-    webhook_secret: ""  # 可选 webhook 签名验证
+    bot_token: ""              # iLink bot token（扫码后自动填充）
+    ilink_bot_id: ""           # iLink bot ID
+    ilink_user_id: ""          # iLink user ID
+    ilink_base_url: "https://ilinkai.weixin.qq.com"
 ```
 
 **依赖**: `httpx`（已有）
@@ -136,9 +158,9 @@ channels:
 
 ## 三、集成到 Thumbelina
 
-### 3.1 配置模型扩展
+### 3.1 配置模型
 
-在 `config/models.py` 添加:
+在 `channels/config.py` 中定义:
 
 ```python
 class QQChannelConfig(BaseModel):
@@ -150,9 +172,11 @@ class QQChannelConfig(BaseModel):
 
 class WeChatChannelConfig(BaseModel):
     enabled: bool = False
-    weclaw_api_url: str = "http://127.0.0.1:18011"
-    weclaw_token: str = ""
-    webhook_secret: str = ""
+    bot_token: str = ""           # iLink bot token
+    ilink_bot_id: str = ""        # iLink bot ID
+    ilink_user_id: str = ""       # iLink user ID
+    ilink_base_url: str = "https://ilinkai.weixin.qq.com"
+    webhook_secret: str = ""      # 可选 webhook 签名验证
 
 class ChannelsConfig(BaseModel):
     qq: QQChannelConfig = QQChannelConfig()
@@ -161,38 +185,43 @@ class ChannelsConfig(BaseModel):
 
 ### 3.2 应用生命周期集成
 
-在 `api/app.py` 的 `lifespan()` 中:
+在 `api/app.py` 的 `lifespan()` 中，**先加载数据库配置，再初始化频道**:
 
 ```python
-# 初始化频道
-channels = []
-if config.channels.qq.enabled:
-    from thumbelina.channels.qq_channel import QQChannel
-    qq = QQChannel(config=config.channels.qq, agent=agent)
-    channels.append(qq)
-    await qq.start()
+# 1. 初始化配置仓库和运行时管理器
+config_repo = ConfigRepository(db_url=config.memory.database_url)
+runtime_manager = RuntimeConfigManager(config=config, config_repo=config_repo)
 
+# 2. 从数据库加载配置（覆盖 YAML）
+await runtime_manager.load_from_database()
+
+# 3. 初始化频道（使用数据库配置）
 if config.channels.wechat.enabled:
-    from thumbelina.channels.wechat_channel import WeChatChannel
-    wx = WeChatChannel(config=config.channels.wechat, agent=agent)
-    channels.append(wx)
-    # WeClaw webhook 路由在 create_app() 中注册
+    wechat_channel = WeChatChannel(config=config.channels.wechat, agent=agent)
+    await wechat_channel.start()
 
-yield
-
-for ch in channels:
-    await ch.stop()
-```
-
-### 3.3 CLI 集成
-
-在 `cli/chat.py` 中，频道作为可选的并行输入源:
-
-```python
 if config.channels.qq.enabled:
     qq_channel = QQChannel(config=config.channels.qq, agent=agent)
     await qq_channel.start()
 ```
+
+### 3.3 消息流
+
+#### 微信 → 前端
+
+1. 微信用户发送消息
+2. `ILinkClient.getupdates()` 接收消息
+3. `WeChatChannel._process_message()` 处理消息
+4. `handle_incoming()` 调用 agent 并广播到 WebSocket 客户端
+5. 响应通过 `send_message()` 发送回微信用户
+
+#### 前端 → 微信
+
+1. 前端通过 WebSocket 发送消息到微信对话
+2. WebSocket 处理器识别为微信对话
+3. 调用 `handle_incoming()` 获取 agent 响应
+4. 响应返回给前端 WebSocket 客户端
+5. 调用 `send_message()` 将响应发送到微信（包含 context_token）
 
 ---
 
@@ -207,35 +236,54 @@ if config.channels.qq.enabled:
 
 ### 4.2 微信消息
 
-- 接收: WeClaw 已处理语音转文字、图片等
-- 发送: 纯文本（WeClaw 自动处理 Markdown → 纯文本转换）
-- 媒体: WeClaw 支持图片/视频/文件，Thumbelina 可发送媒体 URL
+- 接收: 纯文本（`item_list` 中 `type=1` 的 `text_item.text`）
+- 发送: 纯文本，通过 `sendmessage` API
+- **context_token**: 必须从接收消息中获取并传回发送消息
+- **消息类型**: `message_type=1`（用户消息），`message_state=2`（已完成）
 
 ---
 
 ## 五、安全设计
 
 1. **QQ Bot**: AppSecret 保密，不提交到代码库
-2. **微信**: WeClaw 运行在本地，HTTP API 仅监听 127.0.0.1
-3. **Webhook 验证**: 可选的签名验证机制
+2. **微信**: bot_token 保密，不存储在数据库中，只保存在本地凭据文件
+3. **Webhook 验证**: 可选的 HMAC-SHA256 签名验证
 4. **消息限流**: 复用现有 `RateLimiter`
 
 ---
 
-## 六、实施计划
+## 六、错误处理
+
+### 6.1 会话过期（errcode=-14）
+
+当 iLink 返回 `errcode=-14` 时:
+1. 停止长轮询循环
+2. 清除内存中的 `context_token` 缓存
+3. 清除持久化的 `get_updates_buf`
+4. 提示用户重新扫码认证
+
+### 6.2 连接错误
+
+- 连接超时: 指数退避重试（最多 60 秒）
+- 连续 5 次错误: 记录错误并提示重新认证
+- 网络不可用: 持续重试直到恢复
+
+---
+
+## 七、实施计划
 
 | 步骤 | 内容 | 预计工作量 | 状态 |
 |------|------|-----------|------|
 | 1 | 创建 Channel ABC + 配置模型 | 小 | 已完成 |
 | 2 | 实现 QQChannel（qq-botpy） | 中 | 已完成 |
-| 3 | 实现 WeChatChannel（WeClaw HTTP） | 中 | 已完成 |
-| 4 | 集成到 app.py / chat.py | 小 | 已完成 |
-| 5 | 编写测试 | 中 | 已完成（52 个测试用例：29 QQ + 23 WeChat） |
+| 3 | 实现 WeChatChannel（weixin-bot 协议） | 中 | 已完成 |
+| 4 | 集成到 app.py（数据库配置优先） | 小 | 已完成 |
+| 5 | 编写测试 | 中 | 已完成（809 个测试用例） |
 | 6 | 更新文档 | 小 | 已完成 |
 
 ---
 
-## 七、使用方式
+## 八、使用方式
 
 ### QQ Bot
 
@@ -251,21 +299,33 @@ if config.channels.qq.enabled:
    ```
 4. 启动 Thumbelina: `thumbelina-serve`
 
-### 微信 ClawBot
+### 微信（weixin-bot 协议）
 
-1. 安装 WeClaw: `curl -sSL https://raw.githubusercontent.com/fastclaw-ai/weclaw/main/install.sh | sh`
-2. 配置 WeClaw 指向 Thumbelina:
-   ```bash
-   weclaw config set agents.thumbelina.type http
-   weclaw config set agents.thumbelina.endpoint http://127.0.0.1:8000/api/v1/wechat/incoming
-   ```
-3. 在 `thumbelina.yaml` 中配置:
-   ```yaml
-   channels:
-     wechat:
-       enabled: true
-       weclaw_api_url: "http://127.0.0.1:18011"
-   ```
-4. 启动 WeClaw: `weclaw start`
-5. 启动 Thumbelina: `thumbelina-serve`
-6. 微信扫码登录，开始对话
+#### 方式 A：扫码登录（推荐）
+
+1. 启动 Thumbelina: `thumbelina-serve`
+2. 调用 `POST /api/v1/wechat/qrcode` 获取二维码
+3. 微信扫码
+4. 轮询 `GET /api/v1/wechat/qrcode/status` 直到状态为 `confirmed`
+5. 调用 `POST /api/v1/wechat/qrcode/confirm` 保存凭据并启用频道
+
+#### 方式 B：手动配置
+
+在 `thumbelina.yaml` 中添加：
+```yaml
+channels:
+  wechat:
+    enabled: true
+    bot_token: "your_bot_token"
+    ilink_bot_id: "your_bot_id"
+    ilink_user_id: "your_user_id"
+    ilink_base_url: "https://ilinkai.weixin.qq.com"
+```
+
+---
+
+## 九、参考资料
+
+- [weixin-bot 项目](https://github.com/epiral/weixin-bot)
+- [weixin-bot 协议规范](https://github.com/epiral/weixin-bot/blob/main/docs/protocol-spec.md)
+- [QQ Bot SDK 文档](https://botpy.qq.com/)

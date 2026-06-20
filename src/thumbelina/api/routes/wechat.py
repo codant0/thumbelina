@@ -1,4 +1,8 @@
-"""WeChat ClawBot API routes."""
+"""WeChat iLink API routes.
+
+Uses weixin-bot protocol for direct iLink communication.
+See: https://github.com/epiral/weixin-bot/blob/main/docs/protocol-spec.md
+"""
 
 from __future__ import annotations
 
@@ -35,7 +39,7 @@ def _get_qrcode_manager():
 
 
 class WeChatIncomingMessage(BaseModel):
-    """Payload sent by WeClaw to Thumbelina's webhook."""
+    """Payload for incoming WeChat messages (webhook or direct)."""
 
     from_: str = Field(alias="from", description="Sender's WeChat user ID")
     text: str = Field(default="", description="Message content")
@@ -62,11 +66,11 @@ async def wechat_incoming(
     request: Request,
     channel: WeChatChannel = Depends(get_wechat_channel),
 ) -> JSONResponse:
-    """Webhook endpoint for WeClaw to deliver incoming WeChat messages.
+    """Webhook endpoint for incoming WeChat messages.
 
-    WeClaw POSTs messages here.  The endpoint validates an optional
-    signature, delegates to ``WeChatChannel.handle_incoming``, and
-    returns the agent response.
+    This endpoint can receive messages from external services or directly
+    from the iLink API. The endpoint validates an optional signature,
+    delegates to ``WeChatChannel.handle_incoming``, and returns the agent response.
     """
     # Optional webhook secret verification
     secret = channel._config.webhook_secret
@@ -89,24 +93,24 @@ async def wechat_send(
     body: WeChatSendMessage,
     channel: WeChatChannel = Depends(get_wechat_channel),
 ) -> JSONResponse:
-    """API endpoint to send a message to a WeChat user via WeClaw."""
+    """API endpoint to send a message to a WeChat user via iLink."""
     try:
         result = await channel.send_message(user_id=body.user_id, text=body.text)
     except Exception as exc:
-        logger.exception("Failed to send message via WeClaw")
+        logger.exception("Failed to send message via iLink")
         raise HTTPException(
             status_code=502,
-            detail=f"WeClaw send failed: {exc}",
+            detail=f"iLink send failed: {exc}",
         ) from exc
 
-    return JSONResponse(content={"sent": True, "weclaw_response": result})
+    return JSONResponse(content={"sent": True, "ilink_response": result})
 
 
 @router.get("/wechat/status")
 async def wechat_status(
     channel: WeChatChannel = Depends(get_wechat_channel),
 ) -> JSONResponse:
-    """Check WeClaw connection status."""
+    """Check iLink connection status."""
     status = await channel.check_status()
     return JSONResponse(content=status)
 
@@ -208,7 +212,7 @@ async def confirm_wechat_login(
     """Save credentials and enable the WeChat channel.
 
     The client calls this after receiving ``status=confirmed`` from the
-    poll endpoint.  This saves the credentials to ``~/.weclaw/accounts/``
+    poll endpoint. This saves the credentials to ``~/.weclaw/accounts/``
     and hot-enables the WeChat channel via the runtime config manager.
     """
     from thumbelina.channels.wechat_qrcode import WeChatCredentials

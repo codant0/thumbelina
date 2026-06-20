@@ -19,7 +19,7 @@ An AI-powered personal assistant built with [FastAPI](https://fastapi.tiangolo.c
 - **Task Scheduler** — Natural language time parsing (Chinese & English) with conditional triggers and notification broadcast
 - **Plugin System** — Register and manage tools, skills, channels, and providers with sandbox validation and dependency resolution
 - **QQ Bot Channel** — Connect via QQ official bot SDK (`qq-botpy`), supports guild, group, and private messages
-- **WeChat Channel** — Direct iLink long-polling integration for personal WeChat account, with QR code login
+- **WeChat Channel** — iLink long-polling integration for personal WeChat account via [weixin-bot](https://github.com/epiral/weixin-bot), with QR code login
 - **Dream Visualization** — Skill evolution timeline, maturity charts, skill cloud, and category statistics
 - **Streaming WebSocket** — Real-time token-by-token responses over WebSocket connections
 - **Security** — JWT authentication (HS256), sliding-window rate limiting, role-based access control, and data export/deletion
@@ -156,7 +156,7 @@ thumbelina/
 │   ├── agent/               # LangGraph agent (graph, nodes, edges, state)
 │   ├── api/                 # FastAPI app factory, routes, WebSocket, dependency injection
 │   ├── backup/              # JSON backup manager
-│   ├── channels/            # IM channels (QQ Bot, WeChat ClawBot)
+│   ├── channels/            # IM channels (QQ Bot, WeChat via weixin-bot)
 │   ├── cli/                 # Click CLI with prompt_toolkit chat session
 │   ├── config/              # YAML + env var config loader, Pydantic models
 │   ├── llm/                 # LLM provider abstraction (OpenAI, Anthropic, Ollama)
@@ -248,7 +248,7 @@ thumbelina/
 
 ## WeChat Setup
 
-WeChat integration uses the iLink API directly — no sidecar process required.
+WeChat integration uses the [weixin-bot](https://github.com/epiral/weixin-bot) protocol for direct iLink API communication — no sidecar process required.
 
 ### Option A: QR Code Login (Recommended)
 
@@ -270,6 +270,14 @@ channels:
     ilink_user_id: "your_user_id"
     ilink_base_url: "https://ilinkai.weixin.qq.com"
 ```
+
+### Protocol Reference
+
+This implementation follows the [weixin-bot protocol specification](https://github.com/epiral/weixin-bot/blob/main/docs/protocol-spec.md):
+- Long-polling via `POST /ilink/bot/getupdates` with ~35s hold
+- `context_token` is required for message delivery (managed automatically)
+- Session expiration (`errcode=-14`) requires re-authentication via QR code
+- `X-WECHAT-UIN` must be base64-encoded (per protocol spec)
 
 ## Development
 
@@ -367,7 +375,7 @@ logging:
 | Auth | PyJWT (HS256) |
 | CLI | Click, prompt_toolkit |
 | Frontend | React 19, TypeScript, Vite |
-| IM Channels | qq-botpy (QQ), WeClaw (WeChat) |
+| IM Channels | qq-botpy (QQ), weixin-bot (WeChat) |
 | Testing | pytest, pytest-asyncio, Vitest |
 | Linting | Ruff, ESLint, mypy |
 | Container | Docker, docker-compose |

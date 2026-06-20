@@ -26,8 +26,8 @@ class WeChatChannelConfig(BaseModel):
 
     After QR code login, the iLink credential fields (``bot_token``,
     ``ilink_bot_id``, ``ilink_user_id``) are populated automatically.
-    The channel uses these to long-poll iLink directly — no WeClaw
-    sidecar required.
+    The channel uses these to long-poll iLink directly using the
+    weixin-bot protocol — no sidecar required.
     """
 
     enabled: bool = Field(default=False, description="Enable WeChat channel")

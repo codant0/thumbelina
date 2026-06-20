@@ -128,6 +128,25 @@ async def websocket_chat(websocket: WebSocket) -> None:
                         # Send response back to the originating WebSocket client
                         await websocket.send_json({"response": response, "conversation_id": cid})
                         await websocket.send_json({"done": True, "conversation_id": cid})
+
+                        # Also send the response to WeChat via iLink
+                        logger.info("Sending frontend message response to WeChat")
+                        try:
+                            # Get the last WeChat user who sent a message
+                            last_wechat_user = getattr(wechat_channel, '_last_wechat_user_id', None)
+                            last_context_token = getattr(wechat_channel, '_last_context_token', '')
+
+                            if last_wechat_user:
+                                await wechat_channel.send_message(
+                                    last_wechat_user,
+                                    response,
+                                    context_token=last_context_token,
+                                )
+                                logger.info("Sent response to WeChat user %s", last_wechat_user)
+                            else:
+                                logger.warning("No WeChat user ID available to send response to")
+                        except Exception as send_exc:
+                            logger.warning("Failed to send response to WeChat: %s", send_exc)
                     except Exception as exc:
                         logger.warning("WeChat channel handle_incoming failed: %s", exc)
                         await websocket.send_json({"error": str(exc), "conversation_id": cid})
