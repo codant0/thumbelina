@@ -75,16 +75,19 @@ Sensitive fields (API keys, tokens) are never stored in the database — use env
 ### Running
 
 ```bash
-# Start the API server (default: http://127.0.0.1:8000)
-thumbelina-serve
+# Start both backend and frontend dev servers simultaneously
+python start_dev.py
+# Backend:  http://localhost:8000 (uvicorn with --reload)
+# Frontend: http://localhost:5173 (vite)
 
-# Or use the interactive CLI (`thumb` is an equivalent shortcut)
+# Or start them separately:
+thumbelina-serve                # API server only
+cd frontend && npm run dev      # Frontend only
+
+# Interactive CLI (`thumb` is an equivalent shortcut)
 thumbelina
 # or
 thumb
-
-# Start the frontend dev server
-cd frontend && npm run dev
 ```
 
 ### Docker

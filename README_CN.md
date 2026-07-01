@@ -75,16 +75,19 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 ### 运行
 
 ```bash
-# 启动 API 服务（默认：http://127.0.0.1:8000）
-thumbelina-serve
+# 同时启动后端和前端开发服务器
+python start_dev.py
+# 后端：http://localhost:8000（uvicorn，支持热重载）
+# 前端：http://localhost:5173（vite）
 
-# 或使用交互式 CLI（thumb 为等效快捷命令）
+# 或分别启动：
+thumbelina-serve                # 仅启动 API 服务
+cd frontend && npm run dev      # 仅启动前端
+
+# 交互式 CLI（thumb 为等效快捷命令）
 thumbelina
 # 或
 thumb
-
-# 启动前端开发服务器
-cd frontend && npm run dev
 ```
 
 ### Docker 部署
