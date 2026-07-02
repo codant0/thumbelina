@@ -1,21 +1,21 @@
 # LLM Endpoint Management — Backend Design
 
 > **Date:** 2026-07-02  
-> **Scope:** Backend API and services for multi-base_url management, model list fetching, and speed testing.  
-> **Strategy:** Start with OpenAI / OpenAI-compatible providers; define a clean extension point for Ollama and Anthropic later.
+> **Scope:** Backend API 与服务，用于多 base_url 管理、模型列表获取以及速度测试。  
+> **Strategy:** 从 OpenAI / OpenAI 兼容提供商开始；为后续支持 Ollama 与 Anthropic 定义清晰的扩展点。
 
 ---
 
 ## 1. Goal
 
-Allow users to:
+允许用户：
 
-1. Save multiple LLM base URLs (endpoints) per provider.
-2. Fetch the list of available models from a given endpoint after providing an API key.
-3. Run a lightweight latency / availability test against an endpoint.
-4. Select a default endpoint so that `PUT /config/llm` can reuse it implicitly.
+1. 为每个 provider 保存多个 LLM base URL（endpoint）。
+2. 在提供 API key 后，从指定 endpoint 获取可用模型列表。
+3. 对 endpoint 执行轻量级延迟 / 可用性测试。
+4. 选择默认 endpoint，使 `PUT /config/llm` 可以隐式复用。
 
-The first implementation targets **OpenAI-compatible endpoints only**. Ollama and Anthropic will be added later by implementing the same provider interface.
+首次实现仅针对 **OpenAI 兼容 endpoint**。Ollama 与 Anthropic 将在后续通过实现相同的 provider 接口加入。
 
 ---
 
@@ -59,7 +59,7 @@ The first implementation targets **OpenAI-compatible endpoints only**. Ollama an
 
 ### 3.1 `LLMProvider` abstract base (`llm/base.py`)
 
-Two new abstract methods:
+新增两个抽象方法：
 
 ```python
 from dataclasses import dataclass
@@ -90,26 +90,26 @@ class LLMProvider(ABC):
         ...
 ```
 
-Rules:
-- If a provider does not implement the method, raise `NotImplementedError`.
-- `base_url=None` means “use the provider’s configured default base URL”.
-- `api_key=None` means “use the provider’s configured API key”.
+规则：
+- 如果 provider 未实现该方法，则抛出 `NotImplementedError`。
+- `base_url=None` 表示“使用 provider 配置的默认 base URL”。
+- `api_key=None` 表示“使用 provider 配置的 API key”。
 
 ### 3.2 `OpenAIProvider` (`llm/openai.py`)
 
-Implements:
-- `list_models`: `GET {base_url}/v1/models`, read `data[].id`.
-- `speed_test`: `POST {base_url}/v1/chat/completions` with `max_tokens=1`, `messages=[{"role":"user","content":"hi"}]`. Measure TTFB and total time.
+实现：
+- `list_models`：`GET {base_url}/v1/models`，读取 `data[].id`。
+- `speed_test`：`POST {base_url}/v1/chat/completions`，参数为 `max_tokens=1`、`messages=[{"role":"user","content":"hi"}]`。测量 TTFB 与总耗时。
 
-Use `httpx.AsyncClient` directly for these calls so we do not depend on LangChain for non-chat operations.
+这些调用直接使用 `httpx.AsyncClient`，从而在非聊天场景下不依赖 LangChain。
 
 ### 3.3 `EndpointManager` (`llm/endpoint_manager.py`)
 
-Responsibilities:
-- Define `LLMEndpoint` Pydantic model.
-- CRUD operations backed by `ConfigRepository`.
-- Maintain at most one `is_default=True` endpoint per provider.
-- Run speed tests via `create_provider(provider, ...)`.
+职责：
+- 定义 `LLMEndpoint` Pydantic model。
+- 基于 `ConfigRepository` 的 CRUD 操作。
+- 保证每个 provider 最多只有一个 `is_default=True` 的 endpoint。
+- 通过 `create_provider(provider, ...)` 运行速度测试。
 
 ```python
 class LLMEndpoint(BaseModel):
@@ -128,8 +128,8 @@ class LLMEndpoint(BaseModel):
     updated_at: datetime
 ```
 
-Storage key in `ConfigRepository`: `llm_endpoints.{id}` under category `llm_endpoints`.  
-A separate index key `llm_endpoints.index` stores the ordered list of IDs for easy listing.
+在 `ConfigRepository` 中的存储 key：`llm_endpoints.{id}`，category 为 `llm_endpoints`。  
+另一个索引 key `llm_endpoints.index` 保存有序的 ID 列表，便于列出。
 
 ### 3.4 API Routes (`api/routes/config.py`)
 
@@ -178,23 +178,23 @@ class ModelListResponse(BaseModel):
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/v1/config/llm/endpoints` | List saved endpoints, optionally filtered by `provider`. |
-| `POST` | `/api/v1/config/llm/endpoints` | Create a new endpoint. |
-| `PUT` | `/api/v1/config/llm/endpoints/{id}` | Update endpoint fields. |
-| `DELETE` | `/api/v1/config/llm/endpoints/{id}` | Delete endpoint. |
-| `POST` | `/api/v1/config/llm/endpoints/{id}/speed-test` | Run speed test and persist result. |
-| `GET` | `/api/v1/config/llm/models?provider=&base_url=` | Fetch model list from a live endpoint. Optional `api_key` header if not saved. |
+| `GET` | `/api/v1/config/llm/endpoints` | 列出已保存的 endpoints，可按照 `provider` 过滤。 |
+| `POST` | `/api/v1/config/llm/endpoints` | 创建新 endpoint。 |
+| `PUT` | `/api/v1/config/llm/endpoints/{id}` | 更新 endpoint 字段。 |
+| `DELETE` | `/api/v1/config/llm/endpoints/{id}` | 删除 endpoint。 |
+| `POST` | `/api/v1/config/llm/endpoints/{id}/speed-test` | 运行速度测试并持久化结果。 |
+| `GET` | `/api/v1/config/llm/models?provider=&base_url=` | 从在线 endpoint 获取模型列表。若未保存，可通过 `api_key` header 提供。 |
 
-**Security:** `api_key` is write-only. Responses always expose `api_key_set: bool` instead of the key.
+**安全：** `api_key` 为仅写字段，响应中始终只暴露 `api_key_set: bool`，不会返回 key 本身。
 
 ### 3.5 Integration with existing `PUT /config/llm`
 
-When `PUT /config/llm` receives `base_url` or `endpoint_id`, it resolves the full endpoint:
-- If `endpoint_id` is provided, look it up in `EndpointManager` and use its `base_url` + `api_key`.
-- If only `base_url` is provided, fall back to current behavior.
-- If `endpoint_id` is the default endpoint, `base_url` becomes optional.
+当 `PUT /config/llm` 收到 `base_url` 或 `endpoint_id` 时，按以下规则解析完整 endpoint：
+- 若提供了 `endpoint_id`，则在 `EndpointManager` 中查找，并使用其 `base_url` + `api_key`。
+- 若只提供了 `base_url`，则保持现有行为回退。
+- 若 `endpoint_id` 为默认 endpoint，则 `base_url` 变为可选。
 
-This keeps the existing chat flow unchanged while allowing endpoint reuse.
+这样可在不改变现有聊天流程的情况下复用 endpoint。
 
 ---
 
@@ -202,42 +202,42 @@ This keeps the existing chat flow unchanged while allowing endpoint reuse.
 
 ### 4.1 Fetching model list
 
-1. Frontend calls `GET /api/v1/config/llm/models?provider=openai&base_url=https://api.xxx.com/v1`.
-2. Route asks `EndpointManager` for the API key if an endpoint matches `(provider, base_url)`.
-3. Route calls `create_provider("openai", api_key=..., base_url=...)`.
-4. `OpenAIProvider.list_models(...)` fetches `/v1/models`.
-5. Route returns `{ provider, base_url, models: [...] }`.
+1. 前端调用 `GET /api/v1/config/llm/models?provider=openai&base_url=https://api.xxx.com/v1`。
+2. Route 向 `EndpointManager` 请求匹配 `(provider, base_url)` 的 API key。
+3. Route 调用 `create_provider("openai", api_key=..., base_url=...)`。
+4. `OpenAIProvider.list_models(...)` 请求 `/v1/models`。
+5. Route 返回 `{ provider, base_url, models: [...] }`。
 
 ### 4.2 Speed test
 
-1. Frontend calls `POST /api/v1/config/llm/endpoints/{id}/speed-test`.
-2. `EndpointManager` loads the endpoint.
-3. It calls `provider.speed_test(model=..., base_url=..., api_key=...)`.
-4. Persists `latency_ms`, `total_ms`, `is_reachable`, `last_tested_at` to the endpoint record.
-5. Returns `SpeedTestResponse`.
+1. 前端调用 `POST /api/v1/config/llm/endpoints/{id}/speed-test`。
+2. `EndpointManager` 加载 endpoint。
+3. 调用 `provider.speed_test(model=..., base_url=..., api_key=...)`。
+4. 将 `latency_ms`、`total_ms`、`is_reachable`、`last_tested_at` 持久化到 endpoint 记录。
+5. 返回 `SpeedTestResponse`。
 
 ### 4.3 Creating an endpoint
 
-1. Frontend `POST /api/v1/config/llm/endpoints` with name, provider, base_url, api_key.
-2. `EndpointManager` validates URL format and provider name.
-3. If `is_default=True`, clears default flag on other endpoints of the same provider.
-4. Saves endpoint and updates index.
-5. Returns `LLMEndpointResponse` with `api_key_set=True`.
+1. 前端 `POST /api/v1/config/llm/endpoints`，携带 name、provider、base_url、api_key。
+2. `EndpointManager` 校验 URL 格式与 provider 名称。
+3. 若 `is_default=True`，清除同 provider 下其他 endpoint 的默认标记。
+4. 保存 endpoint 并更新索引。
+5. 返回 `LLMEndpointResponse`，其中 `api_key_set=True`。
 
 ---
 
 ## 5. Error Handling
 
-| Scenario | HTTP Status | Response Body |
+| 场景 | HTTP Status | Response Body |
 |---|---|---|
-| Provider does not support `list_models` / `speed_test` | `501 Not Implemented` | `{ "detail": "Provider 'anthropic' does not support model listing yet." }` |
-| Endpoint unreachable / network error | `502 Bad Gateway` | `{ "detail": "Failed to reach endpoint: <reason>" }` |
-| Request timeout | `504 Gateway Timeout` | `{ "detail": "Endpoint did not respond in time." }` |
-| Invalid provider | `422 Unprocessable Entity` | Standard FastAPI validation |
-| Endpoint not found | `404 Not Found` | `{ "detail": "Endpoint not found" }` |
-| Duplicate `(provider, base_url)` | `409 Conflict` | `{ "detail": "An endpoint with this base_url already exists." }` |
+| Provider 尚未支持 `list_models` / `speed_test` | `501 Not Implemented` | `{ "detail": "Provider 'anthropic' does not support model listing yet." }` |
+| Endpoint 不可达 / 网络错误 | `502 Bad Gateway` | `{ "detail": "Failed to reach endpoint: <reason>" }` |
+| 请求超时 | `504 Gateway Timeout` | `{ "detail": "Endpoint did not respond in time." }` |
+| 无效的 provider | `422 Unprocessable Entity` | 标准 FastAPI 校验错误 |
+| Endpoint 不存在 | `404 Not Found` | `{ "detail": "Endpoint not found" }` |
+| 重复的 `(provider, base_url)` | `409 Conflict` | `{ "detail": "An endpoint with this base_url already exists." }` |
 
-All provider-specific errors are logged server-side with `logger.warning` / `logger.exception`.
+所有 provider 相关的错误都会通过 `logger.warning` / `logger.exception` 在服务端记录。
 
 ---
 
@@ -246,44 +246,44 @@ All provider-specific errors are logged server-side with `logger.warning` / `log
 ### 6.1 Unit tests
 
 - `tests/test_llm/test_openai_provider.py`
-  - `test_openai_provider_lists_models` — mock httpx, assert model IDs returned.
-  - `test_openai_provider_speed_test_reachable` — mock successful completion.
-  - `test_openai_provider_speed_test_unreachable` — mock connection error.
+  - `test_openai_provider_lists_models` — mock httpx，断言返回 model IDs。
+  - `test_openai_provider_speed_test_reachable` — mock 成功的 completion。
+  - `test_openai_provider_speed_test_unreachable` — mock 连接错误。
 
 - `tests/test_llm/test_endpoint_manager.py`
-  - CRUD operations with in-memory `ConfigRepository`.
-  - Default-endpoint uniqueness.
-  - Duplicate base_url rejection.
+  - 使用内存中的 `ConfigRepository` 进行 CRUD 操作。
+  - 默认 endpoint 唯一性。
+  - 重复 base_url 拒绝。
 
 ### 6.2 API tests
 
-- `tests/test_api/test_config_endpoints.py` (new file)
-  - Create / list / update / delete endpoints.
-  - Speed test endpoint returns correct shape.
-  - Model list endpoint returns models.
-  - `api_key` is never leaked in responses.
+- `tests/test_api/test_config_endpoints.py`（新文件）
+  - 创建 / 列出 / 更新 / 删除 endpoints。
+  - 速度测试接口返回正确结构。
+  - 模型列表接口返回模型。
+  - 响应中绝不泄露 `api_key`。
 
-Use `respx` or `httpx` transport mocking for external HTTP calls.
+外部 HTTP 调用使用 `respx` 或 `httpx` transport mocking。
 
 ### 6.3 Contract tests
 
-- Ensure `LLMEndpointResponse` field names match the frontend `LLMEndpoint` TypeScript interface defined in the companion frontend design doc.
+- 确保 `LLMEndpointResponse` 的字段名与配套前端设计文档中定义的 `LLMEndpoint` TypeScript 接口一致。
 
 ---
 
 ## 7. Extension Points for Ollama / Anthropic
 
-| Provider | `list_models` strategy | `speed_test` strategy |
+| Provider | `list_models` 策略 | `speed_test` 策略 |
 |---|---|---|
-| Ollama | `GET {base_url}/api/tags` → `models[].name` | `POST {base_url}/api/generate` with tiny prompt |
-| Anthropic | Hard-coded list in `AnthropicProvider` | `POST /v1/messages` with `max_tokens=1` |
+| Ollama | `GET {base_url}/api/tags` → `models[].name` | `POST {base_url}/api/generate`，使用极小 prompt |
+| Anthropic | `AnthropicProvider` 中硬编码列表 | `POST /v1/messages`，参数为 `max_tokens=1` |
 
-To add a provider:
-1. Implement the two methods in its provider class.
-2. Add the provider name to the frontend provider dropdown.
-3. Add API tests.
+添加 provider 的步骤：
+1. 在该 provider 类中实现这两个方法。
+2. 将 provider 名称加入前端 provider 下拉框。
+3. 添加 API 测试。
 
-No changes to `EndpointManager` or routes are required.
+无需修改 `EndpointManager` 或 routes。
 
 ---
 
@@ -291,17 +291,17 @@ No changes to `EndpointManager` or routes are required.
 
 ### Create
 - `src/thumbelina/llm/endpoint_manager.py`
-- `src/thumbelina/llm/models.py` (optional — shared `SpeedTestResult`, `LLMEndpoint` schemas)
+- `src/thumbelina/llm/models.py`（可选 — 共享 `SpeedTestResult`、`LLMEndpoint` schema）
 - `tests/test_llm/test_openai_provider.py`
 - `tests/test_llm/test_endpoint_manager.py`
 - `tests/test_api/test_config_endpoints.py`
 
 ### Modify
-- `src/thumbelina/llm/base.py` — add abstract methods.
-- `src/thumbelina/llm/openai.py` — implement methods.
-- `src/thumbelina/llm/factory.py` — accept `base_url` for OpenAI (already supports, verify).
-- `src/thumbelina/api/routes/config.py` — add new routes.
-- `src/thumbelina/api/app.py` — register `EndpointManager` in app state if needed.
+- `src/thumbelina/llm/base.py` — 添加抽象方法。
+- `src/thumbelina/llm/openai.py` — 实现方法。
+- `src/thumbelina/llm/factory.py` — 为 OpenAI 接受 `base_url`（已支持，需验证）。
+- `src/thumbelina/api/routes/config.py` — 添加新 routes。
+- `src/thumbelina/api/app.py` — 如需，在 app state 中注册 `EndpointManager`。
 
 ---
 
@@ -318,16 +318,16 @@ No changes to `EndpointManager` or routes are required.
 | `LLMEndpointResponse.last_total_ms` | `LLMEndpoint.last_total_ms` | integer or null |
 | `LLMEndpointResponse.is_reachable` | `LLMEndpoint.is_reachable` | boolean or null |
 | `LLMEndpointResponse.last_tested_at` | `LLMEndpoint.last_tested_at` | ISO 8601 string or null |
-| `ModelListResponse.models` | `string[]` | list of model IDs |
-| `SpeedTestResponse.latency_ms` | `number` | TTFB in milliseconds |
-| `SpeedTestResponse.total_ms` | `number` | total request time |
+| `ModelListResponse.models` | `string[]` | model ID 列表 |
+| `SpeedTestResponse.latency_ms` | `number` | TTFB，单位为毫秒 |
+| `SpeedTestResponse.total_ms` | `number` | 请求总耗时 |
 
-The frontend design doc is the source of truth for UI state and component names; this doc is the source of truth for the API schema.
+前端设计文档是 UI state 与组件命名的唯一事实来源；本文档是 API schema 的事实来源。
 
 ---
 
 ## 10. Open Questions
 
-1. Should endpoints be scoped per user or global? (Current config system is global; keep global for consistency.)
-2. Should `api_key` be encrypted at rest? (Out of scope for first iteration; store as plaintext like existing `config.llm.api_key`.)
-3. Should speed tests run automatically when an endpoint is created? (No; manual trigger only to avoid surprising API usage.)
+1. Endpoint 应该按用户作用域还是全局作用域？（当前配置系统是全局的；为保持一致，保持全局。）
+2. `api_key` 是否应该在静态存储中加密？（首次迭代不在范围内；与现有 `config.llm.api_key` 一样以明文存储。）
+3. 创建 endpoint 时是否应自动运行速度测试？（否；仅手动触发，以避免意外的 API 调用。）
