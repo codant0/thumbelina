@@ -6,7 +6,7 @@ from typing import Any
 
 from langchain_core.language_models import BaseChatModel
 
-from thumbelina.llm.base import LLMProvider
+from thumbelina.llm.base import LLMProvider, SpeedTestResult
 
 
 class OllamaProvider(LLMProvider):
@@ -46,3 +46,20 @@ class OllamaProvider(LLMProvider):
     @property
     def base_url(self) -> str:
         return self._base_url
+
+    async def list_models(
+        self,
+        *,
+        base_url: str | None = None,
+        api_key: str | None = None,
+    ) -> list[str]:
+        raise NotImplementedError("Ollama does not support model listing yet.")
+
+    async def speed_test(
+        self,
+        model: str,
+        *,
+        base_url: str | None = None,
+        api_key: str | None = None,
+    ) -> SpeedTestResult:
+        raise NotImplementedError("Ollama does not support speed tests yet.")

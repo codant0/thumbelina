@@ -6,7 +6,7 @@ from typing import Any
 
 from langchain_core.language_models import BaseChatModel
 
-from thumbelina.llm.base import LLMProvider
+from thumbelina.llm.base import LLMProvider, SpeedTestResult
 
 
 class AnthropicProvider(LLMProvider):
@@ -41,3 +41,20 @@ class AnthropicProvider(LLMProvider):
     @property
     def chat_model(self) -> BaseChatModel:
         return self._model
+
+    async def list_models(
+        self,
+        *,
+        base_url: str | None = None,
+        api_key: str | None = None,
+    ) -> list[str]:
+        raise NotImplementedError("Anthropic does not support model listing yet.")
+
+    async def speed_test(
+        self,
+        model: str,
+        *,
+        base_url: str | None = None,
+        api_key: str | None = None,
+    ) -> SpeedTestResult:
+        raise NotImplementedError("Anthropic does not support speed tests yet.")

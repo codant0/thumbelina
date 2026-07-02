@@ -6,6 +6,8 @@ import inspect
 
 import pytest
 
+from thumbelina.llm.base import LLMProvider, SpeedTestResult
+
 
 class TestLLMProviderABC:
     """Tests for the LLMProvider abstract base class."""
@@ -62,6 +64,12 @@ class TestLLMProviderABC:
 
             async def stream(self, messages):
                 yield "chunk"
+
+            async def list_models(self, *, base_url=None, api_key=None):
+                return []
+
+            async def speed_test(self, model, *, base_url=None, api_key=None):
+                return SpeedTestResult(reachable=True)
 
         provider = CompleteProvider()
         assert isinstance(provider, LLMProvider)
@@ -153,3 +161,15 @@ class TestMessageConversion:
 
         with pytest.raises(ValueError, match="Unknown role"):
             LLMProvider._to_langchain_messages([{"role": "ghost", "content": "boo"}])
+
+
+def test_speed_test_result_has_reachable_field():
+    result = SpeedTestResult(reachable=True, latency_ms=123, total_ms=456)
+    assert result.reachable is True
+    assert result.latency_ms == 123
+    assert result.total_ms == 456
+
+
+def test_provider_has_list_models_and_speed_test_methods():
+    assert hasattr(LLMProvider, "list_models")
+    assert hasattr(LLMProvider, "speed_test")

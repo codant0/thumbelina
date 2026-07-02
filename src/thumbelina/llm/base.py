@@ -4,9 +4,22 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
+from datetime import datetime
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+
+
+@dataclass
+class SpeedTestResult:
+    """Result of a lightweight endpoint latency / availability test."""
+
+    reachable: bool
+    latency_ms: int | None = None        # time-to-first-token (TTFB)
+    total_ms: int | None = None          # full round-trip for a minimal request
+    error: str | None = None
+    tested_at: datetime | None = None
 
 
 class LLMProvider(ABC):
@@ -76,6 +89,31 @@ class LLMProvider(ABC):
     @abstractmethod
     def chat_model(self) -> BaseChatModel:
         """Return the underlying LangChain chat model."""
+        ...
+
+    # ------------------------------------------------------------------
+    # Abstract endpoint management methods every provider must supply
+    # ------------------------------------------------------------------
+
+    @abstractmethod
+    async def list_models(
+        self,
+        *,
+        base_url: str | None = None,
+        api_key: str | None = None,
+    ) -> list[str]:
+        """Return model IDs available at the given endpoint."""
+        ...
+
+    @abstractmethod
+    async def speed_test(
+        self,
+        model: str,
+        *,
+        base_url: str | None = None,
+        api_key: str | None = None,
+    ) -> SpeedTestResult:
+        """Run a minimal request and measure latency."""
         ...
 
     # ------------------------------------------------------------------
