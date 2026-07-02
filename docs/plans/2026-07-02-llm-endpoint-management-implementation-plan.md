@@ -1,24 +1,24 @@
-# LLM Endpoint Management — Implementation Plan
+# LLM Endpoint Management — 实现计划
 
-> **Date:** 2026-07-02
-> **Feature:** Multi-base_url LLM endpoint management with model listing and speed testing.
-> **Goal:** Let users save multiple OpenAI-compatible endpoints, fetch available models, run latency/availability tests, and set a default endpoint that the main LLM form can reuse.
-> **Tech Stack:** FastAPI + Python 3.11 (backend), React 19 + TypeScript + Vite + Vitest (frontend).
-> **Architecture Summary:** Extend `LLMProvider` with `list_models` and `speed_test`, implement them in `OpenAIProvider`, build an `EndpointManager` backed by `ConfigRepository`, expose REST routes under `/api/v1/config/llm`, and build a React `EndpointManager` + `ModelSelector` in the Settings page.
+> **日期：** 2026-07-02
+> **功能：** 多 base_url 的 LLM 端点管理，支持模型列表获取与速度测试。
+> **目标：** 允许用户保存多个 OpenAI 兼容端点，拉取可用模型，执行延迟 / 可用性测试，并设置一个主 LLM 表单可复用的默认端点。
+> **技术栈：** FastAPI + Python 3.11（后端），React 19 + TypeScript + Vite + Vitest（前端）。
+> **架构概述：** 扩展 `LLMProvider` 的 `list_models` 和 `speed_test` 能力，在 `OpenAIProvider` 中实现；基于 `ConfigRepository` 构建 `EndpointManager`；在 `/api/v1/config/llm` 下暴露 REST 路由；并在设置页面中构建 React 的 `EndpointManager` + `ModelSelector`。
 
 ---
 
-## Backend Tasks
+## 后端任务
 
-### Task 1 — Extend `LLMProvider` base class
+### 任务 1 — 扩展 `LLMProvider` 基类
 
-**Files**
-- Modify: `src/thumbelina/llm/base.py`
-- Modify: `src/thumbelina/llm/anthropic.py`
-- Modify: `src/thumbelina/llm/ollama.py`
-- Test: `tests/test_llm/test_base.py`
+**涉及文件**
+- 修改：`src/thumbelina/llm/base.py`
+- 修改：`src/thumbelina/llm/anthropic.py`
+- 修改：`src/thumbelina/llm/ollama.py`
+- 测试：`tests/test_llm/test_base.py`
 
-**Step 1 — Write failing test**
+**步骤 1 — 编写失败的测试**
 
 ```python
 # tests/test_llm/test_base.py
@@ -41,15 +41,15 @@ def test_provider_has_list_models_and_speed_test_methods():
     assert hasattr(LLMProvider, "speed_test")
 ```
 
-**Step 2 — Run test command and expected failure**
+**步骤 2 — 运行测试命令并查看预期失败**
 
 ```bash
 pytest tests/test_llm/test_base.py -x -q
 ```
 
-Expected failure: `ImportError: cannot import name 'SpeedTestResult' from 'thumbelina.llm.base'`.
+预期失败：`ImportError: cannot import name 'SpeedTestResult' from 'thumbelina.llm.base'`。
 
-**Step 3 — Write minimal implementation**
+**步骤 3 — 编写最小实现**
 
 ```python
 # src/thumbelina/llm/base.py
@@ -146,15 +146,15 @@ from thumbelina.llm.base import LLMProvider, SpeedTestResult
         raise NotImplementedError("Ollama does not support speed tests yet.")
 ```
 
-**Step 4 — Run test command and expected pass**
+**步骤 4 — 运行测试命令并查看预期通过**
 
 ```bash
 pytest tests/test_llm/test_base.py -x -q
 ```
 
-Expected: 2 passed.
+预期结果：2 passed。
 
-**Step 5 — Commit message**
+**步骤 5 — Commit message**
 
 ```
 feat(llm): add list_models and speed_test abstract methods to LLMProvider
@@ -164,13 +164,13 @@ Adds SpeedTestResult dataclass and stubs for Anthropic/Ollama.
 
 ---
 
-### Task 2 — Implement `OpenAIProvider.list_models`
+### 任务 2 — 实现 `OpenAIProvider.list_models`
 
-**Files**
-- Modify: `src/thumbelina/llm/openai.py`
-- Test: `tests/test_llm/test_openai_provider.py`
+**涉及文件**
+- 修改：`src/thumbelina/llm/openai.py`
+- 测试：`tests/test_llm/test_openai_provider.py`
 
-**Step 1 — Write failing test**
+**步骤 1 — 编写失败的测试**
 
 ```python
 # tests/test_llm/test_openai_provider.py
@@ -198,15 +198,15 @@ async def test_openai_provider_lists_models():
     assert models == ["gpt-4o", "gpt-3.5-turbo"]
 ```
 
-**Step 2 — Run test command and expected failure**
+**步骤 2 — 运行测试命令并查看预期失败**
 
 ```bash
 pytest tests/test_llm/test_openai_provider.py::test_openai_provider_lists_models -x -q
 ```
 
-Expected failure: `AttributeError: 'OpenAIProvider' object has no attribute 'list_models'`.
+预期失败：`AttributeError: 'OpenAIProvider' object has no attribute 'list_models'`。
 
-**Step 3 — Write minimal implementation**
+**步骤 3 — 编写最小实现**
 
 ```python
 # src/thumbelina/llm/openai.py
@@ -267,15 +267,15 @@ class OpenAIProvider(LLMProvider):
         return [m["id"] for m in payload.get("data", []) if "id" in m]
 ```
 
-**Step 4 — Run test command and expected pass**
+**步骤 4 — 运行测试命令并查看预期通过**
 
 ```bash
 pytest tests/test_llm/test_openai_provider.py::test_openai_provider_lists_models -x -q
 ```
 
-Expected: 1 passed.
+预期结果：1 passed。
 
-**Step 5 — Commit message**
+**步骤 5 — Commit message**
 
 ```
 feat(llm): implement OpenAIProvider.list_models
@@ -283,13 +283,13 @@ feat(llm): implement OpenAIProvider.list_models
 
 ---
 
-### Task 3 — Implement `OpenAIProvider.speed_test`
+### 任务 3 — 实现 `OpenAIProvider.speed_test`
 
-**Files**
-- Modify: `src/thumbelina/llm/openai.py`
-- Test: `tests/test_llm/test_openai_provider.py`
+**涉及文件**
+- 修改：`src/thumbelina/llm/openai.py`
+- 测试：`tests/test_llm/test_openai_provider.py`
 
-**Step 1 — Write failing test**
+**步骤 1 — 编写失败的测试**
 
 ```python
 # tests/test_llm/test_openai_provider.py
@@ -350,15 +350,15 @@ async def test_openai_provider_speed_test_unreachable():
     assert "Connection refused" in result.error
 ```
 
-**Step 2 — Run test command and expected failure**
+**步骤 2 — 运行测试命令并查看预期失败**
 
 ```bash
 pytest tests/test_llm/test_openai_provider.py -x -q
 ```
 
-Expected failure: `AttributeError: 'OpenAIProvider' object has no attribute 'speed_test'`.
+预期失败：`AttributeError: 'OpenAIProvider' object has no attribute 'speed_test'`。
 
-**Step 3 — Write minimal implementation**
+**步骤 3 — 编写最小实现**
 
 ```python
 # src/thumbelina/llm/openai.py
@@ -418,15 +418,15 @@ from datetime import datetime, timezone
             )
 ```
 
-**Step 4 — Run test command and expected pass**
+**步骤 4 — 运行测试命令并查看预期通过**
 
 ```bash
 pytest tests/test_llm/test_openai_provider.py -x -q
 ```
 
-Expected: 3 passed.
+预期结果：3 passed。
 
-**Step 5 — Commit message**
+**步骤 5 — Commit message**
 
 ```
 feat(llm): implement OpenAIProvider.speed_test
@@ -434,13 +434,13 @@ feat(llm): implement OpenAIProvider.speed_test
 
 ---
 
-### Task 4 — Create `EndpointManager`
+### 任务 4 — 创建 `EndpointManager`
 
-**Files**
-- Create: `src/thumbelina/llm/endpoint_manager.py`
-- Test: `tests/test_llm/test_endpoint_manager.py`
+**涉及文件**
+- 创建：`src/thumbelina/llm/endpoint_manager.py`
+- 测试：`tests/test_llm/test_endpoint_manager.py`
 
-**Step 1 — Write failing test**
+**步骤 1 — 编写失败的测试**
 
 ```python
 # tests/test_llm/test_endpoint_manager.py
@@ -514,15 +514,15 @@ async def test_default_endpoint_uniqueness(manager):
     assert second.is_default is True
 ```
 
-**Step 2 — Run test command and expected failure**
+**步骤 2 — 运行测试命令并查看预期失败**
 
 ```bash
 pytest tests/test_llm/test_endpoint_manager.py -x -q
 ```
 
-Expected failure: `ModuleNotFoundError: No module named 'thumbelina.llm.endpoint_manager'`.
+预期失败：`ModuleNotFoundError: No module named 'thumbelina.llm.endpoint_manager'`。
 
-**Step 3 — Write minimal implementation**
+**步骤 3 — 编写最小实现**
 
 ```python
 # src/thumbelina/llm/endpoint_manager.py
@@ -722,29 +722,28 @@ class EndpointManager:
         return result
 ```
 
-**Step 4 — Run test command and expected pass**
+**步骤 4 — 运行测试命令并查看预期通过**
 
 ```bash
 pytest tests/test_llm/test_endpoint_manager.py -x -q
 ```
 
-Expected: 3 passed.
+预期结果：3 passed。
 
-**Step 5 — Commit message**
+**步骤 5 — Commit message**
 
 ```
 feat(llm): add EndpointManager for LLM endpoint CRUD and speed tests
 ```
 
 ---
+### 任务 5 — 添加端点 API 路由
 
-### Task 5 — Add API routes for endpoints
+**文件**
+- 修改：`src/thumbelina/api/routes/config.py`
+- 测试：`tests/test_api/test_config_endpoints.py`
 
-**Files**
-- Modify: `src/thumbelina/api/routes/config.py`
-- Test: `tests/test_api/test_config_endpoints.py`
-
-**Step 1 — Write failing test**
+**步骤 1 — 编写失败测试**
 
 ```python
 # tests/test_api/test_config_endpoints.py
@@ -807,15 +806,15 @@ def test_create_endpoint(client):
     assert data["api_key_set"] is True
 ```
 
-**Step 2 — Run test command and expected failure**
+**步骤 2 — 运行测试命令并查看预期失败**
 
 ```bash
 pytest tests/test_api/test_config_endpoints.py -x -q
 ```
 
-Expected failure: `404 Not Found` on `/api/v1/config/llm/endpoints`.
+预期失败：`/api/v1/config/llm/endpoints` 返回 `404 Not Found`。
 
-**Step 3 — Write minimal implementation**
+**步骤 3 — 编写最小实现**
 
 ```python
 # src/thumbelina/api/routes/config.py
@@ -999,15 +998,15 @@ async def list_models(
     return ModelListResponse(provider=provider, base_url=base_url, models=models)
 ```
 
-**Step 4 — Run test command and expected pass**
+**步骤 4 — 运行测试命令并查看通过**
 
 ```bash
 pytest tests/test_api/test_config_endpoints.py -x -q
 ```
 
-Expected: 3 passed.
+预期：3 个通过。
 
-**Step 5 — Commit message**
+**步骤 5 — 提交信息**
 
 ```
 feat(api): add LLM endpoint management routes
@@ -1015,15 +1014,15 @@ feat(api): add LLM endpoint management routes
 
 ---
 
-### Task 6 — Wire `EndpointManager` into app state
+### 任务 6 — 将 `EndpointManager` 接入应用状态
 
-**Files**
-- Modify: `src/thumbelina/api/app.py`
-- Test: `tests/test_api/test_config_endpoints.py` (existing)
+**文件**
+- 修改：`src/thumbelina/api/app.py`
+- 测试：`tests/test_api/test_config_endpoints.py`（现有）
 
-**Step 1 — Write failing test**
+**步骤 1 — 编写失败测试**
 
-Add to `tests/test_api/test_config_endpoints.py`:
+添加到 `tests/test_api/test_config_endpoints.py`：
 
 ```python
 def test_app_state_has_endpoint_manager(client):
@@ -1031,15 +1030,15 @@ def test_app_state_has_endpoint_manager(client):
     assert client.app.state.endpoint_manager is not None
 ```
 
-**Step 2 — Run test command and expected failure**
+**步骤 2 — 运行测试命令并查看预期失败**
 
 ```bash
 pytest tests/test_api/test_config_endpoints.py::test_app_state_has_endpoint_manager -x -q
 ```
 
-Expected failure: `AssertionError: assert hasattr(...)` false.
+预期失败：`AssertionError: assert hasattr(...)` 为假。
 
-**Step 3 — Write minimal implementation**
+**步骤 3 — 编写最小实现**
 
 ```python
 # src/thumbelina/api/app.py
@@ -1053,15 +1052,15 @@ from thumbelina.llm.endpoint_manager import EndpointManager
     app.state.endpoint_manager = endpoint_manager
 ```
 
-**Step 4 — Run test command and expected pass**
+**步骤 4 — 运行测试命令并查看通过**
 
 ```bash
 pytest tests/test_api/test_config_endpoints.py -x -q
 ```
 
-Expected: all passed.
+预期：全部通过。
 
-**Step 5 — Commit message**
+**步骤 5 — 提交信息**
 
 ```
 feat(api): register EndpointManager in app state
@@ -1069,15 +1068,15 @@ feat(api): register EndpointManager in app state
 
 ---
 
-### Task 7 — Extend `PUT /config/llm` to accept `endpoint_id`
+### 任务 7 — 扩展 `PUT /config/llm` 以接受 `endpoint_id`
 
-**Files**
-- Modify: `src/thumbelina/api/routes/config.py`
-- Test: `tests/test_api/test_config_swap_api.py` (existing)
+**文件**
+- 修改：`src/thumbelina/api/routes/config.py`
+- 测试：`tests/test_api/test_config_swap_api.py`（现有）
 
-**Step 1 — Write failing test**
+**步骤 1 — 编写失败测试**
 
-Add to `tests/test_api/test_config_swap_api.py`:
+添加到 `tests/test_api/test_config_swap_api.py`：
 
 ```python
 def test_swap_llm_with_endpoint_id(client):
@@ -1105,15 +1104,15 @@ def test_swap_llm_with_endpoint_id(client):
     assert data["base_url"] == "https://api.openai.com/v1"
 ```
 
-**Step 2 — Run test command and expected failure**
+**步骤 2 — 运行测试命令并查看预期失败**
 
 ```bash
 pytest tests/test_api/test_config_swap_api.py::test_swap_llm_with_endpoint_id -x -q
 ```
 
-Expected failure: Pydantic validation error for `endpoint_id`.
+预期失败：针对 `endpoint_id` 的 Pydantic 校验错误。
 
-**Step 3 — Write minimal implementation**
+**步骤 3 — 编写最小实现**
 
 ```python
 # src/thumbelina/api/routes/config.py
@@ -1167,15 +1166,15 @@ async def swap_llm(body: LLMSwapRequest, request: Request) -> LLMSwapResponse:
     )
 ```
 
-**Step 4 — Run test command and expected pass**
+**步骤 4 — 运行测试命令并查看通过**
 
 ```bash
 pytest tests/test_api/test_config_swap_api.py -x -q
 ```
 
-Expected: all passed.
+预期：全部通过。
 
-**Step 5 — Commit message**
+**步骤 5 — 提交信息**
 
 ```
 feat(api): resolve endpoint_id in PUT /config/llm
@@ -1183,15 +1182,15 @@ feat(api): resolve endpoint_id in PUT /config/llm
 
 ---
 
-## Frontend Tasks
+## 前端任务
 
-### Task 8 — Create `api/llmConfig.ts`
+### 任务 8 — 创建 `api/llmConfig.ts`
 
-**Files**
-- Create: `frontend/src/api/llmConfig.ts`
-- Test: `frontend/src/api/llmConfig.test.ts`
+**文件**
+- 创建: `frontend/src/api/llmConfig.ts`
+- 测试: `frontend/src/api/llmConfig.test.ts`
 
-**Step 1 — Write failing test**
+**步骤 1 — 编写失败的测试**
 
 ```typescript
 // frontend/src/api/llmConfig.test.ts
@@ -1237,15 +1236,15 @@ describe('llmConfig API', () => {
 })
 ```
 
-**Step 2 — Run test command and expected failure**
+**步骤 2 — 运行测试命令并查看预期失败**
 
 ```bash
 cd frontend && npm test -- src/api/llmConfig.test.ts
 ```
 
-Expected failure: `Error: Cannot find module './llmConfig' or its corresponding type declarations.`
+预期失败: `Error: Cannot find module './llmConfig' or its corresponding type declarations.`
 
-**Step 3 — Write minimal implementation**
+**步骤 3 — 编写最小实现**
 
 ```typescript
 // frontend/src/api/llmConfig.ts
@@ -1334,15 +1333,15 @@ export async function fetchModels(params: { provider: string; base_url: string; 
 }
 ```
 
-**Step 4 — Run test command and expected pass**
+**步骤 4 — 运行测试命令并查看预期通过**
 
 ```bash
 cd frontend && npm test -- src/api/llmConfig.test.ts
 ```
 
-Expected: 3 passed.
+预期结果: 3 passed.
 
-**Step 5 — Commit message**
+**步骤 5 — Commit message**
 
 ```
 feat(frontend): add LLM endpoint API client
@@ -1350,13 +1349,13 @@ feat(frontend): add LLM endpoint API client
 
 ---
 
-### Task 9 — Create `EndpointList` component
+### 任务 9 — 创建 `EndpointList` 组件
 
-**Files**
-- Create: `frontend/src/components/Settings/EndpointList.tsx`
-- Test: `frontend/src/components/Settings/EndpointList.test.tsx`
+**文件**
+- 创建: `frontend/src/components/Settings/EndpointList.tsx`
+- 测试: `frontend/src/components/Settings/EndpointList.test.tsx`
 
-**Step 1 — Write failing test**
+**步骤 1 — 编写失败的测试**
 
 ```typescript
 // frontend/src/components/Settings/EndpointList.test.tsx
@@ -1393,15 +1392,15 @@ describe('EndpointList', () => {
 })
 ```
 
-**Step 2 — Run test command and expected failure**
+**步骤 2 — 运行测试命令并查看预期失败**
 
 ```bash
 cd frontend && npm test -- src/components/Settings/EndpointList.test.tsx
 ```
 
-Expected failure: `Cannot find module './EndpointList'`.
+预期失败: `Cannot find module './EndpointList'`.
 
-**Step 3 — Write minimal implementation**
+**步骤 3 — 编写最小实现**
 
 ```typescript
 // frontend/src/components/Settings/EndpointList.tsx
@@ -1477,15 +1476,15 @@ export function EndpointList({
 }
 ```
 
-**Step 4 — Run test command and expected pass**
+**步骤 4 — 运行测试命令并查看预期通过**
 
 ```bash
 cd frontend && npm test -- src/components/Settings/EndpointList.test.tsx
 ```
 
-Expected: 2 passed.
+预期结果: 2 passed.
 
-**Step 5 — Commit message**
+**步骤 5 — Commit message**
 
 ```
 feat(frontend): add EndpointList component
@@ -1493,13 +1492,13 @@ feat(frontend): add EndpointList component
 
 ---
 
-### Task 10 — Create `EndpointForm` component
+### 任务 10 — 创建 `EndpointForm` 组件
 
-**Files**
-- Create: `frontend/src/components/Settings/EndpointForm.tsx`
-- Test: `frontend/src/components/Settings/EndpointForm.test.tsx`
+**文件**
+- 创建: `frontend/src/components/Settings/EndpointForm.tsx`
+- 测试: `frontend/src/components/Settings/EndpointForm.test.tsx`
 
-**Step 1 — Write failing test**
+**步骤 1 — 编写失败的测试**
 
 ```typescript
 // frontend/src/components/Settings/EndpointForm.test.tsx
@@ -1543,15 +1542,15 @@ describe('EndpointForm', () => {
 })
 ```
 
-**Step 2 — Run test command and expected failure**
+**步骤 2 — 运行测试命令并查看预期失败**
 
 ```bash
 cd frontend && npm test -- src/components/Settings/EndpointForm.test.tsx
 ```
 
-Expected failure: `Cannot find module './EndpointForm'`.
+预期失败: `Cannot find module './EndpointForm'`.
 
-**Step 3 — Write minimal implementation**
+**步骤 3 — 编写最小实现**
 
 ```typescript
 // frontend/src/components/Settings/EndpointForm.tsx
@@ -1638,15 +1637,15 @@ export function EndpointForm({ initialValues, onSubmit, onCancel }: EndpointForm
 }
 ```
 
-**Step 4 — Run test command and expected pass**
+**步骤 4 — 运行测试命令并查看预期通过**
 
 ```bash
 cd frontend && npm test -- src/components/Settings/EndpointForm.test.tsx
 ```
 
-Expected: 3 passed.
+预期结果: 3 passed.
 
-**Step 5 — Commit message**
+**步骤 5 — Commit message**
 
 ```
 feat(frontend): add EndpointForm component
@@ -1654,13 +1653,13 @@ feat(frontend): add EndpointForm component
 
 ---
 
-### Task 11 — Create `SpeedTestResult` component
+### 任务 11 — 创建 `SpeedTestResult` 组件
 
-**Files**
-- Create: `frontend/src/components/Settings/SpeedTestResult.tsx`
-- Test: inline in `EndpointList.test.tsx` or `SpeedTestResult.test.tsx`
+**文件**
+- 创建: `frontend/src/components/Settings/SpeedTestResult.tsx`
+- 测试: 内联在 `EndpointList.test.tsx` 或 `SpeedTestResult.test.tsx`
 
-**Step 1 — Write failing test**
+**步骤 1 — 编写失败的测试**
 
 ```typescript
 // frontend/src/components/Settings/SpeedTestResult.test.tsx
@@ -1688,15 +1687,15 @@ describe('SpeedTestResult', () => {
 })
 ```
 
-**Step 2 — Run test command and expected failure**
+**步骤 2 — 运行测试命令并查看预期失败**
 
 ```bash
 cd frontend && npm test -- src/components/Settings/SpeedTestResult.test.tsx
 ```
 
-Expected failure: `Cannot find module './SpeedTestResult'`.
+预期失败: `Cannot find module './SpeedTestResult'`.
 
-**Step 3 — Write minimal implementation**
+**步骤 3 — 编写最小实现**
 
 ```typescript
 // frontend/src/components/Settings/SpeedTestResult.tsx
@@ -1731,15 +1730,15 @@ export function SpeedTestResult({ loading, result }: SpeedTestResultProps) {
 }
 ```
 
-**Step 4 — Run test command and expected pass**
+**步骤 4 — 运行测试命令并查看预期通过**
 
 ```bash
 cd frontend && npm test -- src/components/Settings/SpeedTestResult.test.tsx
 ```
 
-Expected: 3 passed.
+预期结果: 3 passed.
 
-**Step 5 — Commit message**
+**步骤 5 — Commit message**
 
 ```
 feat(frontend): add SpeedTestResult component
@@ -1747,13 +1746,13 @@ feat(frontend): add SpeedTestResult component
 
 ---
 
-### Task 12 — Create `EndpointManager` component
+### 任务 12 — 创建 `EndpointManager` 组件
 
-**Files**
-- Create: `frontend/src/components/Settings/EndpointManager.tsx`
-- Test: `frontend/src/components/Settings/EndpointManager.test.tsx`
+**文件**
+- 创建：`frontend/src/components/Settings/EndpointManager.tsx`
+- 测试：`frontend/src/components/Settings/EndpointManager.test.tsx`
 
-**Step 1 — Write failing test**
+**步骤 1 — 编写失败的测试**
 
 ```typescript
 // frontend/src/components/Settings/EndpointManager.test.tsx
@@ -1794,15 +1793,15 @@ describe('EndpointManager', () => {
 })
 ```
 
-**Step 2 — Run test command and expected failure**
+**步骤 2 — 运行测试命令并查看预期失败**
 
 ```bash
 cd frontend && npm test -- src/components/Settings/EndpointManager.test.tsx
 ```
 
-Expected failure: `Cannot find module './EndpointManager'`.
+预期失败：`Cannot find module './EndpointManager'`。
 
-**Step 3 — Write minimal implementation**
+**步骤 3 — 编写最小实现**
 
 ```typescript
 // frontend/src/components/Settings/EndpointManager.tsx
@@ -1933,15 +1932,15 @@ export function EndpointManager({ onMessage }: EndpointManagerProps) {
 }
 ```
 
-**Step 4 — Run test command and expected pass**
+**步骤 4 — 运行测试命令并查看预期通过**
 
 ```bash
 cd frontend && npm test -- src/components/Settings/EndpointManager.test.tsx
 ```
 
-Expected: 2 passed.
+预期结果：2 个测试通过。
 
-**Step 5 — Commit message**
+**步骤 5 — 提交信息**
 
 ```
 feat(frontend): add EndpointManager container component
@@ -1949,13 +1948,13 @@ feat(frontend): add EndpointManager container component
 
 ---
 
-### Task 13 — Create `ModelSelector` component
+### 任务 13 — 创建 `ModelSelector` 组件
 
-**Files**
-- Create: `frontend/src/components/Settings/ModelSelector.tsx`
-- Test: `frontend/src/components/Settings/ModelSelector.test.tsx`
+**文件**
+- 创建：`frontend/src/components/Settings/ModelSelector.tsx`
+- 测试：`frontend/src/components/Settings/ModelSelector.test.tsx`
 
-**Step 1 — Write failing test**
+**步骤 1 — 编写失败的测试**
 
 ```typescript
 // frontend/src/components/Settings/ModelSelector.test.tsx
@@ -1988,15 +1987,15 @@ describe('ModelSelector', () => {
 })
 ```
 
-**Step 2 — Run test command and expected failure**
+**步骤 2 — 运行测试命令并查看预期失败**
 
 ```bash
 cd frontend && npm test -- src/components/Settings/ModelSelector.test.tsx
 ```
 
-Expected failure: `Cannot find module './ModelSelector'`.
+预期失败：`Cannot find module './ModelSelector'`。
 
-**Step 3 — Write minimal implementation**
+**步骤 3 — 编写最小实现**
 
 ```typescript
 // frontend/src/components/Settings/ModelSelector.tsx
@@ -2062,15 +2061,15 @@ export function ModelSelector({ provider, base_url, api_key, model, onSelect }: 
 }
 ```
 
-**Step 4 — Run test command and expected pass**
+**步骤 4 — 运行测试命令并查看预期通过**
 
 ```bash
 cd frontend && npm test -- src/components/Settings/ModelSelector.test.tsx
 ```
 
-Expected: 2 passed.
+预期结果：2 个测试通过。
 
-**Step 5 — Commit message**
+**步骤 5 — 提交信息**
 
 ```
 feat(frontend): add ModelSelector component
@@ -2078,15 +2077,15 @@ feat(frontend): add ModelSelector component
 
 ---
 
-### Task 14 — Integrate into `SettingsPanel`
+### 任务 14 — 集成到 `SettingsPanel`
 
-**Files**
-- Modify: `frontend/src/components/Settings/SettingsPanel.tsx`
-- Modify: `frontend/src/components/Settings/SettingsPanel.test.tsx`
+**文件**
+- 修改：`frontend/src/components/Settings/SettingsPanel.tsx`
+- 修改：`frontend/src/components/Settings/SettingsPanel.test.tsx`
 
-**Step 1 — Write failing test**
+**步骤 1 — 编写失败的测试**
 
-Add to `frontend/src/components/Settings/SettingsPanel.test.tsx`:
+在 `frontend/src/components/Settings/SettingsPanel.test.tsx` 中添加：
 
 ```typescript
   it('should render endpoint manager', async () => {
@@ -2104,17 +2103,17 @@ Add to `frontend/src/components/Settings/SettingsPanel.test.tsx`:
   })
 ```
 
-**Step 2 — Run test command and expected failure**
+**步骤 2 — 运行测试命令并查看预期失败**
 
 ```bash
 cd frontend && npm test -- src/components/Settings/SettingsPanel.test.tsx
 ```
 
-Expected failure: `Unable to find element with data-testid "endpoint-manager"`.
+预期失败：`Unable to find element with data-testid "endpoint-manager"`。
 
-**Step 3 — Write minimal implementation**
+**步骤 3 — 编写最小实现**
 
-Modify `frontend/src/components/Settings/SettingsPanel.tsx`:
+修改 `frontend/src/components/Settings/SettingsPanel.tsx`：
 
 ```typescript
 import { useState, useEffect, useCallback, type FormEvent } from 'react'
@@ -2171,15 +2170,15 @@ export function SettingsPanel() {
 }
 ```
 
-**Step 4 — Run test command and expected pass**
+**步骤 4 — 运行测试命令并查看预期通过**
 
 ```bash
 cd frontend && npm test -- src/components/Settings/SettingsPanel.test.tsx
 ```
 
-Expected: all existing + new tests pass.
+预期结果：所有已有测试 + 新增测试均通过。
 
-**Step 5 — Commit message**
+**步骤 5 — 提交信息**
 
 ```
 feat(frontend): integrate EndpointManager and ModelSelector into SettingsPanel
@@ -2187,20 +2186,20 @@ feat(frontend): integrate EndpointManager and ModelSelector into SettingsPanel
 
 ---
 
-## Verification Tasks
+## 验证任务
 
-### Task 15 — Backend full test suite and lint
+### 任务 15 — 后端完整测试套件与代码检查
 
-**Files**
-- All backend files created/modified above.
+**文件**
+- 上述所有创建/修改的后端文件。
 
-**Step 1 — Run tests**
+**步骤 1 — 运行测试**
 
 ```bash
 pytest tests/test_llm/ tests/test_api/test_config_endpoints.py tests/test_api/test_config_swap_api.py -q
 ```
 
-**Step 2 — Run lint and type check**
+**步骤 2 — 运行代码检查与类型检查**
 
 ```bash
 ruff check src/ tests/
@@ -2208,7 +2207,7 @@ ruff format src/ tests/
 mypy src/
 ```
 
-**Step 3 — Commit message**
+**步骤 3 — 提交信息**
 
 ```
 chore(llm): lint and type-check endpoint management backend
@@ -2216,25 +2215,25 @@ chore(llm): lint and type-check endpoint management backend
 
 ---
 
-### Task 16 — Frontend full test suite and lint
+### 任务 16 — 前端完整测试套件与代码检查
 
-**Files**
-- All frontend files created/modified above.
+**文件**
+- 上述所有创建/修改的前端文件。
 
-**Step 1 — Run tests**
+**步骤 1 — 运行测试**
 
 ```bash
 cd frontend && npm test
 ```
 
-**Step 2 — Run lint and build**
+**步骤 2 — 运行代码检查与构建**
 
 ```bash
 cd frontend && npm run lint
 cd frontend && npm run build
 ```
 
-**Step 3 — Commit message**
+**步骤 3 — 提交信息**
 
 ```
 chore(frontend): lint and build endpoint management UI
@@ -2242,23 +2241,23 @@ chore(frontend): lint and build endpoint management UI
 
 ---
 
-## Summary of Task List
+## 任务清单总结
 
-| # | Task | Files |
+| # | 任务 | 文件 |
 |---|------|-------|
-| 1 | Extend `LLMProvider` base class | `src/thumbelina/llm/base.py`, `src/thumbelina/llm/anthropic.py`, `src/thumbelina/llm/ollama.py`, `tests/test_llm/test_base.py` |
-| 2 | Implement `OpenAIProvider.list_models` | `src/thumbelina/llm/openai.py`, `tests/test_llm/test_openai_provider.py` |
-| 3 | Implement `OpenAIProvider.speed_test` | `src/thumbelina/llm/openai.py`, `tests/test_llm/test_openai_provider.py` |
-| 4 | Create `EndpointManager` | `src/thumbelina/llm/endpoint_manager.py`, `tests/test_llm/test_endpoint_manager.py` |
-| 5 | Add API routes | `src/thumbelina/api/routes/config.py`, `tests/test_api/test_config_endpoints.py` |
-| 6 | Wire `EndpointManager` into app state | `src/thumbelina/api/app.py` |
-| 7 | Extend `PUT /config/llm` with `endpoint_id` | `src/thumbelina/api/routes/config.py`, `tests/test_api/test_config_swap_api.py` |
-| 8 | Create `api/llmConfig.ts` | `frontend/src/api/llmConfig.ts`, `frontend/src/api/llmConfig.test.ts` |
-| 9 | Create `EndpointList` component | `frontend/src/components/Settings/EndpointList.tsx`, `frontend/src/components/Settings/EndpointList.test.tsx` |
-| 10 | Create `EndpointForm` component | `frontend/src/components/Settings/EndpointForm.tsx`, `frontend/src/components/Settings/EndpointForm.test.tsx` |
-| 11 | Create `SpeedTestResult` component | `frontend/src/components/Settings/SpeedTestResult.tsx`, `frontend/src/components/Settings/SpeedTestResult.test.tsx` |
-| 12 | Create `EndpointManager` component | `frontend/src/components/Settings/EndpointManager.tsx`, `frontend/src/components/Settings/EndpointManager.test.tsx` |
-| 13 | Create `ModelSelector` component | `frontend/src/components/Settings/ModelSelector.tsx`, `frontend/src/components/Settings/ModelSelector.test.tsx` |
-| 14 | Integrate into `SettingsPanel` | `frontend/src/components/Settings/SettingsPanel.tsx`, `frontend/src/components/Settings/SettingsPanel.test.tsx` |
-| 15 | Backend verification | backend full suite |
-| 16 | Frontend verification | frontend full suite |
+| 1 | 扩展 `LLMProvider` 基类 | `src/thumbelina/llm/base.py`, `src/thumbelina/llm/anthropic.py`, `src/thumbelina/llm/ollama.py`, `tests/test_llm/test_base.py` |
+| 2 | 实现 `OpenAIProvider.list_models` | `src/thumbelina/llm/openai.py`, `tests/test_llm/test_openai_provider.py` |
+| 3 | 实现 `OpenAIProvider.speed_test` | `src/thumbelina/llm/openai.py`, `tests/test_llm/test_openai_provider.py` |
+| 4 | 创建 `EndpointManager` | `src/thumbelina/llm/endpoint_manager.py`, `tests/test_llm/test_endpoint_manager.py` |
+| 5 | 添加 API 路由 | `src/thumbelina/api/routes/config.py`, `tests/test_api/test_config_endpoints.py` |
+| 6 | 将 `EndpointManager` 接入应用状态 | `src/thumbelina/api/app.py` |
+| 7 | 扩展 `PUT /config/llm` 支持 `endpoint_id` | `src/thumbelina/api/routes/config.py`, `tests/test_api/test_config_swap_api.py` |
+| 8 | 创建 `api/llmConfig.ts` | `frontend/src/api/llmConfig.ts`, `frontend/src/api/llmConfig.test.ts` |
+| 9 | 创建 `EndpointList` 组件 | `frontend/src/components/Settings/EndpointList.tsx`, `frontend/src/components/Settings/EndpointList.test.tsx` |
+| 10 | 创建 `EndpointForm` 组件 | `frontend/src/components/Settings/EndpointForm.tsx`, `frontend/src/components/Settings/EndpointForm.test.tsx` |
+| 11 | 创建 `SpeedTestResult` 组件 | `frontend/src/components/Settings/SpeedTestResult.tsx`, `frontend/src/components/Settings/SpeedTestResult.test.tsx` |
+| 12 | 创建 `EndpointManager` 组件 | `frontend/src/components/Settings/EndpointManager.tsx`, `frontend/src/components/Settings/EndpointManager.test.tsx` |
+| 13 | 创建 `ModelSelector` 组件 | `frontend/src/components/Settings/ModelSelector.tsx`, `frontend/src/components/Settings/ModelSelector.test.tsx` |
+| 14 | 集成到 `SettingsPanel` | `frontend/src/components/Settings/SettingsPanel.tsx`, `frontend/src/components/Settings/SettingsPanel.test.tsx` |
+| 15 | 后端验证 | 后端完整测试套件 |
+| 16 | 前端验证 | 前端完整测试套件 |
