@@ -21,6 +21,7 @@ export function ChatWindow({ conversationId, onConversationCreated, onDefaultCon
 
   // Sync from WebSocket when backend reports mode
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setStreamingMode(wsStreamingMode)
   }, [wsStreamingMode])
 

@@ -109,6 +109,7 @@ export function ChannelsPage() {
 
   useEffect(() => {
     if (!config) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void fetchStatus(config)
   }, [config])
 
