@@ -31,6 +31,9 @@ describe('SettingsPanel', () => {
           ),
         )
       }
+      if (urlString.includes('/config/llm/endpoints')) {
+        return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
+      }
       return Promise.resolve(new Response(JSON.stringify({}), { status: 200 }))
     })
   })
@@ -156,6 +159,20 @@ describe('SettingsPanel', () => {
     fireEvent.click(screen.getByTestId('export-button'))
     await waitFor(() => {
       expect(globalThis.fetch).toHaveBeenCalledWith('/api/v1/data/export')
+    })
+  })
+
+  it('should render endpoint manager', async () => {
+    render(<SettingsPanel />)
+    await waitFor(() => {
+      expect(screen.getByTestId('endpoint-manager')).toBeInTheDocument()
+    })
+  })
+
+  it('should render fetch models button', async () => {
+    render(<SettingsPanel />)
+    await waitFor(() => {
+      expect(screen.getByTestId('fetch-models-button')).toBeInTheDocument()
     })
   })
 })

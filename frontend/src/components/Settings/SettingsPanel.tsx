@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, type FormEvent } from 'react'
+import { EndpointManager } from './EndpointManager'
+import { ModelSelector } from './ModelSelector'
 
 interface ConfigData {
   provider: string
@@ -195,6 +197,13 @@ export function SettingsPanel() {
               value={config.model}
               onChange={e => setConfig({ ...config, model: e.target.value })}
             />
+            <ModelSelector
+              provider={config.provider}
+              base_url={config.base_url}
+              api_key={config.api_key}
+              model={config.model}
+              onSelect={model => setConfig(prev => ({ ...prev, model }))}
+            />
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="base_url">Base URL</label>
@@ -243,6 +252,9 @@ export function SettingsPanel() {
           </p>
         )}
       </div>
+
+      {/* LLM Endpoints */}
+      <EndpointManager onMessage={(msg, err) => { setMessage(msg); setIsError(err) }} />
 
       {/* User Profile */}
       <div className="card" data-testid="user-profile-card">
