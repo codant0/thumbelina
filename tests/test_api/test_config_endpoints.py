@@ -55,3 +55,19 @@ def test_create_endpoint(client):
     assert data["provider"] == "openai"
     assert "api_key" not in data
     assert data["api_key_set"] is True
+
+
+@pytest.fixture
+def live_client():
+    config = AppConfig(
+        llm=LLMConfig(provider="openai", model="test", api_key="test-key"),
+        memory=MemoryConfig(database_url="sqlite:///:memory:"),
+    )
+    app = create_app(config)
+    with TestClient(app) as client:
+        yield client
+
+
+def test_app_state_has_endpoint_manager(live_client):
+    assert hasattr(live_client.app.state, "endpoint_manager")
+    assert live_client.app.state.endpoint_manager is not None

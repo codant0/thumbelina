@@ -27,6 +27,7 @@ from thumbelina.api.routes import (
 )
 from thumbelina.api.websocket import router as ws_router
 from thumbelina.config import AppConfig, load_config
+from thumbelina.llm.endpoint_manager import EndpointManager
 from thumbelina.llm.factory import create_provider
 from thumbelina.memory.manager import MemoryManager
 from thumbelina.notifications import NotificationManager
@@ -280,6 +281,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     config_repo = ConfigRepository(db_url=config.memory.database_url)
     app.state.config_repo = config_repo
+
+    # Initialize LLM endpoint manager backed by the config repository
+    endpoint_manager = EndpointManager(config_repo=config_repo)
+    app.state.endpoint_manager = endpoint_manager
 
     # Import YAML config to database on first startup (if DB is empty)
     from thumbelina.config.loader import import_yaml_to_db
