@@ -3,10 +3,19 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
+
+from thumbelina.llm.endpoint_manager import (
+    EndpointManager,
+    LLMEndpoint,
+    LLMEndpointCreate,
+    LLMEndpointUpdate,
+)
+from thumbelina.llm.factory import create_provider
 
 logger = logging.getLogger(__name__)
 
@@ -332,3 +341,172 @@ async def reload_config(request: Request) -> dict[str, str]:
     if hasattr(manager, "load_from_database"):
         await manager.load_from_database()
     return {"status": "ok"}
+
+
+# ── LLM Endpoint Management ──────────────────────────────────────────
+
+
+class LLMEndpointResponse(BaseModel):
+    """LLM endpoint without secrets."""
+
+    id: str
+    provider: str
+    name: str
+    base_url: str
+    api_key_set: bool
+    is_default: bool
+    last_latency_ms: int | None = None
+    last_total_ms: int | None = None
+    is_reachable: bool | None = None
+    last_tested_at: datetime | None = None
+
+
+LLMEndpointResponse.model_rebuild()
+
+
+class SpeedTestResponse(BaseModel):
+    """Speed test result."""
+
+    endpoint_id: str
+    reachable: bool
+    latency_ms: int | None = None
+    total_ms: int | None = None
+    error: str | None = None
+
+
+class ModelListResponse(BaseModel):
+    """Model list from a live endpoint."""
+
+    provider: str
+    base_url: str
+    models: list[str]
+
+
+def _to_response(endpoint: LLMEndpoint) -> LLMEndpointResponse:
+    return LLMEndpointResponse(
+        id=endpoint.id,
+        provider=endpoint.provider,
+        name=endpoint.name,
+        base_url=endpoint.base_url,
+        api_key_set=endpoint.api_key_set,
+        is_default=endpoint.is_default,
+        last_latency_ms=endpoint.last_latency_ms,
+        last_total_ms=endpoint.last_total_ms,
+        is_reachable=endpoint.is_reachable,
+        last_tested_at=endpoint.last_tested_at,
+    )
+
+
+def _get_endpoint_manager(request: Request) -> EndpointManager:
+    manager = getattr(request.app.state, "endpoint_manager", None)
+    if manager is None:
+        raise HTTPException(status_code=503, detail="Endpoint manager not available")
+    return manager
+
+
+@router.get("/config/llm/endpoints", response_model=list[LLMEndpointResponse])
+async def list_endpoints(
+    request: Request,
+    provider: str | None = Query(None),
+) -> list[LLMEndpointResponse]:
+    """List saved LLM endpoints."""
+    manager = _get_endpoint_manager(request)
+    endpoints = await manager.list_endpoints(provider=provider)
+    return [_to_response(e) for e in endpoints]
+
+
+@router.post(
+    "/config/llm/endpoints",
+    response_model=LLMEndpointResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_endpoint(
+    body: LLMEndpointCreate,
+    request: Request,
+) -> LLMEndpointResponse:
+    """Create a new LLM endpoint."""
+    manager = _get_endpoint_manager(request)
+    endpoint = await manager.create_endpoint(body)
+    return _to_response(endpoint)
+
+
+@router.put("/config/llm/endpoints/{endpoint_id}", response_model=LLMEndpointResponse)
+async def update_endpoint(
+    endpoint_id: str,
+    body: LLMEndpointUpdate,
+    request: Request,
+) -> LLMEndpointResponse:
+    """Update an existing LLM endpoint."""
+    manager = _get_endpoint_manager(request)
+    endpoint = await manager.update_endpoint(endpoint_id, body)
+    if endpoint is None:
+        raise HTTPException(status_code=404, detail="Endpoint not found")
+    return _to_response(endpoint)
+
+
+@router.delete("/config/llm/endpoints/{endpoint_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_endpoint(endpoint_id: str, request: Request) -> None:
+    """Delete an LLM endpoint."""
+    manager = _get_endpoint_manager(request)
+    deleted = await manager.delete_endpoint(endpoint_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Endpoint not found")
+
+
+@router.post(
+    "/config/llm/endpoints/{endpoint_id}/speed-test",
+    response_model=SpeedTestResponse,
+)
+async def speed_test_endpoint(
+    endpoint_id: str,
+    request: Request,
+    model: str = Query(...),
+) -> SpeedTestResponse:
+    """Run a speed test against a saved endpoint."""
+    manager = _get_endpoint_manager(request)
+    result = await manager.run_speed_test(endpoint_id, model=model)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Endpoint not found")
+    if result.reachable is False:
+        logger.warning("Speed test failed for endpoint %s: %s", endpoint_id, result.error)
+    return SpeedTestResponse(
+        endpoint_id=endpoint_id,
+        reachable=result.reachable,
+        latency_ms=result.latency_ms,
+        total_ms=result.total_ms,
+        error=result.error,
+    )
+
+
+@router.get("/config/llm/models", response_model=ModelListResponse)
+async def list_models(
+    request: Request,
+    provider: str = Query(...),
+    base_url: str = Query(...),
+    api_key: str | None = Query(None),
+) -> ModelListResponse:
+    """Fetch model list from a live endpoint."""
+    manager = _get_endpoint_manager(request)
+    resolved_key = api_key
+
+    # Try to find a matching saved endpoint to reuse its key.
+    for endpoint in await manager.list_endpoints(provider=provider):
+        if endpoint.base_url.rstrip("/") == base_url.rstrip("/"):
+            resolved_key = endpoint.api_key or api_key
+            break
+
+    try:
+        llm_provider = create_provider(
+            provider,
+            api_key=resolved_key or "",
+            base_url=base_url,
+            model="gpt-4o",
+        )
+        models = await llm_provider.list_models(base_url=base_url, api_key=resolved_key)
+    except NotImplementedError as exc:
+        raise HTTPException(status_code=501, detail=str(exc))
+    except Exception as exc:
+        logger.warning("Failed to list models: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Failed to reach endpoint: {exc}")
+
+    return ModelListResponse(provider=provider, base_url=base_url, models=models)
