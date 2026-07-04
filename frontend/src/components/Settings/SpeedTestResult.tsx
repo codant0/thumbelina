@@ -15,15 +15,15 @@ export function SpeedTestResult({ loading, result }: SpeedTestResultProps) {
   if (result.reachable) {
     return (
       <span className="speed-test-success">
-        {result.latency_ms !== undefined ? `${result.latency_ms} ms` : '—'}
+        ✓ <span>{result.latency_ms !== undefined ? `${result.latency_ms} ms` : '—'}</span>
         {' / '}
-        {result.total_ms !== undefined ? `${result.total_ms} ms` : '—'}
+        <span>{result.total_ms !== undefined ? `${result.total_ms} ms` : '—'}</span>
       </span>
     )
   }
   return (
     <span className="speed-test-error" title={result.error}>
-      Unreachable{result.error ? ` — ${result.error}` : ''}
+      ✗ Unreachable{result.error ? ` — ${result.error}` : ''}
     </span>
   )
 }
