@@ -33,6 +33,7 @@ export function EndpointManager({ onMessage }: EndpointManagerProps) {
   }, [onMessage])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load()
   }, [load])
 

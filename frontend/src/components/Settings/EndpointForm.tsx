@@ -27,7 +27,6 @@ export function EndpointForm({ initialValues, onSubmit, onCancel }: EndpointForm
       return
     }
     try {
-      // eslint-disable-next-line no-new
       new URL(baseUrl)
     } catch {
       setError('Base URL must be a valid URL')

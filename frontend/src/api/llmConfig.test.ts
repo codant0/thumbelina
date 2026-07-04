@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { fetchEndpoints, createEndpoint, fetchModels, runSpeedTest } from './llmConfig'
+import { fetchEndpoints, createEndpoint } from './llmConfig'
 
 describe('llmConfig API', () => {
   beforeEach(() => {
