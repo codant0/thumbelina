@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from thumbelina.config.models import AppConfig
+from thumbelina.llm.endpoint_manager import EndpointManager, LLMEndpoint
 
 
 @pytest.fixture()
@@ -126,6 +127,31 @@ class TestPutLLMConfig:
         assert resp.status_code == 422
         assert "Unknown provider" in resp.json()["detail"]
 
+    def test_swap_llm_with_endpoint_id(self, client):
+        endpoint = LLMEndpoint(
+            id="e1",
+            provider="openai",
+            name="Default",
+            base_url="https://api.openai.com/v1",
+            api_key="sk-test",
+            api_key_set=True,
+            created_at="2026-07-02T00:00:00Z",
+            updated_at="2026-07-02T00:00:00Z",
+        )
+        client.app.state.endpoint_manager = MagicMock(spec=EndpointManager)
+        client.app.state.endpoint_manager.get_endpoint = AsyncMock(return_value=endpoint)
+        response = client.put(
+            "/api/v1/config/llm",
+            json={
+                "provider": "openai",
+                "model": "gpt-4o",
+                "endpoint_id": "e1",
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["base_url"] == "https://api.openai.com/v1"
+
 
 class TestPutChannelConfig:
     """Tests for PUT /config/channels/{name}."""
@@ -175,9 +201,7 @@ class TestPutChannelConfig:
 
     def test_disable_channel(self, client):
         """Disabling a channel returns connected=False."""
-        client.app.state.runtime_config_manager.swap_channel = AsyncMock(
-            return_value=False
-        )
+        client.app.state.runtime_config_manager.swap_channel = AsyncMock(return_value=False)
         resp = client.put(
             "/api/v1/config/channels/qq",
             json={"enabled": False},

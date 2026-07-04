@@ -79,7 +79,8 @@ class LLMSwapRequest(BaseModel):
     provider: str = Field(..., min_length=1)
     model: str = Field(..., min_length=1)
     api_key: str = Field(default="")
-    base_url: str | None = None
+    base_url: str | None = Field(default=None)
+    endpoint_id: str | None = Field(default=None)
 
 
 class LLMSwapResponse(BaseModel):
@@ -172,12 +173,16 @@ async def update_config(
     if "streaming_enabled" in body.llm:
         config.llm.streaming_enabled = bool(body.llm["streaming_enabled"])
         if hasattr(manager, "_persist_to_db"):
-            await manager._persist_to_db("llm", "llm.streaming_enabled", config.llm.streaming_enabled)
+            await manager._persist_to_db(
+                "llm", "llm.streaming_enabled", config.llm.streaming_enabled
+            )
 
     if "enabled" in body.rate_limit:
         config.rate_limit.enabled = body.rate_limit["enabled"]
         if hasattr(manager, "_persist_to_db"):
-            await manager._persist_to_db("rate_limit", "rate_limit.enabled", config.rate_limit.enabled)
+            await manager._persist_to_db(
+                "rate_limit", "rate_limit.enabled", config.rate_limit.enabled
+            )
 
     return {"status": "ok"}
 
@@ -190,13 +195,24 @@ async def swap_llm(body: LLMSwapRequest, request: Request) -> LLMSwapResponse:
     """Hot-swap the LLM provider/model at runtime."""
     manager = request.app.state.runtime_config_manager
     agent = request.app.state.agent
+    endpoint_manager = getattr(request.app.state, "endpoint_manager", None)
+
+    effective_api_key = body.api_key
+    effective_base_url = body.base_url
+
+    if endpoint_manager and body.endpoint_id:
+        endpoint = await endpoint_manager.get_endpoint(body.endpoint_id)
+        if endpoint is None:
+            raise HTTPException(status_code=404, detail="Endpoint not found")
+        effective_base_url = endpoint.base_url
+        effective_api_key = endpoint.api_key or body.api_key
 
     try:
         await manager.swap_llm_provider(
             new_provider=body.provider,
             new_model=body.model,
-            new_api_key=body.api_key,
-            new_base_url=body.base_url,
+            new_api_key=effective_api_key,
+            new_base_url=effective_base_url,
             agent=agent,
             skill_engine=getattr(request.app.state, "skill_engine", None),
             composition_engine=getattr(request.app.state, "composition_engine", None),
@@ -210,7 +226,7 @@ async def swap_llm(body: LLMSwapRequest, request: Request) -> LLMSwapResponse:
         status="ok",
         provider=body.provider,
         model=body.model,
-        base_url=body.base_url,
+        base_url=effective_base_url,
     )
 
 
@@ -241,20 +257,13 @@ async def swap_channel(
         existing = config.channels.qq
         new_config: Any = QQChannelConfig(
             enabled=body.enabled,
-            app_id=(
-                body.app_id if body.app_id is not None else existing.app_id
-            ),
-            app_secret=(
-                body.app_secret if body.app_secret is not None
-                else existing.app_secret
-            ),
+            app_id=(body.app_id if body.app_id is not None else existing.app_id),
+            app_secret=(body.app_secret if body.app_secret is not None else existing.app_secret),
             allowed_guilds=(
-                body.allowed_guilds if body.allowed_guilds is not None
-                else existing.allowed_guilds
+                body.allowed_guilds if body.allowed_guilds is not None else existing.allowed_guilds
             ),
             allowed_groups=(
-                body.allowed_groups if body.allowed_groups is not None
-                else existing.allowed_groups
+                body.allowed_groups if body.allowed_groups is not None else existing.allowed_groups
             ),
         )
     else:
@@ -263,25 +272,18 @@ async def swap_channel(
         existing = config.channels.wechat
         new_config = WeChatChannelConfig(
             enabled=body.enabled,
-            bot_token=(
-                body.bot_token if body.bot_token is not None
-                else existing.bot_token
-            ),
+            bot_token=(body.bot_token if body.bot_token is not None else existing.bot_token),
             ilink_bot_id=(
-                body.ilink_bot_id if body.ilink_bot_id is not None
-                else existing.ilink_bot_id
+                body.ilink_bot_id if body.ilink_bot_id is not None else existing.ilink_bot_id
             ),
             ilink_user_id=(
-                body.ilink_user_id if body.ilink_user_id is not None
-                else existing.ilink_user_id
+                body.ilink_user_id if body.ilink_user_id is not None else existing.ilink_user_id
             ),
             ilink_base_url=(
-                body.ilink_base_url if body.ilink_base_url is not None
-                else existing.ilink_base_url
+                body.ilink_base_url if body.ilink_base_url is not None else existing.ilink_base_url
             ),
             webhook_secret=(
-                body.webhook_secret if body.webhook_secret is not None
-                else existing.webhook_secret
+                body.webhook_secret if body.webhook_secret is not None else existing.webhook_secret
             ),
         )
 
