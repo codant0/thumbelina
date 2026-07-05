@@ -1,4 +1,7 @@
-"""Start both backend (uvicorn) and frontend (vite) dev servers concurrently."""
+"""Start backend (uvicorn) then frontend (vite) dev servers.
+
+Backend is started first and health-checked before the frontend is launched.
+"""
 
 import subprocess
 import signal
@@ -6,6 +9,8 @@ import sys
 import os
 import time
 import threading
+import urllib.request
+import urllib.error
 from pathlib import Path
 
 
@@ -22,12 +27,12 @@ def _stream_and_capture(pipe, label: str, buffer: list[str]):
 
 
 def _start_process(name: str, cmd: list[str], cwd: str, procs, buffers, threads):
-    """Start a subprocess with stderr piped, streamed to terminal via a reader thread."""
+    """Start a subprocess with output piped, streamed to terminal via a reader thread."""
     proc = subprocess.Popen(
         cmd,
         cwd=cwd,
         stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,   # merge stderr into stdout so nothing is lost
+        stderr=subprocess.STDOUT,
     )
     procs[name] = proc
     buffers[name] = []
@@ -38,6 +43,24 @@ def _start_process(name: str, cmd: list[str], cwd: str, procs, buffers, threads)
     )
     t.start()
     threads.append(t)
+
+
+def _wait_for_backend(procs, output_buffers, threads, host="127.0.0.1", port=8000, timeout=30):
+    """Poll the /health endpoint until the backend is ready or times out."""
+    url = f"http://{host}:{port}/health"
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        # If backend already exited, bail out immediately
+        if procs.get("backend") and procs["backend"].poll() is not None:
+            return False
+        try:
+            resp = urllib.request.urlopen(url, timeout=2)
+            if resp.status == 200:
+                return True
+        except (urllib.error.URLError, OSError):
+            pass
+        time.sleep(0.5)
+    return False
 
 
 def main():
@@ -54,10 +77,8 @@ def main():
                 p.terminate()
         for p in procs.values():
             p.wait()
-        # Give reader threads a moment to drain remaining output
         for t in threads:
             t.join(timeout=1.0)
-        # Show prominent error output for any failed process
         failed = False
         for name, p in procs.items():
             if p.returncode and p.returncode != 0:
@@ -76,6 +97,7 @@ def main():
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
 
+    # 1. Start backend
     print("Starting backend (uvicorn) on http://localhost:8000 ...")
     _start_process(
         "backend",
@@ -84,6 +106,18 @@ def main():
         str(root), procs, output_buffers, threads,
     )
 
+    # 2. Wait for backend to be healthy
+    print("Waiting for backend to be ready ...", end="", flush=True)
+    if _wait_for_backend(procs, output_buffers, threads):
+        print(" ready!")
+    else:
+        # Check if backend process died
+        if procs.get("backend") and procs["backend"].poll() is not None:
+            shutdown()
+        else:
+            print(f" timed out after 30s. Starting frontend anyway ...")
+
+    # 3. Start frontend
     print("Starting frontend (vite) on http://localhost:5173 ...")
     npm_cmd = "npm.cmd" if os.name == "nt" else "npm"
     _start_process(
