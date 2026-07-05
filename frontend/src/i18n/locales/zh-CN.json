@@ -6,7 +6,7 @@
     "dream": "梦境",
     "settings": "设置",
     "plugins": "插件",
-    "channels": "渠道"
+    "channels": "频道"
   },
   "common": {
     "loading": "加载中…",
@@ -95,13 +95,13 @@
     "speedTestFailed": "速度测试失败"
   },
   "channels": {
-    "title": "渠道",
+    "title": "频道",
     "qqBot": "QQ 机器人",
     "wechat": "微信",
     "enabled": "已启用",
     "disabled": "已禁用",
     "enable": "启用",
-    "enableWechat": "启用微信渠道",
+    "enableWechat": "启用微信频道",
     "enableQQ": "启用 QQ 机器人",
     "scanQR": "扫码登录",
     "manualConfig": "手动配置",
