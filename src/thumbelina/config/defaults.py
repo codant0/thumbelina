@@ -5,11 +5,6 @@ from __future__ import annotations
 from thumbelina.config.models import AppConfig
 
 DEFAULT_CONFIG: dict[str, dict[str, str]] = {
-    "llm": {
-        "provider": "openai",
-        "model": "gpt-4o",
-        "api_key": "",
-    },
     "memory": {
         "database_url": "sqlite:///thumbelina.db",
     },

@@ -141,6 +141,57 @@ class _RateLimitMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+class _LazyLLMProvider:
+    """Placeholder LLM provider that defers real provider creation until first use."""
+
+    def __init__(self, provider_name: str, kwargs: dict) -> None:
+        self._provider_name = provider_name
+        self._kwargs = kwargs
+        self._real = None
+
+    def _ensure(self):
+        if self._real is None:
+            try:
+                self._real = create_provider(self._provider_name, **self._kwargs)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"LLM provider '{self._provider_name}' is not available. "
+                    f"Please configure credentials via Web UI Settings or "
+                    f"/api/v1/config/llm. Error: {exc}"
+                ) from exc
+        return self._real
+
+    @property
+    def model(self):
+        return self._kwargs.get('model', 'unknown')
+
+    @property
+    def chat_model(self):
+        return self._ensure().chat_model
+
+    async def chat(self, messages):
+        return await self._ensure().chat(messages)
+
+    async def stream(self, messages):
+        async for chunk in self._ensure().stream(messages):
+            yield chunk
+
+    def chat_sync(self, messages):
+        return self._ensure().chat_sync(messages)
+
+    async def list_models(self, **kwargs):
+        return await self._ensure().list_models(**kwargs)
+
+    async def speed_test(self, model, **kwargs):
+        return await self._ensure().speed_test(model, **kwargs)
+
+    async def test_connection(self, **kwargs):
+        return await self._ensure().test_connection(**kwargs)
+
+    def swap_provider(self, real_provider):
+        self._real = real_provider
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage application startup and shutdown."""
@@ -149,14 +200,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     memory = MemoryManager(config.memory.database_url)
     app.state.memory_manager = memory
 
-    llm_kwargs = {
-        "model": config.llm.model,
-        "api_key": config.llm.api_key,
-    }
+    llm_kwargs: dict[str, Any] = {"model": config.llm.model}
+    if config.llm.api_key:
+        llm_kwargs["api_key"] = config.llm.api_key
     if config.llm.base_url:
         llm_kwargs["base_url"] = config.llm.base_url
 
-    llm_provider = create_provider(config.llm.provider, **llm_kwargs)
+    try:
+        llm_provider = create_provider(config.llm.provider, **llm_kwargs)
+    except Exception:
+        logger.warning(
+            "LLM provider %s not available at startup (no credentials). "
+            "You can configure it via the Web UI Settings or the /api/v1/config/llm endpoint.",
+            config.llm.provider,
+            exc_info=True,
+        )
+        llm_provider = _LazyLLMProvider(config.llm.provider, llm_kwargs)
 
     # Initialize feedback repository
     feedback_repo = None

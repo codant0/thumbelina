@@ -1,13 +1,17 @@
 # Thumbelina default configuration
 # Override values with THUMBELINA_* environment variables
 
-llm:
-  provider: openai
-  model: gpt-4o
-  api_key: ${OPENAI_API_KEY}
-  # base_url: https://api.openai.com/v1  # Optional: custom API endpoint for OpenAI-compatible providers
-  # request_timeout: null                 # Optional: LLM request timeout in seconds
-  # streaming_enabled: true               # Optional: enable WebSocket streaming responses
+# llm:
+#   provider: openai
+#   model: gpt-4o
+#   api_key: sk-xxx
+#   # base_url: https://api.openai.com/v1  # Optional: custom API endpoint for OpenAI-compatible providers
+#   # request_timeout: null                 # Optional: LLM request timeout in seconds
+#   # streaming_enabled: true               # Optional: enable WebSocket streaming responses
+#
+# Supports: openai, anthropic, ollama, deepseek (via openai provider)
+# API key is read from OPENAI_API_KEY / ANTHROPIC_API_KEY env vars automatically.
+# Configure or change provider via Web UI Settings or PUT /api/v1/config/llm.
 
 # cors_origins: ["*"]                     # Optional: CORS allowed origins; restrict in production
 
@@ -26,15 +30,14 @@ memory:
 logging:
   level: INFO
 
-channels:
-  qq:
-    enabled: false
-    app_id: ""
-    app_secret: ""
-  wechat:
-    enabled: false
-    bot_token: ""              # Bot token from iLink (auto-populated after QR code login)
-    ilink_bot_id: ""           # iLink bot ID
-    ilink_user_id: ""          # iLink user ID
-    ilink_base_url: "https://ilinkai.weixin.qq.com"
-    # Protocol reference: https://github.com/epiral/weixin-bot/blob/main/docs/protocol-spec.md
+# channels:
+#   qq:
+#     enabled: false
+#     app_id: ""
+#     app_secret: ""
+#   wechat:
+#     enabled: false
+#     bot_token: ""
+#     ilink_bot_id: ""
+#     ilink_user_id: ""
+#     ilink_base_url: "https://ilinkai.weixin.qq.com"

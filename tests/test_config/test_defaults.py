@@ -10,16 +10,10 @@ class TestDefaults:
         from thumbelina.config.defaults import DEFAULT_CONFIG
 
         assert isinstance(DEFAULT_CONFIG, dict)
-        assert "llm" in DEFAULT_CONFIG
+        # llm is intentionally absent — defaults come from AppConfig / LLMConfig
+        assert "llm" not in DEFAULT_CONFIG
         assert "memory" in DEFAULT_CONFIG
         assert "logging" in DEFAULT_CONFIG
-
-    def test_default_llm_config(self):
-        from thumbelina.config.defaults import DEFAULT_CONFIG
-
-        llm = DEFAULT_CONFIG["llm"]
-        assert llm["provider"] == "openai"
-        assert llm["model"] == "gpt-4o"
 
     def test_default_memory_config(self):
         from thumbelina.config.defaults import DEFAULT_CONFIG
@@ -39,5 +33,6 @@ class TestDefaults:
         cfg = get_default_config()
         assert cfg.llm.provider == "openai"
         assert cfg.llm.model == "gpt-4o"
+        assert cfg.llm.api_key == ""
         assert cfg.memory.database_url == "sqlite:///thumbelina.db"
         assert cfg.logging.level == "INFO"
