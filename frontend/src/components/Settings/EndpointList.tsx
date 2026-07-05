@@ -41,6 +41,7 @@ export function EndpointList({
           <div className="endpoint-row-header">
             <strong>{ep.name}</strong>
             <span className="endpoint-badge">{ep.provider}</span>
+            {ep.model && <span className="endpoint-badge" style={{ opacity: 0.7 }}>{ep.model}</span>}
             {ep.is_default && <span className="endpoint-default-badge">{t('endpoint.active')}</span>}
           </div>
           <div className="endpoint-row-body">

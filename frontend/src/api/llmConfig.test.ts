@@ -23,6 +23,7 @@ describe('llmConfig API', () => {
       provider: 'openai',
       name: 'Default',
       base_url: 'https://api.openai.com/v1',
+      model: 'gpt-4o',
       api_key: 'sk-test',
       is_default: false,
     })
@@ -35,6 +36,6 @@ describe('llmConfig API', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ detail: 'Invalid URL' }), { status: 422 }),
     )
-    await expect(createEndpoint({ provider: 'openai', name: 'x', base_url: 'bad', api_key: '', is_default: false })).rejects.toThrow('Invalid URL')
+    await expect(createEndpoint({ provider: 'openai', name: 'x', base_url: 'bad', model: '', api_key: '', is_default: false })).rejects.toThrow('Invalid URL')
   })
 })

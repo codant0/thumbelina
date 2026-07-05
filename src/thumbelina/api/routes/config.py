@@ -362,6 +362,7 @@ class LLMEndpointResponse(BaseModel):
     provider: str
     name: str
     base_url: str
+    model: str = ""
     api_key_set: bool
     is_default: bool
     last_latency_ms: int | None = None
@@ -437,6 +438,7 @@ def _to_response(endpoint: LLMEndpoint) -> LLMEndpointResponse:
         provider=endpoint.provider,
         name=endpoint.name,
         base_url=endpoint.base_url,
+        model=endpoint.model,
         api_key_set=endpoint.api_key_set,
         is_default=endpoint.is_default,
         last_latency_ms=endpoint.last_latency_ms,

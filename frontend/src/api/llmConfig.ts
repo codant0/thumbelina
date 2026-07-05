@@ -3,6 +3,7 @@ export interface LLMEndpoint {
   provider: 'openai' | 'ollama' | 'anthropic'
   name: string
   base_url: string
+  model: string
   api_key_set: boolean
   is_default: boolean
   last_latency_ms?: number
@@ -15,6 +16,7 @@ export interface EndpointFormData {
   provider: 'openai' | 'ollama' | 'anthropic'
   name: string
   base_url: string
+  model: string
   api_key: string
   is_default: boolean
 }

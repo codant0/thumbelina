@@ -24,6 +24,7 @@ class LLMEndpoint(BaseModel):
     provider: str
     name: str
     base_url: str
+    model: str = ""
     api_key: str = ""
     api_key_set: bool = False
     is_default: bool = False
@@ -41,6 +42,7 @@ class LLMEndpointCreate(BaseModel):
     provider: str
     name: str
     base_url: str
+    model: str = ""
     api_key: str = ""
     is_default: bool = False
 
@@ -50,6 +52,7 @@ class LLMEndpointUpdate(BaseModel):
 
     name: str | None = None
     base_url: str | None = None
+    model: str | None = None
     api_key: str | None = None
     is_default: bool | None = None
 
@@ -122,6 +125,7 @@ class EndpointManager:
             provider=data.provider,
             name=data.name,
             base_url=data.base_url.rstrip("/"),
+            model=data.model,
             api_key=data.api_key,
             api_key_set=bool(data.api_key),
             is_default=data.is_default,
@@ -150,6 +154,8 @@ class EndpointManager:
             endpoint.name = data.name
         if data.base_url is not None:
             endpoint.base_url = data.base_url.rstrip("/")
+        if data.model is not None:
+            endpoint.model = data.model
         if data.api_key is not None:
             endpoint.api_key = data.api_key
             endpoint.api_key_set = bool(data.api_key)

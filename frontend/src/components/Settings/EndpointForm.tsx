@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import type { EndpointFormData, LLMEndpoint } from '../../api/llmConfig'
 import { useTranslation } from '../../i18n'
 import { ConnectionTestButton } from './ConnectionTestButton'
+import { ModelSelector } from './ModelSelector'
 
 interface EndpointFormProps {
   initialValues?: LLMEndpoint
@@ -14,6 +15,7 @@ export function EndpointForm({ initialValues, onSubmit, onCancel }: EndpointForm
   const [provider, setProvider] = useState<'openai' | 'ollama' | 'anthropic'>(initialValues?.provider ?? 'openai')
   const [name, setName] = useState(initialValues?.name ?? '')
   const [baseUrl, setBaseUrl] = useState(initialValues?.base_url ?? '')
+  const [model, setModel] = useState(initialValues?.model ?? '')
   const [apiKey, setApiKey] = useState('')
   const [isDefault, setIsDefault] = useState(initialValues?.is_default ?? false)
   const [error, setError] = useState('')
@@ -39,6 +41,7 @@ export function EndpointForm({ initialValues, onSubmit, onCancel }: EndpointForm
       provider,
       name: name.trim(),
       base_url: baseUrl.trim(),
+      model: model.trim(),
       api_key: apiKey,
       is_default: isDefault,
     })
@@ -78,6 +81,23 @@ export function EndpointForm({ initialValues, onSubmit, onCancel }: EndpointForm
           value={baseUrl}
           onChange={e => setBaseUrl(e.target.value)}
           placeholder="https://api.openai.com/v1"
+        />
+      </div>
+      <div className="form-group">
+        <label className="form-label">{t('settings.model')}</label>
+        <input
+          className="form-input"
+          data-testid="endpoint-model-input"
+          value={model}
+          onChange={e => setModel(e.target.value)}
+          placeholder="gpt-4o / deepseek-chat / ..."
+        />
+        <ModelSelector
+          provider={provider}
+          base_url={baseUrl}
+          api_key={apiKey}
+          model={model}
+          onSelect={m => setModel(m)}
         />
       </div>
       <div className="form-group">

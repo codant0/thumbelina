@@ -34,6 +34,7 @@ describe('EndpointForm', () => {
         provider: 'openai',
         name: 'Default',
         base_url: 'https://api.openai.com/v1',
+        model: '',
         api_key: 'sk-test',
         is_default: false,
       })
@@ -46,7 +47,7 @@ describe('EndpointForm', () => {
         <EndpointForm
           onSubmit={vi.fn()}
           onCancel={vi.fn()}
-          initialValues={{ id: '1', provider: 'openai', name: 'Default', base_url: 'https://api.openai.com/v1', api_key_set: true, is_default: false }}
+          initialValues={{ id: '1', provider: 'openai', name: 'Default', base_url: 'https://api.openai.com/v1', model: 'gpt-4o', api_key_set: true, is_default: false }}
         />
       </LocaleProvider>,
     )

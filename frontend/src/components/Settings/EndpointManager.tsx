@@ -124,7 +124,7 @@ export function EndpointManager({ onMessage }: EndpointManagerProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           provider: ep.provider,
-          model: '',
+          model: ep.model || '',
           base_url: ep.base_url,
           endpoint_id: ep.id,
         }),

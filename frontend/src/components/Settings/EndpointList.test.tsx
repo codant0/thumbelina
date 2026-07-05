@@ -8,6 +8,7 @@ const sampleEndpoint = {
   provider: 'openai' as const,
   name: 'OpenAI Default',
   base_url: 'https://api.openai.com/v1',
+  model: 'gpt-4o',
   api_key_set: true,
   is_default: true,
   is_reachable: true,
