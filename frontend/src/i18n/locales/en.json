@@ -92,7 +92,16 @@
     "activated": "Activated: {name}",
     "activateFailed": "Failed to activate endpoint",
     "speedTestPassed": "Speed test complete",
-    "speedTestFailed": "Speed test failed"
+    "speedTestFailed": "Speed test failed",
+    "addTitle": "Add Endpoint",
+    "editTitle": "Edit Endpoint",
+    "name": "Name",
+    "namePlaceholder": "e.g. OpenAI Production",
+    "nameRequired": "Name is required",
+    "providerRequired": "Provider is required",
+    "invalidUrl": "Base URL must be a valid URL",
+    "keepKeyHint": "Leave empty to keep current key",
+    "setDefault": "Set as default"
   },
   "channels": {
     "title": "Channels",
