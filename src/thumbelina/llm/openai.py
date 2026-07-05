@@ -46,17 +46,11 @@ class OpenAIProvider(LLMProvider):
         base_url: str | None = None,
         **kwargs: Any,
     ) -> None:
-        from langchain_openai import ChatOpenAI
-
         self._model_name = model
         self._api_key = api_key
         self._base_url = base_url
-        self._model = ChatOpenAI(
-            api_key=api_key or None,
-            model=model,
-            base_url=base_url,
-            **kwargs,
-        )
+        self._chat_model_kwargs = kwargs
+        self._chat_model: BaseChatModel | None = None
 
     @property
     def model(self) -> str:
@@ -64,7 +58,16 @@ class OpenAIProvider(LLMProvider):
 
     @property
     def chat_model(self) -> BaseChatModel:
-        return self._model
+        if self._chat_model is None:
+            from langchain_openai import ChatOpenAI
+
+            self._chat_model = ChatOpenAI(
+                api_key=self._api_key or None,
+                model=self._model_name,
+                base_url=self._base_url,
+                **self._chat_model_kwargs,
+            )
+        return self._chat_model
 
     @staticmethod
     def _normalize_url(base_url: str | None, fallback: str = "https://api.openai.com/v1") -> str:

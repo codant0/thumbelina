@@ -40,10 +40,10 @@ class AnthropicProvider(LLMProvider):
         model: str = "claude-sonnet-4-20250514",
         **kwargs: Any,
     ) -> None:
-        from langchain_anthropic import ChatAnthropic
-
         self._model_name = model
-        self._model = ChatAnthropic(api_key=api_key or None, model=model, **kwargs)
+        self._api_key = api_key
+        self._chat_model_kwargs = kwargs
+        self._chat_model: BaseChatModel | None = None
 
     @property
     def model(self) -> str:
@@ -51,7 +51,15 @@ class AnthropicProvider(LLMProvider):
 
     @property
     def chat_model(self) -> BaseChatModel:
-        return self._model
+        if self._chat_model is None:
+            from langchain_anthropic import ChatAnthropic
+
+            self._chat_model = ChatAnthropic(
+                api_key=self._api_key or None,
+                model=self._model_name,
+                **self._chat_model_kwargs,
+            )
+        return self._chat_model
 
     async def list_models(
         self,
