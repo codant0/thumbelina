@@ -1,17 +1,6 @@
-import { useState, useEffect, useCallback, type FormEvent } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { EndpointManager } from './EndpointManager'
-import { ModelSelector } from './ModelSelector'
-import { ConnectionTestButton } from './ConnectionTestButton'
-import { PresetManager } from './PresetManager'
 import { useTranslation } from '../../i18n'
-
-interface ConfigData {
-  provider: string
-  model: string
-  base_url: string
-  api_key: string
-  rate_limit_enabled: boolean
-}
 
 interface UserProfile {
   id: string
@@ -30,14 +19,6 @@ interface UserPreference {
 
 export function SettingsPanel() {
   const { t, locale, setLocale } = useTranslation()
-  const [config, setConfig] = useState<ConfigData>({
-    provider: 'openai',
-    model: 'gpt-4o',
-    base_url: '',
-    api_key: '',
-    rate_limit_enabled: false,
-  })
-  const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
   const [isError, setIsError] = useState(false)
 
@@ -50,23 +31,6 @@ export function SettingsPanel() {
   const [exporting, setExporting] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
-
-  useEffect(() => {
-    fetch('/api/v1/config')
-      .then(res => { if (res.ok) return res.json(); return null })
-      .then(data => {
-        if (data) {
-          setConfig({
-            provider: data.provider ?? 'openai',
-            model: data.model ?? 'gpt-4o',
-            base_url: data.base_url ?? '',
-            api_key: '',
-            rate_limit_enabled: data.rate_limit_enabled ?? false,
-          })
-        }
-      })
-      .catch(() => {})
-  }, [])
 
   // Fetch user profile
   useEffect(() => {
@@ -81,50 +45,6 @@ export function SettingsPanel() {
       .catch(() => {})
       .finally(() => setProfileLoading(false))
   }, [])
-
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault()
-    setSaving(true)
-    setMessage('')
-    try {
-      const res = await fetch('/api/v1/config/llm', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider: config.provider,
-          model: config.model,
-          base_url: config.base_url || null,
-          api_key: config.api_key || '',
-        }),
-      })
-      if (res.ok) {
-        const data = await res.json()
-        setMessage(`Switched to ${data.provider}/${data.model}`)
-        setIsError(false)
-        setConfig(prev => ({ ...prev, api_key: '' }))
-      } else {
-        const err = await res.json().catch(() => null)
-        setMessage(err?.detail || 'Failed to switch provider')
-        setIsError(true)
-      }
-    } catch {
-      setMessage('Network error')
-      setIsError(true)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleRateLimitToggle = async (enabled: boolean) => {
-    setConfig(prev => ({ ...prev, rate_limit_enabled: enabled }))
-    try {
-      await fetch('/api/v1/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rate_limit: { enabled } }),
-      })
-    } catch { /* ignore */ }
-  }
 
   const handleExport = useCallback(async () => {
     setExporting(true)
@@ -190,101 +110,17 @@ export function SettingsPanel() {
         </div>
       </div>
 
-      {/* LLM Presets */}
-      <PresetManager onMessage={(msg, err) => { setMessage(msg); setIsError(err) }} />
-
       {/* LLM Configuration */}
-      <div className="card">
-        <div className="card-title">{t('settings.llmConfig')}</div>
-        <form onSubmit={handleSubmit} className="settings-form">
-          <div className="form-group">
-            <label className="form-label" htmlFor="provider">{t('settings.provider')}</label>
-            <select
-              id="provider"
-              className="form-select"
-              data-testid="provider-select"
-              value={config.provider}
-              onChange={e => setConfig({ ...config, provider: e.target.value })}
-            >
-              <option value="openai">OpenAI</option>
-              <option value="anthropic">Anthropic</option>
-              <option value="ollama">Ollama</option>
-            </select>
-          </div>
-          <div className="form-group">
-            <label className="form-label" htmlFor="model">{t('settings.model')}</label>
-            <input
-              id="model"
-              type="text"
-              className="form-input"
-              data-testid="model-input"
-              value={config.model}
-              onChange={e => setConfig({ ...config, model: e.target.value })}
-            />
-            <ModelSelector
-              provider={config.provider}
-              base_url={config.base_url}
-              api_key={config.api_key}
-              model={config.model}
-              onSelect={model => setConfig(prev => ({ ...prev, model }))}
-            />
-            <ConnectionTestButton
-              provider={config.provider}
-              base_url={config.base_url}
-              api_key={config.api_key}
-              model={config.model}
-            />
-          </div>
-          <div className="form-group">
-            <label className="form-label" htmlFor="base_url">{t('settings.baseUrl')}</label>
-            <input
-              id="base_url"
-              type="text"
-              className="form-input"
-              data-testid="base-url-input"
-              value={config.base_url}
-              onChange={e => setConfig({ ...config, base_url: e.target.value })}
-              placeholder="Optional custom API base URL"
-            />
-          </div>
-          <div className="form-group">
-            <label className="form-label" htmlFor="api_key">{t('settings.apiKey')}</label>
-            <input
-              id="api_key"
-              type="password"
-              className="form-input"
-              data-testid="api-key-input"
-              value={config.api_key}
-              onChange={e => setConfig({ ...config, api_key: e.target.value })}
-              placeholder="Leave empty to keep current key"
-            />
-          </div>
-          <div className="form-group">
-            <label className="form-checkbox">
-              <input
-                type="checkbox"
-                data-testid="rate-limit-toggle"
-                checked={config.rate_limit_enabled}
-                onChange={e => handleRateLimitToggle(e.target.checked)}
-              />
-              {t('settings.rateLimit')}
-            </label>
-          </div>
-          <div className="settings-actions">
-            <button type="submit" className="btn btn-primary" disabled={saving} data-testid="save-button">
-              {saving ? t('settings.switching') : t('settings.switchModel')}
-            </button>
-          </div>
-        </form>
-        {message && (
-          <p data-testid="settings-message" style={{ marginTop: 12, fontSize: 12.5, color: isError ? 'var(--error)' : 'var(--success)' }}>
-            {message}
-          </p>
-        )}
-      </div>
-
-      {/* LLM Endpoints */}
       <EndpointManager onMessage={(msg, err) => { setMessage(msg); setIsError(err) }} />
+
+      {message && (
+        <p
+          data-testid="settings-message"
+          style={{ fontSize: 12.5, color: isError ? 'var(--error)' : 'var(--success)', margin: '8px 0' }}
+        >
+          {message}
+        </p>
+      )}
 
       {/* User Profile */}
       <div className="card" data-testid="user-profile-card">

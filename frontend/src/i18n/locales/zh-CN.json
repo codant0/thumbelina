@@ -22,6 +22,7 @@
     "delete": "删除",
     "activate": "激活",
     "active": "当前使用",
+    "activating": "激活中…",
     "test": "测试",
     "testing": "测试中…"
   },
@@ -77,8 +78,21 @@
   "endpoint": {
     "speedTest": "速度测试",
     "testConnection": "测试连接",
-    "default": "默认",
-    "noEndpoints": "加载端点中…"
+    "active": "当前使用",
+    "never": "从未",
+    "loading": "加载端点中…",
+    "add": "添加端点",
+    "noEndpoints": "暂无已保存的端点。添加一个以快速切换 LLM Provider。",
+    "created": "端点已创建",
+    "createFailed": "创建端点失败",
+    "updated": "端点已更新",
+    "updateFailed": "更新端点失败",
+    "deleted": "端点已删除",
+    "deleteFailed": "删除端点失败",
+    "activated": "已激活：{name}",
+    "activateFailed": "激活端点失败",
+    "speedTestPassed": "速度测试完成",
+    "speedTestFailed": "速度测试失败"
   },
   "channels": {
     "title": "渠道",

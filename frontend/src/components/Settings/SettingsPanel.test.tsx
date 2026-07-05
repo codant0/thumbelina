@@ -52,36 +52,6 @@ describe('SettingsPanel', () => {
     expect(screen.getByTestId('settings-panel')).toBeInTheDocument()
   })
 
-  it('should render provider dropdown', () => {
-    renderWithProvider()
-    expect(screen.getByTestId('provider-select')).toBeInTheDocument()
-  })
-
-  it('should render model input', () => {
-    renderWithProvider()
-    expect(screen.getByTestId('model-input')).toBeInTheDocument()
-  })
-
-  it('should render base url input', () => {
-    renderWithProvider()
-    expect(screen.getByTestId('base-url-input')).toBeInTheDocument()
-  })
-
-  it('should render rate limit toggle', () => {
-    renderWithProvider()
-    expect(screen.getByTestId('rate-limit-toggle')).toBeInTheDocument()
-  })
-
-  it('should render save button', () => {
-    renderWithProvider()
-    expect(screen.getByTestId('save-button')).toBeInTheDocument()
-  })
-
-  it('should have openai as default provider', () => {
-    renderWithProvider()
-    expect(screen.getByTestId('provider-select')).toHaveValue('openai')
-  })
-
   it('should render user profile card', () => {
     renderWithProvider()
     expect(screen.getByTestId('user-profile-card')).toBeInTheDocument()
@@ -178,10 +148,10 @@ describe('SettingsPanel', () => {
     })
   })
 
-  it('should render fetch models button', async () => {
+  it('should render language selector', async () => {
     renderWithProvider()
     await waitFor(() => {
-      expect(screen.getByTestId('fetch-models-button')).toBeInTheDocument()
+      expect(screen.getByTestId('language-select')).toBeInTheDocument()
     })
   })
 })

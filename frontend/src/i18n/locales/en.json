@@ -22,6 +22,7 @@
     "delete": "Delete",
     "activate": "Activate",
     "active": "Active",
+    "activating": "Activating…",
     "test": "Test",
     "testing": "Testing…"
   },
@@ -77,8 +78,21 @@
   "endpoint": {
     "speedTest": "Speed Test",
     "testConnection": "Test Connection",
-    "default": "Default",
-    "noEndpoints": "Loading endpoints…"
+    "active": "Active",
+    "never": "Never",
+    "loading": "Loading endpoints…",
+    "add": "Add Endpoint",
+    "noEndpoints": "No saved endpoints. Add one to quickly switch between LLM providers.",
+    "created": "Endpoint created",
+    "createFailed": "Failed to create endpoint",
+    "updated": "Endpoint updated",
+    "updateFailed": "Failed to update endpoint",
+    "deleted": "Endpoint deleted",
+    "deleteFailed": "Failed to delete endpoint",
+    "activated": "Activated: {name}",
+    "activateFailed": "Failed to activate endpoint",
+    "speedTestPassed": "Speed test complete",
+    "speedTestFailed": "Speed test failed"
   },
   "channels": {
     "title": "Channels",
