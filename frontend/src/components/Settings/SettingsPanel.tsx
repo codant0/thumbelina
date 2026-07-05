@@ -21,6 +21,7 @@ export function SettingsPanel() {
   const { t, locale, setLocale } = useTranslation()
   const [message, setMessage] = useState('')
   const [isError, setIsError] = useState(false)
+  const [rateLimitEnabled, setRateLimitEnabled] = useState(false)
 
   // User profile state
   const [profile, setProfile] = useState<UserProfile | null>(null)
@@ -31,6 +32,14 @@ export function SettingsPanel() {
   const [exporting, setExporting] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
+
+  // Fetch rate limit config
+  useEffect(() => {
+    fetch('/api/v1/config')
+      .then(res => { if (res.ok) return res.json(); return null })
+      .then(data => { if (data) setRateLimitEnabled(data.rate_limit_enabled ?? false) })
+      .catch(() => {})
+  }, [])
 
   // Fetch user profile
   useEffect(() => {
@@ -45,6 +54,17 @@ export function SettingsPanel() {
       .catch(() => {})
       .finally(() => setProfileLoading(false))
   }, [])
+
+  const handleRateLimitToggle = async (enabled: boolean) => {
+    setRateLimitEnabled(enabled)
+    try {
+      await fetch('/api/v1/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rate_limit: { enabled } }),
+      })
+    } catch { /* ignore */ }
+  }
 
   const handleExport = useCallback(async () => {
     setExporting(true)
@@ -108,6 +128,19 @@ export function SettingsPanel() {
             <option value="zh-CN">{t('language.zhCN')}</option>
           </select>
         </div>
+      </div>
+
+      {/* Rate Limiting */}
+      <div className="card">
+        <label className="form-checkbox">
+          <input
+            type="checkbox"
+            data-testid="rate-limit-toggle"
+            checked={rateLimitEnabled}
+            onChange={e => handleRateLimitToggle(e.target.checked)}
+          />
+          {t('settings.rateLimit')}
+        </label>
       </div>
 
       {/* LLM Configuration */}
