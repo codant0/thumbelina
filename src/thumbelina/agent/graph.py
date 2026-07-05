@@ -6,6 +6,7 @@ import logging
 from collections.abc import AsyncGenerator
 from typing import Any
 
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool, tool
 from langgraph.graph import END, StateGraph
@@ -220,7 +221,6 @@ class ThumbelinaAgent:
         user_profiler: UserProfiler | None = None,
     ) -> None:
         self.llm_provider = llm_provider
-        self.llm = llm_provider.chat_model
         self.memory_manager = memory_manager
         self.request_timeout = request_timeout
         self.skill_engine = skill_engine
@@ -249,7 +249,22 @@ class ThumbelinaAgent:
         model.  The compiled graph does **not** need to be rebuilt.
         """
         self.llm_provider = new_provider
-        self.llm = new_provider.chat_model
+        self._llm = new_provider.chat_model
+
+    @property
+    def llm(self) -> BaseChatModel:
+        """Return the underlying LangChain chat model.
+
+        Lazily resolved from ``llm_provider`` on first access so that
+        the server can start without valid LLM credentials.
+        """
+        if not hasattr(self, "_llm") or self._llm is None:
+            self._llm = self.llm_provider.chat_model
+        return self._llm
+
+    @llm.setter
+    def llm(self, value: BaseChatModel) -> None:
+        self._llm = value
 
     def _build_graph(self) -> CompiledStateGraph[AgentState, Any]:
         """Build and compile the LangGraph agent graph."""

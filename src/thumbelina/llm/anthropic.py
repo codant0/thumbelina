@@ -36,14 +36,14 @@ class AnthropicProvider(LLMProvider):
     def __init__(
         self,
         *,
-        api_key: str,
+        api_key: str = "",
         model: str = "claude-sonnet-4-20250514",
         **kwargs: Any,
     ) -> None:
         from langchain_anthropic import ChatAnthropic
 
         self._model_name = model
-        self._model = ChatAnthropic(api_key=api_key, model=model, **kwargs)
+        self._model = ChatAnthropic(api_key=api_key or None, model=model, **kwargs)
 
     @property
     def model(self) -> str:

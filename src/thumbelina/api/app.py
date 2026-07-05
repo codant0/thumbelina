@@ -208,12 +208,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     try:
         llm_provider = create_provider(config.llm.provider, **llm_kwargs)
-    except Exception:
+    except Exception as exc:
         logger.warning(
-            "LLM provider %s not available at startup (no credentials). "
-            "You can configure it via the Web UI Settings or the /api/v1/config/llm endpoint.",
+            "LLM provider %s not configured (%s). "
+            "Configure via Web UI Settings or PUT /api/v1/config/llm.",
             config.llm.provider,
-            exc_info=True,
+            exc,
         )
         llm_provider = _LazyLLMProvider(config.llm.provider, llm_kwargs)
 

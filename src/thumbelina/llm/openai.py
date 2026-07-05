@@ -41,7 +41,7 @@ class OpenAIProvider(LLMProvider):
     def __init__(
         self,
         *,
-        api_key: str,
+        api_key: str = "",
         model: str = "gpt-4o",
         base_url: str | None = None,
         **kwargs: Any,
@@ -52,7 +52,7 @@ class OpenAIProvider(LLMProvider):
         self._api_key = api_key
         self._base_url = base_url
         self._model = ChatOpenAI(
-            api_key=api_key,
+            api_key=api_key or None,
             model=model,
             base_url=base_url,
             **kwargs,
