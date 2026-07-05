@@ -105,10 +105,11 @@ class TestConfigRepository:
     def test_sensitive_key_not_stored(self, repo):
         """Sensitive keys are not stored in the database."""
         repo._set_sync("llm.api_key", json.dumps("sk-secret"), "llm")
-        value = repo._get_sync("llm.api_key")
+        _ = repo._get_sync("llm.api_key")
         # The set_sync method doesn't filter, but the async set method does
         # This test verifies the _is_sensitive check works
         from thumbelina.config.config_repo import _is_sensitive
+
         assert _is_sensitive("llm.api_key") is True
 
     def test_export_to_dict(self, repo):
@@ -119,6 +120,7 @@ class TestConfigRepository:
 
         # Use the sync helper directly
         from thumbelina.config.loader import _load_db_config_sync
+
         config_dict = _load_db_config_sync(repo)
         assert config_dict["llm"]["provider"] == "openai"
         assert config_dict["llm"]["model"] == "gpt-4o"

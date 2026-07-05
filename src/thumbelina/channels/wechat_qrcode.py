@@ -22,11 +22,14 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+
+class ILinkSessionExpiredError(Exception):
+    """Raised when iLink reports that the bot session has expired (errcode=-14)."""
+
+
 # iLink public endpoints (same ones WeClaw uses internally)
 _QR_CODE_URL = "https://ilinkai.weixin.qq.com/ilink/bot/get_bot_qrcode?bot_type=3"
-_QR_STATUS_URL = (
-    "https://ilinkai.weixin.qq.com/ilink/bot/get_qrcode_status?qrcode="
-)
+_QR_STATUS_URL = "https://ilinkai.weixin.qq.com/ilink/bot/get_qrcode_status?qrcode="
 
 _CONNECT_TIMEOUT = 10.0
 _POLL_TIMEOUT = 45.0  # slightly longer than the 40 s long-poll
@@ -286,9 +289,7 @@ class ILinkClient:
 
     # ── Receive (long-poll) ────────────────────────────────────────
 
-    async def getupdates(
-        self, sync_buffer: str = ""
-    ) -> tuple[list[ILMessage], str]:
+    async def getupdates(self, sync_buffer: str = "") -> tuple[list[ILMessage], str]:
         """Long-poll for new messages (~35 s).
 
         Returns ``(messages, new_sync_buffer)``.
@@ -319,14 +320,8 @@ class ILinkClient:
         errcode = data.get("errcode", ret)  # Support both formats
 
         if errcode == -14:
-            logger.error(
-                "iLink session expired (errcode=-14) — re-authenticate via QR code"
-            )
-            raise httpx.HTTPStatusError(
-                "Session expired",
-                request=resp.request,
-                response=resp,
-            )
+            logger.error("iLink session expired (errcode=-14) — re-authenticate via QR code")
+            raise ILinkSessionExpiredError("iLink session expired")
         if errcode != 0:
             logger.warning(
                 "iLink getupdates returned errcode=%s: %s",

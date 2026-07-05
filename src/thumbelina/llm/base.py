@@ -16,9 +16,41 @@ class SpeedTestResult:
     """Result of a lightweight endpoint latency / availability test."""
 
     reachable: bool
-    latency_ms: int | None = None        # time-to-first-token (TTFB)
-    total_ms: int | None = None          # full round-trip for a minimal request
+    latency_ms: int | None = None  # time-to-first-token (TTFB)
+    total_ms: int | None = None  # full round-trip for a minimal request
     error: str | None = None
+    tested_at: datetime | None = None
+
+
+@dataclass
+class ConnectionTestStep:
+    """Result of a single connectivity test step."""
+
+    ok: bool
+    latency_ms: int | None = None
+    error: str | None = None
+
+
+@dataclass
+class ConnectionTestDetails:
+    """Per-step results for a connectivity test."""
+
+    network: ConnectionTestStep
+    auth: ConnectionTestStep
+    service: ConnectionTestStep
+
+
+@dataclass
+class ConnectionTestResult:
+    """Result of a three-level connectivity test."""
+
+    reachable: bool
+    network_reachable: bool = False
+    auth_valid: bool = False
+    service_available: bool = False
+    latency_ms: int | None = None
+    error: str | None = None
+    details: ConnectionTestDetails | None = None
     tested_at: datetime | None = None
 
 
@@ -114,6 +146,25 @@ class LLMProvider(ABC):
         api_key: str | None = None,
     ) -> SpeedTestResult:
         """Run a minimal request and measure latency."""
+        ...
+
+    @abstractmethod
+    async def test_connection(
+        self,
+        *,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        model: str | None = None,
+    ) -> ConnectionTestResult:
+        """Test connectivity to the provider endpoint.
+
+        Performs a three-level check:
+        1. Network reachability (TCP handshake)
+        2. Auth validity (API key acceptance)
+        3. Service availability (minimal request round-trip)
+
+        Returns a detailed result with per-step timing and errors.
+        """
         ...
 
     # ------------------------------------------------------------------

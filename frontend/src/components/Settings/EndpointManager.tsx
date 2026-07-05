@@ -6,6 +6,7 @@ import {
   updateEndpoint,
   deleteEndpoint,
   runSpeedTest,
+  testEndpointConnection,
 } from '../../api/llmConfig'
 import { EndpointList } from './EndpointList'
 import { EndpointForm } from './EndpointForm'
@@ -20,6 +21,7 @@ export function EndpointManager({ onMessage }: EndpointManagerProps) {
   const [editing, setEditing] = useState<LLMEndpoint | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [testingId, setTestingId] = useState<string | null>(null)
+  const [testingConnectionId, setTestingConnectionId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -89,6 +91,23 @@ export function EndpointManager({ onMessage }: EndpointManagerProps) {
     }
   }
 
+  const handleTestConnection = async (id: string) => {
+    setTestingConnectionId(id)
+    try {
+      const result = await testEndpointConnection(id)
+      setEndpoints(prev => prev.map(ep => (ep.id === id ? {
+        ...ep,
+        is_reachable: result.reachable,
+        last_tested_at: new Date().toISOString(),
+      } : ep)))
+      onMessage(result.reachable ? 'Connection test passed' : `Connection test failed: ${result.error || ''}`, !result.reachable)
+    } catch (err) {
+      onMessage(err instanceof Error ? err.message : 'Connection test failed', true)
+    } finally {
+      setTestingConnectionId(null)
+    }
+  }
+
   const handleSetDefault = async (id: string) => {
     const ep = endpoints.find(e => e.id === id)
     if (!ep) return
@@ -116,9 +135,11 @@ export function EndpointManager({ onMessage }: EndpointManagerProps) {
       <EndpointList
         endpoints={endpoints}
         testingId={testingId}
+        testingConnectionId={testingConnectionId}
         onEdit={id => setEditing(endpoints.find(e => e.id === id) ?? null)}
         onDelete={handleDelete}
         onSpeedTest={handleSpeedTest}
+        onTestConnection={handleTestConnection}
         onSetDefault={handleSetDefault}
       />
     </div>

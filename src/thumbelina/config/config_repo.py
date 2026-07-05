@@ -5,11 +5,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import select
 
-from thumbelina.memory.models import Base, SystemConfig
+from thumbelina.memory.models import SystemConfig
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ class ConfigRepository:
         with self.SessionLocal() as session:
             from sqlalchemy import func
 
-            count = session.query(func.count(SystemConfig.key)).scalar()
+            count = cast(int, session.query(func.count(SystemConfig.key)).scalar())
             return count == 0
 
     async def is_empty(self) -> bool:
@@ -78,7 +78,7 @@ class ConfigRepository:
             record = session.get(SystemConfig, key)
             if record is None:
                 return None
-            return record.value
+            return cast(str, record.value)
 
     def _set_sync(self, key: str, value: str, category: str) -> None:
         """Synchronous implementation of set."""

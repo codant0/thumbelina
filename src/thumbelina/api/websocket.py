@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
@@ -22,7 +23,7 @@ MAX_MESSAGE_SIZE = 1024 * 1024
 _chat_ws_clients: set[WebSocket] = set()
 
 
-async def broadcast_chat_message(message: dict) -> None:
+async def broadcast_chat_message(message: dict[str, Any]) -> None:
     """Broadcast a message to all connected chat WebSocket clients.
 
     Used by channel integrations (e.g. WeChat) to push incoming messages
@@ -85,7 +86,12 @@ async def websocket_chat(websocket: WebSocket) -> None:
                         await websocket.send_json({"error": f"Conversation not found: {new_cid}"})
                         continue
                 default_conversation_id = new_cid
-                await websocket.send_json({"conversation_switched": True, "conversation_id": new_cid})
+                await websocket.send_json(
+                    {
+                        "conversation_switched": True,
+                        "conversation_id": new_cid,
+                    }
+                )
                 continue
 
             # Validate incoming message via Pydantic schema
@@ -133,8 +139,8 @@ async def websocket_chat(websocket: WebSocket) -> None:
                         logger.info("Sending frontend message response to WeChat")
                         try:
                             # Get the last WeChat user who sent a message
-                            last_wechat_user = getattr(wechat_channel, '_last_wechat_user_id', None)
-                            last_context_token = getattr(wechat_channel, '_last_context_token', '')
+                            last_wechat_user = getattr(wechat_channel, "_last_wechat_user_id", None)
+                            last_context_token = getattr(wechat_channel, "_last_context_token", "")
 
                             if last_wechat_user:
                                 await wechat_channel.send_message(
@@ -152,7 +158,12 @@ async def websocket_chat(websocket: WebSocket) -> None:
                         await websocket.send_json({"error": str(exc), "conversation_id": cid})
                 else:
                     logger.warning("WeChat channel not available on app.state")
-                    await websocket.send_json({"error": "WeChat channel not available", "conversation_id": cid})
+                    await websocket.send_json(
+                        {
+                            "error": "WeChat channel not available",
+                            "conversation_id": cid,
+                        }
+                    )
                 continue
 
             try:
@@ -163,7 +174,13 @@ async def websocket_chat(websocket: WebSocket) -> None:
                 else:
                     response = await agent.run(parsed.message)
                     await websocket.send_json({"response": response, "conversation_id": cid})
-                await websocket.send_json({"done": True, "conversation_id": cid, "streaming_mode": streaming})
+                await websocket.send_json(
+                    {
+                        "done": True,
+                        "conversation_id": cid,
+                        "streaming_mode": streaming,
+                    }
+                )
             except Exception as exc:
                 await websocket.send_json({"error": str(exc), "conversation_id": cid})
 

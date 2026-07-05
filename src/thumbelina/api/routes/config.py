@@ -16,6 +16,13 @@ from thumbelina.llm.endpoint_manager import (
     LLMEndpointUpdate,
 )
 from thumbelina.llm.factory import create_provider
+from thumbelina.llm.preset_manager import PresetManager
+from thumbelina.llm.preset_models import (
+    LLMPresetActivateResponse,
+    LLMPresetCreate,
+    LLMPresetResponse,
+    LLMPresetUpdate,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -384,6 +391,46 @@ class ModelListResponse(BaseModel):
     models: list[str]
 
 
+class ConnectionTestStep(BaseModel):
+    """Single step of a connectivity test."""
+
+    ok: bool
+    latency_ms: int | None = None
+    error: str | None = None
+
+
+class ConnectionTestDetails(BaseModel):
+    """Per-step connectivity test details."""
+
+    network: ConnectionTestStep
+    auth: ConnectionTestStep
+    service: ConnectionTestStep
+
+
+class ConnectionTestRequest(BaseModel):
+    """Request body for POST /config/llm/test-connection."""
+
+    provider: str = Field(..., min_length=1)
+    base_url: str = Field(..., min_length=1)
+    api_key: str = Field(default="")
+    model: str | None = Field(default=None)
+
+
+class ConnectionTestResponse(BaseModel):
+    """Result of a connectivity test."""
+
+    provider: str
+    base_url: str
+    endpoint_id: str | None = None
+    reachable: bool
+    network_reachable: bool
+    auth_valid: bool
+    service_available: bool
+    latency_ms: int | None = None
+    error: str | None = None
+    details: ConnectionTestDetails | None = None
+
+
 def _to_response(endpoint: LLMEndpoint) -> LLMEndpointResponse:
     return LLMEndpointResponse(
         id=endpoint.id,
@@ -403,6 +450,13 @@ def _get_endpoint_manager(request: Request) -> EndpointManager:
     manager = getattr(request.app.state, "endpoint_manager", None)
     if manager is None:
         raise HTTPException(status_code=503, detail="Endpoint manager not available")
+    return manager
+
+
+def _get_preset_manager(request: Request) -> PresetManager:
+    manager = getattr(request.app.state, "preset_manager", None)
+    if manager is None:
+        raise HTTPException(status_code=503, detail="Preset manager not available")
     return manager
 
 
@@ -512,3 +566,170 @@ async def list_models(
         raise HTTPException(status_code=502, detail=f"Failed to reach endpoint: {exc}")
 
     return ModelListResponse(provider=provider, base_url=base_url, models=models)
+
+
+def _connection_test_to_response(
+    provider: str,
+    base_url: str,
+    result: Any,
+    endpoint_id: str | None = None,
+) -> ConnectionTestResponse:
+    """Convert a provider ConnectionTestResult to the API response model."""
+    details = None
+    if result.details is not None:
+        details = ConnectionTestDetails(
+            network=ConnectionTestStep(
+                ok=result.details.network.ok,
+                latency_ms=result.details.network.latency_ms,
+                error=result.details.network.error,
+            ),
+            auth=ConnectionTestStep(
+                ok=result.details.auth.ok,
+                latency_ms=result.details.auth.latency_ms,
+                error=result.details.auth.error,
+            ),
+            service=ConnectionTestStep(
+                ok=result.details.service.ok,
+                latency_ms=result.details.service.latency_ms,
+                error=result.details.service.error,
+            ),
+        )
+    return ConnectionTestResponse(
+        provider=provider,
+        base_url=base_url,
+        endpoint_id=endpoint_id,
+        reachable=result.reachable,
+        network_reachable=result.network_reachable,
+        auth_valid=result.auth_valid,
+        service_available=result.service_available,
+        latency_ms=result.latency_ms,
+        error=result.error,
+        details=details,
+    )
+
+
+@router.post("/config/llm/test-connection", response_model=ConnectionTestResponse)
+async def test_connection(
+    body: ConnectionTestRequest,
+    request: Request,
+) -> ConnectionTestResponse:
+    """Run a connectivity test against arbitrary provider parameters."""
+    try:
+        llm_provider = create_provider(
+            body.provider,
+            api_key=body.api_key,
+            base_url=body.base_url,
+            model=body.model or "gpt-4o",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    result = await llm_provider.test_connection(
+        base_url=body.base_url,
+        api_key=body.api_key or None,
+        model=body.model,
+    )
+    return _connection_test_to_response(body.provider, body.base_url, result)
+
+
+@router.post(
+    "/config/llm/endpoints/{endpoint_id}/test-connection",
+    response_model=ConnectionTestResponse,
+)
+async def test_connection_endpoint(
+    endpoint_id: str,
+    request: Request,
+    model: str | None = Query(None),
+) -> ConnectionTestResponse:
+    """Run a connectivity test against a saved endpoint."""
+    manager = _get_endpoint_manager(request)
+    result = await manager.test_connection(endpoint_id, model=model)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Endpoint not found")
+
+    endpoint = await manager.get_endpoint(endpoint_id)
+    assert endpoint is not None
+    return _connection_test_to_response(
+        endpoint.provider,
+        endpoint.base_url,
+        result,
+        endpoint_id=endpoint_id,
+    )
+
+
+# ── LLM Preset Management ────────────────────────────────────────────
+
+
+@router.get("/config/llm/presets", response_model=list[LLMPresetResponse])
+async def list_presets(request: Request) -> list[LLMPresetResponse]:
+    """List saved LLM presets."""
+    manager = _get_preset_manager(request)
+    return await manager.list_presets()
+
+
+@router.post(
+    "/config/llm/presets",
+    response_model=LLMPresetResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_preset(
+    body: LLMPresetCreate,
+    request: Request,
+) -> LLMPresetResponse:
+    """Create a new LLM preset."""
+    manager = _get_preset_manager(request)
+    try:
+        return await manager.create_preset(body)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@router.get("/config/llm/presets/{preset_id}", response_model=LLMPresetResponse)
+async def get_preset(preset_id: str, request: Request) -> LLMPresetResponse:
+    """Get a single LLM preset."""
+    manager = _get_preset_manager(request)
+    preset = await manager.get_preset(preset_id)
+    if preset is None:
+        raise HTTPException(status_code=404, detail="Preset not found")
+    return preset
+
+
+@router.put("/config/llm/presets/{preset_id}", response_model=LLMPresetResponse)
+async def update_preset(
+    preset_id: str,
+    body: LLMPresetUpdate,
+    request: Request,
+) -> LLMPresetResponse:
+    """Update an existing LLM preset."""
+    manager = _get_preset_manager(request)
+    preset = await manager.update_preset(preset_id, body)
+    if preset is None:
+        raise HTTPException(status_code=404, detail="Preset not found")
+    return preset
+
+
+@router.delete("/config/llm/presets/{preset_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_preset(preset_id: str, request: Request) -> None:
+    """Delete an LLM preset."""
+    manager = _get_preset_manager(request)
+    deleted = await manager.delete_preset(preset_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Preset not found")
+
+
+@router.post(
+    "/config/llm/presets/{preset_id}/activate",
+    response_model=LLMPresetActivateResponse,
+)
+async def activate_preset(
+    preset_id: str,
+    request: Request,
+) -> LLMPresetActivateResponse:
+    """Activate an LLM preset and hot-swap the provider."""
+    manager = _get_preset_manager(request)
+    try:
+        return await manager.activate_preset(preset_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))

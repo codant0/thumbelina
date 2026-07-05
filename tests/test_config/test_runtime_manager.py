@@ -59,9 +59,7 @@ class TestSwapLLMProvider:
                 user_profiler=user_profiler,
             )
 
-        mock_create.assert_called_once_with(
-            "anthropic", model="claude-3", api_key="sk-new"
-        )
+        mock_create.assert_called_once_with("anthropic", model="claude-3", api_key="sk-new")
         agent.swap_provider.assert_called_once_with(new_provider)
         assert skill_engine.llm_provider is new_provider
         assert subagent_manager.llm_provider is new_provider
@@ -145,9 +143,7 @@ class TestSwapLLMProvider:
                 agent=agent,
             )
 
-        mock_create.assert_called_once_with(
-            "openai", model="gpt-4-turbo", api_key="sk-existing"
-        )
+        mock_create.assert_called_once_with("openai", model="gpt-4-turbo", api_key="sk-existing")
 
     @pytest.mark.asyncio
     async def test_swap_with_base_url(self, tmp_path):
@@ -212,9 +208,7 @@ class TestSwapChannel:
         manager = RuntimeConfigManager(config, str(tmp_path / "c.yaml"))
 
         with pytest.raises(ValueError, match="Unknown channel"):
-            await manager.swap_channel(
-                "invalid", MagicMock(), MagicMock(), MagicMock()
-            )
+            await manager.swap_channel("invalid", MagicMock(), MagicMock(), MagicMock())
 
     @pytest.mark.asyncio
     async def test_swap_channel_enable_qq(self, tmp_path):

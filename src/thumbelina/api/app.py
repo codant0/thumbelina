@@ -9,7 +9,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.responses import Response
+from starlette.types import ASGIApp
 
 from thumbelina.agent.graph import ThumbelinaAgent
 from thumbelina.api.routes import (
@@ -29,8 +31,10 @@ from thumbelina.api.websocket import router as ws_router
 from thumbelina.config import AppConfig, load_config
 from thumbelina.llm.endpoint_manager import EndpointManager
 from thumbelina.llm.factory import create_provider
+from thumbelina.llm.preset_manager import PresetManager
 from thumbelina.memory.manager import MemoryManager
 from thumbelina.notifications import NotificationManager
+from thumbelina.scheduler.scheduler import ScheduledTask
 from thumbelina.security.auth import AuthService
 from thumbelina.security.rate_limit import RateLimiter
 
@@ -70,7 +74,7 @@ class _AuthMiddleware(BaseHTTPMiddleware):
 
     def __init__(
         self,
-        app,
+        app: ASGIApp,
         auth_service: AuthService,
         required_roles: list[str] | None = None,
     ) -> None:
@@ -78,7 +82,11 @@ class _AuthMiddleware(BaseHTTPMiddleware):
         self._auth = auth_service
         self._required_roles = required_roles
 
-    async def dispatch(self, request: Request, call_next):
+    async def dispatch(
+        self,
+        request: Request,
+        call_next: RequestResponseEndpoint,
+    ) -> Response:
         if request.url.path in _AUTH_WHITELIST:
             return await call_next(request)
 
@@ -113,11 +121,15 @@ class _AuthMiddleware(BaseHTTPMiddleware):
 class _RateLimitMiddleware(BaseHTTPMiddleware):
     """ASGI middleware that applies per-IP rate limiting."""
 
-    def __init__(self, app, limiter: RateLimiter) -> None:
+    def __init__(self, app: ASGIApp, limiter: RateLimiter) -> None:
         super().__init__(app)
         self._limiter = limiter
 
-    async def dispatch(self, request: Request, call_next):
+    async def dispatch(
+        self,
+        request: Request,
+        call_next: RequestResponseEndpoint,
+    ) -> Response:
         client_ip = request.client.host if request.client else "unknown"
 
         if not self._limiter.is_allowed(client_ip):
@@ -209,7 +221,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         scheduler = TaskScheduler()
 
         # 任务完成时广播通知
-        async def _on_due_task(task):
+        async def _on_due_task(task: ScheduledTask) -> None:
             await notification_manager.broadcast(
                 {
                     "type": "task_completed",
@@ -315,23 +327,46 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await runtime_manager.load_from_database()
     logger.info("Loaded configuration from database")
 
+    # Initialize LLM preset manager after runtime config is loaded
+    preset_manager = PresetManager(
+        config_repo=config_repo,
+        runtime_manager=runtime_manager,
+        agent=agent,
+        skill_engine=getattr(app.state, "skill_engine", None),
+        composition_engine=getattr(app.state, "composition_engine", None),
+        subagent_manager=getattr(app.state, "subagent_manager", None),
+        user_profiler=getattr(app.state, "user_profiler", None),
+    )
+    app.state.preset_manager = preset_manager
+    try:
+        await preset_manager.restore_active_preset()
+    except Exception:
+        logger.warning("Failed to restore active LLM preset", exc_info=True)
+
     # Initialize WeChat channel if enabled (AFTER database config is loaded)
     wechat_channel = None
     if config.channels.wechat.enabled:
         try:
-            from thumbelina.channels.wechat_channel import WeChatChannel
             from thumbelina.api.websocket import broadcast_chat_message
+            from thumbelina.channels.wechat_channel import WeChatChannel
 
-            async def _on_wechat_message(cid: str, user_text: str, response: str, source: str = "wechat") -> None:
-                await broadcast_chat_message({
-                    "channel_message": {
-                        "channel": "wechat",
-                        "conversation_id": cid,
-                        "user_message": user_text,
-                        "response": response,
-                        "source": source,
+            async def _on_wechat_message(
+                cid: str,
+                user_text: str,
+                response: str,
+                source: str = "wechat",
+            ) -> None:
+                await broadcast_chat_message(
+                    {
+                        "channel_message": {
+                            "channel": "wechat",
+                            "conversation_id": cid,
+                            "user_message": user_text,
+                            "response": response,
+                            "source": source,
+                        }
                     }
-                })
+                )
 
             wechat_channel = WeChatChannel(
                 config=config.channels.wechat,
@@ -340,10 +375,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             )
             await wechat_channel.start()
             app.state.wechat_channel = wechat_channel
-            # Cache the WeChat conversation ID for fast lookup in the WS handler
-            app.state.wechat_conversation_id = wechat_channel._agent.current_conversation_id
+            # Cache the WeChat conversation ID for fast lookup in the WS handler.
+            # If the channel needs re-authentication, there is no active
+            # conversation yet.
+            app.state.wechat_conversation_id = (
+                None
+                if wechat_channel._needs_authentication
+                else wechat_channel._agent.current_conversation_id
+            )
             logger.info(
-                "WeChat channel initialized (conversation=%s)",
+                "WeChat channel initialized (needs_authentication=%s, conversation=%s)",
+                wechat_channel._needs_authentication,
                 app.state.wechat_conversation_id,
             )
         except Exception:

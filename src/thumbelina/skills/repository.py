@@ -8,7 +8,7 @@ from datetime import datetime
 
 from sqlalchemy import select
 
-from thumbelina.memory.models import Base, SkillRecord
+from thumbelina.memory.models import SkillRecord
 from thumbelina.skills.models import Skill
 
 
@@ -47,7 +47,7 @@ class SkillRepository:
     async def save(self, skill: Skill) -> None:
         """Save or update a skill."""
 
-        def _save():
+        def _save() -> None:
             with self.SessionLocal() as session:
                 record = session.get(SkillRecord, skill.id)
                 if record:
@@ -75,7 +75,7 @@ class SkillRepository:
     async def get(self, skill_id: str) -> Skill | None:
         """Get a skill by ID."""
 
-        def _get():
+        def _get() -> Skill | None:
             with self.SessionLocal() as session:
                 record = session.get(SkillRecord, skill_id)
                 return self._record_to_skill(record) if record else None
@@ -85,7 +85,7 @@ class SkillRepository:
     async def list_all(self) -> list[Skill]:
         """List all skills."""
 
-        def _list():
+        def _list() -> list[Skill]:
             with self.SessionLocal() as session:
                 stmt = select(SkillRecord)
                 records = session.execute(stmt).scalars().all()
@@ -96,7 +96,7 @@ class SkillRepository:
     async def delete(self, skill_id: str) -> bool:
         """Delete a skill."""
 
-        def _delete():
+        def _delete() -> bool:
             with self.SessionLocal() as session:
                 record = session.get(SkillRecord, skill_id)
                 if not record:
@@ -110,7 +110,7 @@ class SkillRepository:
     async def search(self, query: str) -> list[Skill]:
         """Search skills by name or description."""
 
-        def _search():
+        def _search() -> list[Skill]:
             with self.SessionLocal() as session:
                 stmt = select(SkillRecord).where(
                     SkillRecord.name.contains(query) | SkillRecord.description.contains(query)

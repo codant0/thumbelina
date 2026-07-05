@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session, joinedload
 
-from thumbelina.memory.models import Base, Conversation, Message
+from thumbelina.memory.models import Conversation, Message
 
 # Valid roles for messages
 VALID_ROLES = {"user", "assistant", "system"}
@@ -62,9 +62,7 @@ class ConversationRepository:
             session.refresh(conversation)
             return conversation.id
 
-    async def create_conversation(
-        self, name: str | None = None, pinned: bool = False
-    ) -> str:
+    async def create_conversation(self, name: str | None = None, pinned: bool = False) -> str:
         """Create a new conversation.
 
         Parameters

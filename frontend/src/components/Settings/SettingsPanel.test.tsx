@@ -1,6 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { SettingsPanel } from './SettingsPanel'
+import { LocaleProvider } from '../../i18n'
+
+function renderWithProvider() {
+  return render(
+    <LocaleProvider>
+      <SettingsPanel />
+    </LocaleProvider>,
+  )
+}
 
 describe('SettingsPanel', () => {
   beforeEach(() => {
@@ -39,47 +48,47 @@ describe('SettingsPanel', () => {
   })
 
   it('should render settings panel', () => {
-    render(<SettingsPanel />)
+    renderWithProvider()
     expect(screen.getByTestId('settings-panel')).toBeInTheDocument()
   })
 
   it('should render provider dropdown', () => {
-    render(<SettingsPanel />)
+    renderWithProvider()
     expect(screen.getByTestId('provider-select')).toBeInTheDocument()
   })
 
   it('should render model input', () => {
-    render(<SettingsPanel />)
+    renderWithProvider()
     expect(screen.getByTestId('model-input')).toBeInTheDocument()
   })
 
   it('should render base url input', () => {
-    render(<SettingsPanel />)
+    renderWithProvider()
     expect(screen.getByTestId('base-url-input')).toBeInTheDocument()
   })
 
   it('should render rate limit toggle', () => {
-    render(<SettingsPanel />)
+    renderWithProvider()
     expect(screen.getByTestId('rate-limit-toggle')).toBeInTheDocument()
   })
 
   it('should render save button', () => {
-    render(<SettingsPanel />)
+    renderWithProvider()
     expect(screen.getByTestId('save-button')).toBeInTheDocument()
   })
 
   it('should have openai as default provider', () => {
-    render(<SettingsPanel />)
+    renderWithProvider()
     expect(screen.getByTestId('provider-select')).toHaveValue('openai')
   })
 
   it('should render user profile card', () => {
-    render(<SettingsPanel />)
+    renderWithProvider()
     expect(screen.getByTestId('user-profile-card')).toBeInTheDocument()
   })
 
   it('should display user profile data after loading', async () => {
-    render(<SettingsPanel />)
+    renderWithProvider()
     await waitFor(() => {
       expect(screen.getByText('casual')).toBeInTheDocument()
       expect(screen.getByText('intermediate')).toBeInTheDocument()
@@ -87,7 +96,7 @@ describe('SettingsPanel', () => {
   })
 
   it('should display preferences with confidence scores', async () => {
-    render(<SettingsPanel />)
+    renderWithProvider()
     await waitFor(() => {
       expect(screen.getByTestId('preference-item')).toBeInTheDocument()
       expect(screen.getByText('theme/color:')).toBeInTheDocument()
@@ -97,22 +106,22 @@ describe('SettingsPanel', () => {
   })
 
   it('should render data management card', () => {
-    render(<SettingsPanel />)
+    renderWithProvider()
     expect(screen.getByTestId('data-management-card')).toBeInTheDocument()
   })
 
   it('should render export button', () => {
-    render(<SettingsPanel />)
+    renderWithProvider()
     expect(screen.getByTestId('export-button')).toBeInTheDocument()
   })
 
   it('should render delete all button', () => {
-    render(<SettingsPanel />)
+    renderWithProvider()
     expect(screen.getByTestId('delete-all-button')).toBeInTheDocument()
   })
 
   it('should show confirmation prompt when delete button is clicked once', async () => {
-    render(<SettingsPanel />)
+    renderWithProvider()
     fireEvent.click(screen.getByTestId('delete-all-button'))
     await waitFor(() => {
       expect(screen.getByText('Click again to confirm')).toBeInTheDocument()
@@ -120,7 +129,7 @@ describe('SettingsPanel', () => {
   })
 
   it('should show cancel button during delete confirmation', async () => {
-    render(<SettingsPanel />)
+    renderWithProvider()
     fireEvent.click(screen.getByTestId('delete-all-button'))
     await waitFor(() => {
       expect(screen.getByText('Cancel')).toBeInTheDocument()
@@ -128,7 +137,7 @@ describe('SettingsPanel', () => {
   })
 
   it('should cancel delete confirmation when cancel is clicked', async () => {
-    render(<SettingsPanel />)
+    renderWithProvider()
     fireEvent.click(screen.getByTestId('delete-all-button'))
     await waitFor(() => {
       expect(screen.getByText('Cancel')).toBeInTheDocument()
@@ -140,7 +149,7 @@ describe('SettingsPanel', () => {
   })
 
   it('should call delete endpoint on second confirm click', async () => {
-    render(<SettingsPanel />)
+    renderWithProvider()
     fireEvent.click(screen.getByTestId('delete-all-button'))
     await waitFor(() => {
       expect(screen.getByText('Click again to confirm')).toBeInTheDocument()
@@ -155,7 +164,7 @@ describe('SettingsPanel', () => {
   })
 
   it('should call export endpoint when export button is clicked', async () => {
-    render(<SettingsPanel />)
+    renderWithProvider()
     fireEvent.click(screen.getByTestId('export-button'))
     await waitFor(() => {
       expect(globalThis.fetch).toHaveBeenCalledWith('/api/v1/data/export')
@@ -163,14 +172,14 @@ describe('SettingsPanel', () => {
   })
 
   it('should render endpoint manager', async () => {
-    render(<SettingsPanel />)
+    renderWithProvider()
     await waitFor(() => {
       expect(screen.getByTestId('endpoint-manager')).toBeInTheDocument()
     })
   })
 
   it('should render fetch models button', async () => {
-    render(<SettingsPanel />)
+    renderWithProvider()
     await waitFor(() => {
       expect(screen.getByTestId('fetch-models-button')).toBeInTheDocument()
     })

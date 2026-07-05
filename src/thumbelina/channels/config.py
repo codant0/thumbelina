@@ -38,9 +38,7 @@ class WeChatChannelConfig(BaseModel):
         default="https://ilinkai.weixin.qq.com",
         description="iLink API base URL",
     )
-    webhook_secret: str = Field(
-        default="", description="Webhook signature verification secret"
-    )
+    webhook_secret: str = Field(default="", description="Webhook signature verification secret")
 
 
 class ChannelsConfig(BaseModel):

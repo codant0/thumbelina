@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from thumbelina.config.models import AppConfig
 from thumbelina.config.persistence import save_config
@@ -13,12 +13,13 @@ from thumbelina.llm.factory import create_provider
 
 if TYPE_CHECKING:
     from thumbelina.agent.graph import ThumbelinaAgent
-    from thumbelina.channels.config import QQChannelConfig, WeChatChannelConfig
     from thumbelina.config.config_repo import ConfigRepository
     from thumbelina.llm.base import LLMProvider
     from thumbelina.skills.application import SkillApplicationEngine
     from thumbelina.skills.composition_engine import CompositionEngine
     from thumbelina.subagents.manager import SubagentManager
+
+from thumbelina.channels.config import QQChannelConfig, WeChatChannelConfig
 
 logger = logging.getLogger(__name__)
 
@@ -152,9 +153,7 @@ class RuntimeConfigManager:
                 try:
                     await old_channel.stop()
                 except Exception:
-                    logger.warning(
-                        "Failed to stop old %s channel", channel_name, exc_info=True
-                    )
+                    logger.warning("Failed to stop old %s channel", channel_name, exc_info=True)
 
             # Update in-memory config
             if channel_name == "qq":
@@ -168,31 +167,47 @@ class RuntimeConfigManager:
             # token).  This allows the saved-credentials recovery path in
             # WeChatChannel.start() to kick in on the next restart.
             self._persist()
-            await self._persist_to_db("channel", f"channels.{channel_name}.enabled", new_config.enabled)
+            await self._persist_to_db(
+                "channel", f"channels.{channel_name}.enabled", new_config.enabled
+            )
             if channel_name == "qq":
-                await self._persist_to_db("channel", f"channels.qq.app_id", new_config.app_id)
+                assert isinstance(new_config, QQChannelConfig)
+                await self._persist_to_db("channel", "channels.qq.app_id", new_config.app_id)
                 if new_config.allowed_guilds:
-                    await self._persist_to_db("channel", "channels.qq.allowed_guilds", new_config.allowed_guilds)
+                    await self._persist_to_db(
+                        "channel", "channels.qq.allowed_guilds", new_config.allowed_guilds
+                    )
                 if new_config.allowed_groups:
-                    await self._persist_to_db("channel", "channels.qq.allowed_groups", new_config.allowed_groups)
+                    await self._persist_to_db(
+                        "channel", "channels.qq.allowed_groups", new_config.allowed_groups
+                    )
             else:
+                assert isinstance(new_config, WeChatChannelConfig)
                 if new_config.ilink_bot_id:
-                    await self._persist_to_db("channel", "channels.wechat.ilink_bot_id", new_config.ilink_bot_id)
+                    await self._persist_to_db(
+                        "channel", "channels.wechat.ilink_bot_id", new_config.ilink_bot_id
+                    )
                 if new_config.ilink_user_id:
-                    await self._persist_to_db("channel", "channels.wechat.ilink_user_id", new_config.ilink_user_id)
+                    await self._persist_to_db(
+                        "channel", "channels.wechat.ilink_user_id", new_config.ilink_user_id
+                    )
                 if new_config.ilink_base_url:
-                    await self._persist_to_db("channel", "channels.wechat.ilink_base_url", new_config.ilink_base_url)
+                    await self._persist_to_db(
+                        "channel", "channels.wechat.ilink_base_url", new_config.ilink_base_url
+                    )
 
             # Create and start new channel if enabled
             if new_config.enabled:
+                from thumbelina.channels.qq_channel import QQChannel
+                from thumbelina.channels.wechat_channel import WeChatChannel
+
+                new_channel: QQChannel | WeChatChannel
                 if channel_name == "qq":
-                    from thumbelina.channels.qq_channel import QQChannel
-
-                    new_channel = QQChannel(config=new_config, agent=agent)  # type: ignore[arg-type]
+                    assert isinstance(new_config, QQChannelConfig)
+                    new_channel = QQChannel(config=new_config, agent=agent)
                 else:
-                    from thumbelina.channels.wechat_channel import WeChatChannel
-
-                    new_channel = WeChatChannel(  # type: ignore[arg-type]
+                    assert isinstance(new_config, WeChatChannelConfig)
+                    new_channel = WeChatChannel(
                         config=new_config,
                         agent=agent,
                         on_message_callback=on_message_callback,
@@ -205,15 +220,18 @@ class RuntimeConfigManager:
                     # Config is already persisted above, so ilink_bot_id
                     # survives for session recovery on next restart.
                     setattr(app_state, attr, None)
-                    raise RuntimeError(
-                        f"Failed to start {channel_name} channel: {exc}"
-                    ) from exc
+                    raise RuntimeError(f"Failed to start {channel_name} channel: {exc}") from exc
 
                 setattr(app_state, attr, new_channel)
-                # Cache WeChat conversation ID for fast lookup in WS handler
+                # Cache WeChat conversation ID for fast lookup in WS handler.
+                # If the WeChat channel needs re-authentication, there is no
+                # active conversation yet.
                 if channel_name == "wechat":
+                    wechat_channel = cast("WeChatChannel", new_channel)
                     app_state.wechat_conversation_id = (
-                        new_channel._agent.current_conversation_id
+                        None
+                        if wechat_channel._needs_authentication
+                        else wechat_channel._agent.current_conversation_id
                     )
             else:
                 setattr(app_state, attr, None)
@@ -221,6 +239,8 @@ class RuntimeConfigManager:
                     app_state.wechat_conversation_id = None
 
             connected = new_config.enabled and getattr(app_state, attr) is not None
+            if channel_name == "wechat" and connected:
+                connected = not cast("WeChatChannel", new_channel)._needs_authentication
             logger.info(
                 "Channel %s swapped → enabled=%s connected=%s",
                 channel_name,

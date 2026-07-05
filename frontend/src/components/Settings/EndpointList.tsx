@@ -4,18 +4,22 @@ import { SpeedTestResult } from './SpeedTestResult'
 interface EndpointListProps {
   endpoints: LLMEndpoint[]
   testingId: string | null
+  testingConnectionId: string | null
   onEdit: (id: string) => void
   onDelete: (id: string) => void
   onSpeedTest: (id: string) => void
+  onTestConnection: (id: string) => void
   onSetDefault: (id: string) => void
 }
 
 export function EndpointList({
   endpoints,
   testingId,
+  testingConnectionId,
   onEdit,
   onDelete,
   onSpeedTest,
+  onTestConnection,
   onSetDefault,
 }: EndpointListProps) {
   const formatLatency = (ms?: number) => (ms !== undefined ? `${ms} ms` : '—')
@@ -47,6 +51,14 @@ export function EndpointList({
             <span>{formatTime(ep.last_tested_at)}</span>
           </div>
           <div className="endpoint-row-actions">
+            <button
+              className="btn btn-ghost btn-sm"
+              data-testid={`test-connection-${ep.id}`}
+              onClick={() => onTestConnection(ep.id)}
+              disabled={testingConnectionId === ep.id}
+            >
+              {testingConnectionId === ep.id ? <SpeedTestResult loading /> : 'Test Connection'}
+            </button>
             <button
               className="btn btn-ghost btn-sm"
               data-testid={`speed-test-${ep.id}`}

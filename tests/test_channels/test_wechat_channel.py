@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from thumbelina.channels.config import WeChatChannelConfig
 from thumbelina.channels.wechat_channel import WeChatChannel
+from thumbelina.channels.wechat_qrcode import ILinkSessionExpiredError
 
 # ------------------------------------------------------------------
 # Fixtures
@@ -156,12 +157,14 @@ class TestWeChatChannelLifecycle:
         accounts_dir.mkdir(parents=True)
         cred_file = accounts_dir / "bot-id.json"
         cred_file.write_text(
-            json.dumps({
-                "bot_token": "saved-token-123",
-                "ilink_bot_id": "bot@id",
-                "baseurl": "https://ilinkai.weixin.qq.com",
-                "ilink_user_id": "user@id",
-            }),
+            json.dumps(
+                {
+                    "bot_token": "saved-token-123",
+                    "ilink_bot_id": "bot@id",
+                    "baseurl": "https://ilinkai.weixin.qq.com",
+                    "ilink_user_id": "user@id",
+                }
+            ),
             encoding="utf-8",
         )
 
@@ -185,10 +188,10 @@ class TestWeChatChannelLifecycle:
             assert ch._ilink is mock_ilink
 
     @pytest.mark.asyncio
-    async def test_start_raises_when_no_token_and_no_saved_creds(
+    async def test_start_marks_needs_auth_when_no_token_and_no_saved_creds(
         self, mock_agent: MagicMock, tmp_path
     ) -> None:
-        """start() should raise RuntimeError when no token and no saved credentials."""
+        """start() should mark channel as needing auth when no token and no saved credentials."""
         config = WeChatChannelConfig(
             enabled=True,
             bot_token="",
@@ -200,11 +203,15 @@ class TestWeChatChannelLifecycle:
         empty_dir = tmp_path / "empty_accounts"
         empty_dir.mkdir()
 
-        with (
-            patch("thumbelina.channels.wechat_qrcode._accounts_dir", return_value=empty_dir),
-            pytest.raises(RuntimeError, match="no bot_token"),
-        ):
+        with patch("thumbelina.channels.wechat_qrcode._accounts_dir", return_value=empty_dir):
             await ch.start()
+
+        assert ch._needs_authentication is True
+        assert ch._ilink is None
+        assert ch._poll_task is None
+        status = await ch.check_status()
+        assert status["needs_authentication"] is True
+        assert status["connected"] is False
 
 
 # ------------------------------------------------------------------
@@ -275,9 +282,7 @@ class TestWeChatChannelIncoming:
     async def test_handle_voice_message(
         self, channel: WeChatChannel, mock_agent: MagicMock
     ) -> None:
-        result = await channel.handle_incoming(
-            "wxid_user1", "transcribed text", msg_type="voice"
-        )
+        result = await channel.handle_incoming("wxid_user1", "transcribed text", msg_type="voice")
 
         mock_agent.run.assert_not_called()
         assert "voice" in result.lower()
@@ -292,9 +297,7 @@ class TestWeChatChannelIncoming:
         assert "image" in result.lower()
 
     @pytest.mark.asyncio
-    async def test_handle_agent_error(
-        self, channel: WeChatChannel, mock_agent: MagicMock
-    ) -> None:
+    async def test_handle_agent_error(self, channel: WeChatChannel, mock_agent: MagicMock) -> None:
         mock_agent.run = AsyncMock(side_effect=RuntimeError("LLM failure"))
 
         result = await channel.handle_incoming("wxid_user1", "Hello!")
@@ -313,7 +316,8 @@ class TestWeChatConversationSetup:
         await ch._ensure_wechat_conversation()
 
         mock_agent.memory_manager.create_conversation.assert_awaited_once_with(
-            name="微信聊天", pinned=True,
+            name="微信聊天",
+            pinned=True,
         )
         assert mock_agent.current_conversation_id == "conv-wechat-123"
 
@@ -332,9 +336,7 @@ class TestWeChatConversationSetup:
         assert mock_agent.current_conversation_id == "existing-conv"
 
     @pytest.mark.asyncio
-    async def test_no_memory_manager_skips(
-        self, wechat_config: WeChatChannelConfig
-    ) -> None:
+    async def test_no_memory_manager_skips(self, wechat_config: WeChatChannelConfig) -> None:
         agent = MagicMock()
         agent.memory_manager = None
         agent.current_conversation_id = None
@@ -365,6 +367,7 @@ class TestWeChatChannelStatus:
         status = await ch.check_status()
 
         assert status["connected"] is True
+        assert status["needs_authentication"] is False
 
     @pytest.mark.asyncio
     async def test_status_poll_loop_stopped(
@@ -379,6 +382,7 @@ class TestWeChatChannelStatus:
         status = await ch.check_status()
 
         assert status["connected"] is False
+        assert status["needs_authentication"] is False
         assert "stopped" in status["error"].lower()
 
     @pytest.mark.asyncio
@@ -386,7 +390,49 @@ class TestWeChatChannelStatus:
         status = await channel.check_status()
 
         assert status["connected"] is False
+        assert status["needs_authentication"] is False
         assert "not started" in status["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_status_needs_authentication(
+        self, wechat_config: WeChatChannelConfig, mock_agent: MagicMock
+    ) -> None:
+        ch = WeChatChannel(config=wechat_config, agent=mock_agent)
+        ch._needs_authentication = True
+
+        status = await ch.check_status()
+
+        assert status["connected"] is False
+        assert status["needs_authentication"] is True
+        assert "qr code" in status["error"].lower()
+
+
+# ------------------------------------------------------------------
+# Poll loop tests
+# ------------------------------------------------------------------
+
+
+class TestWeChatChannelPollLoop:
+    """Test the iLink long-polling loop."""
+
+    @pytest.mark.asyncio
+    async def test_poll_loop_stops_on_session_expired(
+        self, wechat_config: WeChatChannelConfig, mock_agent: MagicMock
+    ) -> None:
+        """The poll loop should stop and mark needs_authentication on errcode=-14."""
+        ch = WeChatChannel(config=wechat_config, agent=mock_agent)
+        mock_ilink = AsyncMock()
+        mock_ilink.getupdates = AsyncMock(side_effect=ILinkSessionExpiredError("expired"))
+        mock_ilink.close = AsyncMock()
+        ch._ilink = mock_ilink
+
+        # Run the loop briefly; it should exit after the first auth failure.
+        task = asyncio.create_task(ch._poll_loop())
+        await asyncio.wait_for(task, timeout=1.0)
+
+        assert ch._needs_authentication is True
+        assert ch._poll_task is None  # stop() is not called, task simply finished
+        mock_ilink.getupdates.assert_awaited_once()
 
 
 # ------------------------------------------------------------------

@@ -5,12 +5,10 @@ from __future__ import annotations
 import json
 import os
 
-import pytest
 import yaml
 
 from thumbelina.config.config_repo import ConfigRepository
 from thumbelina.config.loader import import_yaml_to_db, load_config, load_config_from_db
-from thumbelina.config.models import AppConfig
 
 
 class TestDatabaseEmptyDetection:

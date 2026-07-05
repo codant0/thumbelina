@@ -8,7 +8,6 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from thumbelina.memory.models import Base
 from thumbelina.memory.user_profile import UserPreference, UserProfile
 
 

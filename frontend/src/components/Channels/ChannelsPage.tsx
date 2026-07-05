@@ -19,6 +19,7 @@ interface ChannelConfig {
 interface ChannelStatus {
   connected: boolean
   error?: string
+  needs_authentication?: boolean
 }
 
 interface QQForm {
@@ -532,12 +533,37 @@ export function ChannelsPage() {
           </form>
         ) : (
           <>
-            {config?.wechat.enabled ? (
+            {config?.wechat.enabled && (
               <>
                 <div className="chat-status" style={{ marginBottom: 12, borderRadius: 'var(--radius-sm)', padding: '6px 10px', fontSize: 12 }}>
                   <span className={`dot ${wechatStatus?.connected ? 'connected' : 'disconnected'}`} />
                   <span>{wechatStatus?.connected ? 'Connected' : wechatStatus?.error || 'Disconnected'}</span>
                 </div>
+
+                {wechatStatus?.needs_authentication && (
+                  <div
+                    style={{
+                      marginBottom: 12,
+                      borderRadius: 'var(--radius-sm)',
+                      padding: '10px 12px',
+                      fontSize: 12,
+                      background: 'var(--warning-bg, #fff7ed)',
+                      color: 'var(--warning-text, #9a3412)',
+                      border: '1px solid var(--warning-border, #fdba74)',
+                    }}
+                  >
+                    <p style={{ margin: '0 0 8px' }}>
+                      WeChat session expired or not logged in. Scan a QR code to reconnect.
+                    </p>
+                    <button
+                      className="btn btn-primary btn-sm"
+                      onClick={startQRFlow}
+                      data-testid="wechat-reconnect-button"
+                    >
+                      Scan QR Code to Reconnect
+                    </button>
+                  </div>
+                )}
 
                 <div className="form-group">
                   <label className="form-label">Bot ID</label>
@@ -546,116 +572,113 @@ export function ChannelsPage() {
                   </div>
                 </div>
               </>
-            ) : (
-              <>
-                {/* QR Code Login Flow */}
-                {qrFlow === 'idle' && (
-                  <div style={{ padding: '12px 0' }}>
-                    <p style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 12 }}>
-                      Scan a QR code with WeChat to login, or configure manually.
-                    </p>
-                    <div className="settings-actions">
-                      <button
-                        className="btn btn-primary"
-                        onClick={startQRFlow}
-                        data-testid="wechat-qrcode-button"
-                      >
-                        Scan QR Code to Login
-                      </button>
-                      <button
-                        className="btn btn-ghost"
-                        onClick={startEditWechat}
-                        data-testid="edit-wechat-button"
-                      >
-                        Manual Config
-                      </button>
-                    </div>
-                  </div>
-                )}
+            )}
 
-                {qrFlow === 'loading' && (
-                  <div style={{ padding: '16px 0', textAlign: 'center' }}>
-                    <div className="spinner" />
-                    <p style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 8 }}>
-                      Fetching QR code...
-                    </p>
-                  </div>
-                )}
+            {!config?.wechat.enabled && qrFlow === 'idle' && (
+              <div style={{ padding: '12px 0' }}>
+                <p style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 12 }}>
+                  Scan a QR code with WeChat to login, or configure manually.
+                </p>
+                <div className="settings-actions">
+                  <button
+                    className="btn btn-primary"
+                    onClick={startQRFlow}
+                    data-testid="wechat-qrcode-button"
+                  >
+                    Scan QR Code to Login
+                  </button>
+                  <button
+                    className="btn btn-ghost"
+                    onClick={startEditWechat}
+                    data-testid="edit-wechat-button"
+                  >
+                    Manual Config
+                  </button>
+                </div>
+              </div>
+            )}
 
-                {(qrFlow === 'scanning' || qrFlow === 'scanned') && qrData && (
-                  <div style={{ padding: '12px 0', textAlign: 'center' }}>
-                    <div
-                      style={{
-                        display: 'inline-block',
-                        padding: 16,
-                        background: '#fff',
-                        borderRadius: 'var(--radius)',
-                        marginBottom: 12,
-                      }}
-                      data-testid="wechat-qrcode-display"
-                    >
-                      <QRCodeSVG value={qrData.imgContent} size={200} />
-                    </div>
-                    <p style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-                      {qrFlow === 'scanned'
-                        ? 'Scanned! Please confirm on your phone.'
-                        : 'Scan this QR code with WeChat'}
-                    </p>
-                    <p style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
-                      Waiting for confirmation...
-                    </p>
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      style={{ marginTop: 8 }}
-                      onClick={resetQRFlow}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                )}
+            {qrFlow === 'loading' && (
+              <div style={{ padding: '16px 0', textAlign: 'center' }}>
+                <div className="spinner" />
+                <p style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 8 }}>
+                  Fetching QR code...
+                </p>
+              </div>
+            )}
 
-                {qrFlow === 'confirmed' && (
-                  <div style={{ padding: '16px 0', textAlign: 'center' }}>
-                    <p style={{ fontSize: 14, fontWeight: 500, color: 'var(--success)', marginBottom: 8 }}>
-                      Login successful!
-                    </p>
-                    <p style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 12 }}>
-                      WeChat channel is now enabled and connected.
-                    </p>
-                    <button className="btn btn-ghost" onClick={resetQRFlow}>
-                      Done
-                    </button>
-                  </div>
-                )}
+            {(qrFlow === 'scanning' || qrFlow === 'scanned') && qrData && (
+              <div style={{ padding: '12px 0', textAlign: 'center' }}>
+                <div
+                  style={{
+                    display: 'inline-block',
+                    padding: 16,
+                    background: '#fff',
+                    borderRadius: 'var(--radius)',
+                    marginBottom: 12,
+                  }}
+                  data-testid="wechat-qrcode-display"
+                >
+                  <QRCodeSVG value={qrData.imgContent} size={200} />
+                </div>
+                <p style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
+                  {qrFlow === 'scanned'
+                    ? 'Scanned! Please confirm on your phone.'
+                    : 'Scan this QR code with WeChat'}
+                </p>
+                <p style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
+                  Waiting for confirmation...
+                </p>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  style={{ marginTop: 8 }}
+                  onClick={resetQRFlow}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
 
-                {qrFlow === 'expired' && (
-                  <div style={{ padding: '12px 0', textAlign: 'center' }}>
-                    <p style={{ fontSize: 13, color: 'var(--error)', marginBottom: 8 }}>
-                      QR code expired.
-                    </p>
-                    <button className="btn btn-primary" onClick={startQRFlow}>
-                      Get New QR Code
-                    </button>
-                    <button className="btn btn-ghost" style={{ marginLeft: 8 }} onClick={resetQRFlow}>
-                      Cancel
-                    </button>
-                  </div>
-                )}
+            {qrFlow === 'confirmed' && (
+              <div style={{ padding: '16px 0', textAlign: 'center' }}>
+                <p style={{ fontSize: 14, fontWeight: 500, color: 'var(--success)', marginBottom: 8 }}>
+                  Login successful!
+                </p>
+                <p style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 12 }}>
+                  WeChat channel is now enabled and connected.
+                </p>
+                <button className="btn btn-ghost" onClick={resetQRFlow}>
+                  Done
+                </button>
+              </div>
+            )}
 
-                {qrFlow === 'error' && (
-                  <div style={{ padding: '12px 0', textAlign: 'center' }}>
-                    <p style={{ fontSize: 13, color: 'var(--error)', marginBottom: 8 }}>
-                      {qrError || 'Something went wrong'}
-                    </p>
-                    <button className="btn btn-primary" onClick={startQRFlow}>
-                      Retry
-                    </button>
-                    <button className="btn btn-ghost" style={{ marginLeft: 8 }} onClick={resetQRFlow}>
-                      Cancel
-                    </button>
-                  </div>
-                )}
-              </>
+            {qrFlow === 'expired' && (
+              <div style={{ padding: '12px 0', textAlign: 'center' }}>
+                <p style={{ fontSize: 13, color: 'var(--error)', marginBottom: 8 }}>
+                  QR code expired.
+                </p>
+                <button className="btn btn-primary" onClick={startQRFlow}>
+                  Get New QR Code
+                </button>
+                <button className="btn btn-ghost" style={{ marginLeft: 8 }} onClick={resetQRFlow}>
+                  Cancel
+                </button>
+              </div>
+            )}
+
+            {qrFlow === 'error' && (
+              <div style={{ padding: '12px 0', textAlign: 'center' }}>
+                <p style={{ fontSize: 13, color: 'var(--error)', marginBottom: 8 }}>
+                  {qrError || 'Something went wrong'}
+                </p>
+                <button className="btn btn-primary" onClick={startQRFlow}>
+                  Retry
+                </button>
+                <button className="btn btn-ghost" style={{ marginLeft: 8 }} onClick={resetQRFlow}>
+                  Cancel
+                </button>
+              </div>
             )}
 
             {config?.wechat.enabled && (

@@ -67,13 +67,20 @@ class ChromaVectorStore(VectorStore):
         )
 
         results = []
-        for i in range(len(result["ids"][0])):
+        ids = result.get("ids")
+        documents = result.get("documents")
+        distances = result.get("distances")
+        metadatas = result.get("metadatas")
+        if not ids or not documents:
+            return []
+
+        for i, doc_id in enumerate(ids[0]):
             results.append(
                 {
-                    "id": result["ids"][0][i],
-                    "text": result["documents"][0][i],
-                    "score": result["distances"][0][i] if result["distances"] else 0.0,
-                    "metadata": result["metadatas"][0][i] if result["metadatas"] else {},
+                    "id": doc_id,
+                    "text": documents[0][i],
+                    "score": distances[0][i] if distances else 0.0,
+                    "metadata": metadatas[0][i] if metadatas else {},
                 }
             )
         return results

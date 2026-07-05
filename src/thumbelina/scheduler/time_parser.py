@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 import dateparser
 
@@ -52,7 +53,7 @@ class TimeParser:
         result = dateparser.parse(text, settings=settings)
         return result
 
-    def parse_recurring(self, text: str) -> dict | None:
+    def parse_recurring(self, text: str) -> dict[str, Any] | None:
         """Parse a recurring time expression.
 
         Parameters

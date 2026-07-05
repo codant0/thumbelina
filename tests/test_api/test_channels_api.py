@@ -60,9 +60,7 @@ class TestQQStatusEndpoint:
     def test_qq_status_connected(self) -> None:
         """Returns connected status when QQ channel is mocked."""
         mock_channel = MagicMock()
-        mock_channel.check_status = AsyncMock(
-            return_value={"connected": True}
-        )
+        mock_channel.check_status = AsyncMock(return_value={"connected": True})
 
         config = AppConfig(
             llm=LLMConfig(provider="openai", model="test", api_key="test-key"),

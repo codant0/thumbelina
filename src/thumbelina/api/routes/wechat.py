@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hmac
 import logging
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -15,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from thumbelina.api.deps import get_wechat_channel
 from thumbelina.channels.wechat_channel import WeChatChannel
+from thumbelina.channels.wechat_qrcode import WeChatQRCodeManager
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +26,7 @@ router = APIRouter(tags=["wechat"])
 _qrcode_manager = None
 
 
-def _get_qrcode_manager():
+def _get_qrcode_manager() -> WeChatQRCodeManager:
     global _qrcode_manager
     if _qrcode_manager is None:
         from thumbelina.channels.wechat_qrcode import WeChatQRCodeManager
@@ -192,7 +194,7 @@ async def wechat_qrcode_status(
             detail=f"Failed to poll status: {exc}",
         ) from exc
 
-    body: dict = {"status": result.status}
+    body: dict[str, Any] = {"status": result.status}
     if result.credentials is not None:
         body["credentials"] = {
             "bot_token": result.credentials.bot_token,
@@ -255,16 +257,23 @@ async def confirm_wechat_login(
         try:
             from thumbelina.api.websocket import broadcast_chat_message
 
-            async def _on_wechat_message(cid: str, user_text: str, response: str, source: str = "wechat") -> None:
-                await broadcast_chat_message({
-                    "channel_message": {
-                        "channel": "wechat",
-                        "conversation_id": cid,
-                        "user_message": user_text,
-                        "response": response,
-                        "source": source,
+            async def _on_wechat_message(
+                cid: str,
+                user_text: str,
+                response: str,
+                source: str = "wechat",
+            ) -> None:
+                await broadcast_chat_message(
+                    {
+                        "channel_message": {
+                            "channel": "wechat",
+                            "conversation_id": cid,
+                            "user_message": user_text,
+                            "response": response,
+                            "source": source,
+                        }
                     }
-                })
+                )
 
             connected = await runtime_manager.swap_channel(
                 channel_name="wechat",

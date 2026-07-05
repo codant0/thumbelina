@@ -3,13 +3,13 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from thumbelina.config.config_repo import ConfigRepository
-from thumbelina.llm.base import SpeedTestResult
+from thumbelina.llm.base import ConnectionTestResult, SpeedTestResult
 from thumbelina.llm.factory import create_provider
 
 logger = logging.getLogger(__name__)
@@ -92,7 +92,7 @@ class EndpointManager:
         for endpoint in await self.list_endpoints(provider=provider):
             if endpoint.is_default:
                 endpoint.is_default = False
-                endpoint.updated_at = datetime.now(timezone.utc)
+                endpoint.updated_at = datetime.now(UTC)
                 await self._persist(endpoint)
 
     async def list_endpoints(self, provider: str | None = None) -> list[LLMEndpoint]:
@@ -116,7 +116,7 @@ class EndpointManager:
     ) -> LLMEndpoint:
         if data is None:
             data = LLMEndpointCreate(**kwargs)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         endpoint = LLMEndpoint(
             id=str(uuid.uuid4()),
             provider=data.provider,
@@ -159,7 +159,7 @@ class EndpointManager:
         elif data.is_default is False:
             endpoint.is_default = False
 
-        endpoint.updated_at = datetime.now(timezone.utc)
+        endpoint.updated_at = datetime.now(UTC)
         await self._persist(endpoint)
         return endpoint
 
@@ -194,7 +194,35 @@ class EndpointManager:
         endpoint.is_reachable = result.reachable
         endpoint.last_latency_ms = result.latency_ms
         endpoint.last_total_ms = result.total_ms
-        endpoint.last_tested_at = result.tested_at or datetime.now(timezone.utc)
-        endpoint.updated_at = datetime.now(timezone.utc)
+        endpoint.last_tested_at = result.tested_at or datetime.now(UTC)
+        endpoint.updated_at = datetime.now(UTC)
+        await self._persist(endpoint)
+        return result
+
+    async def test_connection(
+        self,
+        endpoint_id: str,
+        model: str | None = None,
+    ) -> ConnectionTestResult | None:
+        """Run a lightweight connectivity test against a saved endpoint."""
+        endpoint = await self._get_raw(endpoint_id)
+        if endpoint is None:
+            return None
+
+        provider = create_provider(
+            endpoint.provider,
+            api_key=endpoint.api_key,
+            base_url=endpoint.base_url,
+            model=model or "gpt-4o",
+        )
+        result = await provider.test_connection(
+            base_url=endpoint.base_url,
+            api_key=endpoint.api_key,
+            model=model,
+        )
+
+        endpoint.is_reachable = result.reachable
+        endpoint.last_tested_at = result.tested_at or datetime.now(UTC)
+        endpoint.updated_at = datetime.now(UTC)
         await self._persist(endpoint)
         return result

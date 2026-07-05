@@ -17,11 +17,12 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable, Coroutine
-from typing import Any
+from typing import Any, cast
 
 from thumbelina.agent.graph import ThumbelinaAgent
 from thumbelina.channels.base import Channel
 from thumbelina.channels.config import WeChatChannelConfig
+from thumbelina.channels.wechat_qrcode import ILinkSessionExpiredError
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,8 @@ class WeChatChannel(Channel):
         self,
         config: WeChatChannelConfig,
         agent: ThumbelinaAgent,
-        on_message_callback: Callable[[str, str, str, str], Coroutine[Any, Any, None]] | None = None,
+        on_message_callback: Callable[[str, str, str, str], Coroutine[Any, Any, None]]
+        | None = None,
     ) -> None:
         self._config = config
         self._agent = agent
@@ -57,13 +59,20 @@ class WeChatChannel(Channel):
         self._on_message_callback = on_message_callback
         self._last_wechat_user_id: str | None = None  # Track last WeChat user for responses
         self._last_context_token: str = ""  # Track context_token for replies
+        self._needs_authentication: bool = False
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
-        """Create the iLink client, ensure a WeChat conversation, and start polling."""
+        """Create the iLink client, ensure a WeChat conversation, and start polling.
+
+        This is a "soft" start: if no credentials are available, or if the
+        saved credentials are expired, the channel is still created but
+        marked as needing authentication. The backend can start normally,
+        and the frontend can prompt the user to scan a QR code.
+        """
         from thumbelina.channels.wechat_qrcode import ILinkClient
 
         # If bot_token is empty but ilink_bot_id is set, try loading saved
@@ -73,11 +82,13 @@ class WeChatChannel(Channel):
             await self._load_saved_credentials()
 
         if not self._config.bot_token:
-            raise RuntimeError(
-                "WeChat channel cannot start: no bot_token. "
-                "Scan the QR code again to authenticate."
+            self._needs_authentication = True
+            logger.warning(
+                "WeChat channel not started: no bot_token. Scan the QR code again to authenticate."
             )
+            return
 
+        self._needs_authentication = False
         self._ilink = ILinkClient(
             bot_token=self._config.bot_token,
             ilink_bot_id=self._config.ilink_bot_id,
@@ -117,12 +128,8 @@ class WeChatChannel(Channel):
 
             data = json.loads(cred_path.read_text(encoding="utf-8"))
             self._config.bot_token = data.get("bot_token", "")
-            self._config.ilink_bot_id = data.get(
-                "ilink_bot_id", self._config.ilink_bot_id
-            )
-            self._config.ilink_user_id = data.get(
-                "ilink_user_id", self._config.ilink_user_id
-            )
+            self._config.ilink_bot_id = data.get("ilink_bot_id", self._config.ilink_bot_id)
+            self._config.ilink_user_id = data.get("ilink_user_id", self._config.ilink_user_id)
             base_url = data.get("baseurl", "")
             if base_url:
                 self._config.ilink_base_url = base_url
@@ -166,7 +173,7 @@ class WeChatChannel(Channel):
             conversations = await mm.get_conversations()
             for conv in conversations:
                 if conv.get("name") == _WECHAT_CONVERSATION_NAME:
-                    return conv["id"]
+                    return cast(str, conv["id"])
         except Exception:
             logger.warning("Failed to search for existing WeChat conversation", exc_info=True)
         return None
@@ -217,21 +224,28 @@ class WeChatChannel(Channel):
         Raises
         ------
         RuntimeError
-            If the channel has not been started.
+            If the channel has not been started or needs re-authentication.
         """
         if self._ilink is None:
             raise RuntimeError("WeChatChannel has not been started")
+
+        if self._needs_authentication:
+            raise RuntimeError(
+                "WeChat session expired or not logged in. Please scan the QR code to authenticate."
+            )
 
         # Use provided context_token or fall back to last received one
         effective_token = context_token or self._last_context_token
         if not effective_token:
             logger.warning(
-                "No context_token available for send_message to %s — "
-                "message may not be delivered",
+                "No context_token available for send_message to %s — message may not be delivered",
                 user_id,
             )
 
-        return await self._ilink.send_message(user_id, text, effective_token)
+        return cast(
+            dict[str, Any],
+            await self._ilink.send_message(user_id, text, effective_token),
+        )
 
     # ------------------------------------------------------------------
     # Receiving (called by the poll loop)
@@ -285,7 +299,11 @@ class WeChatChannel(Channel):
             # Frontend already receives the response directly via WebSocket
             if self._on_message_callback and response and source == "wechat":
                 cid = self._agent.current_conversation_id or ""
-                logger.info("Broadcasting message to WebSocket clients (source=%s, conv=%s)", source, cid)
+                logger.info(
+                    "Broadcasting message to WebSocket clients (source=%s, conv=%s)",
+                    source,
+                    cid,
+                )
                 try:
                     await self._on_message_callback(cid, text, response, source)
                 except Exception:
@@ -306,17 +324,32 @@ class WeChatChannel(Channel):
         Returns
         -------
         dict
-            Status dict with ``connected`` key and optional ``error``.
+            Status dict with ``connected`` and ``needs_authentication`` keys
+            and optional ``error``.
         """
+        if self._needs_authentication:
+            return {
+                "connected": False,
+                "needs_authentication": True,
+                "error": (
+                    "WeChat session expired or not logged in. "
+                    "Please scan the QR code to authenticate."
+                ),
+            }
         if self._poll_task is None:
-            return {"connected": False, "error": "Channel not started"}
+            return {
+                "connected": False,
+                "needs_authentication": False,
+                "error": "Channel not started",
+            }
         if self._poll_task.done():
             exc = self._poll_task.exception()
             return {
                 "connected": False,
+                "needs_authentication": False,
                 "error": f"Poll loop stopped: {exc}" if exc else "Poll loop stopped",
             }
-        return {"connected": True}
+        return {"connected": True, "needs_authentication": False}
 
     # ------------------------------------------------------------------
     # Internal: background polling loop
@@ -354,6 +387,14 @@ class WeChatChannel(Channel):
 
             except asyncio.CancelledError:
                 raise  # propagate cancellation
+
+            except ILinkSessionExpiredError:
+                self._needs_authentication = True
+                logger.error(
+                    "iLink session expired — stopping poll loop. "
+                    "Re-authenticate via QR code to resume."
+                )
+                break
 
             except Exception as exc:
                 consecutive_errors += 1

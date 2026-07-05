@@ -6,7 +6,10 @@
 
 ## 功能特性
 
-- **多 LLM 提供商** — 通过统一抽象层插件式支持 OpenAI、Anthropic、Ollama
+- **多 LLM 提供商** — 通过统一抽象层插件式支持 OpenAI、Anthropic、Ollama，支持命名预设快速切换和一键连通性测试
+- **LLM 预设管理** — 长期保存多种 LLM 配置（提供商、base URL、API 密钥、模型），支持自定义命名，一键激活任意预设
+- **LLM 连接测试** — 三层连通性验证（网络可达 → 鉴权有效 → 服务可用），覆盖任意 provider 端点
+- **DeepSeek API 兼容** — /models 端点优雅降级，通过 openai provider 配合静态模型推荐即可使用
 - **代理核心** — LangGraph 驱动的代理循环，支持工具调用和条件路由
 - **内置工具** — 文件操作、网络请求、Shell 命令、数据处理（JSON/CSV/文本分析）
 - **对话记忆** — 持久化存储（SQLite），支持关键词搜索和 LLM 生成摘要
@@ -24,7 +27,7 @@
 - **流式 WebSocket** — 通过 WebSocket 连接实现实时逐 token 流式响应
 - **安全机制** — JWT 认证（HS256）、滑动窗口限流、基于角色的访问控制、数据导出/删除
 - **备份恢复** — 基于 JSON 的备份，支持元数据信封
-- **Web 界面** — React 19 + TypeScript 前端，包含聊天、任务、记忆、设置、插件、频道、梦境七个页面
+- **Web 界面** — React 19 + TypeScript 前端，包含聊天、任务、记忆、设置（LLM 预设、端点、连接测试）、插件、频道、梦境七个页面。支持页面内语言切换（中文 / English）
 - **Docker** — 容器化部署，支持 docker-compose
 
 ## 快速开始
@@ -223,6 +226,20 @@ thumbelina/
 | GET | `/api/v1/config` | 获取当前配置快照 |
 | POST | `/api/v1/config` | 更新运行时配置 |
 | PUT | `/api/v1/config/llm` | 热切换 LLM 提供商/模型 |
+| GET | `/api/v1/config/llm/presets` | 列出已保存的 LLM 预设 |
+| POST | `/api/v1/config/llm/presets` | 创建新的 LLM 预设 |
+| GET | `/api/v1/config/llm/presets/{id}` | 获取单个 LLM 预设 |
+| PUT | `/api/v1/config/llm/presets/{id}` | 更新 LLM 预设 |
+| DELETE | `/api/v1/config/llm/presets/{id}` | 删除 LLM 预设 |
+| POST | `/api/v1/config/llm/presets/{id}/activate` | 激活预设（热切换） |
+| GET | `/api/v1/config/llm/models` | 从远程端点获取可用模型列表 |
+| POST | `/api/v1/config/llm/test-connection` | 测试任意 provider 参数连通性 |
+| GET | `/api/v1/config/llm/endpoints` | 列出已保存的 LLM 端点 |
+| POST | `/api/v1/config/llm/endpoints` | 创建新的 LLM 端点 |
+| PUT | `/api/v1/config/llm/endpoints/{id}` | 更新 LLM 端点 |
+| DELETE | `/api/v1/config/llm/endpoints/{id}` | 删除 LLM 端点 |
+| POST | `/api/v1/config/llm/endpoints/{id}/speed-test` | 对已保存端点运行速度测试 |
+| POST | `/api/v1/config/llm/endpoints/{id}/test-connection` | 对已保存端点运行连通性测试 |
 | PUT | `/api/v1/config/channels/{name}` | 热切换频道配置 |
 | GET | `/api/v1/config/export` | 从数据库导出配置 |
 | POST | `/api/v1/config/reload` | 从数据库重新加载配置 |

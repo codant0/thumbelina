@@ -6,7 +6,10 @@ An AI-powered personal assistant built with [FastAPI](https://fastapi.tiangolo.c
 
 ## Features
 
-- **Multi-Provider LLM** — Pluggable support for OpenAI, Anthropic, and Ollama via a unified abstraction layer
+- **Multi-Provider LLM** — Pluggable support for OpenAI, Anthropic, and Ollama via a unified abstraction layer, with named presets for quick switching and one-click connectivity testing
+- **LLM Preset Management** — Save multiple LLM configurations (provider, base URL, API key, model) with custom names and activate any preset with one click
+- **LLM Connection Test** — Three-level connectivity verification (network reachability → auth validity → service availability) for any provider endpoint
+- **DeepSeek API Support** — Graceful fallback for DeepSeek's `/models` endpoint, compatible via `openai` provider with static model recommendations
 - **Agent Core** — LangGraph-powered agent loop with tool calling and conditional routing
 - **Built-in Tools** — File operations, web requests, shell commands, and data processing (JSON/CSV/text analysis)
 - **Conversation Memory** — Persistent storage (SQLite) with keyword search and LLM-generated summaries
@@ -24,7 +27,7 @@ An AI-powered personal assistant built with [FastAPI](https://fastapi.tiangolo.c
 - **Streaming WebSocket** — Real-time token-by-token responses over WebSocket connections
 - **Security** — JWT authentication (HS256), sliding-window rate limiting, role-based access control, and data export/deletion
 - **Backup & Recovery** — JSON-based backup with metadata envelopes
-- **Web UI** — React 19 + TypeScript frontend with Chat, Tasks, Memory, Settings, Plugins, Channels, and Dream pages
+- **Web UI** — React 19 + TypeScript frontend with Chat, Tasks, Memory, Settings (LLM presets, endpoints, connection test), Plugins, Channels, and Dream pages. Supports English and Chinese via on-page language toggle
 - **Docker** — Containerized deployment with docker-compose
 
 ## Quick Start
@@ -223,6 +226,20 @@ thumbelina/
 | GET | `/api/v1/config` | Current configuration snapshot |
 | POST | `/api/v1/config` | Update runtime configuration |
 | PUT | `/api/v1/config/llm` | Hot-swap LLM provider/model |
+| GET | `/api/v1/config/llm/presets` | List saved LLM presets |
+| POST | `/api/v1/config/llm/presets` | Create a new LLM preset |
+| GET | `/api/v1/config/llm/presets/{id}` | Get a single LLM preset |
+| PUT | `/api/v1/config/llm/presets/{id}` | Update an LLM preset |
+| DELETE | `/api/v1/config/llm/presets/{id}` | Delete an LLM preset |
+| POST | `/api/v1/config/llm/presets/{id}/activate` | Activate a preset (hot-swap) |
+| GET | `/api/v1/config/llm/models` | Fetch available models from a live endpoint |
+| POST | `/api/v1/config/llm/test-connection` | Test connectivity to arbitrary provider parameters |
+| GET | `/api/v1/config/llm/endpoints` | List saved LLM endpoints |
+| POST | `/api/v1/config/llm/endpoints` | Create a new LLM endpoint |
+| PUT | `/api/v1/config/llm/endpoints/{id}` | Update an LLM endpoint |
+| DELETE | `/api/v1/config/llm/endpoints/{id}` | Delete an LLM endpoint |
+| POST | `/api/v1/config/llm/endpoints/{id}/speed-test` | Run a speed test against a saved endpoint |
+| POST | `/api/v1/config/llm/endpoints/{id}/test-connection` | Run a connectivity test against a saved endpoint |
 | PUT | `/api/v1/config/channels/{name}` | Hot-swap channel configuration |
 | GET | `/api/v1/config/export` | Export config from database |
 | POST | `/api/v1/config/reload` | Reload config from database |

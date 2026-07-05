@@ -199,9 +199,7 @@ class TaskScheduler:
                     nearest = min(pending_times)
                     # Sleep until next task is due, but cap at 60s and floor at 1s
                     next_wake = max(1.0, min(60.0, nearest - now_ts))
-                elif not any(
-                    t.status == TaskStatus.RUNNING for t in self._tasks.values()
-                ):
+                elif not any(t.status == TaskStatus.RUNNING for t in self._tasks.values()):
                     # No pending tasks and nothing running — sleep longer
                     next_wake = 30.0
             await asyncio.sleep(next_wake)

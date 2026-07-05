@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback, type FormEvent } from 'react'
 import { EndpointManager } from './EndpointManager'
 import { ModelSelector } from './ModelSelector'
+import { ConnectionTestButton } from './ConnectionTestButton'
+import { PresetManager } from './PresetManager'
+import { useTranslation } from '../../i18n'
 
 interface ConfigData {
   provider: string
@@ -26,6 +29,7 @@ interface UserPreference {
 }
 
 export function SettingsPanel() {
+  const { t, locale, setLocale } = useTranslation()
   const [config, setConfig] = useState<ConfigData>({
     provider: 'openai',
     model: 'gpt-4o',
@@ -167,14 +171,34 @@ export function SettingsPanel() {
 
   return (
     <div className="page-container" data-testid="settings-panel">
-      <div className="page-title">Settings</div>
+      <div className="page-title">{t('settings.title')}</div>
+
+      {/* Language selector */}
+      <div className="card">
+        <div className="card-title">{t('settings.language')}</div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <select
+            className="form-select"
+            data-testid="language-select"
+            value={locale}
+            onChange={e => setLocale(e.target.value === 'zh-CN' ? 'zh-CN' : 'en')}
+            style={{ maxWidth: 200 }}
+          >
+            <option value="en">{t('language.en')}</option>
+            <option value="zh-CN">{t('language.zhCN')}</option>
+          </select>
+        </div>
+      </div>
+
+      {/* LLM Presets */}
+      <PresetManager onMessage={(msg, err) => { setMessage(msg); setIsError(err) }} />
 
       {/* LLM Configuration */}
       <div className="card">
-        <div className="card-title">LLM Configuration</div>
+        <div className="card-title">{t('settings.llmConfig')}</div>
         <form onSubmit={handleSubmit} className="settings-form">
           <div className="form-group">
-            <label className="form-label" htmlFor="provider">LLM Provider</label>
+            <label className="form-label" htmlFor="provider">{t('settings.provider')}</label>
             <select
               id="provider"
               className="form-select"
@@ -188,7 +212,7 @@ export function SettingsPanel() {
             </select>
           </div>
           <div className="form-group">
-            <label className="form-label" htmlFor="model">Model</label>
+            <label className="form-label" htmlFor="model">{t('settings.model')}</label>
             <input
               id="model"
               type="text"
@@ -204,9 +228,15 @@ export function SettingsPanel() {
               model={config.model}
               onSelect={model => setConfig(prev => ({ ...prev, model }))}
             />
+            <ConnectionTestButton
+              provider={config.provider}
+              base_url={config.base_url}
+              api_key={config.api_key}
+              model={config.model}
+            />
           </div>
           <div className="form-group">
-            <label className="form-label" htmlFor="base_url">Base URL</label>
+            <label className="form-label" htmlFor="base_url">{t('settings.baseUrl')}</label>
             <input
               id="base_url"
               type="text"
@@ -218,7 +248,7 @@ export function SettingsPanel() {
             />
           </div>
           <div className="form-group">
-            <label className="form-label" htmlFor="api_key">API Key</label>
+            <label className="form-label" htmlFor="api_key">{t('settings.apiKey')}</label>
             <input
               id="api_key"
               type="password"
@@ -237,12 +267,12 @@ export function SettingsPanel() {
                 checked={config.rate_limit_enabled}
                 onChange={e => handleRateLimitToggle(e.target.checked)}
               />
-              Enable Rate Limiting
+              {t('settings.rateLimit')}
             </label>
           </div>
           <div className="settings-actions">
             <button type="submit" className="btn btn-primary" disabled={saving} data-testid="save-button">
-              {saving ? 'Switching...' : 'Switch Model'}
+              {saving ? t('settings.switching') : t('settings.switchModel')}
             </button>
           </div>
         </form>
@@ -258,20 +288,20 @@ export function SettingsPanel() {
 
       {/* User Profile */}
       <div className="card" data-testid="user-profile-card">
-        <div className="card-title">User Profile</div>
+        <div className="card-title">{t('settings.userProfile')}</div>
         {profileLoading ? (
-          <p style={{ color: 'var(--text-secondary)', fontSize: 12 }}>Loading...</p>
+          <p style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{t('common.loading')}</p>
         ) : profile ? (
           <div style={{ fontSize: 13 }}>
             <div style={{ marginBottom: 8 }}>
-              <strong>Communication Style:</strong> {profile.communication_style || 'Not set'}
+              <strong>{t('profile.communicationStyle')}:</strong> {profile.communication_style || t('profile.notSet')}
             </div>
             <div style={{ marginBottom: 8 }}>
-              <strong>Expertise Level:</strong> {profile.expertise_level || 'Not set'}
+              <strong>{t('profile.expertiseLevel')}:</strong> {profile.expertise_level || t('profile.notSet')}
             </div>
             {preferences.length > 0 && (
               <div>
-                <strong>Preferences:</strong>
+                <strong>{t('profile.preferences')}:</strong>
                 <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
                   {preferences.map(p => (
                     <li key={p.id} data-testid="preference-item">
@@ -287,14 +317,14 @@ export function SettingsPanel() {
           </div>
         ) : (
           <p style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
-            No profile data yet. The agent will build your profile as you chat.
+            {t('profile.noData')}
           </p>
         )}
       </div>
 
       {/* Data Management */}
       <div className="card" data-testid="data-management-card">
-        <div className="card-title">Data Management</div>
+        <div className="card-title">{t('settings.dataManagement')}</div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button
             className="btn btn-ghost"
@@ -302,7 +332,7 @@ export function SettingsPanel() {
             onClick={handleExport}
             disabled={exporting}
           >
-            {exporting ? 'Exporting...' : 'Export All Data'}
+            {exporting ? 'Exporting...' : t('settings.exportAll')}
           </button>
           <button
             className={`btn ${deleteConfirm ? 'btn-danger' : 'btn-ghost'}`}
@@ -310,14 +340,14 @@ export function SettingsPanel() {
             onClick={handleDeleteAll}
             disabled={deleting}
           >
-            {deleting ? 'Deleting...' : deleteConfirm ? 'Click again to confirm' : 'Delete All Data'}
+            {deleting ? 'Deleting...' : deleteConfirm ? t('settings.confirmDelete') : t('settings.deleteAll')}
           </button>
           {deleteConfirm && (
             <button
               className="btn btn-ghost btn-sm"
               onClick={() => setDeleteConfirm(false)}
             >
-              Cancel
+              {t('common.cancel')}
             </button>
           )}
         </div>

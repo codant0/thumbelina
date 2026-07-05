@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,12 @@ class Channel(ABC):
         """Stop the channel connection."""
 
     @abstractmethod
-    async def send_message(self, user_id: str, text: str) -> None:
+    async def send_message(
+        self,
+        user_id: str,
+        text: str,
+        context_token: str = "",
+    ) -> dict[str, Any] | None:
         """Send a message to a specific user.
 
         Parameters
@@ -52,4 +58,6 @@ class Channel(ABC):
             The target user identifier.
         text:
             The message text to send.
+        context_token:
+            Optional channel-specific context token (e.g. WeChat iLink).
         """

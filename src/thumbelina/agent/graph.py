@@ -251,7 +251,7 @@ class ThumbelinaAgent:
         self.llm_provider = new_provider
         self.llm = new_provider.chat_model
 
-    def _build_graph(self) -> CompiledStateGraph:
+    def _build_graph(self) -> CompiledStateGraph[AgentState, Any]:
         """Build and compile the LangGraph agent graph."""
         graph = StateGraph(AgentState)
         graph.add_node("agent", self._call_model_node)
@@ -389,7 +389,11 @@ class ThumbelinaAgent:
             for node_name, state_update in event.items():
                 if "messages" in state_update:
                     for message in state_update["messages"]:
-                        if isinstance(message, AIMessage) and message.content and not message.tool_calls:
+                        if (
+                            isinstance(message, AIMessage)
+                            and message.content
+                            and not message.tool_calls
+                        ):
                             chunk = str(message.content)
                             full_response += chunk
                             yield chunk

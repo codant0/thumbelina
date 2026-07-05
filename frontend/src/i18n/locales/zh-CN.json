@@ -1,0 +1,154 @@
+{
+  "nav": {
+    "chat": "聊天",
+    "tasks": "任务",
+    "memory": "记忆",
+    "dream": "梦境",
+    "settings": "设置",
+    "plugins": "插件",
+    "channels": "渠道"
+  },
+  "common": {
+    "loading": "加载中…",
+    "save": "保存",
+    "saving": "保存中…",
+    "cancel": "取消",
+    "connected": "已连接",
+    "disconnected": "已断开",
+    "generating": "生成中…",
+    "edit": "编辑",
+    "retry": "重试",
+    "done": "完成",
+    "delete": "删除",
+    "activate": "激活",
+    "active": "当前使用",
+    "test": "测试",
+    "testing": "测试中…"
+  },
+  "settings": {
+    "title": "设置",
+    "llmConfig": "LLM 配置",
+    "provider": "LLM 提供商",
+    "model": "模型",
+    "baseUrl": "基础地址",
+    "apiKey": "API 密钥",
+    "rateLimit": "启用速率限制",
+    "switchModel": "切换模型",
+    "switching": "切换中…",
+    "userProfile": "用户画像",
+    "dataManagement": "数据管理",
+    "exportAll": "导出全部数据",
+    "deleteAll": "删除全部数据",
+    "confirmDelete": "再次点击确认删除",
+    "language": "语言",
+    "presets": "LLM 预设",
+    "endpoints": "LLM 端点"
+  },
+  "language": {
+    "en": "English",
+    "zhCN": "中文"
+  },
+  "connectionTest": {
+    "button": "测试连接",
+    "title": "连接测试",
+    "network": "网络",
+    "auth": "认证",
+    "service": "服务",
+    "connected": "已连接 — {latency} ms",
+    "failed": "连接失败 — {error}",
+    "skipped": "跳过后续检查"
+  },
+  "preset": {
+    "title": "LLM 预设",
+    "add": "添加预设",
+    "name": "名称",
+    "provider": "提供商",
+    "baseUrl": "基础地址",
+    "apiKey": "API 密钥",
+    "model": "模型",
+    "extraParams": "额外参数 (JSON)",
+    "setActive": "设为当前预设",
+    "noPresets": "还没有预设，创建第一个预设以快速切换 LLM Provider。",
+    "create": "创建预设",
+    "update": "更新预设",
+    "keepKeyHint": "（留空则保持不变）",
+    "placeholder": "{\"temperature\": 0.7}"
+  },
+  "endpoint": {
+    "speedTest": "速度测试",
+    "testConnection": "测试连接",
+    "default": "默认",
+    "noEndpoints": "加载端点中…"
+  },
+  "channels": {
+    "title": "渠道",
+    "qqBot": "QQ 机器人",
+    "wechat": "微信",
+    "enabled": "已启用",
+    "disabled": "已禁用",
+    "enable": "启用",
+    "enableWechat": "启用微信渠道",
+    "enableQQ": "启用 QQ 机器人",
+    "scanQR": "扫码登录",
+    "manualConfig": "手动配置",
+    "reconnect": "扫码重新连接"
+  },
+  "chat": {
+    "startPrompt": "开始对话",
+    "startHint": "在下方输入消息开始",
+    "noConversations": "暂无对话。",
+    "sendHint": "发送消息以开始。",
+    "streamLabel": "流式"
+  },
+  "taskManager": {
+    "title": "任务管理器",
+    "subagents": "子代理",
+    "scheduledTasks": "计划任务",
+    "noSubagents": "无活跃子代理",
+    "noTasks": "无计划任务"
+  },
+  "memory": {
+    "title": "记忆",
+    "searchConversations": "搜索对话",
+    "searchPlaceholder": "搜索消息…",
+    "search": "搜索",
+    "searching": "搜索中…",
+    "noResults": "未找到结果",
+    "skills": "技能",
+    "loadSkills": "加载技能",
+    "skillCompositions": "技能组合",
+    "noSkills": "未找到技能",
+    "noCompositions": "未找到组合"
+  },
+  "dream": {
+    "title": "梦境",
+    "loading": "加载中…",
+    "refresh": "刷新",
+    "skills": "技能",
+    "categories": "分类",
+    "activeDays": "活跃天数",
+    "timeline": "时间线",
+    "topSkills": "热门技能（按成熟度）",
+    "categoryTitle": "分类",
+    "skillCloud": "技能云",
+    "noSkills": "尚无技能记录。技能将在代理学习过程中出现在此处。"
+  },
+  "plugins": {
+    "title": "插件",
+    "loaded": "已加载插件",
+    "noPlugins": "未加载插件。在 thumbelina.yaml 中配置 plugin_dirs 以加载插件。",
+    "showReport": "显示沙箱报告",
+    "hideReport": "隐藏沙箱报告",
+    "sandboxReport": "沙箱验证报告",
+    "valid": "有效",
+    "invalid": "无效",
+    "violations": "违规"
+  },
+  "profile": {
+    "communicationStyle": "沟通风格",
+    "expertiseLevel": "专业水平",
+    "preferences": "偏好设置",
+    "notSet": "未设置",
+    "noData": "暂无画像数据。代理将在聊天过程中建立您的用户画像。"
+  }
+}

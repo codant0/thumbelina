@@ -78,7 +78,7 @@ class QQChannel(Channel):
             If ``qq-botpy`` is not installed.
         """
         try:
-            import botpy
+            import botpy  # type: ignore[import-not-found]
         except ImportError:
             raise ImportError(
                 "qq-botpy is required for the QQ channel. Install it with: pip install qq-botpy"
@@ -86,7 +86,7 @@ class QQChannel(Channel):
 
         channel = self
 
-        class _ThumbelinaBotClient(botpy.Client):
+        class _ThumbelinaBotClient(botpy.Client):  # type: ignore[misc]
             """Internal botpy client that delegates messages to Thumbelina."""
 
             async def on_ready(self) -> None:
@@ -232,7 +232,12 @@ class QQChannel(Channel):
             return {"connected": False, "error": "Bot thread not running"}
         return {"connected": self._ready.is_set()}
 
-    async def send_message(self, user_id: str, text: str) -> None:
+    async def send_message(
+        self,
+        user_id: str,
+        text: str,
+        context_token: str = "",
+    ) -> dict[str, Any] | None:
         """Send a proactive message to a QQ user.
 
         Parameters
@@ -241,6 +246,8 @@ class QQChannel(Channel):
             The target user ID.
         text:
             The message text.
+        context_token:
+            Unused by QQ; accepted for compatibility with the base class.
 
         Note
         ----
@@ -253,3 +260,4 @@ class QQChannel(Channel):
         # botpy proactive messaging requires specific API calls
         # that depend on the message source (guild/group/c2c).
         # This is logged for now; actual sending is handled per-event.
+        return None

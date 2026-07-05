@@ -10,7 +10,7 @@ from typing import Any
 
 from sqlalchemy import func, select
 
-from thumbelina.memory.models import Base, FeedbackRecord
+from thumbelina.memory.models import FeedbackRecord
 
 
 @dataclass

@@ -1,0 +1,154 @@
+{
+  "nav": {
+    "chat": "Chat",
+    "tasks": "Tasks",
+    "memory": "Memory",
+    "dream": "Dream",
+    "settings": "Settings",
+    "plugins": "Plugins",
+    "channels": "Channels"
+  },
+  "common": {
+    "loading": "Loading…",
+    "save": "Save",
+    "saving": "Saving…",
+    "cancel": "Cancel",
+    "connected": "Connected",
+    "disconnected": "Disconnected",
+    "generating": "Generating…",
+    "edit": "Edit",
+    "retry": "Retry",
+    "done": "Done",
+    "delete": "Delete",
+    "activate": "Activate",
+    "active": "Active",
+    "test": "Test",
+    "testing": "Testing…"
+  },
+  "settings": {
+    "title": "Settings",
+    "llmConfig": "LLM Configuration",
+    "provider": "LLM Provider",
+    "model": "Model",
+    "baseUrl": "Base URL",
+    "apiKey": "API Key",
+    "rateLimit": "Enable Rate Limiting",
+    "switchModel": "Switch Model",
+    "switching": "Switching…",
+    "userProfile": "User Profile",
+    "dataManagement": "Data Management",
+    "exportAll": "Export All Data",
+    "deleteAll": "Delete All Data",
+    "confirmDelete": "Click again to confirm",
+    "language": "Language",
+    "presets": "LLM Presets",
+    "endpoints": "LLM Endpoints"
+  },
+  "language": {
+    "en": "English",
+    "zhCN": "中文"
+  },
+  "connectionTest": {
+    "button": "Test Connection",
+    "title": "Connection Test",
+    "network": "Network",
+    "auth": "Auth",
+    "service": "Service",
+    "connected": "Connected — {latency} ms",
+    "failed": "Connection failed — {error}",
+    "skipped": "Skipped further checks"
+  },
+  "preset": {
+    "title": "LLM Presets",
+    "add": "Add Preset",
+    "name": "Name",
+    "provider": "Provider",
+    "baseUrl": "Base URL",
+    "apiKey": "API Key",
+    "model": "Model",
+    "extraParams": "Extra Params (JSON)",
+    "setActive": "Set as active preset",
+    "noPresets": "No presets yet. Create your first preset to quickly switch between LLM providers.",
+    "create": "Create Preset",
+    "update": "Update Preset",
+    "keepKeyHint": "(leave blank to keep current)",
+    "placeholder": "{\"temperature\": 0.7}"
+  },
+  "endpoint": {
+    "speedTest": "Speed Test",
+    "testConnection": "Test Connection",
+    "default": "Default",
+    "noEndpoints": "Loading endpoints…"
+  },
+  "channels": {
+    "title": "Channels",
+    "qqBot": "QQ Bot",
+    "wechat": "WeChat",
+    "enabled": "enabled",
+    "disabled": "disabled",
+    "enable": "Enable",
+    "enableWechat": "Enable WeChat Channel",
+    "enableQQ": "Enable QQ Bot",
+    "scanQR": "Scan QR Code to Login",
+    "manualConfig": "Manual Config",
+    "reconnect": "Scan QR Code to Reconnect"
+  },
+  "chat": {
+    "startPrompt": "Start a conversation",
+    "startHint": "Type a message below to begin",
+    "noConversations": "No conversations yet.",
+    "sendHint": "Send a message to start.",
+    "streamLabel": "Stream"
+  },
+  "taskManager": {
+    "title": "Task Manager",
+    "subagents": "Subagents",
+    "scheduledTasks": "Scheduled Tasks",
+    "noSubagents": "No active subagents",
+    "noTasks": "No scheduled tasks"
+  },
+  "memory": {
+    "title": "Memory",
+    "searchConversations": "Search Conversations",
+    "searchPlaceholder": "Search messages…",
+    "search": "Search",
+    "searching": "Searching…",
+    "noResults": "No results found",
+    "skills": "Skills",
+    "loadSkills": "Load Skills",
+    "skillCompositions": "Skill Compositions",
+    "noSkills": "No skills found",
+    "noCompositions": "No compositions found"
+  },
+  "dream": {
+    "title": "Dream",
+    "loading": "Loading…",
+    "refresh": "Refresh",
+    "skills": "Skills",
+    "categories": "Categories",
+    "activeDays": "Active Days",
+    "timeline": "Timeline",
+    "topSkills": "Top Skills by Maturity",
+    "categoryTitle": "Categories",
+    "skillCloud": "Skill Cloud",
+    "noSkills": "No skills recorded yet. Skills will appear here as the agent learns."
+  },
+  "plugins": {
+    "title": "Plugins",
+    "loaded": "Loaded Plugins",
+    "noPlugins": "No plugins loaded. Configure plugin_dirs in thumbelina.yaml to load plugins.",
+    "showReport": "Show Sandbox Report",
+    "hideReport": "Hide Sandbox Report",
+    "sandboxReport": "Sandbox Validation Report",
+    "valid": "valid",
+    "invalid": "invalid",
+    "violations": "violations"
+  },
+  "profile": {
+    "communicationStyle": "Communication Style",
+    "expertiseLevel": "Expertise Level",
+    "preferences": "Preferences",
+    "notSet": "Not set",
+    "noData": "No profile data yet. The agent will build your profile as you chat."
+  }
+}

@@ -17,14 +17,14 @@ const sampleEndpoint = {
 
 describe('EndpointList', () => {
   it('renders endpoint name and provider', () => {
-    render(<EndpointList endpoints={[sampleEndpoint]} onEdit={vi.fn()} onDelete={vi.fn()} onSpeedTest={vi.fn()} onSetDefault={vi.fn()} testingId={null} />)
+    render(<EndpointList endpoints={[sampleEndpoint]} onEdit={vi.fn()} onDelete={vi.fn()} onSpeedTest={vi.fn()} onTestConnection={vi.fn()} onSetDefault={vi.fn()} testingId={null} testingConnectionId={null} />)
     expect(screen.getByText('OpenAI Default')).toBeInTheDocument()
     expect(screen.getByText('openai')).toBeInTheDocument()
   })
 
   it('emits speed-test event', () => {
     const onSpeedTest = vi.fn()
-    render(<EndpointList endpoints={[sampleEndpoint]} onEdit={vi.fn()} onDelete={vi.fn()} onSpeedTest={onSpeedTest} onSetDefault={vi.fn()} testingId={null} />)
+    render(<EndpointList endpoints={[sampleEndpoint]} onEdit={vi.fn()} onDelete={vi.fn()} onSpeedTest={onSpeedTest} onTestConnection={vi.fn()} onSetDefault={vi.fn()} testingId={null} testingConnectionId={null} />)
     fireEvent.click(screen.getByTestId('speed-test-1'))
     expect(onSpeedTest).toHaveBeenCalledWith('1')
   })

@@ -7,7 +7,7 @@ import json
 
 from sqlalchemy import select
 
-from thumbelina.memory.models import Base, CompositionRecord
+from thumbelina.memory.models import CompositionRecord
 from thumbelina.skills.composition import SkillComposition
 
 

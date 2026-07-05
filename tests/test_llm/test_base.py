@@ -71,6 +71,11 @@ class TestLLMProviderABC:
             async def speed_test(self, model, *, base_url=None, api_key=None):
                 return SpeedTestResult(reachable=True)
 
+            async def test_connection(self, *, base_url=None, api_key=None, model=None):
+                from thumbelina.llm.base import ConnectionTestResult
+
+                return ConnectionTestResult(reachable=True)
+
         provider = CompleteProvider()
         assert isinstance(provider, LLMProvider)
 
@@ -173,3 +178,4 @@ def test_speed_test_result_has_reachable_field():
 def test_provider_has_list_models_and_speed_test_methods():
     assert hasattr(LLMProvider, "list_models")
     assert hasattr(LLMProvider, "speed_test")
+    assert hasattr(LLMProvider, "test_connection")

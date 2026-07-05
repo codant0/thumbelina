@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+
+from thumbelina.plugins.manager import PluginManager
 
 router = APIRouter(tags=["plugins"])
 
 
-def _get_plugin_manager(request: Request):
+def _get_plugin_manager(request: Request) -> PluginManager | None:
     """Get the PluginManager from app.state, if available."""
     return getattr(request.app.state, "plugin_manager", None)
 
@@ -28,7 +32,7 @@ async def list_plugins(request: Request) -> JSONResponse:
     sandbox_report = plugin_manager.get_sandbox_report()
 
     # Build a lookup from plugin name to sandbox result
-    sandbox_lookup: dict[str, dict] = {}
+    sandbox_lookup: dict[str, dict[str, Any]] = {}
     for entry in sandbox_report:
         sandbox_lookup[entry["plugin_name"]] = entry
 

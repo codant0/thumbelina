@@ -7,6 +7,7 @@ import importlib.util
 import logging
 import os
 import sys
+from typing import Any
 
 from thumbelina.plugins.base import Plugin, PluginType
 from thumbelina.plugins.dependency import PluginMetadata, parse_plugin_metadata
@@ -66,7 +67,7 @@ class PluginManager:
         """
         return self._resolver.resolve(self._metadata_cache)
 
-    def get_dependency_graph(self) -> dict:
+    def get_dependency_graph(self) -> dict[str, Any]:
         """Return the dependency graph as a serialisable dict.
 
         Returns
@@ -77,7 +78,7 @@ class PluginManager:
         """
         load_order, errors = self.resolve_dependencies()
 
-        plugins_info: dict[str, dict] = {}
+        plugins_info: dict[str, dict[str, Any]] = {}
         for name, meta in self._metadata_cache.items():
             plugins_info[name] = {
                 "name": meta.name,
