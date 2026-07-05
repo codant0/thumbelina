@@ -66,6 +66,22 @@ class OpenAIProvider(LLMProvider):
     def chat_model(self) -> BaseChatModel:
         return self._model
 
+    @staticmethod
+    def _normalize_url(base_url: str | None, fallback: str = "https://api.openai.com/v1") -> str:
+        """Ensure the base URL includes a /v1 path prefix.
+
+        LangChain's ChatOpenAI internally appends /v1 when the configured
+        base URL does not already end with it, but our raw httpx calls in
+        test_connection / list_models need the full path.
+        """
+        url = (base_url or fallback).rstrip("/")
+        parsed = urllib.parse.urlparse(url)
+        path = parsed.path.rstrip("/")
+        # If there's no /v1 segment, append one
+        if not path or path == "":
+            url = f"{url}/v1"
+        return url
+
     async def list_models(
         self,
         *,
@@ -73,7 +89,7 @@ class OpenAIProvider(LLMProvider):
         api_key: str | None = None,
     ) -> list[str]:
         """Return model IDs from the OpenAI /v1/models endpoint."""
-        url = (base_url or self._base_url or "https://api.openai.com/v1").rstrip("/")
+        url = self._normalize_url(base_url)
         key = api_key or self._api_key
         headers: dict[str, str] = {"Authorization": f"Bearer {key}"} if key else {}
 
@@ -110,7 +126,7 @@ class OpenAIProvider(LLMProvider):
         and service availability. Returns a detailed result with per-step
         timing and errors.
         """
-        url = (base_url or self._base_url or "https://api.openai.com/v1").rstrip("/")
+        url = self._normalize_url(base_url)
         key = api_key or self._api_key
         headers: dict[str, str] = {"Authorization": f"Bearer {key}"} if key else {}
         tested_at = datetime.now(UTC)
@@ -245,7 +261,7 @@ class OpenAIProvider(LLMProvider):
         api_key: str | None = None,
     ) -> SpeedTestResult:
         """Run a minimal streamed chat completion and measure latency."""
-        url = (base_url or self._base_url or "https://api.openai.com/v1").rstrip("/")
+        url = self._normalize_url(base_url)
         key = api_key or self._api_key
         headers: dict[str, str] = {
             "Authorization": f"Bearer {key}",
