@@ -68,19 +68,30 @@ class OpenAIProvider(LLMProvider):
 
     @staticmethod
     def _normalize_url(base_url: str | None, fallback: str = "https://api.openai.com/v1") -> str:
-        """Ensure the base URL includes a /v1 path prefix.
-
-        LangChain's ChatOpenAI internally appends /v1 when the configured
-        base URL does not already end with it, but our raw httpx calls in
-        test_connection / list_models need the full path.
-        """
+        """Ensure the base URL includes a /v1 path prefix."""
         url = (base_url or fallback).rstrip("/")
         parsed = urllib.parse.urlparse(url)
         path = parsed.path.rstrip("/")
-        # If there's no /v1 segment, append one
         if not path or path == "":
             url = f"{url}/v1"
         return url
+
+    @staticmethod
+    def _resolve_model(model: str | None, url: str, fallback: str = "gpt-4o") -> str:
+        """Pick a model that exists on the target provider.
+
+        When testing connectivity to a non-OpenAI endpoint, the default
+        ``gpt-4o`` won't exist.  Detect known providers from the URL
+        hostname and return a sensible default.
+        """
+        if model and model != fallback:
+            return model
+        hostname = urllib.parse.urlparse(url).hostname or ""
+        if "deepseek" in hostname:
+            return "deepseek-chat"
+        if "groq" in hostname:
+            return "llama-3.3-70b-versatile"
+        return model or fallback
 
     async def list_models(
         self,
@@ -215,8 +226,9 @@ class OpenAIProvider(LLMProvider):
         # Level 3: service availability (minimal chat completion)
         try:
             t0 = time.perf_counter()
+            effective_model = self._resolve_model(model, url, self._model_name)
             payload = {
-                "model": model or self._model_name or "gpt-4o",
+                "model": effective_model,
                 "messages": [{"role": "user", "content": "hi"}],
                 "max_tokens": 1,
                 "stream": False,
