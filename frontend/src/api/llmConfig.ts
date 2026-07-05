@@ -129,7 +129,9 @@ export async function deleteEndpoint(id: string): Promise<void> {
 }
 
 export async function runSpeedTest(id: string, model: string): Promise<SpeedTestResult> {
-  return request<SpeedTestResult>(`/config/llm/endpoints/${id}/speed-test?model=${encodeURIComponent(model)}`)
+  return request<SpeedTestResult>(`/config/llm/endpoints/${id}/speed-test?model=${encodeURIComponent(model)}`, {
+    method: 'POST',
+  })
 }
 
 export async function fetchModels(params: { provider: string; base_url: string; api_key?: string }): Promise<ModelList> {
@@ -157,7 +159,9 @@ export async function testEndpointConnection(
   model?: string,
 ): Promise<ConnectionTestResult> {
   const query = model ? `?model=${encodeURIComponent(model)}` : ''
-  return request<ConnectionTestResult>(`/config/llm/endpoints/${endpointId}/test-connection${query}`)
+  return request<ConnectionTestResult>(`/config/llm/endpoints/${endpointId}/test-connection${query}`, {
+    method: 'POST',
+  })
 }
 
 export async function fetchPresets(): Promise<LLMPreset[]> {
