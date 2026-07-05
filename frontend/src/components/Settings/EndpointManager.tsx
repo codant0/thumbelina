@@ -77,9 +77,10 @@ export function EndpointManager({ onMessage }: EndpointManagerProps) {
   }
 
   const handleSpeedTest = async (id: string) => {
+    const ep = endpoints.find(e => e.id === id)
     setTestingId(id)
     try {
-      const result = await runSpeedTest(id, 'gpt-4o')
+      const result = await runSpeedTest(id, ep?.model || 'gpt-4o')
       setEndpoints(prev => prev.map(ep => (ep.id === id ? {
         ...ep,
         is_reachable: result.reachable,

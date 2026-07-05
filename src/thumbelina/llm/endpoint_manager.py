@@ -215,16 +215,17 @@ class EndpointManager:
         if endpoint is None:
             return None
 
+        effective_model = model or endpoint.model or None
         provider = create_provider(
             endpoint.provider,
             api_key=endpoint.api_key,
             base_url=endpoint.base_url,
-            model=model or "gpt-4o",
+            model=effective_model or "gpt-4o",
         )
         result = await provider.test_connection(
             base_url=endpoint.base_url,
             api_key=endpoint.api_key,
-            model=model,
+            model=effective_model,
         )
 
         endpoint.is_reachable = result.reachable
