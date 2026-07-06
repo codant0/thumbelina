@@ -85,13 +85,6 @@ export function EndpointForm({ initialValues, onSubmit, onCancel }: EndpointForm
       </div>
       <div className="form-group">
         <label className="form-label">{t('settings.model')}</label>
-        <input
-          className="form-input"
-          data-testid="endpoint-model-input"
-          value={model}
-          onChange={e => setModel(e.target.value)}
-          placeholder="gpt-4o / deepseek-chat / ..."
-        />
         <ModelSelector
           provider={provider}
           base_url={baseUrl}

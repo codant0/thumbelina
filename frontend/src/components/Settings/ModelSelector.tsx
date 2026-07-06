@@ -31,30 +31,33 @@ export function ModelSelector({ provider, base_url, api_key, model, onSelect }: 
 
   return (
     <div className="model-selector">
-      <button
-        type="button"
-        className="btn btn-ghost btn-sm"
-        data-testid="fetch-models-button"
-        onClick={handleFetch}
-        disabled={!supported || loading || !base_url}
-        title={supported ? 'Fetch available models' : 'Model listing not supported for this provider yet.'}
-      >
-        {loading ? 'Fetching…' : 'Fetch models'}
-      </button>
+      <div className="model-selector-input-row">
+        <input
+          list="model-options"
+          type="text"
+          className="form-input"
+          data-testid="endpoint-model-input"
+          value={model}
+          onChange={e => onSelect(e.target.value)}
+          placeholder="Select or type a model"
+        />
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          data-testid="fetch-models-button"
+          onClick={handleFetch}
+          disabled={!supported || loading || !base_url}
+          title={supported ? 'Fetch available models' : 'Model listing not supported for this provider yet.'}
+        >
+          {loading ? '…' : 'Fetch'}
+        </button>
+      </div>
       {error && <span className="form-error">{error}</span>}
       <datalist id="model-options">
         {models.map(m => (
           <option key={m} value={m} data-testid="model-option" />
         ))}
       </datalist>
-      <input
-        list="model-options"
-        type="text"
-        className="form-input"
-        value={model}
-        onChange={e => onSelect(e.target.value)}
-        placeholder="Select or type a model"
-      />
     </div>
   )
 }

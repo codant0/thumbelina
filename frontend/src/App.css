@@ -639,6 +639,29 @@
   height: 14px;
 }
 
+/* ===== Model Selector ===== */
+.model-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.model-selector-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.model-selector-input-row .form-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.model-selector-input-row .btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 /* ===== Status Badges ===== */
 .badge {
   display: inline-flex;
