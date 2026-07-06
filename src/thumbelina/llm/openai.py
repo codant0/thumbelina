@@ -116,8 +116,7 @@ class OpenAIProvider(LLMProvider):
         except httpx.HTTPStatusError as e:
             if e.response.status_code in (401, 403, 404):
                 logger.warning(
-                    "Model listing not supported at %s (HTTP %d). "
-                    "Falling back to empty list.",
+                    "Model listing not supported at %s (HTTP %d). Falling back to empty list.",
                     url,
                     e.response.status_code,
                 )
@@ -178,13 +177,16 @@ class OpenAIProvider(LLMProvider):
             )
 
         # Level 2: auth validity (GET /models)
+        # Some OpenAI-compatible proxies do not expose /models; in those cases
+        # we fall through to Level 3 and let a minimal chat completion decide
+        # whether the endpoint is usable. A definitive 401/403 still short-
+        # circuits to avoid wasting tokens.
         auth_latency_ms: int | None = None
+        auth_ok = False
         try:
             t0 = time.perf_counter()
             async with httpx.AsyncClient() as client:
-                resp = await client.get(
-                    f"{url}/models", headers=headers, timeout=10.0
-                )
+                resp = await client.get(f"{url}/models", headers=headers, timeout=10.0)
             auth_latency_ms = int((time.perf_counter() - t0) * 1000)
             if resp.status_code in (401, 403):
                 steps.auth = ConnectionTestStep(
@@ -201,59 +203,76 @@ class OpenAIProvider(LLMProvider):
                     tested_at=tested_at,
                 )
             resp.raise_for_status()
+            auth_ok = True
             steps.auth = ConnectionTestStep(ok=True, latency_ms=auth_latency_ms)
         except httpx.HTTPStatusError as exc:
-            steps.auth = ConnectionTestStep(
-                ok=False, latency_ms=auth_latency_ms, error=str(exc)
-            )
-            return ConnectionTestResult(
-                reachable=False,
-                network_reachable=True,
-                auth_valid=False,
-                error=str(exc),
-                details=steps,
-                tested_at=tested_at,
-            )
+            steps.auth = ConnectionTestStep(ok=False, latency_ms=auth_latency_ms, error=str(exc))
         except Exception as exc:  # noqa: BLE001
             error = str(exc)
             steps.auth = ConnectionTestStep(ok=False, error=error)
-            return ConnectionTestResult(
-                reachable=False,
-                network_reachable=True,
-                auth_valid=False,
-                error=error,
-                details=steps,
-                tested_at=tested_at,
-            )
 
         # Level 3: service availability (minimal chat completion)
-        try:
-            t0 = time.perf_counter()
-            effective_model = self._resolve_model(model, url, self._model_name)
+        # Try the requested/default model first. If the caller did not specify
+        # a model and the endpoint rejects the default with 400, fall back to
+        # the first model reported by /models so we don't blindly pin ``gpt-4o``
+        # on providers that don't host it.
+        async def _post_chat(model_name: str) -> httpx.Response:
             payload = {
-                "model": effective_model,
+                "model": model_name,
                 "messages": [{"role": "user", "content": "hi"}],
                 "max_tokens": 1,
                 "stream": False,
             }
             async with httpx.AsyncClient() as client:
-                resp = await client.post(
+                return await client.post(
                     f"{url}/chat/completions",
                     headers=headers | {"Content-Type": "application/json"},
                     json=payload,
                     timeout=15.0,
                 )
+
+        candidates = [self._resolve_model(model, url, self._model_name)]
+        if not model:
+            try:
+                available = await self.list_models(base_url=base_url, api_key=api_key)
+                for m in available:
+                    if m not in candidates:
+                        candidates.append(m)
+            except Exception:  # noqa: BLE001
+                pass
+
+        last_error: str | None = None
+        for candidate in candidates:
+            try:
+                t0 = time.perf_counter()
+                resp = await _post_chat(candidate)
                 resp.raise_for_status()
-            total_latency = int((time.perf_counter() - t0) * 1000)
-            steps.service = ConnectionTestStep(ok=True, latency_ms=total_latency)
-        except Exception as exc:  # noqa: BLE001
-            error = str(exc)
-            steps.service = ConnectionTestStep(ok=False, error=error)
+                total_latency = int((time.perf_counter() - t0) * 1000)
+                steps.service = ConnectionTestStep(ok=True, latency_ms=total_latency)
+                last_error = None
+                break
+            except httpx.HTTPStatusError as exc:
+                body = ""
+                try:
+                    body = exc.response.text
+                except Exception:  # noqa: BLE001
+                    pass
+                last_error = f"{exc}. Response: {body}" if body else str(exc)
+                # A 400 on the first candidate may just mean the default model
+                # is wrong; keep trying other discovered models.
+                if exc.response.status_code != 400 or candidate == candidates[-1]:
+                    break
+            except Exception as exc:  # noqa: BLE001
+                last_error = str(exc)
+                break
+
+        if last_error is not None:
+            steps.service = ConnectionTestStep(ok=False, error=last_error)
             return ConnectionTestResult(
                 reachable=False,
                 network_reachable=True,
-                auth_valid=True,
-                error=error,
+                auth_valid=auth_ok,
+                error=last_error,
                 details=steps,
                 tested_at=tested_at,
             )

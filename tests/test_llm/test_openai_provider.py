@@ -153,6 +153,92 @@ async def test_test_connection_success():
 
 
 @pytest.mark.asyncio
+async def test_test_connection_default_model_400_falls_back_to_listed_model():
+    provider = OpenAIProvider(api_key="test-key")
+
+    mock_models_response = MagicMock()
+    mock_models_response.status_code = 200
+    mock_models_response.raise_for_status = MagicMock()
+    mock_models_response.json.return_value = {"data": [{"id": "mimo-model"}]}
+
+    bad_chat_response = MagicMock()
+    bad_chat_response.status_code = 400
+    bad_chat_response.text = '{"error":{"message":"model not found"}}'
+    bad_chat_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+        "400 Bad Request",
+        request=MagicMock(),
+        response=bad_chat_response,
+    )
+
+    good_chat_response = MagicMock()
+    good_chat_response.status_code = 200
+    good_chat_response.raise_for_status = MagicMock()
+    good_chat_response.json.return_value = {"choices": [{"message": {"content": "hi"}}]}
+
+    calls = []
+
+    async def _fake_get(*args, **kwargs):
+        return mock_models_response
+
+    async def _fake_post(*args, **kwargs):
+        calls.append(args)
+        if len(calls) == 1:
+            return bad_chat_response
+        return good_chat_response
+
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=_fake_get):
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock, side_effect=_fake_post):
+            with patch("asyncio.open_connection", side_effect=_fake_open_connection):
+                result = await provider.test_connection(
+                    base_url="https://token-plan-cn.xiaomimimo.com/v1",
+                )
+
+    assert isinstance(result, ConnectionTestResult)
+    assert result.reachable is True
+    assert result.network_reachable is True
+    assert result.auth_valid is True
+    assert result.service_available is True
+
+
+@pytest.mark.asyncio
+async def test_test_connection_includes_response_body_on_400():
+    provider = OpenAIProvider(api_key="test-key")
+
+    mock_models_response = MagicMock()
+    mock_models_response.status_code = 200
+    mock_models_response.raise_for_status = MagicMock()
+    mock_models_response.json.return_value = {"data": []}
+
+    bad_chat_response = MagicMock()
+    bad_chat_response.status_code = 400
+    bad_chat_response.text = '{"error":{"message":"invalid model"}}'
+    bad_chat_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+        "400 Bad Request",
+        request=MagicMock(),
+        response=bad_chat_response,
+    )
+
+    async def _fake_get(*args, **kwargs):
+        return mock_models_response
+
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=_fake_get):
+        with patch(
+            "httpx.AsyncClient.post", new_callable=AsyncMock, return_value=bad_chat_response
+        ):
+            with patch("asyncio.open_connection", side_effect=_fake_open_connection):
+                result = await provider.test_connection(
+                    base_url="https://api.openai.com/v1",
+                    model="gpt-4o",
+                )
+
+    assert isinstance(result, ConnectionTestResult)
+    assert result.reachable is False
+    assert result.service_available is False
+    assert result.error is not None
+    assert "invalid model" in result.error
+
+
+@pytest.mark.asyncio
 async def test_test_connection_auth_failure():
     provider = OpenAIProvider(api_key="test-key")
 
