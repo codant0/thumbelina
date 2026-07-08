@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { EndpointManager } from './EndpointManager'
 import { useTranslation } from '../../i18n'
+import { Toast } from './Toast'
+import { Globe, Shield, User, Database, Download, Trash2, Loader2 } from 'lucide-react'
 
 interface UserProfile {
   id: string
@@ -113,16 +115,21 @@ export function SettingsPanel() {
     <div className="page-container" data-testid="settings-panel">
       <div className="page-title">{t('settings.title')}</div>
 
+      <Toast
+        message={message}
+        isError={isError}
+        onClose={() => setMessage('')}
+      />
+
       {/* Language selector */}
       <div className="card">
-        <div className="card-title">{t('settings.language')}</div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div className="card-title"><Globe size={14} />{t('settings.language')}</div>
+        <div className="settings-row">
           <select
             className="form-select"
             data-testid="language-select"
             value={locale}
             onChange={e => setLocale(e.target.value === 'zh-CN' ? 'zh-CN' : 'en')}
-            style={{ maxWidth: 200 }}
           >
             <option value="en">{t('language.en')}</option>
             <option value="zh-CN">{t('language.zhCN')}</option>
@@ -139,6 +146,7 @@ export function SettingsPanel() {
             checked={rateLimitEnabled}
             onChange={e => handleRateLimitToggle(e.target.checked)}
           />
+          <Shield size={16} />
           {t('settings.rateLimit')}
         </label>
       </div>
@@ -146,61 +154,51 @@ export function SettingsPanel() {
       {/* LLM Configuration */}
       <EndpointManager onMessage={(msg, err) => { setMessage(msg); setIsError(err) }} />
 
-      {message && (
-        <p
-          data-testid="settings-message"
-          style={{ fontSize: 12.5, color: isError ? 'var(--error)' : 'var(--success)', margin: '8px 0' }}
-        >
-          {message}
-        </p>
-      )}
-
       {/* User Profile */}
       <div className="card" data-testid="user-profile-card">
-        <div className="card-title">{t('settings.userProfile')}</div>
+        <div className="card-title"><User size={14} />{t('settings.userProfile')}</div>
         {profileLoading ? (
-          <p style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{t('common.loading')}</p>
+          <p className="settings-empty-hint">{t('common.loading')}</p>
         ) : profile ? (
-          <div style={{ fontSize: 13 }}>
-            <div style={{ marginBottom: 8 }}>
-              <strong>{t('profile.communicationStyle')}:</strong> {profile.communication_style || t('profile.notSet')}
+          <div className="settings-profile-list">
+            <div className="settings-profile-item">
+              <strong>{t('profile.communicationStyle')}:</strong>&nbsp;{profile.communication_style || t('profile.notSet')}
             </div>
-            <div style={{ marginBottom: 8 }}>
-              <strong>{t('profile.expertiseLevel')}:</strong> {profile.expertise_level || t('profile.notSet')}
+            <div className="settings-profile-item">
+              <strong>{t('profile.expertiseLevel')}:</strong>&nbsp;{profile.expertise_level || t('profile.notSet')}
             </div>
             {preferences.length > 0 && (
-              <div>
-                <strong>{t('profile.preferences')}:</strong>
-                <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
-                  {preferences.map(p => (
-                    <li key={p.id} data-testid="preference-item">
-                      <span style={{ color: 'var(--text-secondary)' }}>{p.category}/{p.key}:</span> {p.value}
-                      <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--text-secondary)' }}>
-                        ({Math.round(p.confidence_score * 100)}%)
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+              <div className="settings-profile-item">
+                <div>
+                  <strong>{t('profile.preferences')}:</strong>
+                  <ul className="settings-preference-list">
+                    {preferences.map(p => (
+                      <li key={p.id} data-testid="preference-item" className="settings-preference-li">
+                        <span className="settings-preference-key">{p.category}/{p.key}:</span> {p.value}
+                        <span className="settings-preference-score"> ({Math.round(p.confidence_score * 100)}%)</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               </div>
             )}
           </div>
         ) : (
-          <p style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
-            {t('profile.noData')}
-          </p>
+          <p className="settings-empty-hint">{t('profile.noData')}</p>
         )}
       </div>
 
       {/* Data Management */}
       <div className="card" data-testid="data-management-card">
-        <div className="card-title">{t('settings.dataManagement')}</div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div className="card-title"><Database size={14} />{t('settings.dataManagement')}</div>
+        <div className="settings-row settings-row--wrap">
           <button
             className="btn btn-ghost"
             data-testid="export-button"
             onClick={handleExport}
             disabled={exporting}
           >
+            {exporting ? <Loader2 size={16} className="spin" /> : <Download size={16} />}
             {exporting ? 'Exporting...' : t('settings.exportAll')}
           </button>
           <button
@@ -209,6 +207,7 @@ export function SettingsPanel() {
             onClick={handleDeleteAll}
             disabled={deleting}
           >
+            {deleting ? <Loader2 size={16} className="spin" /> : <Trash2 size={16} />}
             {deleting ? 'Deleting...' : deleteConfirm ? t('settings.confirmDelete') : t('settings.deleteAll')}
           </button>
           {deleteConfirm && (

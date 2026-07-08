@@ -1,4 +1,5 @@
 import type { Conversation } from '../../types/chat'
+import { Plus, X } from 'lucide-react'
 
 interface SidebarProps {
   conversations: Conversation[]
@@ -15,7 +16,7 @@ export function Sidebar({ conversations, onSelect, onNew, onDelete, selectedId }
         <span>Conversations</span>
         {onNew && (
           <button onClick={onNew} title="New conversation" aria-label="New conversation">
-            +
+            <Plus size={16} />
           </button>
         )}
       </div>
@@ -49,7 +50,7 @@ export function Sidebar({ conversations, onSelect, onNew, onDelete, selectedId }
                   aria-label="Delete conversation"
                   onClick={e => { e.stopPropagation(); onDelete(conv.id) }}
                 >
-                  &times;
+                  <X size={14} />
                 </button>
               )}
             </div>

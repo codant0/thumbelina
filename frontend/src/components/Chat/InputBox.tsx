@@ -1,4 +1,5 @@
 import { useState, useRef, type FormEvent, type KeyboardEvent } from 'react'
+import { Send } from 'lucide-react'
 
 interface InputBoxProps {
   onSend: (message: string) => void
@@ -53,6 +54,7 @@ export function InputBox({ onSend, disabled }: InputBoxProps) {
           rows={1}
         />
         <button type="submit" disabled={disabled}>
+          <Send size={16} />
           Send
         </button>
       </form>

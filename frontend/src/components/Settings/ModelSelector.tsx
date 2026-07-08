@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import { fetchModels } from '../../api/llmConfig'
+import { Loader2, Download } from 'lucide-react'
 
 interface ModelSelectorProps {
   provider: string
@@ -46,10 +47,16 @@ export function ModelSelector({ provider, base_url, api_key, model, onSelect }: 
           className="btn btn-ghost btn-sm"
           data-testid="fetch-models-button"
           onClick={handleFetch}
-          disabled={!supported || loading || !base_url}
-          title={supported ? 'Fetch available models' : 'Model listing not supported for this provider yet.'}
+          disabled={!supported || loading || !provider || !base_url || !api_key}
+          title={
+            !supported
+              ? 'Model listing not supported for this provider yet.'
+              : !provider || !base_url || !api_key
+                ? 'Provider, base URL and API key are required to fetch models'
+                : 'Fetch available models'
+          }
         >
-          {loading ? '…' : 'Fetch'}
+          {loading ? <><Loader2 size={14} className="spin" />Fetching</> : <><Download size={14} />Fetch</>}
         </button>
       </div>
       {error && <span className="form-error">{error}</span>}

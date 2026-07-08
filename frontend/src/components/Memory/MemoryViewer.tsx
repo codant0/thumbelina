@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react'
+import { Search, Sparkles, Layers, Loader2 } from 'lucide-react'
 
 interface SearchResult {
   conversation_id: string
@@ -79,7 +80,7 @@ export function MemoryViewer() {
       <div className="page-title">Memory</div>
 
       <div className="card">
-        <div className="card-title">Search Conversations</div>
+        <div className="card-title"><Search size={14} />Search Conversations</div>
         <div className="search-bar">
           <input
             type="text"
@@ -96,18 +97,19 @@ export function MemoryViewer() {
             onClick={handleSearch}
             disabled={searching}
           >
+            {searching ? <Loader2 size={16} className="spin" /> : <Search size={16} />}
             {searching ? 'Searching...' : 'Search'}
           </button>
         </div>
-        {error && <p data-testid="search-error" style={{ color: 'var(--error)', fontSize: 12, marginBottom: 8 }}>{error}</p>}
+        {error && <p data-testid="search-error" className="task-empty" style={{ color: 'var(--error)' }}>{error}</p>}
         <div data-testid="search-results">
           {results.length === 0 && query && !searching ? (
-            <p style={{ color: 'var(--text-secondary)', fontSize: 12, padding: '8px 0' }}>No results found</p>
+            <p className="task-empty">No results found</p>
           ) : (
             results.map((r, i) => (
-              <div key={i} data-testid="search-result-item" className="task-item" style={{ marginBottom: 6, alignItems: 'flex-start' }}>
+              <div key={i} data-testid="search-result-item" className="task-item search-result-item">
                 <div className="task-info">
-                  <div className="task-title" style={{ whiteSpace: 'pre-wrap', overflow: 'visible', textOverflow: 'unset' }}>{r.content}</div>
+                  <div className="task-title search-result-content">{r.content}</div>
                   <div className="task-meta">
                     <span className={`badge ${r.role === 'user' ? 'badge-neutral' : 'badge-success'}`}>{r.role}</span>
                     <span>Conv: {r.conversation_id.slice(0, 8)}</span>
@@ -120,8 +122,8 @@ export function MemoryViewer() {
       </div>
 
       <div className="card">
-        <div className="card-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span>Skills</span>
+        <div className="card-title card-title--between">
+          <span><Sparkles size={14} />Skills</span>
           <button
             className="btn btn-ghost btn-sm"
             data-testid="load-skills-button"
@@ -133,7 +135,7 @@ export function MemoryViewer() {
         </div>
         <div className="skill-grid" data-testid="skills-list">
           {skills.length === 0 && skillsLoaded ? (
-            <p style={{ color: 'var(--text-secondary)', fontSize: 12, padding: '8px 0' }}>No skills found</p>
+            <p className="task-empty">No skills found</p>
           ) : (
             skills.map(skill => (
               <div key={skill.id} className="skill-card" data-testid="skill-item">
@@ -156,8 +158,8 @@ export function MemoryViewer() {
 
       {/* Skill Compositions */}
       <div className="card">
-        <div className="card-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span>Skill Compositions</span>
+        <div className="card-title card-title--between">
+          <span><Layers size={14} />Skill Compositions</span>
           <button
             className="btn btn-ghost btn-sm"
             data-testid="load-compositions-button"
@@ -169,10 +171,10 @@ export function MemoryViewer() {
         </div>
         <div data-testid="compositions-list">
           {compositions.length === 0 && compositionsLoaded ? (
-            <p style={{ color: 'var(--text-secondary)', fontSize: 12, padding: '8px 0' }}>No compositions found</p>
+            <p className="task-empty">No compositions found</p>
           ) : (
             compositions.map(comp => (
-              <div key={comp.id} className="task-item" data-testid="composition-item" style={{ alignItems: 'flex-start' }}>
+              <div key={comp.id} className="task-item search-result-item" data-testid="composition-item">
                 <div className="task-info">
                   <div className="task-title">{comp.name}</div>
                   <div className="task-meta">
@@ -185,7 +187,7 @@ export function MemoryViewer() {
                     )}
                   </div>
                   {comp.description && (
-                    <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>{comp.description}</div>
+                    <div className="task-desc">{comp.description}</div>
                   )}
                 </div>
               </div>

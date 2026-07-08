@@ -5,12 +5,12 @@ import {
   createEndpoint,
   updateEndpoint,
   deleteEndpoint,
-  runSpeedTest,
   testEndpointConnection,
 } from '../../api/llmConfig'
 import { useTranslation } from '../../i18n'
 import { EndpointList } from './EndpointList'
 import { EndpointForm } from './EndpointForm'
+import { Plus, Cpu } from 'lucide-react'
 
 interface EndpointManagerProps {
   onMessage: (message: string, isError: boolean) => void
@@ -22,7 +22,6 @@ export function EndpointManager({ onMessage }: EndpointManagerProps) {
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState<LLMEndpoint | null>(null)
   const [showForm, setShowForm] = useState(false)
-  const [testingId, setTestingId] = useState<string | null>(null)
   const [testingConnectionId, setTestingConnectionId] = useState<string | null>(null)
   const [activatingId, setActivatingId] = useState<string | null>(null)
 
@@ -57,7 +56,11 @@ export function EndpointManager({ onMessage }: EndpointManagerProps) {
   const handleUpdate = async (data: EndpointFormData) => {
     if (!editing) return
     try {
-      await updateEndpoint(editing.id, data)
+      // Omit api_key when the user didn't enter a new one so the backend
+      // keeps the stored key (an empty string would overwrite it to empty).
+      const patch: Partial<EndpointFormData> = { ...data }
+      if (!patch.api_key) delete patch.api_key
+      await updateEndpoint(editing.id, patch)
       setEditing(null)
       onMessage(t('endpoint.updated'), false)
       await load()
@@ -76,26 +79,6 @@ export function EndpointManager({ onMessage }: EndpointManagerProps) {
     }
   }
 
-  const handleSpeedTest = async (id: string) => {
-    const ep = endpoints.find(e => e.id === id)
-    setTestingId(id)
-    try {
-      const result = await runSpeedTest(id, ep?.model || 'gpt-4o')
-      setEndpoints(prev => prev.map(ep => (ep.id === id ? {
-        ...ep,
-        is_reachable: result.reachable,
-        last_latency_ms: result.latency_ms,
-        last_total_ms: result.total_ms,
-        last_tested_at: new Date().toISOString(),
-      } : ep)))
-      onMessage(result.reachable ? t('endpoint.speedTestPassed') : `${t('endpoint.speedTestFailed')}: ${result.error || ''}`, !result.reachable)
-    } catch (err) {
-      onMessage(err instanceof Error ? err.message : t('endpoint.speedTestFailed'), true)
-    } finally {
-      setTestingId(null)
-    }
-  }
-
   const handleTestConnection = async (id: string) => {
     setTestingConnectionId(id)
     try {
@@ -105,9 +88,13 @@ export function EndpointManager({ onMessage }: EndpointManagerProps) {
         is_reachable: result.reachable,
         last_tested_at: new Date().toISOString(),
       } : ep)))
-      onMessage(result.reachable ? t('connectionTest.connected') : `${t('connectionTest.failed')}: ${result.error || ''}`, !result.reachable)
+      if (result.reachable) {
+        onMessage(t('connectionTest.connected', { latency: result.latency_ms ?? 0 }), false)
+      } else {
+        onMessage(t('connectionTest.failed', { error: result.error || '' }), true)
+      }
     } catch (err) {
-      onMessage(err instanceof Error ? err.message : t('connectionTest.failed'), true)
+      onMessage(err instanceof Error ? err.message : t('connectionTest.failed', { error: '' }), true)
     } finally {
       setTestingConnectionId(null)
     }
@@ -151,12 +138,13 @@ export function EndpointManager({ onMessage }: EndpointManagerProps) {
 
   return (
     <div className="card" data-testid="endpoint-manager">
-      <div className="card-title">{t('settings.endpoints')}</div>
+      <div className="card-title"><Cpu size={14} />{t('settings.endpoints')}</div>
       <button
         className="btn btn-primary"
         data-testid="add-endpoint-button"
         onClick={() => setShowForm(true)}
       >
+        <Plus size={16} />
         {t('endpoint.add')}
       </button>
       {showForm && (
@@ -166,18 +154,14 @@ export function EndpointManager({ onMessage }: EndpointManagerProps) {
         <EndpointForm initialValues={editing} onSubmit={handleUpdate} onCancel={() => setEditing(null)} />
       )}
       {endpoints.length === 0 && !showForm ? (
-        <p style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 12 }}>
-          {t('endpoint.noEndpoints')}
-        </p>
+        <p className="settings-empty-hint">{t('endpoint.noEndpoints')}</p>
       ) : (
         <EndpointList
           endpoints={endpoints}
-          testingId={testingId}
           testingConnectionId={testingConnectionId}
           activatingId={activatingId}
           onEdit={id => setEditing(endpoints.find(e => e.id === id) ?? null)}
           onDelete={handleDelete}
-          onSpeedTest={handleSpeedTest}
           onTestConnection={handleTestConnection}
           onActivate={handleActivate}
         />

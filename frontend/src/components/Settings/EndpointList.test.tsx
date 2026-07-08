@@ -21,10 +21,8 @@ const defaultProps = {
   endpoints: [sampleEndpoint],
   onEdit: vi.fn(),
   onDelete: vi.fn(),
-  onSpeedTest: vi.fn(),
   onTestConnection: vi.fn(),
   onActivate: vi.fn(),
-  testingId: null,
   testingConnectionId: null,
   activatingId: null,
 }
@@ -37,17 +35,26 @@ describe('EndpointList', () => {
       </LocaleProvider>,
     )
     expect(screen.getByText('OpenAI Default')).toBeInTheDocument()
-    expect(screen.getByText('openai')).toBeInTheDocument()
+    expect(screen.getByText('OpenAI')).toBeInTheDocument()
   })
 
-  it('emits speed-test event', () => {
-    const onSpeedTest = vi.fn()
+  it('renders active tag for default endpoint', () => {
     render(
       <LocaleProvider>
-        <EndpointList {...defaultProps} onSpeedTest={onSpeedTest} />
+        <EndpointList {...defaultProps} />
       </LocaleProvider>,
     )
-    fireEvent.click(screen.getByTestId('speed-test-1'))
-    expect(onSpeedTest).toHaveBeenCalledWith('1')
+    expect(screen.getByTestId('endpoint-active-tag-1')).toBeInTheDocument()
+  })
+
+  it('emits test-connection event', () => {
+    const onTestConnection = vi.fn()
+    render(
+      <LocaleProvider>
+        <EndpointList {...defaultProps} onTestConnection={onTestConnection} />
+      </LocaleProvider>,
+    )
+    fireEvent.click(screen.getByTestId('test-connection-1'))
+    expect(onTestConnection).toHaveBeenCalledWith('1')
   })
 })

@@ -1,66 +1,66 @@
 import type { LLMEndpoint } from '../../api/llmConfig'
 import { useTranslation } from '../../i18n'
 import { SpeedTestResult } from './SpeedTestResult'
+import { Check, Plug, Pencil, Trash2 } from 'lucide-react'
 
 interface EndpointListProps {
   endpoints: LLMEndpoint[]
-  testingId: string | null
   testingConnectionId: string | null
   activatingId: string | null
   onEdit: (id: string) => void
   onDelete: (id: string) => void
-  onSpeedTest: (id: string) => void
   onTestConnection: (id: string) => void
   onActivate: (id: string) => void
 }
 
+const PROVIDER_LABEL: Record<string, string> = {
+  openai: 'OpenAI',
+  anthropic: 'Anthropic',
+  ollama: 'Ollama',
+}
+
 export function EndpointList({
   endpoints,
-  testingId,
   testingConnectionId,
   activatingId,
   onEdit,
   onDelete,
-  onSpeedTest,
   onTestConnection,
   onActivate,
 }: EndpointListProps) {
   const { t } = useTranslation()
-  const formatLatency = (ms?: number) => (ms !== undefined ? `${ms} ms` : '—')
-  const formatTime = (iso?: string) => (iso ? new Date(iso).toLocaleString() : t('endpoint.never'))
 
   return (
     <div className="endpoint-list">
       {endpoints.map((ep) => (
         <div
           key={ep.id}
-          className="card"
+          className={`endpoint-card ${ep.is_default ? 'endpoint-card--active' : ''}`}
           data-testid={`endpoint-row-${ep.id}`}
-          style={ep.is_default ? { borderColor: 'var(--success)' } : undefined}
         >
-          <div className="endpoint-row-header">
-            <strong>{ep.name}</strong>
-            <span className="endpoint-badge">{ep.provider}</span>
-            {ep.model && <span className="endpoint-badge" style={{ opacity: 0.7 }}>{ep.model}</span>}
-            {ep.is_default && <span className="endpoint-default-badge">{t('endpoint.active')}</span>}
+          <div className="endpoint-card__main">
+            <div className="endpoint-card__head">
+              <span className={`endpoint-provider-logo endpoint-provider-logo--${ep.provider}`}>
+                {(PROVIDER_LABEL[ep.provider] || ep.provider).charAt(0)}
+              </span>
+              <div className="endpoint-card__title">
+                <strong>{ep.name}</strong>
+                <span className="endpoint-card__subtitle">
+                  {PROVIDER_LABEL[ep.provider] || ep.provider}
+                  {ep.model && <span className="endpoint-card__model">· {ep.model}</span>}
+                </span>
+              </div>
+            </div>
+            <div className="endpoint-card__url" title={ep.base_url}>{ep.base_url}</div>
           </div>
-          <div className="endpoint-row-body">
-            <span title={ep.base_url}>{ep.base_url}</span>
-            <span>
-              <span
-                className={`endpoint-status-dot ${
-                  ep.is_reachable === true
-                    ? 'reachable'
-                    : ep.is_reachable === false
-                      ? 'unreachable'
-                      : 'unknown'
-                }`}
-              />
-              {formatLatency(ep.last_latency_ms)} / {formatLatency(ep.last_total_ms)}
-            </span>
-            <span>{formatTime(ep.last_tested_at)}</span>
-          </div>
-          <div className="endpoint-row-actions">
+
+          <div className="endpoint-card__actions">
+            {ep.is_default && (
+              <span className="endpoint-active-tag" data-testid={`endpoint-active-tag-${ep.id}`}>
+                <span className="endpoint-active-dot" />
+                {t('endpoint.active')}
+              </span>
+            )}
             {!ep.is_default && (
               <button
                 className="btn btn-primary btn-sm"
@@ -68,6 +68,7 @@ export function EndpointList({
                 onClick={() => onActivate(ep.id)}
                 disabled={activatingId === ep.id}
               >
+                <Check size={14} />
                 {activatingId === ep.id ? t('common.activating') : t('common.activate')}
               </button>
             )}
@@ -77,20 +78,18 @@ export function EndpointList({
               onClick={() => onTestConnection(ep.id)}
               disabled={testingConnectionId === ep.id}
             >
-              {testingConnectionId === ep.id ? <SpeedTestResult loading /> : t('endpoint.testConnection')}
+              {testingConnectionId === ep.id ? <SpeedTestResult loading /> : <><Plug size={14} />{t('endpoint.testConnection')}</>}
             </button>
             <button
               className="btn btn-ghost btn-sm"
-              data-testid={`speed-test-${ep.id}`}
-              onClick={() => onSpeedTest(ep.id)}
-              disabled={testingId === ep.id}
+              data-testid={`edit-${ep.id}`}
+              onClick={() => onEdit(ep.id)}
             >
-              {testingId === ep.id ? <SpeedTestResult loading /> : t('endpoint.speedTest')}
-            </button>
-            <button className="btn btn-ghost btn-sm" onClick={() => onEdit(ep.id)}>
+              <Pencil size={14} />
               {t('common.edit')}
             </button>
             <button className="btn btn-danger btn-sm" onClick={() => onDelete(ep.id)}>
+              <Trash2 size={14} />
               {t('common.delete')}
             </button>
           </div>

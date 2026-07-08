@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { Bot, X, CalendarClock } from 'lucide-react'
 
 interface Subagent {
   id: string
@@ -64,13 +65,13 @@ export function TaskManager() {
   return (
     <div className="page-container" data-testid="task-manager">
       <div className="page-title">Task Manager</div>
-      {error && <p data-testid="task-error" style={{ color: 'var(--error)', fontSize: 12, marginBottom: 12 }}>{error}</p>}
+      {error && <p data-testid="task-error" className="error-state" style={{ padding: 0 }}>{error}</p>}
 
       <div className="card">
-        <div className="card-title">Subagents</div>
+        <div className="card-title"><Bot size={14} />Subagents</div>
         <div className="task-list" data-testid="subagent-list">
           {subagents.length === 0 ? (
-            <p style={{ color: 'var(--text-secondary)', fontSize: 12, padding: '8px 0' }}>No active subagents</p>
+            <p className="task-empty">No active subagents</p>
           ) : (
             subagents.map(agent => (
               <div key={agent.id} className="task-item" data-testid="subagent-item">
@@ -86,6 +87,7 @@ export function TaskManager() {
                 {(agent.status === 'running' || agent.status === 'pending') && (
                   <div className="task-actions">
                     <button className="btn btn-danger btn-sm" data-testid="cancel-subagent" onClick={() => handleCancelSubagent(agent.id)}>
+                      <X size={14} />
                       Cancel
                     </button>
                   </div>
@@ -97,10 +99,10 @@ export function TaskManager() {
       </div>
 
       <div className="card">
-        <div className="card-title">Scheduled Tasks</div>
+        <div className="card-title"><CalendarClock size={14} />Scheduled Tasks</div>
         <div className="task-list" data-testid="task-list">
           {tasks.length === 0 ? (
-            <p style={{ color: 'var(--text-secondary)', fontSize: 12, padding: '8px 0' }}>No scheduled tasks</p>
+            <p className="task-empty">No scheduled tasks</p>
           ) : (
             tasks.map(task => (
               <div key={task.id} className="task-item" data-testid="task-item">
@@ -116,6 +118,7 @@ export function TaskManager() {
                 {(task.status === 'running' || task.status === 'pending') && (
                   <div className="task-actions">
                     <button className="btn btn-danger btn-sm" data-testid="cancel-task" onClick={() => handleCancelTask(task.id)}>
+                      <X size={14} />
                       Cancel
                     </button>
                   </div>

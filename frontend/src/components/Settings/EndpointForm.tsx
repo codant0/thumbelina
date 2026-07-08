@@ -3,6 +3,7 @@ import type { EndpointFormData, LLMEndpoint } from '../../api/llmConfig'
 import { useTranslation } from '../../i18n'
 import { ConnectionTestButton } from './ConnectionTestButton'
 import { ModelSelector } from './ModelSelector'
+import { Cpu, Tag, Server, KeyRound, Box, Star, Save } from 'lucide-react'
 
 interface EndpointFormProps {
   initialValues?: LLMEndpoint
@@ -51,7 +52,7 @@ export function EndpointForm({ initialValues, onSubmit, onCancel }: EndpointForm
     <form onSubmit={handleSubmit} className="card" data-testid="endpoint-form">
       <div className="card-title">{initialValues ? t('endpoint.editTitle') : t('endpoint.addTitle')}</div>
       <div className="form-group">
-        <label className="form-label">{t('settings.provider')}</label>
+        <label className="form-label"><Cpu size={14} />{t('settings.provider')}</label>
         <select
           className="form-select"
           data-testid="endpoint-provider-select"
@@ -64,7 +65,7 @@ export function EndpointForm({ initialValues, onSubmit, onCancel }: EndpointForm
         </select>
       </div>
       <div className="form-group">
-        <label className="form-label">{t('endpoint.name')}</label>
+        <label className="form-label"><Tag size={14} />{t('endpoint.name')}</label>
         <input
           className="form-input"
           data-testid="endpoint-name-input"
@@ -74,7 +75,7 @@ export function EndpointForm({ initialValues, onSubmit, onCancel }: EndpointForm
         />
       </div>
       <div className="form-group">
-        <label className="form-label">{t('settings.baseUrl')}</label>
+        <label className="form-label"><Server size={14} />{t('settings.baseUrl')}</label>
         <input
           className="form-input"
           data-testid="endpoint-base-url-input"
@@ -84,17 +85,7 @@ export function EndpointForm({ initialValues, onSubmit, onCancel }: EndpointForm
         />
       </div>
       <div className="form-group">
-        <label className="form-label">{t('settings.model')}</label>
-        <ModelSelector
-          provider={provider}
-          base_url={baseUrl}
-          api_key={apiKey}
-          model={model}
-          onSelect={m => setModel(m)}
-        />
-      </div>
-      <div className="form-group">
-        <label className="form-label">{t('settings.apiKey')}</label>
+        <label className="form-label"><KeyRound size={14} />{t('settings.apiKey')}</label>
         <input
           className="form-input"
           data-testid="endpoint-api-key-input"
@@ -105,10 +96,22 @@ export function EndpointForm({ initialValues, onSubmit, onCancel }: EndpointForm
         />
       </div>
       <div className="form-group">
+        <label className="form-label"><Box size={14} />{t('settings.model')}</label>
+        <ModelSelector
+          provider={provider}
+          base_url={baseUrl}
+          api_key={apiKey}
+          model={model}
+          onSelect={m => setModel(m)}
+        />
+      </div>
+      <div className="form-group">
         <ConnectionTestButton
           provider={provider}
           base_url={baseUrl}
           api_key={apiKey}
+          model={model}
+          endpointId={initialValues?.id}
         />
       </div>
       <div className="form-group">
@@ -118,12 +121,14 @@ export function EndpointForm({ initialValues, onSubmit, onCancel }: EndpointForm
             checked={isDefault}
             onChange={e => setIsDefault(e.target.checked)}
           />
+          <Star size={16} />
           {t('endpoint.setDefault')}
         </label>
       </div>
       {error && <p className="form-error" data-testid="endpoint-form-error">{error}</p>}
       <div className="settings-actions">
         <button type="submit" className="btn btn-primary" data-testid="endpoint-form-submit">
+          <Save size={16} />
           {t('common.save')}
         </button>
         <button type="button" className="btn btn-ghost" onClick={onCancel}>

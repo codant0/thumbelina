@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import type { Message } from '../../types/chat'
+import { Star, Wrench, Check } from 'lucide-react'
 
 interface MessageListProps {
   messages: Message[]
@@ -53,7 +54,7 @@ export function MessageList({ messages, waitingForReply, conversationId }: Messa
             <div className="tool-calls" data-testid="tool-calls">
               {msg.toolCalls.map((tc, i) => (
                 <div key={i} className="tool-call" data-testid="tool-call">
-                  <span className="tool-name">{tc.name}</span>
+                  <span className="tool-name"><Wrench size={14} />{tc.name}</span>
                   <div className="tool-args">{JSON.stringify(tc.args, null, 2)}</div>
                   {tc.result && <div className="tool-result">{tc.result}</div>}
                 </div>
@@ -62,20 +63,25 @@ export function MessageList({ messages, waitingForReply, conversationId }: Messa
           )}
           {msg.role === 'assistant' && conversationId && (
             <div className="feedback-row" data-testid="feedback-row">
-              {[1, 2, 3, 4, 5].map(star => (
-                <button
-                  key={star}
-                  className={`star-btn${ratings[idx] !== undefined ? (star <= ratings[idx] ? ' filled' : '') : ''}`}
-                  data-testid={`star-${star}`}
-                  disabled={ratings[idx] !== undefined}
-                  onClick={() => void handleRate(idx, star)}
-                  aria-label={`Rate ${star} star${star > 1 ? 's' : ''}`}
-                >
-                  {star <= (ratings[idx] ?? 0) ? '★' : '☆'}
-                </button>
-              ))}
+              {[1, 2, 3, 4, 5].map(star => {
+                const filled = star <= (ratings[idx] ?? 0)
+                return (
+                  <button
+                    key={star}
+                    className={`star-btn${ratings[idx] !== undefined ? (star <= ratings[idx] ? ' filled' : '') : ''}`}
+                    data-testid={`star-${star}`}
+                    disabled={ratings[idx] !== undefined}
+                    onClick={() => void handleRate(idx, star)}
+                    aria-label={`Rate ${star} star${star > 1 ? 's' : ''}`}
+                  >
+                    <Star size={16} fill={filled ? 'currentColor' : 'none'} strokeWidth={filled ? 0 : 2} />
+                  </button>
+                )
+              })}
               {ratings[idx] !== undefined && (
-                <span className="feedback-thanks" data-testid="feedback-thanks">Thanks!</span>
+                <span className="feedback-thanks" data-testid="feedback-thanks">
+                  <Check size={12} />Thanks!
+                </span>
               )}
             </div>
           )}

@@ -1,4 +1,5 @@
 import type { SpeedTestResult as SpeedTestResultType } from '../../api/llmConfig'
+import { Check, X, Loader2 } from 'lucide-react'
 
 interface SpeedTestResultProps {
   loading?: boolean
@@ -7,7 +8,12 @@ interface SpeedTestResultProps {
 
 export function SpeedTestResult({ loading, result }: SpeedTestResultProps) {
   if (loading) {
-    return <span className="speed-test-loading">Testing…</span>
+    return (
+      <span className="speed-test-loading">
+        <Loader2 size={14} className="spin" />
+        Testing…
+      </span>
+    )
   }
   if (!result) {
     return null
@@ -15,7 +21,8 @@ export function SpeedTestResult({ loading, result }: SpeedTestResultProps) {
   if (result.reachable) {
     return (
       <span className="speed-test-success">
-        ✓ <span>{result.latency_ms !== undefined ? `${result.latency_ms} ms` : '—'}</span>
+        <Check size={14} />
+        <span>{result.latency_ms !== undefined ? `${result.latency_ms} ms` : '—'}</span>
         {' / '}
         <span>{result.total_ms !== undefined ? `${result.total_ms} ms` : '—'}</span>
       </span>
@@ -23,7 +30,8 @@ export function SpeedTestResult({ loading, result }: SpeedTestResultProps) {
   }
   return (
     <span className="speed-test-error" title={result.error}>
-      ✗ Unreachable{result.error ? ` — ${result.error}` : ''}
+      <X size={14} />
+      Unreachable{result.error ? ` — ${result.error}` : ''}
     </span>
   )
 }

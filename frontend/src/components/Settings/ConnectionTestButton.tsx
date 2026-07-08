@@ -1,12 +1,15 @@
 import { useState, useCallback } from 'react'
-import { testConnection, type ConnectionTestResult } from '../../api/llmConfig'
+import { testConnection, testEndpointConnection, type ConnectionTestResult } from '../../api/llmConfig'
 import { ConnectionTestResultDisplay } from './ConnectionTestResultDisplay'
+import { Loader2, Plug } from 'lucide-react'
 
 interface ConnectionTestButtonProps {
   provider: string
   base_url: string
   api_key: string
   model?: string
+  /** When provided, falls back to the saved endpoint's key if api_key is empty. */
+  endpointId?: string
   onResult?: (result: ConnectionTestResult) => void
 }
 
@@ -15,6 +18,7 @@ export function ConnectionTestButton({
   base_url,
   api_key,
   model,
+  endpointId,
   onResult,
 }: ConnectionTestButtonProps) {
   const [result, setResult] = useState<ConnectionTestResult | null>(null)
@@ -24,12 +28,17 @@ export function ConnectionTestButton({
     setLoading(true)
     setResult(null)
     try {
-      const data = await testConnection({
-        provider,
-        base_url,
-        api_key: api_key || undefined,
-        model: model || undefined,
-      })
+      // Edit mode: when the user hasn't entered a new key, reuse the saved
+      // endpoint's key via the endpoint-scoped endpoint instead of sending an
+      // empty key to the generic test-connection (which would fail auth).
+      const data = endpointId && !api_key
+        ? await testEndpointConnection(endpointId, model || undefined)
+        : await testConnection({
+          provider,
+          base_url,
+          api_key: api_key || undefined,
+          model: model || undefined,
+        })
       setResult(data)
       onResult?.(data)
     } catch (err) {
@@ -45,7 +54,7 @@ export function ConnectionTestButton({
     } finally {
       setLoading(false)
     }
-  }, [provider, base_url, api_key, model, onResult])
+  }, [provider, base_url, api_key, model, endpointId, onResult])
 
   return (
     <div>
@@ -57,7 +66,7 @@ export function ConnectionTestButton({
         disabled={loading || !base_url}
         title={base_url ? 'Test connectivity to this endpoint' : 'Enter a base URL first'}
       >
-        {loading ? 'Testing…' : 'Test Connection'}
+        {loading ? <><Loader2 size={14} className="spin" />Testing…</> : <><Plug size={14} />Test Connection</>}
       </button>
       <ConnectionTestResultDisplay result={result} loading={loading} />
     </div>

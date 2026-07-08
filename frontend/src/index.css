@@ -1,14 +1,63 @@
 @import './styles/themes.css';
 
 :root {
+  /* Radii */
   --radius: 8px;
   --radius-sm: 6px;
   --radius-lg: 12px;
-  --font: 13.5px/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  --font-mono: 12px/1.5 'SF Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
+  --radius-full: 9999px;
+
+  /* Typography scale */
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-base: 13.5px;
+  --fs-md: 15px;
+  --fs-lg: 18px;
+  --fs-xl: 22px;
+  --fs-2xl: 28px;
+
+  /* Font weights */
+  --fw-reg: 400;
+  --fw-med: 500;
+  --fw-semi: 600;
+  --fw-bold: 700;
+
+  /* Spacing scale (4px base) */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+
+  /* Icon sizes */
+  --icon-sm: 14px;
+  --icon-md: 16px;
+  --icon-lg: 20px;
+  --icon-xl: 24px;
+
+  /* Motion */
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 250ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+
+  /* Z-index scale */
+  --z-dropdown: 50;
+  --z-sticky: 100;
+  --z-toast: 1000;
+  --z-modal: 1100;
+
+  /* Legacy structural vars (kept for clarity) */
+  --font: var(--fs-base)/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-mono: var(--fs-sm)/1.5 'SF Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
   --sidebar-width: 260px;
   --header-height: 48px;
-  --transition: 120ms ease;
+  --transition: var(--dur-fast) ease;
 }
 
 * {
@@ -50,8 +99,8 @@ a:hover {
 }
 
 ::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
@@ -60,7 +109,7 @@ a:hover {
 
 ::-webkit-scrollbar-thumb {
   background: var(--border);
-  border-radius: 3px;
+  border-radius: var(--radius-full);
 }
 
 ::-webkit-scrollbar-thumb:hover {
@@ -78,15 +127,39 @@ button {
   background: none;
 }
 
+button:disabled {
+  cursor: not-allowed;
+}
+
 code {
   font: var(--font-mono);
-  background: var(--bg);
+  background: var(--code-bg);
+  color: var(--code-text);
   padding: 1px 5px;
-  border-radius: 4px;
-  font-size: 12px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
 }
 
 :focus-visible {
-  outline: 1px solid var(--accent);
-  outline-offset: 1px;
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-sm);
+}
+
+/* Icon utility classes — apply alongside lucide icons for consistent sizing */
+.icon-sm, .icon-md, .icon-lg, .icon-xl {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.icon-sm svg { width: var(--icon-sm); height: var(--icon-sm); }
+.icon-md svg { width: var(--icon-md); height: var(--icon-md); }
+.icon-lg svg { width: var(--icon-lg); height: var(--icon-lg); }
+.icon-xl svg { width: var(--icon-xl); height: var(--icon-xl); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
