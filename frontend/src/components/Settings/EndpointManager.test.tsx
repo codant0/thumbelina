@@ -35,4 +35,28 @@ describe('EndpointManager', () => {
       expect(screen.getByTestId('endpoint-form')).toBeInTheDocument()
     })
   })
+
+  it('omits empty api_key on update to preserve stored key', async () => {
+    render(<EndpointManager onMessage={vi.fn()} />)
+    await waitFor(() => {
+      expect(screen.getByText('Default')).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByTestId('edit-1'))
+    await waitFor(() => {
+      expect(screen.getByTestId('endpoint-form')).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByTestId('endpoint-form-submit'))
+    await waitFor(() => {
+      const calls = vi.mocked(globalThis.fetch).mock.calls as [string, RequestInit][]
+      const put = calls.find(
+        ([url, init]) =>
+          typeof url === 'string' &&
+          url.includes('/config/llm/endpoints/') &&
+          init?.method === 'PUT',
+      )
+      expect(put).toBeTruthy()
+      const body = JSON.parse((put![1]?.body as string) ?? '{}')
+      expect(body).not.toHaveProperty('api_key')
+    })
+  })
 })

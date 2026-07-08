@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { Blocks, ShieldCheck, ShieldAlert, FileWarning } from 'lucide-react'
 
 interface Plugin {
   id: string
@@ -59,8 +60,8 @@ export function PluginsPage() {
       <div className="page-title">Plugins</div>
 
       <div className="card">
-        <div className="card-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span>Loaded Plugins ({plugins.length})</span>
+        <div className="card-title card-title--between">
+          <span><Blocks size={14} />Loaded Plugins ({plugins.length})</span>
           <button
             className="btn btn-ghost btn-sm"
             data-testid="toggle-report"
@@ -70,7 +71,7 @@ export function PluginsPage() {
           </button>
         </div>
         {plugins.length === 0 ? (
-          <p style={{ color: 'var(--text-secondary)', fontSize: 12, padding: '8px 0' }}>
+          <p className="task-empty">
             No plugins loaded. Configure plugin_dirs in thumbelina.yaml to load plugins.
           </p>
         ) : (
@@ -87,11 +88,12 @@ export function PluginsPage() {
                     </span>
                     {plugin.sandbox && (
                       <span className={`badge ${plugin.sandbox.is_valid ? 'badge-success' : 'badge-error'}`}>
+                        {plugin.sandbox.is_valid ? <ShieldCheck size={12} /> : <ShieldAlert size={12} />}
                         {plugin.sandbox.is_valid ? 'sandbox ok' : `${plugin.sandbox.violation_count} violations`}
                       </span>
                     )}
                   </div>
-                  {plugin.description && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>{plugin.description}</div>}
+                  {plugin.description && <div className="plugin-desc">{plugin.description}</div>}
                 </div>
               </div>
             ))}
@@ -104,7 +106,7 @@ export function PluginsPage() {
           <div className="card-title">Sandbox Validation Report</div>
           <div className="task-list">
             {report.map(entry => (
-              <div key={entry.plugin_name} className="task-item" style={{ alignItems: 'flex-start' }}>
+              <div key={entry.plugin_name} className="task-item search-result-item">
                 <div className="task-info">
                   <div className="task-title">{entry.plugin_name}</div>
                   <div className="task-meta">
@@ -114,14 +116,17 @@ export function PluginsPage() {
                     <span>{entry.violations.length} violations</span>
                   </div>
                   {entry.violations.length > 0 && (
-                    <ul style={{ margin: '4px 0 0 16px', padding: 0, fontSize: 12, color: 'var(--text-secondary)' }}>
+                    <ul className="sandbox-report">
                       {entry.violations.map((v, i) => (
                         <li key={i}>
-                          <span className={`badge ${v.violation_type === 'error' ? 'badge-error' : 'badge-warning'}`}>
-                            {v.violation_type}
+                          <FileWarning size={14} />
+                          <span>
+                            <span className={`badge ${v.violation_type === 'error' ? 'badge-error' : 'badge-warning'}`}>
+                              {v.violation_type}
+                            </span>
+                            {' '}{v.message}
+                            {v.line !== null && ` (line ${v.line})`}
                           </span>
-                          {' '}{v.message}
-                          {v.line !== null && ` (line ${v.line})`}
                         </li>
                       ))}
                     </ul>

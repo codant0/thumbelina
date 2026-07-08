@@ -20,6 +20,11 @@ describe('ModelSelector', () => {
     })
   })
 
+  it('disables button when API key is missing', () => {
+    render(<ModelSelector provider="openai" base_url="https://api.openai.com/v1" api_key="" model="" onSelect={vi.fn()} />)
+    expect(screen.getByTestId('fetch-models-button')).toBeDisabled()
+  })
+
   it('disables button for unsupported provider', () => {
     render(<ModelSelector provider="anthropic" base_url="" api_key="" model="" onSelect={vi.fn()} />)
     expect(screen.getByTestId('fetch-models-button')).toBeDisabled()

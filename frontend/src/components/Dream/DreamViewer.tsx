@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { RefreshCw } from 'lucide-react'
 
 interface TimelineSkill {
   id: string
@@ -32,11 +33,9 @@ interface SkillStats {
 
 const ACCENT_COLORS = [
   'var(--accent)',
-  '#a78bfa',
-  '#c4b5fd',
-  '#818cf8',
-  '#a5b4fc',
-  '#c7d2fe',
+  'var(--accent-secondary)',
+  'var(--accent-hover)',
+  'var(--accent-secondary-hover)',
 ]
 
 export function DreamViewer() {
@@ -110,10 +109,13 @@ export function DreamViewer() {
 
   return (
     <div className="page-container" data-testid="dream-viewer">
-      <div className="page-title">Dream</div>
-      <button className="btn btn-ghost btn-sm" data-testid="refresh-button" onClick={fetchStats} style={{ marginLeft: 8 }}>
-        Refresh
-      </button>
+      <div className="page-title-row">
+        <div className="page-title">Dream</div>
+        <button className="btn btn-ghost btn-sm" data-testid="refresh-button" onClick={fetchStats}>
+          <RefreshCw size={14} />
+          Refresh
+        </button>
+      </div>
 
       <div className="stats-grid">
         <div className="stat-card" data-testid="stat-total">
@@ -133,27 +135,30 @@ export function DreamViewer() {
       <div className="card" data-testid="skill-timeline">
         <div className="card-title">Timeline</div>
         <div className="timeline">
-          {stats.timeline.map((entry, idx) => (
-            <div key={entry.date} className="timeline-entry" data-testid="timeline-entry">
-              <div className="timeline-date">{entry.date}</div>
-              <div className="timeline-skills">
-                {entry.skills.map(skill => (
-                  <span
-                    key={skill.id}
-                    className="badge"
-                    style={{
-                      background: `${ACCENT_COLORS[idx % ACCENT_COLORS.length]}20`,
-                      color: ACCENT_COLORS[idx % ACCENT_COLORS.length],
-                      border: `1px solid ${ACCENT_COLORS[idx % ACCENT_COLORS.length]}30`,
-                    }}
-                  >
-                    {skill.name}
-                    {skill.success_rate > 0 && ` ${(skill.success_rate * 100).toFixed(0)}%`}
-                  </span>
-                ))}
+          {stats.timeline.map((entry, idx) => {
+            const color = ACCENT_COLORS[idx % ACCENT_COLORS.length]
+            return (
+              <div key={entry.date} className="timeline-entry" data-testid="timeline-entry">
+                <div className="timeline-date">{entry.date}</div>
+                <div className="timeline-skills">
+                  {entry.skills.map(skill => (
+                    <span
+                      key={skill.id}
+                      className="badge"
+                      style={{
+                        background: `color-mix(in srgb, ${color} 14%, transparent)`,
+                        color,
+                        border: `1px solid color-mix(in srgb, ${color} 30%, transparent)`,
+                      }}
+                    >
+                      {skill.name}
+                      {skill.success_rate > 0 && ` ${(skill.success_rate * 100).toFixed(0)}%`}
+                    </span>
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       </div>
 

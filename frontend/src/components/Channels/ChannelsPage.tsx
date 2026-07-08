@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, type FormEvent } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
+import { Radio, QrCode, Loader2, AlertTriangle, CircleCheck } from 'lucide-react'
 
 interface ChannelConfig {
   qq: {
@@ -331,8 +332,8 @@ export function ChannelsPage() {
 
       {/* QQ Bot Card */}
       <div className="card" data-testid="qq-channel-card">
-        <div className="card-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span>QQ Bot</span>
+        <div className="card-title card-title--between">
+          <span><Radio size={14} />QQ Bot</span>
           <span className={`badge ${config?.qq.enabled ? 'badge-success' : 'badge-error'}`}>
             {config?.qq.enabled ? 'enabled' : 'disabled'}
           </span>
@@ -405,14 +406,16 @@ export function ChannelsPage() {
           <>
             {config?.qq.enabled ? (
               <>
-                <div className="chat-status" style={{ marginBottom: 12, borderRadius: 'var(--radius-sm)', padding: '6px 10px', fontSize: 12 }}>
-                  <span className={`dot ${qqStatus?.connected ? 'connected' : 'disconnected'}`} />
-                  <span>{qqStatus?.connected ? 'Connected' : qqStatus?.error || 'Disconnected'}</span>
+                <div className="channel-status-row">
+                  <div className="channel-status-info">
+                    <span className={`dot ${qqStatus?.connected ? 'connected' : 'disconnected'}`} />
+                    <span>{qqStatus?.connected ? 'Connected' : qqStatus?.error || 'Disconnected'}</span>
+                  </div>
                 </div>
 
                 <div className="form-group">
                   <label className="form-label">App ID</label>
-                  <div className="form-input" style={{ opacity: 0.7, cursor: 'default' }}>
+                  <div className="form-input channel-readout">
                     {config.qq.app_id || '(not set)'}
                   </div>
                 </div>
@@ -420,9 +423,9 @@ export function ChannelsPage() {
                 {config.qq.allowed_guilds.length > 0 && (
                   <div className="form-group">
                     <label className="form-label">Allowed Guilds</label>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                    <div className="channel-tags">
                       {config.qq.allowed_guilds.map(id => (
-                        <span key={id} className="badge badge-neutral">{id}</span>
+                        <span key={id} className="badge badge-neutral channel-tag">{id}</span>
                       ))}
                     </div>
                   </div>
@@ -431,20 +434,20 @@ export function ChannelsPage() {
                 {config.qq.allowed_groups.length > 0 && (
                   <div className="form-group">
                     <label className="form-label">Allowed Groups</label>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                    <div className="channel-tags">
                       {config.qq.allowed_groups.map(id => (
-                        <span key={id} className="badge badge-neutral">{id}</span>
+                        <span key={id} className="badge badge-neutral channel-tag">{id}</span>
                       ))}
                     </div>
                   </div>
                 )}
               </>
             ) : (
-              <p style={{ color: 'var(--text-secondary)', fontSize: 12, padding: '8px 0' }}>
+              <p className="task-empty">
                 QQ Bot is not enabled. Click Edit to configure.
               </p>
             )}
-            <div className="settings-actions" style={{ marginTop: 8 }}>
+            <div className="settings-actions">
               <button className="btn btn-ghost" onClick={startEditQq} data-testid="edit-qq-button">
                 Edit
               </button>
@@ -453,7 +456,7 @@ export function ChannelsPage() {
         )}
 
         {message?.channel === 'qq' && (
-          <p style={{ marginTop: 8, fontSize: 12.5, color: message.error ? 'var(--error)' : 'var(--success)' }}>
+          <p className={`settings-message ${message.error ? 'settings-message--error' : 'settings-message--success'}`}>
             {message.text}
           </p>
         )}
@@ -461,8 +464,8 @@ export function ChannelsPage() {
 
       {/* WeChat Card */}
       <div className="card" data-testid="wechat-channel-card">
-        <div className="card-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span>WeChat</span>
+        <div className="card-title card-title--between">
+          <span><QrCode size={14} />WeChat</span>
           <span className={`badge ${config?.wechat.enabled ? 'badge-success' : 'badge-error'}`}>
             {config?.wechat.enabled ? 'enabled' : 'disabled'}
           </span>
@@ -535,39 +538,32 @@ export function ChannelsPage() {
           <>
             {config?.wechat.enabled && (
               <>
-                <div className="chat-status" style={{ marginBottom: 12, borderRadius: 'var(--radius-sm)', padding: '6px 10px', fontSize: 12 }}>
-                  <span className={`dot ${wechatStatus?.connected ? 'connected' : 'disconnected'}`} />
-                  <span>{wechatStatus?.connected ? 'Connected' : wechatStatus?.error || 'Disconnected'}</span>
+                <div className="channel-status-row">
+                  <div className="channel-status-info">
+                    <span className={`dot ${wechatStatus?.connected ? 'connected' : 'disconnected'}`} />
+                    <span>{wechatStatus?.connected ? 'Connected' : wechatStatus?.error || 'Disconnected'}</span>
+                  </div>
                 </div>
 
                 {wechatStatus?.needs_authentication && (
-                  <div
-                    style={{
-                      marginBottom: 12,
-                      borderRadius: 'var(--radius-sm)',
-                      padding: '10px 12px',
-                      fontSize: 12,
-                      background: 'var(--warning-bg, #fff7ed)',
-                      color: 'var(--warning-text, #9a3412)',
-                      border: '1px solid var(--warning-border, #fdba74)',
-                    }}
-                  >
-                    <p style={{ margin: '0 0 8px' }}>
-                      WeChat session expired or not logged in. Scan a QR code to reconnect.
-                    </p>
-                    <button
-                      className="btn btn-primary btn-sm"
-                      onClick={startQRFlow}
-                      data-testid="wechat-reconnect-button"
-                    >
-                      Scan QR Code to Reconnect
-                    </button>
+                  <div className="channel-warning">
+                    <AlertTriangle size={16} />
+                    <div>
+                      <p>WeChat session expired or not logged in. Scan a QR code to reconnect.</p>
+                      <button
+                        className="btn btn-primary btn-sm"
+                        onClick={startQRFlow}
+                        data-testid="wechat-reconnect-button"
+                      >
+                        Scan QR Code to Reconnect
+                      </button>
+                    </div>
                   </div>
                 )}
 
                 <div className="form-group">
                   <label className="form-label">Bot ID</label>
-                  <div className="form-input" style={{ opacity: 0.7, cursor: 'default' }}>
+                  <div className="form-input channel-readout">
                     {config.wechat.ilink_bot_id || '(not set)'}
                   </div>
                 </div>
@@ -575,8 +571,8 @@ export function ChannelsPage() {
             )}
 
             {!config?.wechat.enabled && qrFlow === 'idle' && (
-              <div style={{ padding: '12px 0' }}>
-                <p style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 12 }}>
+              <div className="channel-qr">
+                <p className="task-empty">
                   Scan a QR code with WeChat to login, or configure manually.
                 </p>
                 <div className="settings-actions">
@@ -599,39 +595,29 @@ export function ChannelsPage() {
             )}
 
             {qrFlow === 'loading' && (
-              <div style={{ padding: '16px 0', textAlign: 'center' }}>
-                <div className="spinner" />
-                <p style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 8 }}>
+              <div className="channel-qr">
+                <Loader2 size={24} className="spin" />
+                <p className="task-empty">
                   Fetching QR code...
                 </p>
               </div>
             )}
 
             {(qrFlow === 'scanning' || qrFlow === 'scanned') && qrData && (
-              <div style={{ padding: '12px 0', textAlign: 'center' }}>
-                <div
-                  style={{
-                    display: 'inline-block',
-                    padding: 16,
-                    background: '#fff',
-                    borderRadius: 'var(--radius)',
-                    marginBottom: 12,
-                  }}
-                  data-testid="wechat-qrcode-display"
-                >
+              <div className="channel-qr">
+                <div className="channel-qr-frame" data-testid="wechat-qrcode-display">
                   <QRCodeSVG value={qrData.imgContent} size={200} />
                 </div>
-                <p style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
+                <p className="channel-qr-status channel-qr-status--primary">
                   {qrFlow === 'scanned'
                     ? 'Scanned! Please confirm on your phone.'
                     : 'Scan this QR code with WeChat'}
                 </p>
-                <p style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
+                <p className="channel-qr-status">
                   Waiting for confirmation...
                 </p>
                 <button
                   className="btn btn-ghost btn-sm"
-                  style={{ marginTop: 8 }}
                   onClick={resetQRFlow}
                 >
                   Cancel
@@ -640,11 +626,12 @@ export function ChannelsPage() {
             )}
 
             {qrFlow === 'confirmed' && (
-              <div style={{ padding: '16px 0', textAlign: 'center' }}>
-                <p style={{ fontSize: 14, fontWeight: 500, color: 'var(--success)', marginBottom: 8 }}>
+              <div className="channel-qr">
+                <CircleCheck size={32} style={{ color: 'var(--success)' }} />
+                <p className="channel-qr-status channel-qr-status--primary">
                   Login successful!
                 </p>
-                <p style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 12 }}>
+                <p className="task-empty">
                   WeChat channel is now enabled and connected.
                 </p>
                 <button className="btn btn-ghost" onClick={resetQRFlow}>
@@ -654,35 +641,39 @@ export function ChannelsPage() {
             )}
 
             {qrFlow === 'expired' && (
-              <div style={{ padding: '12px 0', textAlign: 'center' }}>
-                <p style={{ fontSize: 13, color: 'var(--error)', marginBottom: 8 }}>
+              <div className="channel-qr">
+                <p className="channel-qr-status" style={{ color: 'var(--error)' }}>
                   QR code expired.
                 </p>
-                <button className="btn btn-primary" onClick={startQRFlow}>
-                  Get New QR Code
-                </button>
-                <button className="btn btn-ghost" style={{ marginLeft: 8 }} onClick={resetQRFlow}>
-                  Cancel
-                </button>
+                <div className="settings-actions">
+                  <button className="btn btn-primary" onClick={startQRFlow}>
+                    Get New QR Code
+                  </button>
+                  <button className="btn btn-ghost" onClick={resetQRFlow}>
+                    Cancel
+                  </button>
+                </div>
               </div>
             )}
 
             {qrFlow === 'error' && (
-              <div style={{ padding: '12px 0', textAlign: 'center' }}>
-                <p style={{ fontSize: 13, color: 'var(--error)', marginBottom: 8 }}>
+              <div className="channel-qr">
+                <p className="channel-qr-status" style={{ color: 'var(--error)' }}>
                   {qrError || 'Something went wrong'}
                 </p>
-                <button className="btn btn-primary" onClick={startQRFlow}>
-                  Retry
-                </button>
-                <button className="btn btn-ghost" style={{ marginLeft: 8 }} onClick={resetQRFlow}>
-                  Cancel
-                </button>
+                <div className="settings-actions">
+                  <button className="btn btn-primary" onClick={startQRFlow}>
+                    Retry
+                  </button>
+                  <button className="btn btn-ghost" onClick={resetQRFlow}>
+                    Cancel
+                  </button>
+                </div>
               </div>
             )}
 
             {config?.wechat.enabled && (
-              <div className="settings-actions" style={{ marginTop: 8 }}>
+              <div className="settings-actions">
                 <button className="btn btn-ghost" onClick={startEditWechat} data-testid="edit-wechat-button">
                   Edit
                 </button>
@@ -692,7 +683,7 @@ export function ChannelsPage() {
         )}
 
         {message?.channel === 'wechat' && (
-          <p style={{ marginTop: 8, fontSize: 12.5, color: message.error ? 'var(--error)' : 'var(--success)' }}>
+          <p className={`settings-message ${message.error ? 'settings-message--error' : 'settings-message--success'}`}>
             {message.text}
           </p>
         )}

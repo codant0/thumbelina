@@ -8,6 +8,7 @@ import {
   activatePreset,
 } from '../../api/llmConfig'
 import { PresetForm } from './PresetForm'
+import { Plus, Check, Pencil, Trash2, Loader2, BookMarked } from 'lucide-react'
 
 interface PresetManagerProps {
   onMessage: (message: string, isError: boolean) => void
@@ -94,12 +95,13 @@ export function PresetManager({ onMessage }: PresetManagerProps) {
 
   return (
     <div className="card" data-testid="preset-manager">
-      <div className="card-title">LLM Presets</div>
+      <div className="card-title"><BookMarked size={14} />LLM Presets</div>
       <button
         className="btn btn-primary"
         data-testid="add-preset-button"
         onClick={() => setShowForm(true)}
       >
+        <Plus size={16} />
         Add Preset
       </button>
       {showForm && (
@@ -109,31 +111,30 @@ export function PresetManager({ onMessage }: PresetManagerProps) {
         <PresetForm initialValues={editing} onSubmit={handleUpdate} onCancel={() => setEditing(null)} />
       )}
       {presets.length === 0 ? (
-        <p style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 12 }}>
+        <p className="settings-empty-hint">
           No presets yet. Create your first preset to quickly switch between LLM providers.
         </p>
       ) : (
-        <div className="preset-list" style={{ marginTop: 12 }}>
+        <div className="preset-list">
           {presets.map(preset => (
             <div
               key={preset.id}
-              className="card"
+              className={`card preset-card${preset.is_active ? ' preset-card--active' : ''}`}
               data-testid={`preset-row-${preset.id}`}
-              style={{
-                borderColor: preset.is_active ? 'var(--success)' : undefined,
-              }}
             >
-              <div className="endpoint-row-header">
-                <strong>{preset.name}</strong>
-                <span className="endpoint-badge">{preset.provider}</span>
-                {preset.is_active && <span className="endpoint-default-badge">Active</span>}
+              <div className="preset-card__header">
+                <span className="preset-card__name">{preset.name}</span>
+                <span className="preset-card__badges">
+                  <span className="badge badge-neutral">{preset.provider}</span>
+                  {preset.is_active && <span className="badge badge-success">Active</span>}
+                </span>
               </div>
-              <div className="endpoint-row-body">
-                <span title={preset.base_url}>{preset.base_url}</span>
-                <span>{preset.model}</span>
-                <span>{new Date(preset.updated_at).toLocaleString()}</span>
+              <div className="preset-card__body">
+                <span className="preset-card__url" title={preset.base_url}>{preset.base_url}</span>
+                <span className="preset-card__model">{preset.model}</span>
+                <span className="preset-card__date">{new Date(preset.updated_at).toLocaleString()}</span>
               </div>
-              <div className="endpoint-row-actions">
+              <div className="preset-card__actions">
                 {!preset.is_active && (
                   <button
                     className="btn btn-ghost btn-sm"
@@ -141,6 +142,7 @@ export function PresetManager({ onMessage }: PresetManagerProps) {
                     onClick={() => handleActivate(preset.id)}
                     disabled={activatingId === preset.id}
                   >
+                    {activatingId === preset.id ? <Loader2 size={14} className="spin" /> : <Check size={14} />}
                     {activatingId === preset.id ? 'Activating…' : 'Activate'}
                   </button>
                 )}
@@ -149,6 +151,7 @@ export function PresetManager({ onMessage }: PresetManagerProps) {
                   data-testid={`edit-preset-${preset.id}`}
                   onClick={() => setEditing(preset)}
                 >
+                  <Pencil size={14} />
                   Edit
                 </button>
                 <button
@@ -157,6 +160,7 @@ export function PresetManager({ onMessage }: PresetManagerProps) {
                   onClick={() => handleDelete(preset.id)}
                   disabled={deletingId === preset.id}
                 >
+                  {deletingId === preset.id ? <Loader2 size={14} className="spin" /> : <Trash2 size={14} />}
                   {deletingId === preset.id ? 'Deleting…' : 'Delete'}
                 </button>
               </div>

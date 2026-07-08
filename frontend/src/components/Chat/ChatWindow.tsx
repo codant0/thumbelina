@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useMemo } from 'react'
 import { useWebSocket } from '../../hooks/useWebSocket'
 import { MessageList } from './MessageList'
 import { InputBox } from './InputBox'
+import { Mail } from 'lucide-react'
 
 interface ChatWindowProps {
   conversationId?: string
@@ -102,7 +103,7 @@ export function ChatWindow({ conversationId, onConversationCreated, onDefaultCon
       </div>
       {messages.length === 0 ? (
         <div className="empty-state">
-          <div className="empty-icon">&#9993;</div>
+          <div className="empty-icon"><Mail size={24} /></div>
           <p>Start a conversation</p>
           <p className="empty-hint">Type a message below to begin</p>
         </div>

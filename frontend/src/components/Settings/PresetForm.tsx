@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import type { LLMPreset, PresetFormData } from '../../api/llmConfig'
+import { Loader2, Save } from 'lucide-react'
 
 interface PresetFormProps {
   initialValues?: LLMPreset
@@ -58,7 +59,7 @@ export function PresetForm({ initialValues, onSubmit, onCancel }: PresetFormProp
   }
 
   return (
-    <form onSubmit={handleSubmit} className="settings-form" style={{ marginTop: 12 }}>
+    <form onSubmit={handleSubmit} className="settings-form preset-form">
       <div className="form-group">
         <label className="form-label" htmlFor="preset-name">Name</label>
         <input
@@ -99,7 +100,7 @@ export function PresetForm({ initialValues, onSubmit, onCancel }: PresetFormProp
       </div>
       <div className="form-group">
         <label className="form-label" htmlFor="preset-api-key">
-          API Key {initialValues?.api_key_set && <span style={{ color: 'var(--text-secondary)' }}>(leave blank to keep current)</span>}
+          API Key {initialValues?.api_key_set && <span className="form-label-hint">(leave blank to keep current)</span>}
         </label>
         <input
           id="preset-api-key"
@@ -149,6 +150,7 @@ export function PresetForm({ initialValues, onSubmit, onCancel }: PresetFormProp
       {error && <p className="form-error" data-testid="preset-form-error">{error}</p>}
       <div className="settings-actions">
         <button type="submit" className="btn btn-primary" disabled={submitting} data-testid="preset-save-button">
+          {submitting ? <Loader2 size={16} className="spin" /> : <Save size={16} />}
           {submitting ? 'Saving…' : initialValues ? 'Update Preset' : 'Create Preset'}
         </button>
         <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={submitting}>
