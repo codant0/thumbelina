@@ -61,6 +61,18 @@ def mock_memory():
             return True
         return False
 
+    async def rename_conversation(conv_id: str, name: str) -> bool:
+        if conv_id in conversations:
+            conversations[conv_id]["name"] = name or None
+            return True
+        return False
+
+    async def set_conversation_endpoint(conv_id: str, endpoint_id) -> bool:
+        if conv_id in conversations:
+            conversations[conv_id]["endpoint_id"] = endpoint_id
+            return True
+        return False
+
     memory = MagicMock()
     memory.create_conversation = AsyncMock(return_value="test-conv-id")
     memory.get_conversation = AsyncMock(side_effect=get_conversation)
@@ -69,6 +81,10 @@ def mock_memory():
     memory.delete_conversation = AsyncMock(side_effect=delete_conversation)
     memory.add_message = AsyncMock()
     memory.close = MagicMock()
+
+    # Per-conversation rename / endpoint selection (mutate in-memory dict)
+    memory.rename_conversation = AsyncMock(side_effect=rename_conversation)
+    memory.set_conversation_endpoint = AsyncMock(side_effect=set_conversation_endpoint)
 
     # Mock repository with ping method
     memory.repository = MagicMock()

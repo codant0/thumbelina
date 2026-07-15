@@ -206,6 +206,8 @@ thumbelina/
 | POST | `/api/v1/conversations` | Create a new conversation |
 | GET | `/api/v1/conversations/search/{query}` | Search messages across conversations |
 | GET | `/api/v1/conversations/{id}` | Get conversation with messages |
+| PATCH | `/api/v1/conversations/{id}` | Rename a conversation |
+| PUT | `/api/v1/conversations/{id}/endpoint` | Set per-conversation model (LLM endpoint) |
 | DELETE | `/api/v1/conversations/{id}` | Delete a conversation |
 | GET | `/api/v1/tasks` | List scheduled tasks |
 | POST | `/api/v1/tasks/{id}/cancel` | Cancel a scheduled task |

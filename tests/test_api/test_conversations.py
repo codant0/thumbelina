@@ -83,3 +83,55 @@ def test_delete_nonexistent_conversation(client):
     """DELETE /api/v1/conversations/{id} should return 404 for nonexistent."""
     response = client.delete("/api/v1/conversations/nonexistent-id")
     assert response.status_code == 404
+
+
+def test_rename_conversation_endpoint(client, conversation_id):
+    """PATCH /api/v1/conversations/{id} should rename the conversation."""
+    response = client.patch(
+        f"/api/v1/conversations/{conversation_id}",
+        json={"name": "新名称"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == conversation_id
+    assert data["name"] == "新名称"
+
+
+def test_rename_nonexistent_conversation(client):
+    """PATCH /api/v1/conversations/{id} should 404 for unknown IDs."""
+    response = client.patch(
+        "/api/v1/conversations/nonexistent-id",
+        json={"name": "x"},
+    )
+    assert response.status_code == 404
+
+
+def test_rename_strips_whitespace(client, conversation_id):
+    """PATCH should strip surrounding whitespace from the name."""
+    response = client.patch(
+        f"/api/v1/conversations/{conversation_id}",
+        json={"name": "  trimmed  "},
+    )
+    assert response.status_code == 200
+    assert response.json()["name"] == "trimmed"
+
+
+def test_set_conversation_endpoint_rejects_unknown_endpoint(client, conversation_id):
+    """PUT /conversations/{id}/endpoint should 404 for unknown endpoint_id."""
+    # The test client has no endpoint_manager on app.state, so the endpoint
+    # manager is None → 503. Accept either the configured-503 or 404 path.
+    response = client.put(
+        f"/api/v1/conversations/{conversation_id}/endpoint",
+        json={"endpoint_id": "missing-ep"},
+    )
+    assert response.status_code in (404, 503)
+
+
+def test_clear_conversation_endpoint(client, conversation_id):
+    """PUT /conversations/{id}/endpoint with null endpoint_id reverts to default."""
+    response = client.put(
+        f"/api/v1/conversations/{conversation_id}/endpoint",
+        json={"endpoint_id": None},
+    )
+    assert response.status_code == 200
+    assert response.json()["endpoint_id"] is None

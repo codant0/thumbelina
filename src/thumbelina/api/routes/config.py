@@ -229,6 +229,11 @@ async def swap_llm(body: LLMSwapRequest, request: Request) -> LLMSwapResponse:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
+    # Keep the conversation auto-namer on the active provider.
+    namer = getattr(request.app.state, "conversation_namer", None)
+    if namer is not None:
+        namer.llm_provider = agent.llm_provider
+
     return LLMSwapResponse(
         status="ok",
         provider=body.provider,

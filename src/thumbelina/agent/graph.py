@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -17,6 +18,7 @@ from thumbelina.agent.nodes import call_model, tool_node
 from thumbelina.agent.state import AgentState
 from thumbelina.llm.base import LLMProvider
 from thumbelina.memory.manager import MemoryManager
+from thumbelina.memory.namer import AUTO_NAME_AFTER_MESSAGES, ConversationNamer
 from thumbelina.memory.profiler import UserProfiler
 from thumbelina.scheduler.scheduler import ScheduledTask, TaskScheduler
 from thumbelina.scheduler.time_parser import TimeParser
@@ -219,6 +221,7 @@ class ThumbelinaAgent:
         scheduler: TaskScheduler | None = None,
         composition_engine: CompositionEngine | None = None,
         user_profiler: UserProfiler | None = None,
+        conversation_namer: ConversationNamer | None = None,
     ) -> None:
         self.llm_provider = llm_provider
         self.memory_manager = memory_manager
@@ -228,7 +231,10 @@ class ThumbelinaAgent:
         self.scheduler = scheduler
         self.composition_engine = composition_engine
         self.user_profiler = user_profiler
+        self.conversation_namer = conversation_namer
         self.current_conversation_id: str | None = None
+        # Lazily-resolved chat model; None means resolve from llm_provider.
+        self._llm: BaseChatModel | None = None
 
         # Build the combined tools list
         self.tools: list[BaseTool] = list(tools) if tools else []
@@ -263,7 +269,9 @@ class ThumbelinaAgent:
         return self._llm
 
     @llm.setter
-    def llm(self, value: BaseChatModel) -> None:
+    def llm(self, value: BaseChatModel | None) -> None:
+        # ``None`` resets to lazy resolution from ``llm_provider`` so a
+        # per-conversation override can be reverted to the shared default.
         self._llm = value
 
     def _build_graph(self) -> CompiledStateGraph[AgentState, Any]:
@@ -343,6 +351,32 @@ class ThumbelinaAgent:
             logger.warning("Failed to get user context", exc_info=True)
         return None
 
+    async def _maybe_auto_name(self) -> None:
+        """Generate and persist a conversation title when none is set yet.
+
+        Triggered after the first few user turns. Falls back silently when
+        memory, the namer, or the LLM call is unavailable, and never
+        overwrites a name the user set explicitly (including the reserved
+        WeChat conversation).
+        """
+        if self.conversation_namer is None or self.memory_manager is None:
+            return
+        if not self.current_conversation_id:
+            return
+        try:
+            conv = await self.memory_manager.get_conversation(self.current_conversation_id)
+            if conv is None or conv.get("name"):
+                return
+            messages = await self.memory_manager.get_messages(self.current_conversation_id)
+            user_count = sum(1 for m in messages if m.get("role") == "user")
+            if user_count < AUTO_NAME_AFTER_MESSAGES:
+                return
+            name = await self.conversation_namer.suggest_name(messages)
+            if name:
+                await self.memory_manager.rename_conversation(self.current_conversation_id, name)
+        except Exception:
+            logger.warning("Auto-naming failed", exc_info=True)
+
     def clone(self) -> ThumbelinaAgent:
         """Create an independent clone sharing the same LLM provider and memory manager."""
         return ThumbelinaAgent(
@@ -355,6 +389,7 @@ class ThumbelinaAgent:
             scheduler=self.scheduler,
             composition_engine=self.composition_engine,
             user_profiler=self.user_profiler,
+            conversation_namer=self.conversation_namer,
         )
 
     async def run(self, user_input: str) -> str:
@@ -379,6 +414,8 @@ class ThumbelinaAgent:
         response = str(last_message.content)
 
         await self._persist_message("assistant", response)
+        # Auto-name the conversation in the background so the reply is not delayed.
+        asyncio.create_task(self._maybe_auto_name())
 
         return response
 
@@ -415,3 +452,5 @@ class ThumbelinaAgent:
 
         if full_response:
             await self._persist_message("assistant", full_response)
+            # Auto-name the conversation in the background so streaming is not delayed.
+            asyncio.create_task(self._maybe_auto_name())

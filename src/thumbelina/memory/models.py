@@ -134,6 +134,12 @@ class Conversation(Base):
     pinned: Mapped[bool] = mapped_column(
         default=False,
     )
+    endpoint_id: Mapped[str | None] = mapped_column(
+        String(36),
+        nullable=True,
+        default=None,
+        comment="ID of the configured LLM endpoint for per-conversation model selection",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         server_default=func.now(),

@@ -112,6 +112,13 @@ class EndpointManager:
     async def get_endpoint(self, endpoint_id: str) -> LLMEndpoint | None:
         return await self._get_raw(endpoint_id)
 
+    async def get_default_endpoint(self) -> LLMEndpoint | None:
+        """Return the endpoint marked as default, if any."""
+        for endpoint in await self.list_endpoints():
+            if endpoint.is_default:
+                return endpoint
+        return None
+
     async def create_endpoint(
         self,
         data: LLMEndpointCreate | None = None,

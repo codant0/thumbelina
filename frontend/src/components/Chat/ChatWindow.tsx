@@ -2,15 +2,19 @@ import { useState, useCallback, useEffect, useMemo } from 'react'
 import { useWebSocket } from '../../hooks/useWebSocket'
 import { MessageList } from './MessageList'
 import { InputBox } from './InputBox'
+import { ConversationModelSelector } from './ConversationModelSelector'
 import { Mail } from 'lucide-react'
+import type { Conversation } from '../../types/chat'
 
 interface ChatWindowProps {
   conversationId?: string
+  conversations?: Conversation[]
   onConversationCreated?: () => void
   onDefaultConversation?: (id: string) => void
+  onSetEndpoint?: (id: string, endpointId: string | null) => void
 }
 
-export function ChatWindow({ conversationId, onConversationCreated, onDefaultConversation }: ChatWindowProps) {
+export function ChatWindow({ conversationId, conversations, onConversationCreated, onDefaultConversation, onSetEndpoint }: ChatWindowProps) {
   const wsUrl = useMemo(() => {
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     return `${wsProtocol}//${window.location.host}/ws/chat`
@@ -85,6 +89,11 @@ export function ChatWindow({ conversationId, onConversationCreated, onDefaultCon
       : 'connected'
     : 'disconnected'
 
+  const activeConversation = useMemo(
+    () => (Array.isArray(conversations) ? conversations.find(c => c.id === conversationId) : undefined),
+    [conversations, conversationId],
+  )
+
   return (
     <div className="chat-area" data-testid="chat-window">
       <div className="chat-status">
@@ -100,6 +109,13 @@ export function ChatWindow({ conversationId, onConversationCreated, onDefaultCon
           <span className={`toggle-dot ${streamingMode ? 'on' : 'off'}`} />
           <span>Stream</span>
         </button>
+        {onSetEndpoint && conversationId && (
+          <ConversationModelSelector
+            conversationId={conversationId}
+            selectedEndpointId={activeConversation?.endpoint_id ?? null}
+            onChange={endpointId => onSetEndpoint(conversationId, endpointId)}
+          />
+        )}
       </div>
       {messages.length === 0 ? (
         <div className="empty-state">

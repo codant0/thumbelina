@@ -66,3 +66,34 @@ async def test_default_endpoint_uniqueness(manager):
     updated_first = await manager.get_endpoint(first.id)
     assert updated_first.is_default is False
     assert second.is_default is True
+
+
+@pytest.mark.asyncio
+async def test_get_default_endpoint(manager):
+    await manager.create_endpoint(
+        provider="openai",
+        name="Not default",
+        base_url="https://api.openai.com/v1",
+        api_key="sk-test",
+    )
+    default = await manager.create_endpoint(
+        provider="openai",
+        name="Default",
+        base_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        is_default=True,
+    )
+    found = await manager.get_default_endpoint()
+    assert found is not None
+    assert found.id == default.id
+
+
+@pytest.mark.asyncio
+async def test_get_default_endpoint_none_when_unset(manager):
+    await manager.create_endpoint(
+        provider="openai",
+        name="Not default",
+        base_url="https://api.openai.com/v1",
+        api_key="sk-test",
+    )
+    assert await manager.get_default_endpoint() is None
