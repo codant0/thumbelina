@@ -159,7 +159,11 @@ class WeChatChannel(Channel):
             if legacy_id:
                 await mm.rename_conversation(legacy_id, _WECHAT_CONVERSATION_NAME)
                 self._agent.current_conversation_id = legacy_id
-                logger.info("Migrated WeChat conversation %s to '%s'", legacy_id, _WECHAT_CONVERSATION_NAME)
+                logger.info(
+                    "Migrated WeChat conversation %s to '%s'",
+                    legacy_id,
+                    _WECHAT_CONVERSATION_NAME,
+                )
                 return
 
             # Check if a conversation with this name already exists

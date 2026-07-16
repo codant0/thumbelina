@@ -38,7 +38,10 @@ class SetConversationEndpointRequest(BaseModel):
     )
     model: str | None = Field(
         default=None,
-        description="Specific model within the endpoint's models, or null to use the endpoint's active model",
+        description=(
+            "Specific model within the endpoint's models,"
+            " or null to use the endpoint's active model"
+        ),
     )
 
 
@@ -165,9 +168,7 @@ async def set_conversation_endpoint(
         raise HTTPException(status_code=404, detail="Conversation not found")
     # Persist the per-conversation model. When clearing the endpoint, also
     # clear the model so a stale name doesn't linger.
-    await memory.set_conversation_model(
-        conversation_id, body.model if body.endpoint_id else None
-    )
+    await memory.set_conversation_model(conversation_id, body.model if body.endpoint_id else None)
     conv = await memory.get_conversation(conversation_id)
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")

@@ -202,13 +202,9 @@ class MemoryManager:
         bool
             True if set successfully, False if conversation not found.
         """
-        return await self.repository.set_conversation_endpoint(
-            conversation_id, endpoint_id
-        )
+        return await self.repository.set_conversation_endpoint(conversation_id, endpoint_id)
 
-    async def set_conversation_model(
-        self, conversation_id: str, model: str | None
-    ) -> bool:
+    async def set_conversation_model(self, conversation_id: str, model: str | None) -> bool:
         """Set the specific model used for a conversation.
 
         Parameters
@@ -224,9 +220,7 @@ class MemoryManager:
         bool
             True if set successfully, False if conversation not found.
         """
-        return await self.repository.set_conversation_model(
-            conversation_id, model
-        )
+        return await self.repository.set_conversation_model(conversation_id, model)
 
     async def search(
         self,

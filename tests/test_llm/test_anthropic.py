@@ -38,7 +38,7 @@ class TestAnthropicProvider:
         mock_response = MagicMock()
         mock_response.content = "Hello from Anthropic"
 
-        with patch.object(provider, "_model") as mock_model:
+        with patch.object(provider, "_chat_model") as mock_model:
             mock_model.ainvoke = AsyncMock(return_value=mock_response)
             result = await provider.chat([{"role": "user", "content": "hi"}])
 
@@ -53,7 +53,7 @@ class TestAnthropicProvider:
         mock_response = MagicMock()
         mock_response.content = "ok"
 
-        with patch.object(provider, "_model") as mock_model:
+        with patch.object(provider, "_chat_model") as mock_model:
             mock_model.ainvoke = AsyncMock(return_value=mock_response)
             await provider.chat(
                 [
@@ -75,7 +75,7 @@ class TestAnthropicProvider:
             for chunk in ["Hello", " from", " Anthropic"]:
                 yield MagicMock(content=chunk)
 
-        with patch.object(provider, "_model") as mock_model:
+        with patch.object(provider, "_chat_model") as mock_model:
             mock_model.astream = fake_stream
             chunks = []
             async for chunk in provider.stream([{"role": "user", "content": "hi"}]):
@@ -91,7 +91,7 @@ class TestAnthropicProvider:
         mock_response = MagicMock()
         mock_response.content = "sync response"
 
-        with patch.object(provider, "_model") as mock_model:
+        with patch.object(provider, "_chat_model") as mock_model:
             mock_model.ainvoke = AsyncMock(return_value=mock_response)
             result = provider.chat_sync([{"role": "user", "content": "hi"}])
 

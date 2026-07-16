@@ -361,9 +361,7 @@ class ConversationRepository:
         bool
             True if renamed successfully, False if conversation not found.
         """
-        return await asyncio.to_thread(
-            self._rename_conversation_sync, conversation_id, name
-        )
+        return await asyncio.to_thread(self._rename_conversation_sync, conversation_id, name)
 
     def _set_endpoint_sync(self, conversation_id: str, endpoint_id: str | None) -> bool:
         """Synchronous implementation of set_conversation_endpoint."""
@@ -392,9 +390,7 @@ class ConversationRepository:
         bool
             True if set successfully, False if conversation not found.
         """
-        return await asyncio.to_thread(
-            self._set_endpoint_sync, conversation_id, endpoint_id
-        )
+        return await asyncio.to_thread(self._set_endpoint_sync, conversation_id, endpoint_id)
 
     def _set_model_sync(self, conversation_id: str, model: str | None) -> bool:
         """Synchronous implementation of set_conversation_model."""
@@ -406,9 +402,7 @@ class ConversationRepository:
             session.commit()
             return True
 
-    async def set_conversation_model(
-        self, conversation_id: str, model: str | None
-    ) -> bool:
+    async def set_conversation_model(self, conversation_id: str, model: str | None) -> bool:
         """Set the specific model used for a conversation.
 
         Parameters
@@ -424,9 +418,7 @@ class ConversationRepository:
         bool
             True if set successfully, False if conversation not found.
         """
-        return await asyncio.to_thread(
-            self._set_model_sync, conversation_id, model
-        )
+        return await asyncio.to_thread(self._set_model_sync, conversation_id, model)
 
     def _search_messages_sync(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
         """Synchronous implementation of search_messages."""

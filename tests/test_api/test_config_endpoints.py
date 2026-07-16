@@ -177,9 +177,7 @@ def test_activate_endpoint_model(client):
     assert data["models"] == ["gpt-4o", "gpt-4o-mini"]
     assert data["active_model"] == "gpt-4o-mini"
     assert data["is_default"] is True
-    client.app.state.endpoint_manager.activate_model.assert_awaited_once_with(
-        "e1", "gpt-4o-mini"
-    )
+    client.app.state.endpoint_manager.activate_model.assert_awaited_once_with("e1", "gpt-4o-mini")
 
 
 def test_activate_endpoint_model_rejects_unknown(client):

@@ -17,9 +17,7 @@ class _FakeProvider:
 @pytest.mark.asyncio
 async def test_suggest_name_returns_cleaned_title():
     namer = ConversationNamer(_FakeProvider("“Python 调试技巧”。"))
-    name = await namer.suggest_name(
-        [{"role": "user", "content": "怎么在 Python 里调试？"}]
-    )
+    name = await namer.suggest_name([{"role": "user", "content": "怎么在 Python 里调试？"}])
     assert name == "Python 调试技巧"
 
 

@@ -8,13 +8,11 @@ if sys.platform == "win32":
 # 修复 OpenMP 运行时冲突（PyTorch + ONNX Runtime）
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
-import torch  # noqa: E402
-
-from dotenv import load_dotenv
-from llama_index.core import Settings, SimpleDirectoryReader, VectorStoreIndex
-from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-from llama_index.llms.openai_like import OpenAILike
-from llama_index.core.node_parser import SimpleNodeParser
+from dotenv import load_dotenv  # noqa: E402
+from llama_index.core import Settings, SimpleDirectoryReader, VectorStoreIndex  # noqa: E402
+from llama_index.core.node_parser import SimpleNodeParser  # noqa: E402
+from llama_index.embeddings.huggingface import HuggingFaceEmbedding  # noqa: E402
+from llama_index.llms.openai_like import OpenAILike  # noqa: E402
 
 load_dotenv()
 
@@ -34,7 +32,8 @@ model_path = os.path.expanduser("~/.cache/bge-model")
 Settings.embed_model = HuggingFaceEmbedding(model_name=model_path, device="cpu")
 
 # 数据准备-加载原始文档
-documents = SimpleDirectoryReader(input_files=["src/thumbelina/rag/demo/data/easy-rl-chapter1.md"]).load_data()
+_input = "src/thumbelina/rag/demo/data/easy-rl-chapter1.md"
+documents = SimpleDirectoryReader(input_files=[_input]).load_data()
 
 # 将文档解析为节点
 parser = SimpleNodeParser()

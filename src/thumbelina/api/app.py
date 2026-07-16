@@ -210,8 +210,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         llm_provider = create_provider(config.llm.provider, **llm_kwargs)
     except Exception as exc:
         logger.warning(
-            "LLM provider %s not configured (%s). "
-            "Configure via Web UI Settings.",
+            "LLM provider %s not configured (%s). Configure via Web UI Settings.",
             config.llm.provider,
             exc,
         )

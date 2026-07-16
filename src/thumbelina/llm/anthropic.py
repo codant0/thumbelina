@@ -157,9 +157,7 @@ class AnthropicProvider(LLMProvider):
                 resp.raise_for_status()
             steps.auth = ConnectionTestStep(ok=True, latency_ms=auth_latency_ms)
         except httpx.HTTPStatusError as exc:
-            steps.auth = ConnectionTestStep(
-                ok=False, latency_ms=auth_latency_ms, error=str(exc)
-            )
+            steps.auth = ConnectionTestStep(ok=False, latency_ms=auth_latency_ms, error=str(exc))
             return ConnectionTestResult(
                 reachable=False,
                 network_reachable=True,

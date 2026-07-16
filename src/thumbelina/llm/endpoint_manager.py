@@ -226,9 +226,7 @@ class EndpointManager:
         if endpoint is None:
             return None
         if model not in endpoint.models:
-            raise ValueError(
-                f"Model '{model}' is not configured on endpoint '{endpoint.name}'"
-            )
+            raise ValueError(f"Model '{model}' is not configured on endpoint '{endpoint.name}'")
         await self._clear_all_active()
         endpoint.is_default = True
         endpoint.active_model = model
@@ -271,8 +269,8 @@ class EndpointManager:
         if endpoint is None:
             return None
 
-        effective_model = model or endpoint.active_model or (
-            endpoint.models[0] if endpoint.models else None
+        effective_model = (
+            model or endpoint.active_model or (endpoint.models[0] if endpoint.models else None)
         )
         provider = create_provider(
             endpoint.provider,
