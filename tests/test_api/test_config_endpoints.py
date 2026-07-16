@@ -143,6 +143,55 @@ def test_test_connection_endpoint_not_found(client):
     assert response.status_code == 404
 
 
+def test_activate_endpoint_model(client):
+    """POST /config/llm/endpoints/{id}/activate activates a specific model."""
+    endpoint = LLMEndpoint(
+        id="e1",
+        provider="openai",
+        name="Default",
+        base_url="https://api.openai.com/v1",
+        models=["gpt-4o", "gpt-4o-mini"],
+        api_key="sk-test",
+        api_key_set=True,
+        is_default=True,
+        active_model="gpt-4o-mini",
+        created_at="2026-07-02T00:00:00Z",
+        updated_at="2026-07-02T00:00:00Z",
+    )
+    client.app.state.endpoint_manager.activate_model = AsyncMock(return_value=endpoint)
+    # Avoid hitting the real runtime hot-swap in this unit test.
+    runtime_manager = MagicMock()
+    runtime_manager.swap_llm_provider = AsyncMock()
+    client.app.state.runtime_config_manager = runtime_manager
+    agent = MagicMock()
+    agent.llm_provider = MagicMock()
+    client.app.state.agent = agent
+    client.app.state.conversation_namer = None
+
+    response = client.post(
+        "/api/v1/config/llm/endpoints/e1/activate",
+        json={"model": "gpt-4o-mini"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["models"] == ["gpt-4o", "gpt-4o-mini"]
+    assert data["active_model"] == "gpt-4o-mini"
+    assert data["is_default"] is True
+    client.app.state.endpoint_manager.activate_model.assert_awaited_once_with(
+        "e1", "gpt-4o-mini"
+    )
+
+
+def test_activate_endpoint_model_rejects_unknown(client):
+    """Activating a model not in the endpoint's list returns 422."""
+    client.app.state.endpoint_manager.activate_model = AsyncMock(side_effect=ValueError("nope"))
+    response = client.post(
+        "/api/v1/config/llm/endpoints/e1/activate",
+        json={"model": "not-a-model"},
+    )
+    assert response.status_code == 422
+
+
 def test_test_connection_saved_endpoint(client):
     """Test POST /config/llm/endpoints/{id}/test-connection with saved endpoint."""
     endpoint = LLMEndpoint(

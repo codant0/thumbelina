@@ -6,6 +6,7 @@ import {
   updateEndpoint,
   deleteEndpoint,
   testEndpointConnection,
+  activateEndpointModel,
 } from '../../api/llmConfig'
 import { useTranslation } from '../../i18n'
 import { EndpointList } from './EndpointList'
@@ -23,14 +24,14 @@ export function EndpointManager({ onMessage }: EndpointManagerProps) {
   const [editing, setEditing] = useState<LLMEndpoint | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [testingConnectionId, setTestingConnectionId] = useState<string | null>(null)
-  const [activatingId, setActivatingId] = useState<string | null>(null)
+  const [activatingKey, setActivatingKey] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
       const data = await fetchEndpoints()
       setEndpoints(Array.isArray(data) ? data : [])
     } catch (err) {
-      onMessage(err instanceof Error ? err.message : 'Failed to load endpoints', true)
+      onMessage(err instanceof Error ? err.message : t('endpoint.failedToLoad'), true)
       setEndpoints([])
     } finally {
       setLoading(false)
@@ -100,37 +101,17 @@ export function EndpointManager({ onMessage }: EndpointManagerProps) {
     }
   }
 
-  const handleActivate = async (id: string) => {
-    const ep = endpoints.find(e => e.id === id)
-    if (!ep) return
-    setActivatingId(id)
+  const handleActivate = async (endpointId: string, model: string) => {
+    const key = `${endpointId}::${model}`
+    setActivatingKey(key)
     try {
-      // Mark as default and hot-swap the active LLM provider
-      await updateEndpoint(id, { is_default: true })
-      const res = await fetch('/api/v1/config/llm', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider: ep.provider,
-          model: ep.model || '',
-          base_url: ep.base_url,
-          endpoint_id: ep.id,
-        }),
-      })
-      if (res.ok) {
-        setEndpoints(prev => prev.map(e => ({
-          ...e,
-          is_default: e.id === id,
-        })))
-        onMessage(t('endpoint.activated', { name: ep.name }), false)
-      } else {
-        const err = await res.json().catch(() => null)
-        onMessage(err?.detail || t('endpoint.activateFailed'), true)
-      }
+      const updated = await activateEndpointModel(endpointId, model)
+      setEndpoints(prev => prev.map(e => (e.id === endpointId ? updated : e)))
+      onMessage(t('endpoint.activated', { name: model }), false)
     } catch (err) {
       onMessage(err instanceof Error ? err.message : t('endpoint.activateFailed'), true)
     } finally {
-      setActivatingId(null)
+      setActivatingKey(null)
     }
   }
 
@@ -159,7 +140,7 @@ export function EndpointManager({ onMessage }: EndpointManagerProps) {
         <EndpointList
           endpoints={endpoints}
           testingConnectionId={testingConnectionId}
-          activatingId={activatingId}
+          activatingKey={activatingKey}
           onEdit={id => setEditing(endpoints.find(e => e.id === id) ?? null)}
           onDelete={handleDelete}
           onTestConnection={handleTestConnection}

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { EndpointManager } from './EndpointManager'
 import { useTranslation } from '../../i18n'
 import { Toast } from './Toast'
-import { Globe, Shield, User, Database, Download, Trash2, Loader2 } from 'lucide-react'
+import { Globe, User, Database, Download, Trash2, Loader2 } from 'lucide-react'
 
 interface UserProfile {
   id: string
@@ -23,7 +23,6 @@ export function SettingsPanel() {
   const { t, locale, setLocale } = useTranslation()
   const [message, setMessage] = useState('')
   const [isError, setIsError] = useState(false)
-  const [rateLimitEnabled, setRateLimitEnabled] = useState(false)
 
   // User profile state
   const [profile, setProfile] = useState<UserProfile | null>(null)
@@ -34,14 +33,6 @@ export function SettingsPanel() {
   const [exporting, setExporting] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
-
-  // Fetch rate limit config
-  useEffect(() => {
-    fetch('/api/v1/config')
-      .then(res => { if (res.ok) return res.json(); return null })
-      .then(data => { if (data) setRateLimitEnabled(data.rate_limit_enabled ?? false) })
-      .catch(() => {})
-  }, [])
 
   // Fetch user profile
   useEffect(() => {
@@ -56,17 +47,6 @@ export function SettingsPanel() {
       .catch(() => {})
       .finally(() => setProfileLoading(false))
   }, [])
-
-  const handleRateLimitToggle = async (enabled: boolean) => {
-    setRateLimitEnabled(enabled)
-    try {
-      await fetch('/api/v1/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rate_limit: { enabled } }),
-      })
-    } catch { /* ignore */ }
-  }
 
   const handleExport = useCallback(async () => {
     setExporting(true)
@@ -96,11 +76,11 @@ export function SettingsPanel() {
     try {
       const res = await fetch('/api/v1/data/all?confirm=true', { method: 'DELETE' })
       if (res.ok) {
-        setMessage('All data deleted')
+        setMessage(t('settings.allDataDeleted'))
         setIsError(false)
         setDeleteConfirm(false)
       } else {
-        setMessage('Failed to delete data')
+        setMessage(t('settings.failedToDelete'))
         setIsError(true)
       }
     } catch {
@@ -135,20 +115,6 @@ export function SettingsPanel() {
             <option value="zh-CN">{t('language.zhCN')}</option>
           </select>
         </div>
-      </div>
-
-      {/* Rate Limiting */}
-      <div className="card">
-        <label className="form-checkbox">
-          <input
-            type="checkbox"
-            data-testid="rate-limit-toggle"
-            checked={rateLimitEnabled}
-            onChange={e => handleRateLimitToggle(e.target.checked)}
-          />
-          <Shield size={16} />
-          {t('settings.rateLimit')}
-        </label>
       </div>
 
       {/* LLM Configuration */}
@@ -199,7 +165,7 @@ export function SettingsPanel() {
             disabled={exporting}
           >
             {exporting ? <Loader2 size={16} className="spin" /> : <Download size={16} />}
-            {exporting ? 'Exporting...' : t('settings.exportAll')}
+            {exporting ? t('settings.exporting') : t('settings.exportAll')}
           </button>
           <button
             className={`btn ${deleteConfirm ? 'btn-danger' : 'btn-ghost'}`}
@@ -208,7 +174,7 @@ export function SettingsPanel() {
             disabled={deleting}
           >
             {deleting ? <Loader2 size={16} className="spin" /> : <Trash2 size={16} />}
-            {deleting ? 'Deleting...' : deleteConfirm ? t('settings.confirmDelete') : t('settings.deleteAll')}
+            {deleting ? t('settings.deleting') : deleteConfirm ? t('settings.confirmDelete') : t('settings.deleteAll')}
           </button>
           {deleteConfirm && (
             <button

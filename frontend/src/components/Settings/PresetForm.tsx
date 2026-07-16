@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import type { LLMPreset, PresetFormData } from '../../api/llmConfig'
 import { Loader2, Save } from 'lucide-react'
+import { useTranslation } from '../../i18n'
 
 interface PresetFormProps {
   initialValues?: LLMPreset
@@ -22,6 +23,7 @@ export function PresetForm({ initialValues, onSubmit, onCancel }: PresetFormProp
   const [isActive, setIsActive] = useState(initialValues?.is_active ?? false)
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const { t } = useTranslation()
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -35,7 +37,7 @@ export function PresetForm({ initialValues, onSubmit, onCancel }: PresetFormProp
           throw new Error('Extra params must be an object')
         }
       } catch {
-        setError('Extra params must be valid JSON object')
+        setError(t('preset.invalidJson'))
         return
       }
     }
@@ -52,7 +54,7 @@ export function PresetForm({ initialValues, onSubmit, onCancel }: PresetFormProp
         is_active: isActive,
       })
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save preset')
+      setError(err instanceof Error ? err.message : t('preset.saveFailed'))
     } finally {
       setSubmitting(false)
     }
@@ -61,7 +63,7 @@ export function PresetForm({ initialValues, onSubmit, onCancel }: PresetFormProp
   return (
     <form onSubmit={handleSubmit} className="settings-form preset-form">
       <div className="form-group">
-        <label className="form-label" htmlFor="preset-name">Name</label>
+        <label className="form-label" htmlFor="preset-name">{t('preset.name')}</label>
         <input
           id="preset-name"
           type="text"
@@ -73,7 +75,7 @@ export function PresetForm({ initialValues, onSubmit, onCancel }: PresetFormProp
         />
       </div>
       <div className="form-group">
-        <label className="form-label" htmlFor="preset-provider">Provider</label>
+        <label className="form-label" htmlFor="preset-provider">{t('preset.provider')}</label>
         <select
           id="preset-provider"
           className="form-select"
@@ -87,7 +89,7 @@ export function PresetForm({ initialValues, onSubmit, onCancel }: PresetFormProp
         </select>
       </div>
       <div className="form-group">
-        <label className="form-label" htmlFor="preset-base-url">Base URL</label>
+        <label className="form-label" htmlFor="preset-base-url">{t('preset.baseUrl')}</label>
         <input
           id="preset-base-url"
           type="text"
@@ -100,7 +102,7 @@ export function PresetForm({ initialValues, onSubmit, onCancel }: PresetFormProp
       </div>
       <div className="form-group">
         <label className="form-label" htmlFor="preset-api-key">
-          API Key {initialValues?.api_key_set && <span className="form-label-hint">(leave blank to keep current)</span>}
+          API Key {initialValues?.api_key_set && <span className="form-label-hint">{t('preset.keepKeyHint')}</span>}
         </label>
         <input
           id="preset-api-key"
@@ -113,7 +115,7 @@ export function PresetForm({ initialValues, onSubmit, onCancel }: PresetFormProp
         />
       </div>
       <div className="form-group">
-        <label className="form-label" htmlFor="preset-model">Model</label>
+        <label className="form-label" htmlFor="preset-model">{t('preset.model')}</label>
         <input
           id="preset-model"
           type="text"
@@ -125,7 +127,7 @@ export function PresetForm({ initialValues, onSubmit, onCancel }: PresetFormProp
         />
       </div>
       <div className="form-group">
-        <label className="form-label" htmlFor="preset-extra-params">Extra Params (JSON)</label>
+        <label className="form-label" htmlFor="preset-extra-params">{t('preset.extraParams')}</label>
         <textarea
           id="preset-extra-params"
           className="form-input"
@@ -133,7 +135,7 @@ export function PresetForm({ initialValues, onSubmit, onCancel }: PresetFormProp
           value={extraParamsText}
           onChange={e => setExtraParamsText(e.target.value)}
           rows={3}
-          placeholder='{"temperature": 0.7}'
+          placeholder={t('preset.placeholder')}
         />
       </div>
       <div className="form-group">
@@ -144,17 +146,17 @@ export function PresetForm({ initialValues, onSubmit, onCancel }: PresetFormProp
             checked={isActive}
             onChange={e => setIsActive(e.target.checked)}
           />
-          Set as active preset
+          {t('preset.setActive')}
         </label>
       </div>
       {error && <p className="form-error" data-testid="preset-form-error">{error}</p>}
       <div className="settings-actions">
         <button type="submit" className="btn btn-primary" disabled={submitting} data-testid="preset-save-button">
           {submitting ? <Loader2 size={16} className="spin" /> : <Save size={16} />}
-          {submitting ? 'Saving…' : initialValues ? 'Update Preset' : 'Create Preset'}
+          {submitting ? t('common.saving') : initialValues ? t('preset.update') : t('preset.create')}
         </button>
         <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={submitting}>
-          Cancel
+          {t('common.cancel')}
         </button>
       </div>
     </form>

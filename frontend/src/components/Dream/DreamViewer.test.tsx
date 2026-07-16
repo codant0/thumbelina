@@ -39,7 +39,7 @@ describe('DreamViewer', () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(() => new Promise(() => {}))
     render(<DreamViewer />)
     expect(screen.getByTestId('dream-loading')).toBeInTheDocument()
-    expect(screen.getByText('Loading...')).toBeInTheDocument()
+    expect(screen.getByText('Loading…')).toBeInTheDocument()
   })
 
   it('should render error state on fetch failure', async () => {

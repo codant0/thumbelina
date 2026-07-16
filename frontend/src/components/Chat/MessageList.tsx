@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import type { Message } from '../../types/chat'
 import { Star, Wrench, Check } from 'lucide-react'
+import { useTranslation } from '../../i18n'
 
 interface MessageListProps {
   messages: Message[]
@@ -11,6 +12,7 @@ interface MessageListProps {
 export function MessageList({ messages, waitingForReply, conversationId }: MessageListProps) {
   const listRef = useRef<HTMLDivElement>(null)
   const [ratings, setRatings] = useState<Record<number, number>>({})
+  const { t } = useTranslation()
 
   useEffect(() => {
     const el = listRef.current
@@ -47,7 +49,7 @@ export function MessageList({ messages, waitingForReply, conversationId }: Messa
       {messages.map((msg, idx) => (
         <div key={msg.id} data-testid="message-item" className={`message ${msg.role}`}>
           <span className="msg-role">
-            {msg.role === 'user' ? 'You' : msg.role === 'system' ? 'System' : 'Assistant'}
+            {msg.role === 'user' ? t('chat.roleYou') : msg.role === 'system' ? t('chat.roleSystem') : t('chat.roleAssistant')}
           </span>
           <div className="msg-content">{msg.content}</div>
           {msg.toolCalls && msg.toolCalls.length > 0 && (
@@ -72,7 +74,7 @@ export function MessageList({ messages, waitingForReply, conversationId }: Messa
                     data-testid={`star-${star}`}
                     disabled={ratings[idx] !== undefined}
                     onClick={() => void handleRate(idx, star)}
-                    aria-label={`Rate ${star} star${star > 1 ? 's' : ''}`}
+                    aria-label={t('chat.rateStars', { star, s: star > 1 ? 's' : '' })}
                   >
                     <Star size={16} fill={filled ? 'currentColor' : 'none'} strokeWidth={filled ? 0 : 2} />
                   </button>
@@ -80,7 +82,7 @@ export function MessageList({ messages, waitingForReply, conversationId }: Messa
               })}
               {ratings[idx] !== undefined && (
                 <span className="feedback-thanks" data-testid="feedback-thanks">
-                  <Check size={12} />Thanks!
+                  <Check size={12} />{t('chat.rateThanks')}
                 </span>
               )}
             </div>
@@ -89,7 +91,7 @@ export function MessageList({ messages, waitingForReply, conversationId }: Messa
       ))}
       {waitingForReply && (
         <div className="message assistant typing-indicator" data-testid="typing-indicator">
-          <span className="msg-role">Assistant</span>
+          <span className="msg-role">{t('chat.roleAssistant')}</span>
           <div className="typing-dots">
             <span className="typing-dot" />
             <span className="typing-dot" />

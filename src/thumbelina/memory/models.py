@@ -108,7 +108,7 @@ class Conversation(Base):
     id:
         Unique identifier for the conversation.
     name:
-        Human-readable name (e.g. "微信聊天").
+        Human-readable name (e.g. "微信Clawbot").
     pinned:
         Whether this conversation is pinned to the top of the list.
     created_at:
@@ -133,6 +133,18 @@ class Conversation(Base):
     )
     pinned: Mapped[bool] = mapped_column(
         default=False,
+    )
+    endpoint_id: Mapped[str | None] = mapped_column(
+        String(36),
+        nullable=True,
+        default=None,
+        comment="ID of the configured LLM endpoint for per-conversation model selection",
+    )
+    model: Mapped[str | None] = mapped_column(
+        String(200),
+        nullable=True,
+        default=None,
+        comment="Specific model name selected for this conversation (within the endpoint's models)",
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime,

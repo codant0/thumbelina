@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { RefreshCw } from 'lucide-react'
+import { useTranslation } from '../../i18n'
 
 interface TimelineSkill {
   id: string
@@ -42,6 +43,7 @@ export function DreamViewer() {
   const [stats, setStats] = useState<SkillStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const { t } = useTranslation()
 
   const fetchStats = async () => {
     setLoading(true)
@@ -51,10 +53,10 @@ export function DreamViewer() {
       if (res.ok) {
         setStats(await res.json())
       } else {
-        setError('Failed to load skill statistics')
+        setError(t('dream.errors'))
       }
     } catch {
-      setError('Failed to load skill statistics')
+      setError(t('dream.errors'))
     } finally {
       setLoading(false)
     }
@@ -67,10 +69,10 @@ export function DreamViewer() {
   if (loading) {
     return (
       <div className="page-container" data-testid="dream-viewer">
-        <div className="page-title">Dream</div>
+        <div className="page-title">{t('dream.title')}</div>
         <div className="loading-state" data-testid="dream-loading">
           <div className="spinner" />
-          <span>Loading...</span>
+          <span>{t('dream.loading')}</span>
         </div>
       </div>
     )
@@ -82,7 +84,7 @@ export function DreamViewer() {
         <div className="page-title">Dream</div>
         <div className="error-state" data-testid="dream-error">
           <span>{error}</span>
-          <button className="btn btn-ghost" data-testid="retry-button" onClick={fetchStats}>Retry</button>
+          <button className="btn btn-ghost" data-testid="retry-button" onClick={fetchStats}>{t('common.retry')}</button>
         </div>
       </div>
     )
@@ -91,9 +93,9 @@ export function DreamViewer() {
   if (!stats || stats.total === 0) {
     return (
       <div className="page-container" data-testid="dream-viewer">
-        <div className="page-title">Dream</div>
+        <div className="page-title">{t('dream.title')}</div>
         <div className="empty-state" data-testid="dream-empty">
-          <p>No skills recorded yet. Skills will appear here as the agent learns.</p>
+          <p>{t('dream.noSkills')}</p>
         </div>
       </div>
     )
@@ -110,30 +112,30 @@ export function DreamViewer() {
   return (
     <div className="page-container" data-testid="dream-viewer">
       <div className="page-title-row">
-        <div className="page-title">Dream</div>
+        <div className="page-title">{t('dream.title')}</div>
         <button className="btn btn-ghost btn-sm" data-testid="refresh-button" onClick={fetchStats}>
           <RefreshCw size={14} />
-          Refresh
+          {t('dream.refresh')}
         </button>
       </div>
 
       <div className="stats-grid">
         <div className="stat-card" data-testid="stat-total">
           <div className="stat-value">{stats.total}</div>
-          <div className="stat-label">Skills</div>
+          <div className="stat-label">{t('dream.skills')}</div>
         </div>
         <div className="stat-card" data-testid="stat-categories">
           <div className="stat-value">{stats.categories.length}</div>
-          <div className="stat-label">Categories</div>
+          <div className="stat-label">{t('dream.categories')}</div>
         </div>
         <div className="stat-card" data-testid="stat-timeline">
           <div className="stat-value">{stats.timeline.length}</div>
-          <div className="stat-label">Active Days</div>
+          <div className="stat-label">{t('dream.activeDays')}</div>
         </div>
       </div>
 
       <div className="card" data-testid="skill-timeline">
-        <div className="card-title">Timeline</div>
+        <div className="card-title">{t('dream.timeline')}</div>
         <div className="timeline">
           {stats.timeline.map((entry, idx) => {
             const color = ACCENT_COLORS[idx % ACCENT_COLORS.length]
@@ -163,7 +165,7 @@ export function DreamViewer() {
       </div>
 
       <div className="card" data-testid="skill-chart">
-        <div className="card-title">Top Skills by Maturity</div>
+        <div className="card-title">{t('dream.topSkills')}</div>
         <div className="bar-chart">
           {stats.top_skills.map((skill, idx) => (
             <div key={skill.id} className="bar-row" data-testid="bar-row">
@@ -186,7 +188,7 @@ export function DreamViewer() {
       </div>
 
       <div className="card" data-testid="skill-categories">
-        <div className="card-title">Categories</div>
+        <div className="card-title">{t('dream.categoryTitle')}</div>
         <div className="bar-chart">
           {stats.categories.map((cat, idx) => (
             <div key={cat.name} className="bar-row" data-testid="category-row">
@@ -208,7 +210,7 @@ export function DreamViewer() {
       </div>
 
       <div className="card" data-testid="skill-cloud">
-        <div className="card-title">Skill Cloud</div>
+        <div className="card-title">{t('dream.skillCloud')}</div>
         <div className="word-cloud">
           {stats.top_skills.map((skill, idx) => {
             const size = 0.85 + (skill.success_rate / maxBarValue) * 1.2

@@ -8,6 +8,7 @@ import { DreamViewer } from './components/Dream/DreamViewer'
 import { SettingsPanel } from './components/Settings/SettingsPanel'
 import { PluginsPage } from './components/Plugins/PluginsPage'
 import { ChannelsPage } from './components/Channels/ChannelsPage'
+import { renameConversation, setConversationEndpoint } from './api/conversations'
 import type { Conversation } from './types/chat'
 import './App.css'
 
@@ -67,7 +68,14 @@ function App() {
       if (res.ok) {
         const conv: Conversation = await res.json()
         setSelectedId(conv.id)
-        setConversations(prev => [conv, ...(Array.isArray(prev) ? prev : [])])
+        // Insert after pinned conversations so pinned items (e.g. 微信Clawbot)
+        // always stay on top, mirroring the backend's pinned-first ordering.
+        setConversations(prev => {
+          const list = Array.isArray(prev) ? prev : []
+          const pinned = list.filter(c => c.pinned)
+          const rest = list.filter(c => !c.pinned)
+          return [...pinned, conv, ...rest]
+        })
       }
     } catch { /* ignore */ }
   }, [])
@@ -81,6 +89,24 @@ function App() {
       }
     } catch { /* ignore */ }
   }, [selectedId])
+
+  const updateConversationInState = useCallback((conv: Conversation) => {
+    setConversations(prev => (Array.isArray(prev) ? prev : []).map(c => (c.id === conv.id ? { ...c, ...conv } : c)))
+  }, [])
+
+  const handleRename = useCallback(async (id: string, name: string) => {
+    try {
+      const updated = await renameConversation(id, name)
+      updateConversationInState(updated)
+    } catch { /* ignore */ }
+  }, [updateConversationInState])
+
+  const handleSetEndpoint = useCallback(async (id: string, endpointId: string | null, model: string | null) => {
+    try {
+      const updated = await setConversationEndpoint(id, endpointId, model)
+      updateConversationInState(updated)
+    } catch { /* ignore */ }
+  }, [updateConversationInState])
 
   const renderPage = () => {
     switch (activePage) {
@@ -105,12 +131,15 @@ function App() {
               onSelect={handleSelect}
               onNew={handleNewConversation}
               onDelete={handleDelete}
+              onRename={handleRename}
               selectedId={selectedId}
             />
             <ChatWindow
               conversationId={selectedId}
+              conversations={conversations}
               onConversationCreated={fetchConversations}
               onDefaultConversation={handleDefaultConversation}
+              onSetEndpoint={handleSetEndpoint}
             />
           </>
         )

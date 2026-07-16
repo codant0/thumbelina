@@ -2,15 +2,20 @@ import { useState, useCallback, useEffect, useMemo } from 'react'
 import { useWebSocket } from '../../hooks/useWebSocket'
 import { MessageList } from './MessageList'
 import { InputBox } from './InputBox'
+import { ConversationModelSelector } from './ConversationModelSelector'
 import { Mail } from 'lucide-react'
+import type { Conversation } from '../../types/chat'
+import { useTranslation } from '../../i18n'
 
 interface ChatWindowProps {
   conversationId?: string
+  conversations?: Conversation[]
   onConversationCreated?: () => void
   onDefaultConversation?: (id: string) => void
+  onSetEndpoint?: (id: string, endpointId: string | null, model: string | null) => void
 }
 
-export function ChatWindow({ conversationId, onConversationCreated, onDefaultConversation }: ChatWindowProps) {
+export function ChatWindow({ conversationId, conversations, onConversationCreated, onDefaultConversation, onSetEndpoint }: ChatWindowProps) {
   const wsUrl = useMemo(() => {
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     return `${wsProtocol}//${window.location.host}/ws/chat`
@@ -19,6 +24,7 @@ export function ChatWindow({ conversationId, onConversationCreated, onDefaultCon
   const { messages, isConnected, isStreaming, streamingMode: wsStreamingMode, waitingForReply, lastConversationId, newConversationId, clearNewConversation, sendMessage, clearMessages, switchConversation, loadHistory } = useWebSocket(wsUrl, conversationId)
   const [streamingMode, setStreamingMode] = useState(true)
   const [toggling, setToggling] = useState(false)
+  const { t } = useTranslation()
 
   // Sync from WebSocket when backend reports mode
   useEffect(() => {
@@ -75,15 +81,20 @@ export function ChatWindow({ conversationId, onConversationCreated, onDefaultCon
 
   const statusText = isConnected
     ? isStreaming
-      ? 'Generating...'
-      : 'Connected'
-    : 'Disconnected'
+      ? t('common.generating')
+      : t('common.connected')
+    : t('common.disconnected')
 
   const statusClass = isConnected
     ? isStreaming
       ? 'streaming'
       : 'connected'
     : 'disconnected'
+
+  const activeConversation = useMemo(
+    () => (Array.isArray(conversations) ? conversations.find(c => c.id === conversationId) : undefined),
+    [conversations, conversationId],
+  )
 
   return (
     <div className="chat-area" data-testid="chat-window">
@@ -95,17 +106,25 @@ export function ChatWindow({ conversationId, onConversationCreated, onDefaultCon
           data-testid="streaming-toggle"
           onClick={toggleStreaming}
           disabled={isStreaming || toggling}
-          title={streamingMode ? 'Streaming on — typewriter effect' : 'Streaming off — instant reply'}
+          title={streamingMode ? t('chat.streamOnTitle') : t('chat.streamOffTitle')}
         >
           <span className={`toggle-dot ${streamingMode ? 'on' : 'off'}`} />
-          <span>Stream</span>
+          <span>{t('chat.streamLabel')}</span>
         </button>
+        {onSetEndpoint && conversationId && (
+          <ConversationModelSelector
+            conversationId={conversationId}
+            selectedEndpointId={activeConversation?.endpoint_id ?? null}
+            selectedModel={activeConversation?.model ?? null}
+            onChange={(endpointId, model) => onSetEndpoint(conversationId, endpointId, model)}
+          />
+        )}
       </div>
       {messages.length === 0 ? (
         <div className="empty-state">
           <div className="empty-icon"><Mail size={24} /></div>
-          <p>Start a conversation</p>
-          <p className="empty-hint">Type a message below to begin</p>
+          <p>{t('chat.startPrompt')}</p>
+          <p className="empty-hint">{t('chat.startHint')}</p>
         </div>
       ) : (
         <MessageList messages={messages} waitingForReply={waitingForReply} conversationId={conversationId ?? lastConversationId ?? undefined} />

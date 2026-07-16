@@ -1,5 +1,6 @@
 import { useState, useRef, type FormEvent, type KeyboardEvent } from 'react'
 import { Send } from 'lucide-react'
+import { useTranslation } from '../../i18n'
 
 interface InputBoxProps {
   onSend: (message: string) => void
@@ -9,6 +10,7 @@ interface InputBoxProps {
 export function InputBox({ onSend, disabled }: InputBoxProps) {
   const [text, setText] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const { t } = useTranslation()
 
   const handleSend = () => {
     const trimmed = text.trim()
@@ -45,7 +47,7 @@ export function InputBox({ onSend, disabled }: InputBoxProps) {
       <form onSubmit={handleSubmit}>
         <textarea
           ref={textareaRef}
-          placeholder="Type a message..."
+          placeholder={t('chat.inputPlaceholder')}
           value={text}
           onChange={e => setText(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -55,7 +57,7 @@ export function InputBox({ onSend, disabled }: InputBoxProps) {
         />
         <button type="submit" disabled={disabled}>
           <Send size={16} />
-          Send
+          {t('chat.send')}
         </button>
       </form>
     </div>

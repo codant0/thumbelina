@@ -37,3 +37,32 @@ describe('Sidebar', () => {
     expect(screen.getByText(/No conversations yet/i)).toBeInTheDocument()
   })
 })
+
+
+describe('Sidebar rename', () => {
+  it('calls onRename with the edited name', async () => {
+    const onRename = vi.fn()
+    const conversations = [
+      { id: '1', name: '旧名称', created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' },
+    ]
+    const { user } = await import('@testing-library/user-event').then(m => ({ user: m.default.setup() }))
+    render(<Sidebar conversations={conversations} onSelect={vi.fn()} onRename={onRename} />)
+
+    await user.click(screen.getByTestId('rename-conversation'))
+    const input = screen.getByTestId('rename-input') as HTMLInputElement
+    await user.clear(input)
+    await user.type(input, '新名称')
+    await user.click(screen.getByTestId('rename-confirm'))
+
+    expect(onRename).toHaveBeenCalledWith('1', '新名称')
+  })
+
+  it('does not show rename button for the WeChat conversation', () => {
+    const onRename = vi.fn()
+    const conversations = [
+      { id: 'wx', name: '微信Clawbot', pinned: true, created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' },
+    ]
+    render(<Sidebar conversations={conversations} onSelect={vi.fn()} onRename={onRename} />)
+    expect(screen.queryByTestId('rename-conversation')).toBeNull()
+  })
+})

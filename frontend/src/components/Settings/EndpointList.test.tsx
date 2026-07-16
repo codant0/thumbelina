@@ -6,9 +6,10 @@ import { EndpointList } from './EndpointList'
 const sampleEndpoint = {
   id: '1',
   provider: 'openai' as const,
-  name: 'OpenAI Default',
+  name: 'Mimo',
   base_url: 'https://api.openai.com/v1',
-  model: 'gpt-4o',
+  models: ['gpt-4o', 'gpt-4o-mini'],
+  active_model: 'gpt-4o',
   api_key_set: true,
   is_default: true,
   is_reachable: true,
@@ -24,27 +25,45 @@ const defaultProps = {
   onTestConnection: vi.fn(),
   onActivate: vi.fn(),
   testingConnectionId: null,
-  activatingId: null,
+  activatingKey: null,
 }
 
 describe('EndpointList', () => {
-  it('renders endpoint name and provider', () => {
+  it('renders endpoint name as card title', () => {
     render(
       <LocaleProvider>
         <EndpointList {...defaultProps} />
       </LocaleProvider>,
     )
-    expect(screen.getByText('OpenAI Default')).toBeInTheDocument()
+    expect(screen.getByText('Mimo')).toBeInTheDocument()
+  })
+
+  it('renders provider badge', () => {
+    render(
+      <LocaleProvider>
+        <EndpointList {...defaultProps} />
+      </LocaleProvider>,
+    )
     expect(screen.getByText('OpenAI')).toBeInTheDocument()
   })
 
-  it('renders active tag for default endpoint', () => {
+  it('renders model chips for the endpoint', () => {
     render(
       <LocaleProvider>
         <EndpointList {...defaultProps} />
       </LocaleProvider>,
     )
-    expect(screen.getByTestId('endpoint-active-tag-1')).toBeInTheDocument()
+    expect(screen.getByTestId('endpoint-model-1-gpt-4o')).toBeInTheDocument()
+    expect(screen.getByTestId('endpoint-model-1-gpt-4o-mini')).toBeInTheDocument()
+  })
+
+  it('shows active model tag with the model name', () => {
+    render(
+      <LocaleProvider>
+        <EndpointList {...defaultProps} />
+      </LocaleProvider>,
+    )
+    expect(screen.getByTestId('endpoint-active-tag-1').textContent).toContain('gpt-4o')
   })
 
   it('emits test-connection event', () => {
@@ -56,5 +75,16 @@ describe('EndpointList', () => {
     )
     fireEvent.click(screen.getByTestId('test-connection-1'))
     expect(onTestConnection).toHaveBeenCalledWith('1')
+  })
+
+  it('emits activate event with endpoint id and model', () => {
+    const onActivate = vi.fn()
+    render(
+      <LocaleProvider>
+        <EndpointList {...defaultProps} onActivate={onActivate} />
+      </LocaleProvider>,
+    )
+    fireEvent.click(screen.getByTestId('activate-1-gpt-4o-mini'))
+    expect(onActivate).toHaveBeenCalledWith('1', 'gpt-4o-mini')
   })
 })

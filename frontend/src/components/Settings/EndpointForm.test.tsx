@@ -22,19 +22,22 @@ describe('EndpointForm', () => {
     expect(onSubmit).not.toHaveBeenCalled()
   })
 
-  it('submits correct payload', async () => {
+  it('submits correct payload with models array', async () => {
     const onSubmit = vi.fn()
     renderForm({ onSubmit })
     fireEvent.change(screen.getByTestId('endpoint-name-input'), { target: { value: 'Default' } })
     fireEvent.change(screen.getByTestId('endpoint-base-url-input'), { target: { value: 'https://api.openai.com/v1' } })
     fireEvent.change(screen.getByTestId('endpoint-api-key-input'), { target: { value: 'sk-test' } })
+    // Add a model manually
+    fireEvent.change(screen.getByTestId('manual-model-input'), { target: { value: 'gpt-4o' } })
+    fireEvent.click(screen.getByTestId('add-manual-model'))
     fireEvent.click(screen.getByTestId('endpoint-form-submit'))
     await waitFor(() => {
       expect(onSubmit).toHaveBeenCalledWith({
         provider: 'openai',
         name: 'Default',
         base_url: 'https://api.openai.com/v1',
-        model: '',
+        models: ['gpt-4o'],
         api_key: 'sk-test',
         is_default: false,
       })
@@ -47,7 +50,7 @@ describe('EndpointForm', () => {
         <EndpointForm
           onSubmit={vi.fn()}
           onCancel={vi.fn()}
-          initialValues={{ id: '1', provider: 'openai', name: 'Default', base_url: 'https://api.openai.com/v1', model: 'gpt-4o', api_key_set: true, is_default: false }}
+          initialValues={{ id: '1', provider: 'openai', name: 'Default', base_url: 'https://api.openai.com/v1', models: ['gpt-4o'], api_key_set: true, is_default: false }}
         />
       </LocaleProvider>,
     )

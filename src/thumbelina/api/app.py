@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -156,14 +157,13 @@ class _LazyLLMProvider:
             except Exception as exc:
                 raise RuntimeError(
                     f"LLM provider '{self._provider_name}' is not available. "
-                    f"Please configure credentials via Web UI Settings or "
-                    f"/api/v1/config/llm. Error: {exc}"
+                    f"Please activate a model in Web UI Settings. Error: {exc}"
                 ) from exc
         return self._real
 
     @property
     def model(self):
-        return self._kwargs.get('model', 'unknown')
+        return self._kwargs.get("model", "unknown")
 
     @property
     def chat_model(self):
@@ -211,7 +211,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:
         logger.warning(
             "LLM provider %s not configured (%s). "
-            "Configure via Web UI Settings or PUT /api/v1/config/llm.",
+            "Configure via Web UI Settings.",
             config.llm.provider,
             exc,
         )
@@ -308,6 +308,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         logger.debug("User profiler not initialized", exc_info=True)
 
+    # Initialize conversation auto-namer (shares the active LLM provider)
+    from thumbelina.memory.namer import ConversationNamer
+
+    conversation_namer = ConversationNamer(llm_provider=llm_provider)
+    app.state.conversation_namer = conversation_namer
+
     # Load plugins from configured directories (with sandbox validation)
     if config.plugin_dirs:
         from thumbelina.plugins.manager import PluginManager
@@ -339,6 +345,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         scheduler=scheduler,
         composition_engine=composition_engine,
         user_profiler=user_profiler,
+        conversation_namer=conversation_namer,
     )
     app.state.agent = agent
 
@@ -401,6 +408,44 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await preset_manager.restore_active_preset()
     except Exception:
         logger.warning("Failed to restore active LLM preset", exc_info=True)
+
+    # Restore the default LLM endpoint (Web UI "Models") on startup so the
+    # agent uses the user-activated model instead of requiring environment
+    # variables. Only applies when no preset was restored above.
+    try:
+        if await preset_manager.get_active_preset() is None:
+            active = await endpoint_manager.get_active_endpoint_model()
+            if active is not None and active[0].api_key:
+                default_endpoint, active_model = active
+                endpoint_kwargs: dict[str, Any] = {
+                    "api_key": default_endpoint.api_key,
+                    "model": active_model,
+                }
+                if default_endpoint.base_url:
+                    endpoint_kwargs["base_url"] = default_endpoint.base_url
+                restored_provider = create_provider(default_endpoint.provider, **endpoint_kwargs)
+                agent.swap_provider(restored_provider)
+                if getattr(app.state, "skill_engine", None) is not None:
+                    app.state.skill_engine.llm_provider = restored_provider
+                if getattr(app.state, "composition_engine", None) is not None:
+                    app.state.composition_engine.llm_provider = restored_provider
+                if getattr(app.state, "subagent_manager", None) is not None:
+                    app.state.subagent_manager.llm_provider = restored_provider
+                if getattr(app.state, "user_profiler", None) is not None:
+                    app.state.user_profiler.llm_provider = restored_provider
+                if getattr(app.state, "conversation_namer", None) is not None:
+                    app.state.conversation_namer.llm_provider = restored_provider
+                config.llm.provider = default_endpoint.provider
+                config.llm.model = active_model
+                config.llm.api_key = default_endpoint.api_key
+                config.llm.base_url = default_endpoint.base_url or None
+                logger.info(
+                    "Restored default LLM endpoint on startup: %s/%s",
+                    default_endpoint.provider,
+                    config.llm.model,
+                )
+    except Exception:
+        logger.warning("Failed to restore default LLM endpoint", exc_info=True)
 
     # Initialize WeChat channel if enabled (AFTER database config is loaded)
     wechat_channel = None

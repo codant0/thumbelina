@@ -23,10 +23,18 @@ function getInitialLocale(): Locale {
   return DEFAULT_LOCALE
 }
 
+import en from './locales/en.json'
+import zhCN from './locales/zh-CN.json'
+
+const dictionaries: Record<Locale, Record<string, unknown>> = {
+  en,
+  'zh-CN': zhCN,
+}
+
 export const LocaleContext = createContext<LocaleContextValue>({
   locale: DEFAULT_LOCALE,
   setLocale: () => {},
-  t: (key: string) => key,
+  t: (key: string) => getNestedValue(en, key) ?? key,
 })
 
 interface LocaleProviderProps {
@@ -76,12 +84,4 @@ function getNestedValue(obj: Record<string, unknown>, path: string): string | un
     current = (current as Record<string, unknown>)[part]
   }
   return typeof current === 'string' ? current : undefined
-}
-
-import en from './locales/en.json'
-import zhCN from './locales/zh-CN.json'
-
-const dictionaries: Record<Locale, Record<string, unknown>> = {
-  en,
-  'zh-CN': zhCN,
 }

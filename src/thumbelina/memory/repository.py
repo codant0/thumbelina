@@ -190,6 +190,8 @@ class ConversationRepository:
                     "id": conv.id,
                     "name": conv.name,
                     "pinned": conv.pinned or False,
+                    "endpoint_id": conv.endpoint_id,
+                    "model": conv.model,
                     "created_at": conv.created_at.isoformat(),
                     "updated_at": conv.updated_at.isoformat(),
                     "summary": conv.summary,
@@ -223,6 +225,8 @@ class ConversationRepository:
                     "id": conv.id,
                     "name": conv.name,
                     "pinned": conv.pinned or False,
+                    "endpoint_id": conv.endpoint_id,
+                    "model": conv.model,
                     "created_at": conv.created_at.isoformat(),
                     "updated_at": conv.updated_at.isoformat(),
                     "summary": conv.summary,
@@ -256,6 +260,8 @@ class ConversationRepository:
                 "id": conversation.id,
                 "name": conversation.name,
                 "pinned": conversation.pinned or False,
+                "endpoint_id": conversation.endpoint_id,
+                "model": conversation.model,
                 "created_at": conversation.created_at.isoformat(),
                 "updated_at": conversation.updated_at.isoformat(),
                 "summary": conversation.summary,
@@ -329,6 +335,98 @@ class ConversationRepository:
             True if set successfully, False if conversation not found.
         """
         return await asyncio.to_thread(self._set_summary_sync, conversation_id, summary)
+
+    def _rename_conversation_sync(self, conversation_id: str, name: str) -> bool:
+        """Synchronous implementation of rename_conversation."""
+        with self._get_session() as session:
+            conversation = session.get(Conversation, conversation_id)
+            if conversation is None:
+                return False
+            conversation.name = name
+            session.commit()
+            return True
+
+    async def rename_conversation(self, conversation_id: str, name: str) -> bool:
+        """Update the human-readable name of a conversation.
+
+        Parameters
+        ----------
+        conversation_id:
+            ID of the conversation to rename.
+        name:
+            New name. Pass an empty string to clear the name.
+
+        Returns
+        -------
+        bool
+            True if renamed successfully, False if conversation not found.
+        """
+        return await asyncio.to_thread(
+            self._rename_conversation_sync, conversation_id, name
+        )
+
+    def _set_endpoint_sync(self, conversation_id: str, endpoint_id: str | None) -> bool:
+        """Synchronous implementation of set_conversation_endpoint."""
+        with self._get_session() as session:
+            conversation = session.get(Conversation, conversation_id)
+            if conversation is None:
+                return False
+            conversation.endpoint_id = endpoint_id
+            session.commit()
+            return True
+
+    async def set_conversation_endpoint(
+        self, conversation_id: str, endpoint_id: str | None
+    ) -> bool:
+        """Associate a conversation with a configured LLM endpoint.
+
+        Parameters
+        ----------
+        conversation_id:
+            ID of the conversation to update.
+        endpoint_id:
+            ID of the configured endpoint, or None to revert to the default.
+
+        Returns
+        -------
+        bool
+            True if set successfully, False if conversation not found.
+        """
+        return await asyncio.to_thread(
+            self._set_endpoint_sync, conversation_id, endpoint_id
+        )
+
+    def _set_model_sync(self, conversation_id: str, model: str | None) -> bool:
+        """Synchronous implementation of set_conversation_model."""
+        with self._get_session() as session:
+            conversation = session.get(Conversation, conversation_id)
+            if conversation is None:
+                return False
+            conversation.model = model
+            session.commit()
+            return True
+
+    async def set_conversation_model(
+        self, conversation_id: str, model: str | None
+    ) -> bool:
+        """Set the specific model used for a conversation.
+
+        Parameters
+        ----------
+        conversation_id:
+            ID of the conversation to update.
+        model:
+            Model name within the conversation's endpoint, or None to use the
+            endpoint's active/default model.
+
+        Returns
+        -------
+        bool
+            True if set successfully, False if conversation not found.
+        """
+        return await asyncio.to_thread(
+            self._set_model_sync, conversation_id, model
+        )
 
     def _search_messages_sync(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
         """Synchronous implementation of search_messages."""

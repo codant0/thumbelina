@@ -22,6 +22,10 @@ interface WsIncoming {
 
 const CHARS_PER_TICK = 3
 const TICK_INTERVAL = 30
+// If no response arrives within this window, clear the waiting state
+// and surface a timeout message. Prevents the UI from hanging forever
+// when the backend LLM call hangs or the WS frame is silently dropped.
+const REPLY_TIMEOUT_MS = 90_000
 
 export function useWebSocket(url: string, activeConversationId?: string) {
   const [messages, setMessages] = useState<Message[]>([])
@@ -40,11 +44,36 @@ export function useWebSocket(url: string, activeConversationId?: string) {
   const twMsgIdRef = useRef<string | null>(null)
   const twTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const streamDoneRef = useRef(false)
+  const replyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Keep the active conversation ref in sync with the prop
   useEffect(() => {
     activeConversationRef.current = activeConversationId
   }, [activeConversationId])
+
+  const clearReplyTimer = useCallback(() => {
+    if (replyTimerRef.current) {
+      clearTimeout(replyTimerRef.current)
+      replyTimerRef.current = null
+    }
+  }, [])
+
+  const startReplyTimer = useCallback(() => {
+    clearReplyTimer()
+    replyTimerRef.current = setTimeout(() => {
+      replyTimerRef.current = null
+      setWaitingForReply(false)
+      setMessages(prev => [
+        ...prev,
+        {
+          id: String(msgIdRef.current++),
+          role: 'system',
+          content: 'Request timed out. The model may be unresponsive — please try again.',
+          timestamp: new Date().toISOString(),
+        },
+      ])
+    }, REPLY_TIMEOUT_MS)
+  }, [clearReplyTimer])
 
   const stopTypewriter = useCallback((finalId?: string) => {
     if (twTimerRef.current) clearInterval(twTimerRef.current)
@@ -80,6 +109,10 @@ export function useWebSocket(url: string, activeConversationId?: string) {
       } catch {
         return
       }
+
+      // Any message from the backend means the connection is alive; clear
+      // the reply timeout that was started when sendMessage fired.
+      clearReplyTimer()
 
       if (data.error) {
         setWaitingForReply(false)
@@ -270,16 +303,21 @@ export function useWebSocket(url: string, activeConversationId?: string) {
     ws.onclose = () => {
       setIsConnected(false)
       setIsStreaming(false)
+      clearReplyTimer()
+      setWaitingForReply(false)
     }
 
     ws.onerror = () => {
       setIsConnected(false)
       setIsStreaming(false)
+      clearReplyTimer()
+      setWaitingForReply(false)
     }
 
     return () => {
       if (twTimerRef.current) clearInterval(twTimerRef.current)
       twTimerRef.current = null
+      clearReplyTimer()
       ws.close()
     }
   }, [url])
@@ -300,13 +338,28 @@ export function useWebSocket(url: string, activeConversationId?: string) {
       bufferRef.current = ''
       displayedRef.current = 0
       setWaitingForReply(true)
+      startReplyTimer()
       const payload: Record<string, string> = { message }
       if (conversationId) {
         payload.conversation_id = conversationId
       }
-      wsRef.current.send(JSON.stringify(payload))
+      try {
+        wsRef.current.send(JSON.stringify(payload))
+      } catch {
+        clearReplyTimer()
+        setWaitingForReply(false)
+        setMessages(prev => [
+          ...prev,
+          {
+            id: String(msgIdRef.current++),
+            role: 'system',
+            content: 'Failed to send message. Please try again.',
+            timestamp: new Date().toISOString(),
+          },
+        ])
+      }
     }
-  }, [stopTypewriter])
+  }, [stopTypewriter, startReplyTimer, clearReplyTimer])
 
   const switchConversation = useCallback((conversationId: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {

@@ -24,7 +24,9 @@
     "active": "Active",
     "activating": "Activating…",
     "test": "Test",
-    "testing": "Testing…"
+    "testing": "Testing…",
+    "show": "Show",
+    "hide": "Hide"
   },
   "settings": {
     "title": "Settings",
@@ -33,7 +35,6 @@
     "model": "Model",
     "baseUrl": "Base URL",
     "apiKey": "API Key",
-    "rateLimit": "Enable Rate Limiting",
     "switchModel": "Switch Model",
     "switching": "Switching…",
     "userProfile": "User Profile",
@@ -43,7 +44,11 @@
     "confirmDelete": "Click again to confirm",
     "language": "Language",
     "presets": "LLM Presets",
-    "endpoints": "LLM Models"
+    "endpoints": "LLM Models",
+    "allDataDeleted": "All data deleted",
+    "failedToDelete": "Failed to delete data",
+    "exporting": "Exporting…",
+    "deleting": "Deleting…"
   },
   "language": {
     "en": "English",
@@ -57,7 +62,12 @@
     "service": "Service",
     "connected": "Connection normal ({latency}ms)",
     "failed": "Connection failed: {error}",
-    "skipped": "Skipped further checks"
+    "skipped": "Skipped further checks",
+    "testFailed": "Test failed",
+    "testTooltip": "Test connectivity to this endpoint",
+    "enterBaseUrl": "Enter a base URL first",
+    "testing": "Testing connection…",
+    "failedResult": "Connection failed — {error}"
   },
   "preset": {
     "title": "LLM Presets",
@@ -73,7 +83,18 @@
     "create": "Create Preset",
     "update": "Update Preset",
     "keepKeyHint": "(leave blank to keep current)",
-    "placeholder": "{\"temperature\": 0.7}"
+    "placeholder": "{\"temperature\": 0.7}",
+    "failedToLoad": "Failed to load presets",
+    "created": "Preset created",
+    "createFailed": "Failed to create preset",
+    "updated": "Preset updated",
+    "updateFailed": "Failed to update preset",
+    "deleted": "Preset deleted",
+    "deleteFailed": "Failed to delete preset",
+    "activated": "Activated preset: {name}",
+    "activateFailed": "Failed to activate preset",
+    "invalidJson": "Extra params must be valid JSON object",
+    "saveFailed": "Failed to save preset"
   },
   "endpoint": {
     "speedTest": "Speed Test",
@@ -101,7 +122,22 @@
     "providerRequired": "Provider is required",
     "invalidUrl": "Base URL must be a valid URL",
     "keepKeyHint": "Leave empty to keep current key",
-    "setDefault": "Set as default"
+    "setDefault": "Set as default",
+    "modelPlaceholder": "Select or type a model",
+    "modelListUnsupported": "Model listing not supported for this provider yet.",
+    "modelListRequired": "Provider, base URL and API key are required to fetch models",
+    "fetchModels": "Fetch available models",
+    "fetch": "Fetch",
+    "fetching": "Fetching",
+    "unreachable": "Unreachable",
+    "failedToLoad": "Failed to load endpoints",
+    "models": "Models",
+    "modelsHint": "Fetch the list to pick multiple, or add model names manually.",
+    "addModelManually": "Add model manually",
+    "addModelPlaceholder": "Model name, press Enter to add",
+    "activeModel": "Current model",
+    "activateModel": "Activate",
+    "noModels": "No models configured"
   },
   "channels": {
     "title": "Channels",
@@ -114,21 +150,66 @@
     "enableQQ": "Enable QQ Bot",
     "scanQR": "Scan QR Code to Login",
     "manualConfig": "Manual Config",
-    "reconnect": "Scan QR Code to Reconnect"
+    "reconnect": "Scan QR Code to Reconnect",
+    "appId": "App ID",
+    "appIdPlaceholder": "QQ Bot App ID",
+    "appSecret": "App Secret",
+    "keepCurrent": "Leave empty to keep current",
+    "allowedGuilds": "Allowed Guilds",
+    "guildPlaceholder": "Comma-separated guild IDs (empty = all)",
+    "allowedGroups": "Allowed Groups",
+    "groupPlaceholder": "Comma-separated group IDs (empty = all)",
+    "botToken": "Bot Token",
+    "botId": "Bot ID",
+    "userId": "User ID",
+    "ilinkBaseUrl": "iLink Base URL",
+    "ilinkPlaceholder": "https://ilinkai.weixin.qq.com (default)",
+    "notSet": "(not set)",
+    "qqNotEnabled": "QQ Bot is not enabled. Click Edit to configure.",
+    "wechatNotEnabled": "WeChat channel is not enabled. Click Edit to configure.",
+    "scanQRInstruction": "Scan this QR code with WeChat",
+    "qrScanned": "Scanned! Please confirm on your phone.",
+    "qrWaiting": "Waiting for confirmation…",
+    "qrSuccess": "Login successful!",
+    "qrSuccessDetail": "WeChat channel is now enabled and connected.",
+    "qrExpired": "QR code expired.",
+    "getNewQR": "Get New QR Code",
+    "qrError": "Something went wrong",
+    "fetchingQR": "Fetching QR code…",
+    "wechatReconnectWarn": "WeChat session expired or not logged in. Scan a QR code to reconnect."
   },
   "chat": {
     "startPrompt": "Start a conversation",
     "startHint": "Type a message below to begin",
     "noConversations": "No conversations yet.",
     "sendHint": "Send a message to start.",
-    "streamLabel": "Stream"
+    "streamLabel": "Stream",
+    "inputPlaceholder": "Type a message…",
+    "send": "Send",
+    "roleYou": "You",
+    "roleSystem": "System",
+    "roleAssistant": "Assistant",
+    "rateStars": "Rate {star} star{s}",
+    "rateThanks": "Thanks!",
+    "defaultModel": "Default model",
+    "chooseModel": "Choose model for this conversation",
+    "noModels": "No models configured. Add one in Settings.",
+    "sidebarTitle": "Conversations",
+    "newConversation": "New conversation",
+    "saveName": "Save name",
+    "renameConversation": "Rename conversation",
+    "deleteConversation": "Delete conversation",
+    "noConversationsYet": "No conversations yet. Send a message to start.",
+    "streamOnTitle": "Streaming on — typewriter effect",
+    "streamOffTitle": "Streaming off — instant reply"
   },
   "taskManager": {
     "title": "Task Manager",
     "subagents": "Subagents",
     "scheduledTasks": "Scheduled Tasks",
     "noSubagents": "No active subagents",
-    "noTasks": "No scheduled tasks"
+    "noTasks": "No scheduled tasks",
+    "fetchFailed": "Failed to fetch data"
   },
   "memory": {
     "title": "Memory",
@@ -141,7 +222,9 @@
     "loadSkills": "Load Skills",
     "skillCompositions": "Skill Compositions",
     "noSkills": "No skills found",
-    "noCompositions": "No compositions found"
+    "noCompositions": "No compositions found",
+    "loaded": "Loaded",
+    "searchFailed": "Search failed"
   },
   "dream": {
     "title": "Dream",
@@ -154,7 +237,8 @@
     "topSkills": "Top Skills by Maturity",
     "categoryTitle": "Categories",
     "skillCloud": "Skill Cloud",
-    "noSkills": "No skills recorded yet. Skills will appear here as the agent learns."
+    "noSkills": "No skills recorded yet. Skills will appear here as the agent learns.",
+    "errors": "Failed to load skill statistics"
   },
   "plugins": {
     "title": "Plugins",
@@ -165,7 +249,10 @@
     "sandboxReport": "Sandbox Validation Report",
     "valid": "valid",
     "invalid": "invalid",
-    "violations": "violations"
+    "violations": "violations",
+    "sandboxOk": "sandbox ok",
+    "violationsCount": "{count} violations",
+    "line": "(line {number})"
   },
   "profile": {
     "communicationStyle": "Communication Style",
@@ -173,5 +260,11 @@
     "preferences": "Preferences",
     "notSet": "Not set",
     "noData": "No profile data yet. The agent will build your profile as you chat."
+  },
+  "theme": {
+    "dark": "Dark",
+    "light": "Light",
+    "warm": "Warm",
+    "changeTheme": "Change theme"
   }
 }

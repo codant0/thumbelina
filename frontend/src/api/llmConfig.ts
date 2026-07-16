@@ -3,7 +3,8 @@ export interface LLMEndpoint {
   provider: 'openai' | 'ollama' | 'anthropic'
   name: string
   base_url: string
-  model: string
+  models: string[]
+  active_model?: string | null
   api_key_set: boolean
   is_default: boolean
   last_latency_ms?: number
@@ -16,7 +17,7 @@ export interface EndpointFormData {
   provider: 'openai' | 'ollama' | 'anthropic'
   name: string
   base_url: string
-  model: string
+  models: string[]
   api_key: string
   is_default: boolean
 }
@@ -126,6 +127,16 @@ export async function updateEndpoint(id: string, data: Partial<EndpointFormData>
 
 export async function deleteEndpoint(id: string): Promise<void> {
   await request<void>(`/config/llm/endpoints/${id}`, { method: 'DELETE' })
+}
+
+export async function activateEndpointModel(
+  endpointId: string,
+  model: string,
+): Promise<LLMEndpoint> {
+  return request<LLMEndpoint>(`/config/llm/endpoints/${endpointId}/activate`, {
+    method: 'POST',
+    body: JSON.stringify({ model }),
+  })
 }
 
 export async function runSpeedTest(id: string, model: string): Promise<SpeedTestResult> {

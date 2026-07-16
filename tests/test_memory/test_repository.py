@@ -219,3 +219,52 @@ class TestConversationRepository:
         assert len(messages) == 5
         for i, message in enumerate(messages):
             assert message["content"] == f"Message {i}"
+
+
+class TestConversationRenameAndEndpoint:
+    """Tests for rename_conversation and set_conversation_endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_rename_conversation(self, repo: ConversationRepository):
+        """rename_conversation should update the name."""
+        cid = await repo.create_conversation()
+        ok = await repo.rename_conversation(cid, "我的会话")
+        assert ok is True
+        conv = await repo.get_conversation(cid)
+        assert conv["name"] == "我的会话"
+
+    @pytest.mark.asyncio
+    async def test_rename_nonexistent_returns_false(self, repo: ConversationRepository):
+        """rename_conversation should return False for unknown IDs."""
+        assert await repo.rename_conversation("nope", "x") is False
+
+    @pytest.mark.asyncio
+    async def test_rename_exposed_in_list(self, repo: ConversationRepository):
+        """Renamed conversations should expose the name via get_conversations."""
+        cid = await repo.create_conversation()
+        await repo.rename_conversation(cid, "列表名")
+        convs = await repo.get_conversations()
+        target = next(c for c in convs if c["id"] == cid)
+        assert target["name"] == "列表名"
+
+    @pytest.mark.asyncio
+    async def test_set_conversation_endpoint(self, repo: ConversationRepository):
+        """set_conversation_endpoint should persist endpoint_id."""
+        cid = await repo.create_conversation()
+        assert await repo.set_conversation_endpoint(cid, "ep-1") is True
+        conv = await repo.get_conversation(cid)
+        assert conv["endpoint_id"] == "ep-1"
+
+    @pytest.mark.asyncio
+    async def test_clear_conversation_endpoint(self, repo: ConversationRepository):
+        """Passing None should clear the endpoint_id."""
+        cid = await repo.create_conversation()
+        await repo.set_conversation_endpoint(cid, "ep-1")
+        assert await repo.set_conversation_endpoint(cid, None) is True
+        conv = await repo.get_conversation(cid)
+        assert conv["endpoint_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_set_endpoint_nonexistent_returns_false(self, repo: ConversationRepository):
+        """set_conversation_endpoint should return False for unknown IDs."""
+        assert await repo.set_conversation_endpoint("nope", "ep-1") is False

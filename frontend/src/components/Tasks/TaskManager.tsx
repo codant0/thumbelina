@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Bot, X, CalendarClock } from 'lucide-react'
+import { useTranslation } from '../../i18n'
 
 interface Subagent {
   id: string
@@ -27,6 +28,7 @@ export function TaskManager() {
   const [subagents, setSubagents] = useState<Subagent[]>([])
   const [tasks, setTasks] = useState<ScheduledTask[]>([])
   const [error, setError] = useState('')
+  const { t } = useTranslation()
 
   const fetchData = async () => {
     try {
@@ -38,7 +40,7 @@ export function TaskManager() {
       if (tasksRes.ok) setTasks(await tasksRes.json())
       setError('')
     } catch {
-      setError('Failed to fetch data')
+      setError(t('taskManager.fetchFailed'))
     }
   }
 
@@ -64,14 +66,14 @@ export function TaskManager() {
 
   return (
     <div className="page-container" data-testid="task-manager">
-      <div className="page-title">Task Manager</div>
+      <div className="page-title">{t('taskManager.title')}</div>
       {error && <p data-testid="task-error" className="error-state" style={{ padding: 0 }}>{error}</p>}
 
       <div className="card">
-        <div className="card-title"><Bot size={14} />Subagents</div>
+        <div className="card-title"><Bot size={14} />{t('taskManager.subagents')}</div>
         <div className="task-list" data-testid="subagent-list">
           {subagents.length === 0 ? (
-            <p className="task-empty">No active subagents</p>
+            <p className="task-empty">{t('taskManager.noSubagents')}</p>
           ) : (
             subagents.map(agent => (
               <div key={agent.id} className="task-item" data-testid="subagent-item">
@@ -88,7 +90,7 @@ export function TaskManager() {
                   <div className="task-actions">
                     <button className="btn btn-danger btn-sm" data-testid="cancel-subagent" onClick={() => handleCancelSubagent(agent.id)}>
                       <X size={14} />
-                      Cancel
+                      {t('common.cancel')}
                     </button>
                   </div>
                 )}
@@ -99,10 +101,10 @@ export function TaskManager() {
       </div>
 
       <div className="card">
-        <div className="card-title"><CalendarClock size={14} />Scheduled Tasks</div>
+        <div className="card-title"><CalendarClock size={14} />{t('taskManager.scheduledTasks')}</div>
         <div className="task-list" data-testid="task-list">
           {tasks.length === 0 ? (
-            <p className="task-empty">No scheduled tasks</p>
+            <p className="task-empty">{t('taskManager.noTasks')}</p>
           ) : (
             tasks.map(task => (
               <div key={task.id} className="task-item" data-testid="task-item">
@@ -119,7 +121,7 @@ export function TaskManager() {
                   <div className="task-actions">
                     <button className="btn btn-danger btn-sm" data-testid="cancel-task" onClick={() => handleCancelTask(task.id)}>
                       <X size={14} />
-                      Cancel
+                      {t('common.cancel')}
                     </button>
                   </div>
                 )}

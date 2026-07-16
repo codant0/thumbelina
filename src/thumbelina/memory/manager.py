@@ -168,6 +168,66 @@ class MemoryManager:
         """
         return await self.repository.set_summary(conversation_id, summary)
 
+    async def rename_conversation(self, conversation_id: str, name: str) -> bool:
+        """Update the human-readable name of a conversation.
+
+        Parameters
+        ----------
+        conversation_id:
+            ID of the conversation to rename.
+        name:
+            New name. Pass an empty string to clear the name.
+
+        Returns
+        -------
+        bool
+            True if renamed successfully, False if conversation not found.
+        """
+        return await self.repository.rename_conversation(conversation_id, name)
+
+    async def set_conversation_endpoint(
+        self, conversation_id: str, endpoint_id: str | None
+    ) -> bool:
+        """Associate a conversation with a configured LLM endpoint.
+
+        Parameters
+        ----------
+        conversation_id:
+            ID of the conversation to update.
+        endpoint_id:
+            ID of the configured endpoint, or None to revert to the default.
+
+        Returns
+        -------
+        bool
+            True if set successfully, False if conversation not found.
+        """
+        return await self.repository.set_conversation_endpoint(
+            conversation_id, endpoint_id
+        )
+
+    async def set_conversation_model(
+        self, conversation_id: str, model: str | None
+    ) -> bool:
+        """Set the specific model used for a conversation.
+
+        Parameters
+        ----------
+        conversation_id:
+            ID of the conversation to update.
+        model:
+            Model name within the conversation's endpoint, or None to use the
+            endpoint's active/default model.
+
+        Returns
+        -------
+        bool
+            True if set successfully, False if conversation not found.
+        """
+        return await self.repository.set_conversation_model(
+            conversation_id, model
+        )
+
     async def search(
         self,
         query: str,

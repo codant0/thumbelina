@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, type FormEvent } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import { Radio, QrCode, Loader2, AlertTriangle, CircleCheck } from 'lucide-react'
+import { useTranslation } from '../../i18n'
 
 interface ChannelConfig {
   qq: {
@@ -64,6 +65,7 @@ export function ChannelsPage() {
   const [qrData, setQrData] = useState<{ qrcode: string; imgContent: string } | null>(null)
   const [qrError, setQrError] = useState<string | null>(null)
   const pollingRef = useRef(false)
+  const { t } = useTranslation()
 
   const loadConfig = async () => {
     try {
@@ -199,7 +201,7 @@ export function ChannelsPage() {
         await loadConfig()
         setQrFlow('confirmed')
         if (confirmData?.connected) {
-          setMessage({ channel: 'wechat', text: 'Login successful! WeChat channel is connected.', error: false })
+          setMessage({ channel: 'wechat', text: t('channels.qrSuccess') + ' ' + t('channels.qrSuccessDetail'), error: false })
         }
         // Notify App to refresh conversation list (WeChat conversation was created)
         window.dispatchEvent(new Event('conversations-updated'))
@@ -320,22 +322,22 @@ export function ChannelsPage() {
   if (loading) {
     return (
       <div className="page-container" data-testid="channels-page">
-        <div className="page-title">Channels</div>
-        <div className="loading-state"><div className="spinner" /><span>Loading...</span></div>
+        <div className="page-title">{t('channels.title')}</div>
+        <div className="loading-state"><div className="spinner" /><span>{t('dream.loading')}</span></div>
       </div>
     )
   }
 
   return (
     <div className="page-container" data-testid="channels-page">
-      <div className="page-title">Channels</div>
+      <div className="page-title">{t('channels.title')}</div>
 
       {/* QQ Bot Card */}
       <div className="card" data-testid="qq-channel-card">
         <div className="card-title card-title--between">
-          <span><Radio size={14} />QQ Bot</span>
+          <span><Radio size={14} />{t('channels.qqBot')}</span>
           <span className={`badge ${config?.qq.enabled ? 'badge-success' : 'badge-error'}`}>
-            {config?.qq.enabled ? 'enabled' : 'disabled'}
+            {config?.qq.enabled ? t('channels.enabled') : t('channels.disabled')}
           </span>
         </div>
 
@@ -348,58 +350,58 @@ export function ChannelsPage() {
                   checked={qqForm.enabled}
                   onChange={e => setQqForm({ ...qqForm, enabled: e.target.checked })}
                 />
-                Enable QQ Bot
+                {t('channels.enableQQ')}
               </label>
             </div>
             <div className="form-group">
-              <label className="form-label" htmlFor="qq-app-id">App ID</label>
+              <label className="form-label" htmlFor="qq-app-id">{t('channels.appId')}</label>
               <input
                 id="qq-app-id"
                 type="text"
                 className="form-input"
                 value={qqForm.app_id}
                 onChange={e => setQqForm({ ...qqForm, app_id: e.target.value })}
-                placeholder="QQ Bot App ID"
+                placeholder={t('channels.appIdPlaceholder')}
               />
             </div>
             <div className="form-group">
-              <label className="form-label" htmlFor="qq-app-secret">App Secret</label>
+              <label className="form-label" htmlFor="qq-app-secret">{t('channels.appSecret')}</label>
               <input
                 id="qq-app-secret"
                 type="password"
                 className="form-input"
                 value={qqForm.app_secret}
                 onChange={e => setQqForm({ ...qqForm, app_secret: e.target.value })}
-                placeholder={config?.qq.app_secret_set ? "Leave empty to keep current" : ""}
+                placeholder={config?.qq.app_secret_set ? t('channels.keepCurrent') : ""}
               />
             </div>
             <div className="form-group">
-              <label className="form-label" htmlFor="qq-guilds">Allowed Guilds</label>
+              <label className="form-label" htmlFor="qq-guilds">{t('channels.allowedGuilds')}</label>
               <input
                 id="qq-guilds"
                 type="text"
                 className="form-input"
                 value={qqForm.allowed_guilds}
                 onChange={e => setQqForm({ ...qqForm, allowed_guilds: e.target.value })}
-                placeholder="Comma-separated guild IDs (empty = all)"
+                placeholder={t('channels.guildPlaceholder')}
               />
             </div>
             <div className="form-group">
-              <label className="form-label" htmlFor="qq-groups">Allowed Groups</label>
+              <label className="form-label" htmlFor="qq-groups">{t('channels.allowedGroups')}</label>
               <input
                 id="qq-groups"
                 type="text"
                 className="form-input"
                 value={qqForm.allowed_groups}
                 onChange={e => setQqForm({ ...qqForm, allowed_groups: e.target.value })}
-                placeholder="Comma-separated group IDs (empty = all)"
+                placeholder={t('channels.groupPlaceholder')}
               />
             </div>
             <div className="settings-actions">
               <button type="submit" className="btn btn-primary" disabled={saving === 'qq'}>
-                {saving === 'qq' ? 'Saving...' : 'Save'}
+                {saving === 'qq' ? t('common.saving') : t('common.save')}
               </button>
-              <button type="button" className="btn btn-ghost" onClick={() => setEditingQq(false)}>Cancel</button>
+              <button type="button" className="btn btn-ghost" onClick={() => setEditingQq(false)}>{t('common.cancel')}</button>
             </div>
           </form>
         ) : (
@@ -409,20 +411,20 @@ export function ChannelsPage() {
                 <div className="channel-status-row">
                   <div className="channel-status-info">
                     <span className={`dot ${qqStatus?.connected ? 'connected' : 'disconnected'}`} />
-                    <span>{qqStatus?.connected ? 'Connected' : qqStatus?.error || 'Disconnected'}</span>
+                    <span>{qqStatus?.connected ? t('common.connected') : qqStatus?.error || t('common.disconnected')}</span>
                   </div>
                 </div>
 
                 <div className="form-group">
-                  <label className="form-label">App ID</label>
+                  <label className="form-label">{t('channels.appId')}</label>
                   <div className="form-input channel-readout">
-                    {config.qq.app_id || '(not set)'}
+                    {config.qq.app_id || t('channels.notSet')}
                   </div>
                 </div>
 
                 {config.qq.allowed_guilds.length > 0 && (
                   <div className="form-group">
-                    <label className="form-label">Allowed Guilds</label>
+                    <label className="form-label">{t('channels.allowedGuilds')}</label>
                     <div className="channel-tags">
                       {config.qq.allowed_guilds.map(id => (
                         <span key={id} className="badge badge-neutral channel-tag">{id}</span>
@@ -433,7 +435,7 @@ export function ChannelsPage() {
 
                 {config.qq.allowed_groups.length > 0 && (
                   <div className="form-group">
-                    <label className="form-label">Allowed Groups</label>
+                    <label className="form-label">{t('channels.allowedGroups')}</label>
                     <div className="channel-tags">
                       {config.qq.allowed_groups.map(id => (
                         <span key={id} className="badge badge-neutral channel-tag">{id}</span>
@@ -444,12 +446,12 @@ export function ChannelsPage() {
               </>
             ) : (
               <p className="task-empty">
-                QQ Bot is not enabled. Click Edit to configure.
+                {t('channels.qqNotEnabled')}
               </p>
             )}
             <div className="settings-actions">
               <button className="btn btn-ghost" onClick={startEditQq} data-testid="edit-qq-button">
-                Edit
+                {t('common.edit')}
               </button>
             </div>
           </>
@@ -465,9 +467,9 @@ export function ChannelsPage() {
       {/* WeChat Card */}
       <div className="card" data-testid="wechat-channel-card">
         <div className="card-title card-title--between">
-          <span><QrCode size={14} />WeChat</span>
+          <span><QrCode size={14} />{t('channels.wechat')}</span>
           <span className={`badge ${config?.wechat.enabled ? 'badge-success' : 'badge-error'}`}>
-            {config?.wechat.enabled ? 'enabled' : 'disabled'}
+            {config?.wechat.enabled ? t('channels.enabled') : t('channels.disabled')}
           </span>
         </div>
 
@@ -480,22 +482,22 @@ export function ChannelsPage() {
                   checked={wechatForm.enabled}
                   onChange={e => setWechatForm({ ...wechatForm, enabled: e.target.checked })}
                 />
-                Enable WeChat Channel
+                {t('channels.enableWechat')}
               </label>
             </div>
             <div className="form-group">
-              <label className="form-label" htmlFor="wechat-bot-token">Bot Token</label>
+              <label className="form-label" htmlFor="wechat-bot-token">{t('channels.botToken')}</label>
               <input
                 id="wechat-bot-token"
                 type="password"
                 className="form-input"
                 value={wechatForm.bot_token}
                 onChange={e => setWechatForm({ ...wechatForm, bot_token: e.target.value })}
-                placeholder={config?.wechat.bot_token_set ? "Leave empty to keep current" : ""}
+                placeholder={config?.wechat.bot_token_set ? t('channels.keepCurrent') : ""}
               />
             </div>
             <div className="form-group">
-              <label className="form-label" htmlFor="wechat-bot-id">Bot ID</label>
+              <label className="form-label" htmlFor="wechat-bot-id">{t('channels.botId')}</label>
               <input
                 id="wechat-bot-id"
                 type="text"
@@ -506,7 +508,7 @@ export function ChannelsPage() {
               />
             </div>
             <div className="form-group">
-              <label className="form-label" htmlFor="wechat-user-id">User ID</label>
+              <label className="form-label" htmlFor="wechat-user-id">{t('channels.userId')}</label>
               <input
                 id="wechat-user-id"
                 type="text"
@@ -517,21 +519,21 @@ export function ChannelsPage() {
               />
             </div>
             <div className="form-group">
-              <label className="form-label" htmlFor="wechat-base-url">iLink Base URL</label>
+              <label className="form-label" htmlFor="wechat-base-url">{t('channels.ilinkBaseUrl')}</label>
               <input
                 id="wechat-base-url"
                 type="text"
                 className="form-input"
                 value={wechatForm.ilink_base_url}
                 onChange={e => setWechatForm({ ...wechatForm, ilink_base_url: e.target.value })}
-                placeholder="https://ilinkai.weixin.qq.com (default)"
+                placeholder={t('channels.ilinkPlaceholder')}
               />
             </div>
             <div className="settings-actions">
               <button type="submit" className="btn btn-primary" disabled={saving === 'wechat'}>
-                {saving === 'wechat' ? 'Saving...' : 'Save'}
+                {saving === 'wechat' ? t('common.saving') : t('common.save')}
               </button>
-              <button type="button" className="btn btn-ghost" onClick={() => setEditingWechat(false)}>Cancel</button>
+              <button type="button" className="btn btn-ghost" onClick={() => setEditingWechat(false)}>{t('common.cancel')}</button>
             </div>
           </form>
         ) : (
@@ -541,7 +543,7 @@ export function ChannelsPage() {
                 <div className="channel-status-row">
                   <div className="channel-status-info">
                     <span className={`dot ${wechatStatus?.connected ? 'connected' : 'disconnected'}`} />
-                    <span>{wechatStatus?.connected ? 'Connected' : wechatStatus?.error || 'Disconnected'}</span>
+                    <span>{wechatStatus?.connected ? t('common.connected') : wechatStatus?.error || t('common.disconnected')}</span>
                   </div>
                 </div>
 
@@ -549,22 +551,22 @@ export function ChannelsPage() {
                   <div className="channel-warning">
                     <AlertTriangle size={16} />
                     <div>
-                      <p>WeChat session expired or not logged in. Scan a QR code to reconnect.</p>
+                      <p>{t('channels.wechatReconnectWarn')}</p>
                       <button
                         className="btn btn-primary btn-sm"
                         onClick={startQRFlow}
                         data-testid="wechat-reconnect-button"
                       >
-                        Scan QR Code to Reconnect
+                        {t('channels.reconnect')}
                       </button>
                     </div>
                   </div>
                 )}
 
                 <div className="form-group">
-                  <label className="form-label">Bot ID</label>
+                  <label className="form-label">{t('channels.botId')}</label>
                   <div className="form-input channel-readout">
-                    {config.wechat.ilink_bot_id || '(not set)'}
+                    {config.wechat.ilink_bot_id || t('channels.notSet')}
                   </div>
                 </div>
               </>
@@ -573,7 +575,7 @@ export function ChannelsPage() {
             {!config?.wechat.enabled && qrFlow === 'idle' && (
               <div className="channel-qr">
                 <p className="task-empty">
-                  Scan a QR code with WeChat to login, or configure manually.
+                  {t('channels.wechatNotEnabled')}
                 </p>
                 <div className="settings-actions">
                   <button
@@ -581,14 +583,14 @@ export function ChannelsPage() {
                     onClick={startQRFlow}
                     data-testid="wechat-qrcode-button"
                   >
-                    Scan QR Code to Login
+                    {t('channels.scanQR')}
                   </button>
                   <button
                     className="btn btn-ghost"
                     onClick={startEditWechat}
                     data-testid="edit-wechat-button"
                   >
-                    Manual Config
+                    {t('channels.manualConfig')}
                   </button>
                 </div>
               </div>
@@ -598,7 +600,7 @@ export function ChannelsPage() {
               <div className="channel-qr">
                 <Loader2 size={24} className="spin" />
                 <p className="task-empty">
-                  Fetching QR code...
+                  {t('channels.fetchingQR')}
                 </p>
               </div>
             )}
@@ -610,11 +612,11 @@ export function ChannelsPage() {
                 </div>
                 <p className="channel-qr-status channel-qr-status--primary">
                   {qrFlow === 'scanned'
-                    ? 'Scanned! Please confirm on your phone.'
-                    : 'Scan this QR code with WeChat'}
+                    ? t('channels.qrScanned')
+                    : t('channels.scanQRInstruction')}
                 </p>
                 <p className="channel-qr-status">
-                  Waiting for confirmation...
+                  {t('channels.qrWaiting')}
                 </p>
                 <button
                   className="btn btn-ghost btn-sm"
@@ -629,13 +631,13 @@ export function ChannelsPage() {
               <div className="channel-qr">
                 <CircleCheck size={32} style={{ color: 'var(--success)' }} />
                 <p className="channel-qr-status channel-qr-status--primary">
-                  Login successful!
+                  {t('channels.qrSuccess')}
                 </p>
                 <p className="task-empty">
-                  WeChat channel is now enabled and connected.
+                  {t('channels.qrSuccessDetail')}
                 </p>
                 <button className="btn btn-ghost" onClick={resetQRFlow}>
-                  Done
+                  {t('common.done')}
                 </button>
               </div>
             )}
@@ -643,11 +645,11 @@ export function ChannelsPage() {
             {qrFlow === 'expired' && (
               <div className="channel-qr">
                 <p className="channel-qr-status" style={{ color: 'var(--error)' }}>
-                  QR code expired.
+                  {t('channels.qrExpired')}
                 </p>
                 <div className="settings-actions">
                   <button className="btn btn-primary" onClick={startQRFlow}>
-                    Get New QR Code
+                    {t('channels.getNewQR')}
                   </button>
                   <button className="btn btn-ghost" onClick={resetQRFlow}>
                     Cancel
@@ -659,11 +661,11 @@ export function ChannelsPage() {
             {qrFlow === 'error' && (
               <div className="channel-qr">
                 <p className="channel-qr-status" style={{ color: 'var(--error)' }}>
-                  {qrError || 'Something went wrong'}
+                  {qrError || t('channels.qrError')}
                 </p>
                 <div className="settings-actions">
                   <button className="btn btn-primary" onClick={startQRFlow}>
-                    Retry
+                    {t('common.retry')}
                   </button>
                   <button className="btn btn-ghost" onClick={resetQRFlow}>
                     Cancel
@@ -675,7 +677,7 @@ export function ChannelsPage() {
             {config?.wechat.enabled && (
               <div className="settings-actions">
                 <button className="btn btn-ghost" onClick={startEditWechat} data-testid="edit-wechat-button">
-                  Edit
+                  {t('common.edit')}
                 </button>
               </div>
             )}
