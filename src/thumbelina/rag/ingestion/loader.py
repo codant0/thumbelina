@@ -10,6 +10,7 @@
 """
 
 from abc import ABC, abstractmethod
+
 from llama_index.core import SimpleDirectoryReader
 from llama_index_client import Document
 
@@ -23,6 +24,7 @@ class Loader(ABC):
 class TextLoader(Loader):
     def load(self, path) -> list[Document]:
         return SimpleDirectoryReader(path).load_data()
+
 
 # test code, need delete
 path = "src/thumbelina/rag/demo/data"
