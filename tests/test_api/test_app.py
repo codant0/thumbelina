@@ -72,17 +72,9 @@ def test_cors_options_request(client):
 
 
 def _collect_paths(app: FastAPI) -> set[str]:
-    """Recursively collect all route paths from a FastAPI app."""
-    paths: set[str] = set()
-    for route in app.routes:
-        if hasattr(route, "path"):
-            paths.add(route.path)
-        if hasattr(route, "routes"):
-            # Included sub-router — recurse into its child routes
-            for child in route.routes:
-                if hasattr(child, "path"):
-                    paths.add(child.path)
-    return paths
+    """Collect all registered route paths via the OpenAPI schema."""
+    schema = app.openapi()
+    return set(schema.get("paths", {}).keys())
 
 
 def test_app_includes_chat_router(test_config):
