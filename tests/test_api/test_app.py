@@ -71,14 +71,28 @@ def test_cors_options_request(client):
     assert response.status_code == 200
 
 
+def _collect_paths(app: FastAPI) -> set[str]:
+    """Recursively collect all route paths from a FastAPI app."""
+    paths: set[str] = set()
+    for route in app.routes:
+        if hasattr(route, "path"):
+            paths.add(route.path)
+        if hasattr(route, "routes"):
+            # Included sub-router — recurse into its child routes
+            for child in route.routes:
+                if hasattr(child, "path"):
+                    paths.add(child.path)
+    return paths
+
+
 def test_app_includes_chat_router(test_config):
     """App should include the chat router."""
     from thumbelina.api.app import create_app
 
     app = create_app(test_config)
     # Check that /api/v1/chat route exists
-    routes = [r.path for r in app.routes]
-    assert "/api/v1/chat" in routes
+    paths = _collect_paths(app)
+    assert "/api/v1/chat" in paths
 
 
 def test_app_includes_conversations_router(test_config):
@@ -86,6 +100,6 @@ def test_app_includes_conversations_router(test_config):
     from thumbelina.api.app import create_app
 
     app = create_app(test_config)
-    routes = [r.path for r in app.routes]
-    assert "/api/v1/conversations" in routes
-    assert "/api/v1/conversations/{conversation_id}" in routes
+    paths = _collect_paths(app)
+    assert "/api/v1/conversations" in paths
+    assert "/api/v1/conversations/{conversation_id}" in paths
