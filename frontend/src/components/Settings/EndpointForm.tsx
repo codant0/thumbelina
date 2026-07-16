@@ -1,9 +1,8 @@
 import { useState, type FormEvent } from 'react'
-import type { EndpointFormData, LLMEndpoint } from '../../api/llmConfig'
+import type { EndpointFormData, LLMEndpoint, ModelList } from '../../api/llmConfig'
 import { useTranslation } from '../../i18n'
 import { ConnectionTestButton } from './ConnectionTestButton'
-import { ModelSelector } from './ModelSelector'
-import { Cpu, Tag, Server, KeyRound, Box, Star, Save } from 'lucide-react'
+import { Cpu, Tag, Server, KeyRound, Box, Star, Save, Download, X, Loader2, Check } from 'lucide-react'
 
 interface EndpointFormProps {
   initialValues?: LLMEndpoint
@@ -16,10 +15,45 @@ export function EndpointForm({ initialValues, onSubmit, onCancel }: EndpointForm
   const [provider, setProvider] = useState<'openai' | 'ollama' | 'anthropic'>(initialValues?.provider ?? 'openai')
   const [name, setName] = useState(initialValues?.name ?? '')
   const [baseUrl, setBaseUrl] = useState(initialValues?.base_url ?? '')
-  const [model, setModel] = useState(initialValues?.model ?? '')
+  const [models, setModels] = useState<string[]>(initialValues?.models ?? [])
   const [apiKey, setApiKey] = useState('')
   const [isDefault, setIsDefault] = useState(initialValues?.is_default ?? false)
   const [error, setError] = useState('')
+  const [availableModels, setAvailableModels] = useState<string[]>([])
+  const [fetching, setFetching] = useState(false)
+  const [manualModel, setManualModel] = useState('')
+
+  const supported = provider === 'openai'
+
+  const handleFetchModels = async () => {
+    if (!supported || !provider || !baseUrl || !apiKey && !initialValues?.api_key_set) return
+    setFetching(true)
+    try {
+      const params = new URLSearchParams()
+      params.set('provider', provider)
+      params.set('base_url', baseUrl)
+      if (apiKey) params.set('api_key', apiKey)
+      const res = await fetch(`/api/v1/config/llm/models?${params.toString()}`)
+      if (res.ok) {
+        const data = (await res.json()) as ModelList
+        setAvailableModels(data.models ?? [])
+      }
+    } catch { /* ignore */ } finally {
+      setFetching(false)
+    }
+  }
+
+  const toggleModel = (m: string) => {
+    setModels(prev => prev.includes(m) ? prev.filter(x => x !== m) : [...prev, m])
+  }
+
+  const addManualModel = () => {
+    const m = manualModel.trim()
+    if (m && !models.includes(m)) {
+      setModels(prev => [...prev, m])
+    }
+    setManualModel('')
+  }
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault()
@@ -42,7 +76,7 @@ export function EndpointForm({ initialValues, onSubmit, onCancel }: EndpointForm
       provider,
       name: name.trim(),
       base_url: baseUrl.trim(),
-      model: model.trim(),
+      models,
       api_key: apiKey,
       is_default: isDefault,
     })
@@ -96,21 +130,75 @@ export function EndpointForm({ initialValues, onSubmit, onCancel }: EndpointForm
         />
       </div>
       <div className="form-group">
-        <label className="form-label"><Box size={14} />{t('settings.model')}</label>
-        <ModelSelector
-          provider={provider}
-          base_url={baseUrl}
-          api_key={apiKey}
-          model={model}
-          onSelect={m => setModel(m)}
-        />
+        <label className="form-label">
+          <Box size={14} />{t('endpoint.models')}
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            data-testid="fetch-models-button"
+            onClick={handleFetchModels}
+            disabled={fetching || !supported || !baseUrl}
+            title={supported ? t('endpoint.fetchModels') : t('endpoint.modelListUnsupported')}
+            style={{ marginLeft: 8 }}
+          >
+            {fetching ? <Loader2 size={14} className="spin" /> : <Download size={14} />}
+            {fetching ? t('endpoint.fetching') : t('endpoint.fetch')}
+          </button>
+        </label>
+        <p className="form-hint" style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0 8px' }}>
+          {t('endpoint.modelsHint')}
+        </p>
+        {/* Unified model list: selected first (green), then unselected fetched (neutral) */}
+        {(() => {
+          const allModels = Array.from(new Set([...models, ...availableModels]))
+          const selected = allModels.filter(m => models.includes(m))
+          const unselected = allModels.filter(m => !models.includes(m))
+          const ordered = [...selected, ...unselected]
+          if (ordered.length === 0) {
+            return <span className="form-hint" style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('endpoint.noModels')}</span>
+          }
+          return (
+            <div data-testid="model-unified-list" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+              {ordered.map(m => {
+                const checked = models.includes(m)
+                return (
+                  <button
+                    type="button"
+                    key={m}
+                    className={`badge ${checked ? 'badge-success' : 'badge-neutral'}`}
+                    data-testid={checked ? `model-chip-${m}` : `model-toggle-${m}`}
+                    onClick={() => toggleModel(m)}
+                    style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                  >
+                    {checked && <Check size={11} />}
+                    {m}
+                    {checked && <X size={11} />}
+                  </button>
+                )
+              })}
+            </div>
+          )
+        })()}
+        <div className="model-manual-add" style={{ display: 'flex', gap: 6 }}>
+          <input
+            className="form-input"
+            data-testid="manual-model-input"
+            value={manualModel}
+            onChange={e => setManualModel(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addManualModel() } }}
+            placeholder={t('endpoint.addModelPlaceholder')}
+          />
+          <button type="button" className="btn btn-ghost btn-sm" onClick={addManualModel} data-testid="add-manual-model">
+            {t('endpoint.addModelManually')}
+          </button>
+        </div>
       </div>
       <div className="form-group">
         <ConnectionTestButton
           provider={provider}
           base_url={baseUrl}
           api_key={apiKey}
-          model={model}
+          model={models[0]}
           endpointId={initialValues?.id}
         />
       </div>

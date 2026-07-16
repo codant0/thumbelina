@@ -1,6 +1,7 @@
 import type { ConnectionTestResult } from '../../api/llmConfig'
 import type { ReactNode } from 'react'
 import { Check, X, Loader2, Globe, Lock, Server } from 'lucide-react'
+import { useTranslation } from '../../i18n'
 
 interface ConnectionTestResultDisplayProps {
   result: ConnectionTestResult | null
@@ -8,12 +9,13 @@ interface ConnectionTestResultDisplayProps {
 }
 
 export function ConnectionTestResultDisplay({ result, loading }: ConnectionTestResultDisplayProps) {
+  const { t } = useTranslation()
   if (loading) {
     return (
       <div className="conn-test">
         <div className="conn-test__summary">
           <Loader2 size={16} className="spin" />
-          Testing connection…
+          {t('connectionTest.testing')}
         </div>
       </div>
     )
@@ -24,8 +26,8 @@ export function ConnectionTestResultDisplay({ result, loading }: ConnectionTestR
 
   const ok = result.reachable
   const summary = ok
-    ? `Connected — ${result.latency_ms} ms`
-    : `Connection failed — ${result.error || 'Unknown error'}`
+    ? t('connectionTest.connected', { latency: result.latency_ms ?? 0 })
+    : t('connectionTest.failedResult', { error: result.error || t('connectionTest.failed') })
 
   return (
     <div className="conn-test">
@@ -37,21 +39,21 @@ export function ConnectionTestResultDisplay({ result, loading }: ConnectionTestR
         <ul className="conn-test__list">
           <DetailLine
             icon={<Globe size={14} />}
-            label="Network"
+            label={t('connectionTest.network')}
             ok={result.details.network.ok}
             latency={result.details.network.latency_ms}
             error={result.details.network.error}
           />
           <DetailLine
             icon={<Lock size={14} />}
-            label="Auth"
+            label={t('connectionTest.auth')}
             ok={result.details.auth.ok}
             latency={result.details.auth.latency_ms}
             error={result.details.auth.error}
           />
           <DetailLine
             icon={<Server size={14} />}
-            label="Service"
+            label={t('connectionTest.service')}
             ok={result.details.service.ok}
             latency={result.details.service.latency_ms}
             error={result.details.service.error}

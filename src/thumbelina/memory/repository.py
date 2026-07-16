@@ -191,6 +191,7 @@ class ConversationRepository:
                     "name": conv.name,
                     "pinned": conv.pinned or False,
                     "endpoint_id": conv.endpoint_id,
+                    "model": conv.model,
                     "created_at": conv.created_at.isoformat(),
                     "updated_at": conv.updated_at.isoformat(),
                     "summary": conv.summary,
@@ -225,6 +226,7 @@ class ConversationRepository:
                     "name": conv.name,
                     "pinned": conv.pinned or False,
                     "endpoint_id": conv.endpoint_id,
+                    "model": conv.model,
                     "created_at": conv.created_at.isoformat(),
                     "updated_at": conv.updated_at.isoformat(),
                     "summary": conv.summary,
@@ -259,6 +261,7 @@ class ConversationRepository:
                 "name": conversation.name,
                 "pinned": conversation.pinned or False,
                 "endpoint_id": conversation.endpoint_id,
+                "model": conversation.model,
                 "created_at": conversation.created_at.isoformat(),
                 "updated_at": conversation.updated_at.isoformat(),
                 "summary": conversation.summary,
@@ -393,6 +396,37 @@ class ConversationRepository:
             self._set_endpoint_sync, conversation_id, endpoint_id
         )
 
+    def _set_model_sync(self, conversation_id: str, model: str | None) -> bool:
+        """Synchronous implementation of set_conversation_model."""
+        with self._get_session() as session:
+            conversation = session.get(Conversation, conversation_id)
+            if conversation is None:
+                return False
+            conversation.model = model
+            session.commit()
+            return True
+
+    async def set_conversation_model(
+        self, conversation_id: str, model: str | None
+    ) -> bool:
+        """Set the specific model used for a conversation.
+
+        Parameters
+        ----------
+        conversation_id:
+            ID of the conversation to update.
+        model:
+            Model name within the conversation's endpoint, or None to use the
+            endpoint's active/default model.
+
+        Returns
+        -------
+        bool
+            True if set successfully, False if conversation not found.
+        """
+        return await asyncio.to_thread(
+            self._set_model_sync, conversation_id, model
+        )
 
     def _search_messages_sync(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
         """Synchronous implementation of search_messages."""

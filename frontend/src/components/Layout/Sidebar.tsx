@@ -2,8 +2,9 @@ import { useState, useEffect, useRef } from 'react'
 import type { Conversation } from '../../types/chat'
 import { Plus, X, Pencil, Check } from 'lucide-react'
 import { WeChatIcon } from '../icons/WeChatIcon'
+import { useTranslation } from '../../i18n'
 
-const WECHAT_CONVERSATION_NAME = '微信聊天'
+const WECHAT_CONVERSATION_NAME = '微信Clawbot'
 
 interface SidebarProps {
   conversations: Conversation[]
@@ -18,6 +19,7 @@ export function Sidebar({ conversations, onSelect, onNew, onDelete, onRename, se
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  const { t } = useTranslation()
 
   useEffect(() => {
     if (editingId && inputRef.current) {
@@ -49,9 +51,9 @@ export function Sidebar({ conversations, onSelect, onNew, onDelete, onRename, se
   return (
     <aside className="sidebar" data-testid="sidebar">
       <div className="sidebar-header">
-        <span>Conversations</span>
+        <span>{t('chat.sidebarTitle')}</span>
         {onNew && (
-          <button onClick={onNew} title="New conversation" aria-label="New conversation">
+          <button onClick={onNew} title={t('chat.newConversation')} aria-label={t('chat.newConversation')}>
             <Plus size={16} />
           </button>
         )}
@@ -59,7 +61,7 @@ export function Sidebar({ conversations, onSelect, onNew, onDelete, onRename, se
       <div className="sidebar-list">
         {conversations.length === 0 ? (
           <div className="sidebar-empty" data-testid="sidebar-empty">
-            No conversations yet.<br />Send a message to start.
+            No conversations yet.<br />{t('chat.sendHint')}
           </div>
         ) : (
           conversations.map(conv => {
@@ -85,13 +87,13 @@ export function Sidebar({ conversations, onSelect, onNew, onDelete, onRename, se
                         else if (e.key === 'Escape') cancelEdit()
                       }}
                       maxLength={100}
-                      aria-label="Rename conversation"
+                      aria-label={t('chat.renameConversation')}
                     />
                     <button
                       className="btn btn-ghost btn-sm sidebar-item__confirm"
                       data-testid="rename-confirm"
-                      title="Save name"
-                      aria-label="Save name"
+                      title={t('chat.saveName')}
+                      aria-label={t('chat.saveName')}
                       onClick={e => { e.stopPropagation(); commitEdit() }}
                     >
                       <Check size={14} />
@@ -115,8 +117,8 @@ export function Sidebar({ conversations, onSelect, onNew, onDelete, onRename, se
                       <button
                         className="btn btn-ghost btn-sm sidebar-action"
                         data-testid="rename-conversation"
-                        title="Rename conversation"
-                        aria-label="Rename conversation"
+                        title={t('chat.renameConversation')}
+                        aria-label={t('chat.renameConversation')}
                         onClick={e => { e.stopPropagation(); startEdit(conv) }}
                       >
                         <Pencil size={13} />
@@ -126,8 +128,8 @@ export function Sidebar({ conversations, onSelect, onNew, onDelete, onRename, se
                       <button
                         className="btn btn-ghost btn-sm sidebar-delete"
                         data-testid="delete-conversation"
-                        title="Delete conversation"
-                        aria-label="Delete conversation"
+                        title={t('chat.deleteConversation')}
+                        aria-label={t('chat.deleteConversation')}
                         onClick={e => { e.stopPropagation(); onDelete(conv.id) }}
                       >
                         <X size={14} />

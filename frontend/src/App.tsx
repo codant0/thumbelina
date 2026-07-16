@@ -68,7 +68,7 @@ function App() {
       if (res.ok) {
         const conv: Conversation = await res.json()
         setSelectedId(conv.id)
-        // Insert after pinned conversations so pinned items (e.g. 微信聊天)
+        // Insert after pinned conversations so pinned items (e.g. 微信Clawbot)
         // always stay on top, mirroring the backend's pinned-first ordering.
         setConversations(prev => {
           const list = Array.isArray(prev) ? prev : []
@@ -101,9 +101,9 @@ function App() {
     } catch { /* ignore */ }
   }, [updateConversationInState])
 
-  const handleSetEndpoint = useCallback(async (id: string, endpointId: string | null) => {
+  const handleSetEndpoint = useCallback(async (id: string, endpointId: string | null, model: string | null) => {
     try {
-      const updated = await setConversationEndpoint(id, endpointId)
+      const updated = await setConversationEndpoint(id, endpointId, model)
       updateConversationInState(updated)
     } catch { /* ignore */ }
   }, [updateConversationInState])

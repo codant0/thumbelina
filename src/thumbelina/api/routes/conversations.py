@@ -36,6 +36,10 @@ class SetConversationEndpointRequest(BaseModel):
         default=None,
         description="ID of a configured LLM endpoint, or null to use the default model",
     )
+    model: str | None = Field(
+        default=None,
+        description="Specific model within the endpoint's models, or null to use the endpoint's active model",
+    )
 
 
 @router.post("/conversations", response_model=ConversationSchema)
@@ -99,6 +103,7 @@ async def get_conversation(
         name=conversation.get("name"),
         pinned=conversation.get("pinned", False),
         endpoint_id=conversation.get("endpoint_id"),
+        model=conversation.get("model"),
         created_at=conversation["created_at"],
         updated_at=conversation["updated_at"],
         summary=conversation.get("summary"),
@@ -149,10 +154,20 @@ async def set_conversation_endpoint(
         endpoint = await endpoint_manager.get_endpoint(body.endpoint_id)
         if endpoint is None:
             raise HTTPException(status_code=404, detail="Endpoint not found")
+        if body.model is not None and body.model not in endpoint.models:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Model '{body.model}' is not configured on this endpoint",
+            )
 
     ok = await memory.set_conversation_endpoint(conversation_id, body.endpoint_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Conversation not found")
+    # Persist the per-conversation model. When clearing the endpoint, also
+    # clear the model so a stale name doesn't linger.
+    await memory.set_conversation_model(
+        conversation_id, body.model if body.endpoint_id else None
+    )
     conv = await memory.get_conversation(conversation_id)
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")

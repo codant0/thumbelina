@@ -9,6 +9,7 @@ import {
 } from '../../api/llmConfig'
 import { PresetForm } from './PresetForm'
 import { Plus, Check, Pencil, Trash2, Loader2, BookMarked } from 'lucide-react'
+import { useTranslation } from '../../i18n'
 
 interface PresetManagerProps {
   onMessage: (message: string, isError: boolean) => void
@@ -21,13 +22,14 @@ export function PresetManager({ onMessage }: PresetManagerProps) {
   const [editing, setEditing] = useState<LLMPreset | null>(null)
   const [activatingId, setActivatingId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const { t } = useTranslation()
 
   const load = useCallback(async () => {
     try {
       const data = await fetchPresets()
       setPresets(Array.isArray(data) ? data : [])
     } catch (err) {
-      onMessage(err instanceof Error ? err.message : 'Failed to load presets', true)
+      onMessage(err instanceof Error ? err.message : t('preset.failedToLoad'), true)
       setPresets([])
     } finally {
       setLoading(false)
@@ -43,10 +45,10 @@ export function PresetManager({ onMessage }: PresetManagerProps) {
     try {
       await createPreset(data)
       setShowForm(false)
-      onMessage('Preset created', false)
+      onMessage(t('preset.created'), false)
       await load()
     } catch (err) {
-      onMessage(err instanceof Error ? err.message : 'Failed to create preset', true)
+      onMessage(err instanceof Error ? err.message : t('preset.createFailed'), true)
     }
   }
 
@@ -55,10 +57,10 @@ export function PresetManager({ onMessage }: PresetManagerProps) {
     try {
       await updatePreset(editing.id, data)
       setEditing(null)
-      onMessage('Preset updated', false)
+      onMessage(t('preset.updated'), false)
       await load()
     } catch (err) {
-      onMessage(err instanceof Error ? err.message : 'Failed to update preset', true)
+      onMessage(err instanceof Error ? err.message : t('preset.updateFailed'), true)
     }
   }
 
@@ -66,10 +68,10 @@ export function PresetManager({ onMessage }: PresetManagerProps) {
     setDeletingId(id)
     try {
       await deletePreset(id)
-      onMessage('Preset deleted', false)
+      onMessage(t('preset.deleted'), false)
       await load()
     } catch (err) {
-      onMessage(err instanceof Error ? err.message : 'Failed to delete preset', true)
+      onMessage(err instanceof Error ? err.message : t('preset.deleteFailed'), true)
     } finally {
       setDeletingId(null)
     }
@@ -83,26 +85,26 @@ export function PresetManager({ onMessage }: PresetManagerProps) {
         ...p,
         is_active: p.id === id,
       })))
-      onMessage(`Activated preset: ${result.preset_name}`, false)
+      onMessage(t('preset.activated', { name: result.preset_name }), false)
     } catch (err) {
-      onMessage(err instanceof Error ? err.message : 'Failed to activate preset', true)
+      onMessage(err instanceof Error ? err.message : t('preset.activateFailed'), true)
     } finally {
       setActivatingId(null)
     }
   }
 
-  if (loading) return <p>Loading presets…</p>
+  if (loading) return <p>{t('common.loading')}</p>
 
   return (
     <div className="card" data-testid="preset-manager">
-      <div className="card-title"><BookMarked size={14} />LLM Presets</div>
+      <div className="card-title"><BookMarked size={14} />{t('preset.title')}</div>
       <button
         className="btn btn-primary"
         data-testid="add-preset-button"
         onClick={() => setShowForm(true)}
       >
         <Plus size={16} />
-        Add Preset
+        {t('preset.add')}
       </button>
       {showForm && (
         <PresetForm onSubmit={handleCreate} onCancel={() => setShowForm(false)} />
@@ -111,9 +113,7 @@ export function PresetManager({ onMessage }: PresetManagerProps) {
         <PresetForm initialValues={editing} onSubmit={handleUpdate} onCancel={() => setEditing(null)} />
       )}
       {presets.length === 0 ? (
-        <p className="settings-empty-hint">
-          No presets yet. Create your first preset to quickly switch between LLM providers.
-        </p>
+        <p className="settings-empty-hint">{t('preset.noPresets')}</p>
       ) : (
         <div className="preset-list">
           {presets.map(preset => (
@@ -126,7 +126,7 @@ export function PresetManager({ onMessage }: PresetManagerProps) {
                 <span className="preset-card__name">{preset.name}</span>
                 <span className="preset-card__badges">
                   <span className="badge badge-neutral">{preset.provider}</span>
-                  {preset.is_active && <span className="badge badge-success">Active</span>}
+                  {preset.is_active && <span className="badge badge-success">{t('common.active')}</span>}
                 </span>
               </div>
               <div className="preset-card__body">
@@ -143,7 +143,7 @@ export function PresetManager({ onMessage }: PresetManagerProps) {
                     disabled={activatingId === preset.id}
                   >
                     {activatingId === preset.id ? <Loader2 size={14} className="spin" /> : <Check size={14} />}
-                    {activatingId === preset.id ? 'Activating…' : 'Activate'}
+                    {activatingId === preset.id ? t('common.activating') : t('common.activate')}
                   </button>
                 )}
                 <button
@@ -152,7 +152,7 @@ export function PresetManager({ onMessage }: PresetManagerProps) {
                   onClick={() => setEditing(preset)}
                 >
                   <Pencil size={14} />
-                  Edit
+                  {t('common.edit')}
                 </button>
                 <button
                   className="btn btn-danger btn-sm"
@@ -161,7 +161,7 @@ export function PresetManager({ onMessage }: PresetManagerProps) {
                   disabled={deletingId === preset.id}
                 >
                   {deletingId === preset.id ? <Loader2 size={14} className="spin" /> : <Trash2 size={14} />}
-                  {deletingId === preset.id ? 'Deleting…' : 'Delete'}
+                  {deletingId === preset.id ? t('common.delete') : t('common.delete')}
                 </button>
               </div>
             </div>

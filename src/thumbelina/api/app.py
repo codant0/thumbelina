@@ -414,11 +414,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # variables. Only applies when no preset was restored above.
     try:
         if await preset_manager.get_active_preset() is None:
-            default_endpoint = await endpoint_manager.get_default_endpoint()
-            if default_endpoint is not None and default_endpoint.api_key:
+            active = await endpoint_manager.get_active_endpoint_model()
+            if active is not None and active[0].api_key:
+                default_endpoint, active_model = active
                 endpoint_kwargs: dict[str, Any] = {
                     "api_key": default_endpoint.api_key,
-                    "model": default_endpoint.model or "gpt-4o",
+                    "model": active_model,
                 }
                 if default_endpoint.base_url:
                     endpoint_kwargs["base_url"] = default_endpoint.base_url
@@ -435,7 +436,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 if getattr(app.state, "conversation_namer", None) is not None:
                     app.state.conversation_namer.llm_provider = restored_provider
                 config.llm.provider = default_endpoint.provider
-                config.llm.model = default_endpoint.model or "gpt-4o"
+                config.llm.model = active_model
                 config.llm.api_key = default_endpoint.api_key
                 config.llm.base_url = default_endpoint.base_url or None
                 logger.info(

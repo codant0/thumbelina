@@ -24,7 +24,9 @@
     "active": "当前使用",
     "activating": "激活中…",
     "test": "测试",
-    "testing": "测试中…"
+    "testing": "测试中…",
+    "show": "显示",
+    "hide": "隐藏"
   },
   "settings": {
     "title": "设置",
@@ -33,7 +35,6 @@
     "model": "模型",
     "baseUrl": "基础地址",
     "apiKey": "API 密钥",
-    "rateLimit": "启用速率限制",
     "switchModel": "切换模型",
     "switching": "切换中…",
     "userProfile": "用户画像",
@@ -43,7 +44,11 @@
     "confirmDelete": "再次点击确认删除",
     "language": "语言",
     "presets": "LLM 预设",
-    "endpoints": "LLM 模型"
+    "endpoints": "LLM 模型",
+    "allDataDeleted": "全部数据已删除",
+    "failedToDelete": "删除数据失败",
+    "exporting": "导出中…",
+    "deleting": "删除中…"
   },
   "language": {
     "en": "English",
@@ -57,7 +62,12 @@
     "service": "服务",
     "connected": "连通正常({latency}ms)",
     "failed": "连通失败：{error}",
-    "skipped": "跳过后续检查"
+    "skipped": "跳过后续检查",
+    "testFailed": "测试失败",
+    "testTooltip": "测试此端点的连通性",
+    "enterBaseUrl": "请先输入基础地址",
+    "testing": "正在测试连接…",
+    "failedResult": "连接失败 — {error}"
   },
   "preset": {
     "title": "LLM 预设",
@@ -73,7 +83,18 @@
     "create": "创建预设",
     "update": "更新预设",
     "keepKeyHint": "（留空则保持不变）",
-    "placeholder": "{\"temperature\": 0.7}"
+    "placeholder": "{\"temperature\": 0.7}",
+    "failedToLoad": "加载预设失败",
+    "created": "预设已创建",
+    "createFailed": "创建预设失败",
+    "updated": "预设已更新",
+    "updateFailed": "更新预设失败",
+    "deleted": "预设已删除",
+    "deleteFailed": "删除预设失败",
+    "activated": "已激活预设：{name}",
+    "activateFailed": "激活预设失败",
+    "invalidJson": "额外参数必须是有效的 JSON 对象",
+    "saveFailed": "保存预设失败"
   },
   "endpoint": {
     "speedTest": "速度测试",
@@ -101,7 +122,22 @@
     "providerRequired": "请选择提供商",
     "invalidUrl": "基础地址必须是有效的 URL",
     "keepKeyHint": "留空则保持不变",
-    "setDefault": "设为默认"
+    "setDefault": "设为默认",
+    "modelPlaceholder": "选择或输入模型",
+    "modelListUnsupported": "该提供商暂不支持模型列表。",
+    "modelListRequired": "需要提供商、基础地址和 API 密钥才能获取模型列表",
+    "fetchModels": "获取可用模型",
+    "fetch": "获取",
+    "fetching": "获取中",
+    "unreachable": "不可达",
+    "failedToLoad": "加载端点失败",
+    "models": "模型",
+    "modelsHint": "获取列表后可多选，也可手动添加模型名称。",
+    "addModelManually": "手动添加模型",
+    "addModelPlaceholder": "模型名称，回车添加",
+    "activeModel": "当前模型",
+    "activateModel": "激活",
+    "noModels": "未配置模型"
   },
   "channels": {
     "title": "频道",
@@ -114,21 +150,66 @@
     "enableQQ": "启用 QQ 机器人",
     "scanQR": "扫码登录",
     "manualConfig": "手动配置",
-    "reconnect": "扫码重新连接"
+    "reconnect": "扫码重新连接",
+    "appId": "App ID",
+    "appIdPlaceholder": "QQ 机器人 App ID",
+    "appSecret": "App Secret",
+    "keepCurrent": "留空则保持不变",
+    "allowedGuilds": "允许的频道",
+    "guildPlaceholder": "用逗号分隔的频道 ID（留空=全部）",
+    "allowedGroups": "允许的群组",
+    "groupPlaceholder": "用逗号分隔的群组 ID（留空=全部）",
+    "botToken": "Bot Token",
+    "botId": "Bot ID",
+    "userId": "User ID",
+    "ilinkBaseUrl": "iLink 基础地址",
+    "ilinkPlaceholder": "https://ilinkai.weixin.qq.com（默认）",
+    "notSet": "（未设置）",
+    "qqNotEnabled": "QQ 机器人未启用。点击编辑以配置。",
+    "wechatNotEnabled": "微信频道未启用。点击编辑以配置。",
+    "scanQRInstruction": "使用微信扫描此二维码",
+    "qrScanned": "已扫描！请在手机上确认。",
+    "qrWaiting": "等待确认…",
+    "qrSuccess": "登录成功！",
+    "qrSuccessDetail": "微信频道已启用并连接。",
+    "qrExpired": "二维码已过期。",
+    "getNewQR": "获取新二维码",
+    "qrError": "出错了",
+    "fetchingQR": "获取二维码中…",
+    "wechatReconnectWarn": "微信会话已过期或未登录。扫描二维码重新连接。"
   },
   "chat": {
     "startPrompt": "开始对话",
     "startHint": "在下方输入消息开始",
     "noConversations": "暂无对话。",
     "sendHint": "发送消息以开始。",
-    "streamLabel": "流式"
+    "streamLabel": "流式",
+    "inputPlaceholder": "输入消息…",
+    "send": "发送",
+    "roleYou": "你",
+    "roleSystem": "系统",
+    "roleAssistant": "助手",
+    "rateStars": "评分{star}星",
+    "rateThanks": "谢谢！",
+    "defaultModel": "默认模型",
+    "chooseModel": "为当前对话选择模型",
+    "noModels": "未配置模型。请先在设置中添加。",
+    "sidebarTitle": "对话列表",
+    "newConversation": "新建对话",
+    "saveName": "保存名称",
+    "renameConversation": "重命名对话",
+    "deleteConversation": "删除对话",
+    "noConversationsYet": "暂无对话。发送消息开始吧。",
+    "streamOnTitle": "流式已开启 — 打字机效果",
+    "streamOffTitle": "流式已关闭 — 立即回复"
   },
   "taskManager": {
     "title": "任务管理器",
     "subagents": "子代理",
     "scheduledTasks": "计划任务",
     "noSubagents": "无活跃子代理",
-    "noTasks": "无计划任务"
+    "noTasks": "无计划任务",
+    "fetchFailed": "获取数据失败"
   },
   "memory": {
     "title": "记忆",
@@ -141,7 +222,9 @@
     "loadSkills": "加载技能",
     "skillCompositions": "技能组合",
     "noSkills": "未找到技能",
-    "noCompositions": "未找到组合"
+    "noCompositions": "未找到组合",
+    "loaded": "已加载",
+    "searchFailed": "搜索失败"
   },
   "dream": {
     "title": "梦境",
@@ -154,7 +237,8 @@
     "topSkills": "热门技能（按成熟度）",
     "categoryTitle": "分类",
     "skillCloud": "技能云",
-    "noSkills": "尚无技能记录。技能将在代理学习过程中出现在此处。"
+    "noSkills": "尚无技能记录。技能将在代理学习过程中出现在此处。",
+    "errors": "加载技能统计数据失败"
   },
   "plugins": {
     "title": "插件",
@@ -165,7 +249,10 @@
     "sandboxReport": "沙箱验证报告",
     "valid": "有效",
     "invalid": "无效",
-    "violations": "违规"
+    "violations": "违规",
+    "sandboxOk": "沙箱正常",
+    "violationsCount": "{count} 项违规",
+    "line": "（第{number}行）"
   },
   "profile": {
     "communicationStyle": "沟通风格",
@@ -173,5 +260,11 @@
     "preferences": "偏好设置",
     "notSet": "未设置",
     "noData": "暂无画像数据。代理将在聊天过程中建立您的用户画像。"
+  },
+  "theme": {
+    "dark": "深色",
+    "light": "浅色",
+    "warm": "暖色",
+    "changeTheme": "切换主题"
   }
 }

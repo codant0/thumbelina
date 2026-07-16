@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
 
@@ -135,3 +137,28 @@ def test_clear_conversation_endpoint(client, conversation_id):
     )
     assert response.status_code == 200
     assert response.json()["endpoint_id"] is None
+
+
+def test_set_conversation_endpoint_rejects_unknown_model(client, conversation_id):
+    """PUT /conversations/{id}/endpoint rejects a model not on the endpoint."""
+    from thumbelina.llm.endpoint_manager import LLMEndpoint
+
+    endpoint = LLMEndpoint(
+        id="ep1",
+        provider="openai",
+        name="Default",
+        base_url="https://api.openai.com/v1",
+        models=["gpt-4o"],
+        api_key="sk-test",
+        api_key_set=True,
+        created_at="2026-07-02T00:00:00Z",
+        updated_at="2026-07-02T00:00:00Z",
+    )
+    client.app.state.endpoint_manager = MagicMock()
+    client.app.state.endpoint_manager.get_endpoint = AsyncMock(return_value=endpoint)
+
+    response = client.put(
+        f"/api/v1/conversations/{conversation_id}/endpoint",
+        json={"endpoint_id": "ep1", "model": "not-a-model"},
+    )
+    assert response.status_code == 422

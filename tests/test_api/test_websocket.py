@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, MagicMock
+
 
 def _collect_ws_messages(ws, max_messages: int = 10) -> list[dict]:
     """Collect JSON messages from a WebSocket until 'done' or max reached."""
@@ -57,3 +59,40 @@ def test_websocket_json_response_structure(client):
 
         done = [m for m in messages if m.get("done")]
         assert len(done) == 1
+
+
+def test_websocket_wechat_conversation_forwards_only_reply(client):
+    """When chatting in the WeChat conversation, only the agent's reply is
+    forwarded to WeChat (iLink bot sends as the bot, so the user's web-side
+    question would be indistinguishable from a bot reply)."""
+    app = client.app
+    wechat_channel = MagicMock()
+    wechat_channel.handle_incoming = AsyncMock(return_value="Reply from agent")
+    wechat_channel.send_message = AsyncMock()
+    wechat_channel._last_wechat_user_id = "wxid_friend"
+    wechat_channel._last_context_token = "tok-123"
+    app.state.wechat_channel = wechat_channel
+    wechat_conv_id = "wechat-conv-1"
+    app.state.wechat_conversation_id = wechat_conv_id
+
+    # Give the shared agent a memory manager that knows about the WeChat conv.
+    mm = MagicMock()
+    mm.get_conversation = AsyncMock(
+        return_value={"id": wechat_conv_id, "name": "微信Clawbot", "pinned": True}
+    )
+    app.state.agent.memory_manager = mm
+    app.state.agent.current_conversation_id = wechat_conv_id
+    app.state.agent.clone.return_value = app.state.agent
+    # Non-streaming so the response comes back as a single payload
+    app.state.config.llm.streaming_enabled = False
+
+    with client.websocket_connect("/ws/chat") as ws:
+        ws.send_json({"message": "Hello from web", "conversation_id": wechat_conv_id})
+        messages = _collect_ws_messages(ws)
+        assert any(m.get("response") == "Reply from agent" for m in messages)
+
+    # Only the reply should be forwarded to WeChat, not the user's question
+    sent_texts = [call.args[1] for call in wechat_channel.send_message.call_args_list]
+    assert sent_texts == ["Reply from agent"]
+    assert wechat_channel.send_message.call_count == 1
+    assert wechat_channel.send_message.call_args.kwargs.get("context_token") == "tok-123"

@@ -60,7 +60,7 @@ describe('Sidebar rename', () => {
   it('does not show rename button for the WeChat conversation', () => {
     const onRename = vi.fn()
     const conversations = [
-      { id: 'wx', name: '微信聊天', pinned: true, created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' },
+      { id: 'wx', name: '微信Clawbot', pinned: true, created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' },
     ]
     render(<Sidebar conversations={conversations} onSelect={vi.fn()} onRename={onRename} />)
     expect(screen.queryByTestId('rename-conversation')).toBeNull()

@@ -41,6 +41,7 @@ def mock_agent() -> MagicMock:
     mm = MagicMock()
     mm.get_conversations = AsyncMock(return_value=[])
     mm.create_conversation = AsyncMock(return_value="conv-wechat-123")
+    mm.rename_conversation = AsyncMock(return_value=True)
     agent.memory_manager = mm
 
     return agent
@@ -272,7 +273,7 @@ class TestWeChatChannelIncoming:
     async def test_handle_different_users_shares_same_agent(
         self, channel: WeChatChannel, mock_agent: MagicMock
     ) -> None:
-        """All WeChat users share the same '微信聊天' conversation."""
+        """All WeChat users share the same '微信Clawbot' conversation."""
         await channel.handle_incoming("wxid_user1", "Hello!")
         await channel.handle_incoming("wxid_user2", "Hi!")
 
@@ -316,7 +317,7 @@ class TestWeChatConversationSetup:
         await ch._ensure_wechat_conversation()
 
         mock_agent.memory_manager.create_conversation.assert_awaited_once_with(
-            name="微信聊天",
+            name="微信Clawbot",
             pinned=True,
         )
         assert mock_agent.current_conversation_id == "conv-wechat-123"
@@ -326,7 +327,7 @@ class TestWeChatConversationSetup:
         self, wechat_config: WeChatChannelConfig, mock_agent: MagicMock
     ) -> None:
         mock_agent.memory_manager.get_conversations = AsyncMock(
-            return_value=[{"id": "existing-conv", "name": "微信聊天"}]
+            return_value=[{"id": "existing-conv", "name": "微信Clawbot"}]
         )
 
         ch = WeChatChannel(config=wechat_config, agent=mock_agent)
@@ -345,6 +346,23 @@ class TestWeChatConversationSetup:
         await ch._ensure_wechat_conversation()
 
         assert agent.current_conversation_id is None
+
+    @pytest.mark.asyncio
+    async def test_migrates_legacy_named_conversation(
+        self, wechat_config: WeChatChannelConfig, mock_agent: MagicMock
+    ) -> None:
+        mock_agent.memory_manager.get_conversations = AsyncMock(
+            return_value=[{"id": "legacy-conv", "name": "微信聊天"}]
+        )
+
+        ch = WeChatChannel(config=wechat_config, agent=mock_agent)
+        await ch._ensure_wechat_conversation()
+
+        mock_agent.memory_manager.rename_conversation.assert_awaited_once_with(
+            "legacy-conv", "微信Clawbot"
+        )
+        mock_agent.memory_manager.create_conversation.assert_not_awaited()
+        assert mock_agent.current_conversation_id == "legacy-conv"
 
 
 # ------------------------------------------------------------------

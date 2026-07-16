@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Moon, Sun, Flame, Check } from 'lucide-react'
+import { useTranslation } from '../../i18n'
 
 type Theme = 'dark' | 'light' | 'warm'
 
@@ -25,6 +26,7 @@ export function ThemeToggle() {
   const [theme, setTheme] = useState<Theme>(getInitialTheme)
   const [isOpen, setIsOpen] = useState(false)
   const wrapperRef = useRef<HTMLDivElement>(null)
+  const { t } = useTranslation()
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -52,15 +54,15 @@ export function ThemeToggle() {
       <button
         className="theme-toggle-btn"
         onClick={() => setIsOpen(!isOpen)}
-        title="Change theme"
-        aria-label="Change theme"
+        title={t('theme.changeTheme')}
+        aria-label={t('theme.changeTheme')}
         aria-expanded={isOpen}
       >
         <CurrentIcon size={16} />
       </button>
       {isOpen && (
         <div className="theme-dropdown" role="menu">
-          {THEMES.map(({ value, label, Icon }) => (
+          {THEMES.map(({ value, Icon }) => (
             <button
               key={value}
               className={`theme-option${theme === value ? ' active' : ''}`}
@@ -73,7 +75,7 @@ export function ThemeToggle() {
               <span className="theme-option-icon">
                 <Icon size={14} />
               </span>
-              <span className="theme-option-label">{label}</span>
+              <span className="theme-option-label">{t(`theme.${value}`)}</span>
               {theme === value && <Check size={14} />}
             </button>
           ))}

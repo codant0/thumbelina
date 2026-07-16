@@ -73,6 +73,12 @@ def mock_memory():
             return True
         return False
 
+    async def set_conversation_model(conv_id: str, model) -> bool:
+        if conv_id in conversations:
+            conversations[conv_id]["model"] = model
+            return True
+        return False
+
     memory = MagicMock()
     memory.create_conversation = AsyncMock(return_value="test-conv-id")
     memory.get_conversation = AsyncMock(side_effect=get_conversation)
@@ -85,6 +91,7 @@ def mock_memory():
     # Per-conversation rename / endpoint selection (mutate in-memory dict)
     memory.rename_conversation = AsyncMock(side_effect=rename_conversation)
     memory.set_conversation_endpoint = AsyncMock(side_effect=set_conversation_endpoint)
+    memory.set_conversation_model = AsyncMock(side_effect=set_conversation_model)
 
     # Mock repository with ping method
     memory.repository = MagicMock()

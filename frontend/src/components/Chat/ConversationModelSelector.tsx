@@ -2,23 +2,34 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Cpu, Check, ChevronDown } from 'lucide-react'
 import type { LLMEndpoint } from '../../api/llmConfig'
 import { fetchEndpoints } from '../../api/llmConfig'
+import { useTranslation } from '../../i18n'
+
+const PROVIDER_LABEL: Record<string, string> = {
+  openai: 'OpenAI',
+  anthropic: 'Anthropic',
+  ollama: 'Ollama',
+}
 
 interface ConversationModelSelectorProps {
   conversationId?: string
   /** endpoint_id currently stored on the conversation (null = default). */
   selectedEndpointId?: string | null
-  onChange: (endpointId: string | null) => void
+  /** model currently stored on the conversation (null = endpoint's active). */
+  selectedModel?: string | null
+  onChange: (endpointId: string | null, model: string | null) => void
 }
 
 export function ConversationModelSelector({
   conversationId,
   selectedEndpointId,
+  selectedModel,
   onChange,
 }: ConversationModelSelectorProps) {
   const [endpoints, setEndpoints] = useState<LLMEndpoint[]>([])
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const wrapRef = useRef<HTMLDivElement>(null)
+  const { t } = useTranslation()
 
   useEffect(() => {
     let cancelled = false
@@ -48,16 +59,18 @@ export function ConversationModelSelector({
     return () => document.removeEventListener('mousedown', handler)
   }, [open])
 
-  const selected = useMemo(
-    () => endpoints.find(e => e.id === selectedEndpointId) ?? null,
-    [endpoints, selectedEndpointId],
+  // Each endpoint with at least one model is a group.
+  const groups = useMemo(() =>
+    endpoints.filter(ep => ep.models.length > 0),
+    [endpoints],
   )
 
+  const isDefaultSelected = selectedEndpointId == null
   const label = loading
-    ? 'Loading models…'
-    : selected
-      ? selected.name
-      : 'Default model'
+    ? t('endpoint.loading')
+    : isDefaultSelected
+      ? t('chat.defaultModel')
+      : selectedModel || t('chat.defaultModel')
 
   if (!conversationId) return null
 
@@ -67,7 +80,7 @@ export function ConversationModelSelector({
         type="button"
         className="conv-model-selector__trigger"
         data-testid="conv-model-trigger"
-        title="Choose model for this conversation"
+        title={t('chat.chooseModel')}
         onClick={() => setOpen(o => !o)}
       >
         <Cpu size={14} />
@@ -76,38 +89,54 @@ export function ConversationModelSelector({
       </button>
       {open && (
         <ul className="conv-model-selector__menu" role="listbox" data-testid="conv-model-menu">
+          {/* Default model option */}
           <li
             role="option"
-            aria-selected={selectedEndpointId == null}
-            className={`conv-model-selector__option${selectedEndpointId == null ? ' selected' : ''}`}
+            aria-selected={isDefaultSelected}
+            className={`conv-model-selector__option${isDefaultSelected ? ' selected' : ''}`}
             data-testid="conv-model-default"
             onClick={() => {
-              onChange(null)
+              onChange(null, null)
               setOpen(false)
             }}
           >
-            <span className="conv-model-selector__name">Default model</span>
-            {selectedEndpointId == null && <Check size={14} />}
+            <span className="conv-model-selector__name">{t('chat.defaultModel')}</span>
+            {isDefaultSelected && <Check size={14} />}
           </li>
-          {endpoints.map(ep => (
-            <li
-              key={ep.id}
-              role="option"
-              aria-selected={selected?.id === ep.id}
-              className={`conv-model-selector__option${selected?.id === ep.id ? ' selected' : ''}`}
-              data-testid={`conv-model-option-${ep.id}`}
-              onClick={() => {
-                onChange(ep.id)
-                setOpen(false)
-              }}
-            >
-              <span className="conv-model-selector__name">{ep.name}</span>
-              <span className="conv-model-selector__meta">{ep.model || ep.provider}</span>
-              {selected?.id === ep.id && <Check size={14} />}
+
+          {/* Endpoint groups — each endpoint is its own group */}
+          {groups.map(ep => (
+            <li key={ep.id} className="conv-model-selector__group" data-testid={`conv-model-group-${ep.id}`}>
+              <div className="conv-model-selector__group-header">
+                <span className="conv-model-selector__group-name">{ep.name}</span>
+                <span className="badge badge-neutral conv-model-selector__group-provider">
+                  {PROVIDER_LABEL[ep.provider] || ep.provider}
+                </span>
+              </div>
+              {ep.models.map(m => {
+                const selected = selectedEndpointId === ep.id && selectedModel === m
+                return (
+                  <div
+                    key={`${ep.id}-${m}`}
+                    role="option"
+                    aria-selected={selected}
+                    className={`conv-model-selector__option${selected ? ' selected' : ''}`}
+                    data-testid={`conv-model-option-${ep.id}-${m}`}
+                    onClick={() => {
+                      onChange(ep.id, m)
+                      setOpen(false)
+                    }}
+                  >
+                    <span className="conv-model-selector__name">{m}</span>
+                    {selected && <Check size={14} />}
+                  </div>
+                )
+              })}
             </li>
           ))}
+
           {endpoints.length === 0 && !loading && (
-            <li className="conv-model-selector__empty">No models configured. Add one in Settings.</li>
+            <li className="conv-model-selector__empty">{t('chat.noModels')}</li>
           )}
         </ul>
       )}

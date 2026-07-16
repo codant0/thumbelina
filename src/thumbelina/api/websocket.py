@@ -128,6 +128,11 @@ async def websocket_chat(websocket: WebSocket) -> None:
                 wechat_channel = getattr(websocket.app.state, "wechat_channel", None)
                 if wechat_channel is not None:
                     try:
+                        # Apply the conversation's endpoint to the WeChat
+                        # channel agent so the user's model selection actually
+                        # takes effect. The call above applied it to the WS
+                        # clone, but handle_incoming uses a different agent.
+                        await _apply_conversation_endpoint(websocket, wechat_channel._agent, cid)
                         response = await wechat_channel.handle_incoming(
                             user_id="frontend",
                             text=parsed.message,
@@ -138,10 +143,12 @@ async def websocket_chat(websocket: WebSocket) -> None:
                         await websocket.send_json({"response": response, "conversation_id": cid})
                         await websocket.send_json({"done": True, "conversation_id": cid})
 
-                        # Also send the response to WeChat via iLink
+                        # Forward only the reply to WeChat. iLink's bot
+                        # sendmessage always sends as the bot, so the user's
+                        # web-side question would be indistinguishable from a
+                        # bot reply in WeChat — only forward the reply.
                         logger.info("Sending frontend message response to WeChat")
                         try:
-                            # Get the last WeChat user who sent a message
                             last_wechat_user = getattr(wechat_channel, "_last_wechat_user_id", None)
                             last_context_token = getattr(wechat_channel, "_last_context_token", "")
 

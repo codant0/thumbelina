@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Blocks, ShieldCheck, ShieldAlert, FileWarning } from 'lucide-react'
+import { useTranslation } from '../../i18n'
 
 interface Plugin {
   id: string
@@ -25,6 +26,7 @@ export function PluginsPage() {
   const [report, setReport] = useState<SandboxReport[]>([])
   const [loading, setLoading] = useState(true)
   const [showReport, setShowReport] = useState(false)
+  const { t } = useTranslation()
 
   useEffect(() => {
     const load = async () => {
@@ -49,31 +51,29 @@ export function PluginsPage() {
   if (loading) {
     return (
       <div className="page-container" data-testid="plugins-page">
-        <div className="page-title">Plugins</div>
-        <div className="loading-state"><div className="spinner" /><span>Loading...</span></div>
+        <div className="page-title">{t('plugins.title')}</div>
+        <div className="loading-state"><div className="spinner" /><span>{t('dream.loading')}</span></div>
       </div>
     )
   }
 
   return (
     <div className="page-container" data-testid="plugins-page">
-      <div className="page-title">Plugins</div>
+      <div className="page-title">{t('plugins.title')}</div>
 
       <div className="card">
         <div className="card-title card-title--between">
-          <span><Blocks size={14} />Loaded Plugins ({plugins.length})</span>
+          <span><Blocks size={14} />{t('plugins.loaded')} ({plugins.length})</span>
           <button
             className="btn btn-ghost btn-sm"
             data-testid="toggle-report"
             onClick={() => setShowReport(v => !v)}
           >
-            {showReport ? 'Hide' : 'Show'} Sandbox Report
+            {showReport ? t('common.hide') : t('common.show')} {t('plugins.title')}
           </button>
         </div>
         {plugins.length === 0 ? (
-          <p className="task-empty">
-            No plugins loaded. Configure plugin_dirs in thumbelina.yaml to load plugins.
-          </p>
+          <p className="task-empty">{t('plugins.noPlugins')}</p>
         ) : (
           <div className="task-list" data-testid="plugin-list">
             {plugins.map(plugin => (
@@ -84,12 +84,12 @@ export function PluginsPage() {
                     <span className="badge badge-neutral">{plugin.plugin_type}</span>
                     <span className="badge badge-neutral">v{plugin.version}</span>
                     <span className={`badge ${plugin.enabled ? 'badge-success' : 'badge-error'}`}>
-                      {plugin.enabled ? 'enabled' : 'disabled'}
+                      {plugin.enabled ? t('channels.enabled') : t('channels.disabled')}
                     </span>
                     {plugin.sandbox && (
                       <span className={`badge ${plugin.sandbox.is_valid ? 'badge-success' : 'badge-error'}`}>
                         {plugin.sandbox.is_valid ? <ShieldCheck size={12} /> : <ShieldAlert size={12} />}
-                        {plugin.sandbox.is_valid ? 'sandbox ok' : `${plugin.sandbox.violation_count} violations`}
+                        {plugin.sandbox.is_valid ? t('plugins.sandboxOk') : t('plugins.violationsCount', { count: plugin.sandbox.violation_count })}
                       </span>
                     )}
                   </div>
@@ -103,7 +103,7 @@ export function PluginsPage() {
 
       {showReport && report.length > 0 && (
         <div className="card" data-testid="sandbox-report">
-          <div className="card-title">Sandbox Validation Report</div>
+          <div className="card-title">{t('plugins.sandboxReport')}</div>
           <div className="task-list">
             {report.map(entry => (
               <div key={entry.plugin_name} className="task-item search-result-item">
@@ -111,9 +111,9 @@ export function PluginsPage() {
                   <div className="task-title">{entry.plugin_name}</div>
                   <div className="task-meta">
                     <span className={`badge ${entry.is_valid ? 'badge-success' : 'badge-error'}`}>
-                      {entry.is_valid ? 'valid' : 'invalid'}
+                      {entry.is_valid ? t('plugins.valid') : t('plugins.invalid')}
                     </span>
-                    <span>{entry.violations.length} violations</span>
+                    <span>{t('plugins.violationsCount', { count: entry.violations.length })}</span>
                   </div>
                   {entry.violations.length > 0 && (
                     <ul className="sandbox-report">
@@ -125,7 +125,7 @@ export function PluginsPage() {
                               {v.violation_type}
                             </span>
                             {' '}{v.message}
-                            {v.line !== null && ` (line ${v.line})`}
+                            {v.line !== null && ` ${t('plugins.line', { number: v.line })}`}
                           </span>
                         </li>
                       ))}

@@ -38,6 +38,7 @@ class ConversationSchema(BaseModel):
     name: str | None = None
     pinned: bool = False
     endpoint_id: str | None = None
+    model: str | None = None
     created_at: str
     updated_at: str
     summary: str | None = None
@@ -50,6 +51,7 @@ class ConversationDetailSchema(BaseModel):
     name: str | None = None
     pinned: bool = False
     endpoint_id: str | None = None
+    model: str | None = None
     created_at: str
     updated_at: str
     summary: str | None = None

@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from thumbelina.llm.endpoint_manager import (
     EndpointManager,
     LLMEndpoint,
+    LLMEndpointActivate,
     LLMEndpointCreate,
     LLMEndpointUpdate,
 )
@@ -367,7 +368,8 @@ class LLMEndpointResponse(BaseModel):
     provider: str
     name: str
     base_url: str
-    model: str = ""
+    models: list[str] = []
+    active_model: str | None = None
     api_key_set: bool
     is_default: bool
     last_latency_ms: int | None = None
@@ -443,7 +445,8 @@ def _to_response(endpoint: LLMEndpoint) -> LLMEndpointResponse:
         provider=endpoint.provider,
         name=endpoint.name,
         base_url=endpoint.base_url,
-        model=endpoint.model,
+        models=endpoint.models,
+        active_model=endpoint.active_model,
         api_key_set=endpoint.api_key_set,
         is_default=endpoint.is_default,
         last_latency_ms=endpoint.last_latency_ms,
@@ -514,6 +517,53 @@ async def delete_endpoint(endpoint_id: str, request: Request) -> None:
     deleted = await manager.delete_endpoint(endpoint_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Endpoint not found")
+
+
+@router.post(
+    "/config/llm/endpoints/{endpoint_id}/activate",
+    response_model=LLMEndpointResponse,
+)
+async def activate_endpoint_model(
+    endpoint_id: str,
+    body: LLMEndpointActivate,
+    request: Request,
+) -> LLMEndpointResponse:
+    """Globally activate a specific model on an endpoint.
+
+    Activation is unique across all endpoints; activating a model clears any
+    other active (endpoint, model) pair and hot-swaps the running LLM.
+    """
+    manager = _get_endpoint_manager(request)
+    try:
+        endpoint = await manager.activate_model(endpoint_id, body.model)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    if endpoint is None:
+        raise HTTPException(status_code=404, detail="Endpoint not found")
+
+    # Hot-swap the running agent to the activated endpoint+model.
+    runtime_manager = getattr(request.app.state, "runtime_config_manager", None)
+    agent = getattr(request.app.state, "agent", None)
+    if runtime_manager is not None and agent is not None and endpoint.api_key:
+        try:
+            await runtime_manager.swap_llm_provider(
+                new_provider=endpoint.provider,
+                new_model=body.model,
+                new_api_key=endpoint.api_key,
+                new_base_url=endpoint.base_url,
+                agent=agent,
+                skill_engine=getattr(request.app.state, "skill_engine", None),
+                composition_engine=getattr(request.app.state, "composition_engine", None),
+                subagent_manager=getattr(request.app.state, "subagent_manager", None),
+                user_profiler=getattr(request.app.state, "user_profiler", None),
+            )
+            namer = getattr(request.app.state, "conversation_namer", None)
+            if namer is not None:
+                namer.llm_provider = agent.llm_provider
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
+    return _to_response(endpoint)
 
 
 @router.post(

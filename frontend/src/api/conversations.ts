@@ -18,11 +18,12 @@ export async function renameConversation(id: string, name: string): Promise<Conv
 export async function setConversationEndpoint(
   id: string,
   endpointId: string | null,
+  model: string | null = null,
 ): Promise<Conversation> {
   const res = await fetch(`${API_BASE}/conversations/${id}/endpoint`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ endpoint_id: endpointId }),
+    body: JSON.stringify({ endpoint_id: endpointId, model }),
   })
   if (!res.ok) {
     const data = await res.json().catch(() => ({}))

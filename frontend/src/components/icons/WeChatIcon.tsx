@@ -1,9 +1,12 @@
+import { useTranslation } from '../../i18n'
+
 interface WeChatIconProps {
   size?: number
   className?: string
 }
 
 export function WeChatIcon({ size = 16, className }: WeChatIconProps) {
+  const { t } = useTranslation()
   return (
     <svg
       width={size}
@@ -11,7 +14,7 @@ export function WeChatIcon({ size = 16, className }: WeChatIconProps) {
       viewBox="0 0 24 24"
       fill="currentColor"
       className={className}
-      aria-label="WeChat"
+      aria-label={t('channels.wechat')}
       role="img"
     >
       <path d="M8.69 2.19C3.89 2.19 0 5.48 0 9.53c0 2.69 1.45 5.04 3.63 6.36-.16.77-.85 2.34-1.07 2.84-.12.28-.04.61.24.74.28.13.63.02.86-.22.98-1.06 2.15-2.61 2.5-3.05.69.19 1.42.29 2.17.29 4.8 0 8.69-3.29 8.69-7.34 0-4.05-3.89-7.34-8.69-7.34zm-.55 4.5c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm4.3 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm6.19 2.5c-4.36 0-7.9 2.98-7.9 6.65 0 1.92 1.04 3.61 2.6 4.54-.11.55-.59 1.67-.74 2.03-.08.21-.03.46.17.56.2.1.47.01.65-.17.71-.77 1.56-1.89 1.82-2.21.47.13.97.2 1.48.2 4.36 0 7.9-2.98 7.9-6.65s-3.54-6.65-7.9-6.65zm-.5 3.5c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm3.5 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1z" />

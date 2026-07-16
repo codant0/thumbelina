@@ -66,16 +66,29 @@ async def _apply_conversation_endpoint(
     if conv is None:
         return
     endpoint_id = conv.get("endpoint_id")
+    conv_model = conv.get("model")
     if not endpoint_id:
-        # No per-conversation endpoint → revert to the shared default provider.
-        agent.llm = None
-        return
-    endpoint = await endpoint_manager.get_endpoint(endpoint_id)
-    if endpoint is None or not endpoint.api_key:
-        return
+        # No per-conversation endpoint → fall back to the globally active
+        # (endpoint, model) pair if one is set, else the shared default provider.
+        active = await endpoint_manager.get_active_endpoint_model()
+        if active is None or not active[0].api_key:
+            agent.llm = None
+            return
+        endpoint, active_model = active
+        model = active_model
+    else:
+        endpoint = await endpoint_manager.get_endpoint(endpoint_id)
+        if endpoint is None or not endpoint.api_key:
+            return
+        model = (
+            conv_model
+            or endpoint.active_model
+            or (endpoint.models[0] if endpoint.models else None)
+            or "gpt-4o"
+        )
     kwargs: dict[str, Any] = {
         "api_key": endpoint.api_key,
-        "model": endpoint.model or "gpt-4o",
+        "model": model,
     }
     if endpoint.base_url:
         kwargs["base_url"] = endpoint.base_url

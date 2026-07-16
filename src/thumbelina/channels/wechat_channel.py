@@ -8,7 +8,7 @@ Credentials are obtained from the QR code login flow and stored in
 Protocol reference: https://github.com/epiral/weixin-bot/blob/main/docs/protocol-spec.md
 
 All WeChat messages are routed to a single pinned conversation named
-"微信聊天" so they appear at the top of the conversation list in the
+"微信Clawbot" so they appear at the top of the conversation list in the
 Web UI.
 """
 
@@ -26,7 +26,9 @@ from thumbelina.channels.wechat_qrcode import ILinkSessionExpiredError
 
 logger = logging.getLogger(__name__)
 
-_WECHAT_CONVERSATION_NAME = "微信聊天"
+_WECHAT_CONVERSATION_NAME = "微信Clawbot"
+# Legacy name used in older versions; migrated to _WECHAT_CONVERSATION_NAME on startup.
+_WECHAT_LEGACY_CONVERSATION_NAME = "微信聊天"
 
 # How often to log a polling summary (every N cycles)
 _LOG_EVERY_N_POLLS = 100
@@ -142,15 +144,26 @@ class WeChatChannel(Channel):
             logger.warning("Failed to load saved credentials from %s", cred_path, exc_info=True)
 
     async def _ensure_wechat_conversation(self) -> None:
-        """Create or reuse a pinned '微信聊天' conversation for the agent."""
+        """Create or reuse a pinned '微信Clawbot' conversation for the agent.
+
+        Migrates any legacy '微信聊天' conversation to the new name.
+        """
         mm = self._agent.memory_manager
         if mm is None:
             logger.warning("No memory manager — WeChat messages will not be persisted")
             return
 
         try:
+            # Migrate legacy-named conversation if present
+            legacy_id = await self._find_conversation_by_name(mm, _WECHAT_LEGACY_CONVERSATION_NAME)
+            if legacy_id:
+                await mm.rename_conversation(legacy_id, _WECHAT_CONVERSATION_NAME)
+                self._agent.current_conversation_id = legacy_id
+                logger.info("Migrated WeChat conversation %s to '%s'", legacy_id, _WECHAT_CONVERSATION_NAME)
+                return
+
             # Check if a conversation with this name already exists
-            existing_id = await self._find_wechat_conversation(mm)
+            existing_id = await self._find_conversation_by_name(mm, _WECHAT_CONVERSATION_NAME)
             if existing_id:
                 self._agent.current_conversation_id = existing_id
                 logger.info("Reusing existing WeChat conversation %s", existing_id)
@@ -167,12 +180,12 @@ class WeChatChannel(Channel):
             logger.exception("Failed to ensure WeChat conversation")
 
     @staticmethod
-    async def _find_wechat_conversation(mm: Any) -> str | None:
-        """Find an existing conversation named '微信聊天'."""
+    async def _find_conversation_by_name(mm: Any, name: str) -> str | None:
+        """Find an existing conversation with the given name."""
         try:
             conversations = await mm.get_conversations()
             for conv in conversations:
-                if conv.get("name") == _WECHAT_CONVERSATION_NAME:
+                if conv.get("name") == name:
                     return cast(str, conv["id"])
         except Exception:
             logger.warning("Failed to search for existing WeChat conversation", exc_info=True)
@@ -260,7 +273,7 @@ class WeChatChannel(Channel):
     ) -> str:
         """Process an incoming message and return an agent response.
 
-        All messages are routed to the shared "微信聊天" conversation.
+        All messages are routed to the shared "微信Clawbot" conversation.
 
         Parameters
         ----------

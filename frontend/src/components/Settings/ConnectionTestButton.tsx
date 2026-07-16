@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react'
 import { testConnection, testEndpointConnection, type ConnectionTestResult } from '../../api/llmConfig'
 import { ConnectionTestResultDisplay } from './ConnectionTestResultDisplay'
 import { Loader2, Plug } from 'lucide-react'
+import { useTranslation } from '../../i18n'
 
 interface ConnectionTestButtonProps {
   provider: string
@@ -23,6 +24,7 @@ export function ConnectionTestButton({
 }: ConnectionTestButtonProps) {
   const [result, setResult] = useState<ConnectionTestResult | null>(null)
   const [loading, setLoading] = useState(false)
+  const { t } = useTranslation()
 
   const handleTest = useCallback(async () => {
     setLoading(true)
@@ -49,7 +51,7 @@ export function ConnectionTestButton({
         network_reachable: false,
         auth_valid: false,
         service_available: false,
-        error: err instanceof Error ? err.message : 'Test failed',
+        error: err instanceof Error ? err.message : t('connectionTest.testFailed'),
       })
     } finally {
       setLoading(false)
@@ -64,9 +66,9 @@ export function ConnectionTestButton({
         data-testid="test-connection-button"
         onClick={handleTest}
         disabled={loading || !base_url}
-        title={base_url ? 'Test connectivity to this endpoint' : 'Enter a base URL first'}
+        title={base_url ? t('connectionTest.testTooltip') : t('connectionTest.enterBaseUrl')}
       >
-        {loading ? <><Loader2 size={14} className="spin" />Testing…</> : <><Plug size={14} />Test Connection</>}
+        {loading ? <><Loader2 size={14} className="spin" />{t('common.testing')}</> : <><Plug size={14} />{t('connectionTest.button')}</>}
       </button>
       <ConnectionTestResultDisplay result={result} loading={loading} />
     </div>

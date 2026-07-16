@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import { Search, Sparkles, Layers, Loader2 } from 'lucide-react'
+import { useTranslation } from '../../i18n'
 
 interface SearchResult {
   conversation_id: string
@@ -36,6 +37,7 @@ export function MemoryViewer() {
   const [skillsLoaded, setSkillsLoaded] = useState(false)
   const [compositionsLoaded, setCompositionsLoaded] = useState(false)
   const [error, setError] = useState('')
+  const { t } = useTranslation()
 
   const handleSearch = useCallback(async () => {
     if (!query.trim()) return
@@ -46,7 +48,7 @@ export function MemoryViewer() {
       if (res.ok) {
         setResults(await res.json())
       } else {
-        setError('Search failed')
+        setError(t('memory.searchFailed'))
       }
     } catch {
       setError('Search failed')
@@ -77,16 +79,16 @@ export function MemoryViewer() {
 
   return (
     <div className="page-container" data-testid="memory-viewer">
-      <div className="page-title">Memory</div>
+      <div className="page-title">{t('memory.title')}</div>
 
       <div className="card">
-        <div className="card-title"><Search size={14} />Search Conversations</div>
+        <div className="card-title"><Search size={14} />{t('memory.searchConversations')}</div>
         <div className="search-bar">
           <input
             type="text"
             className="form-input"
             data-testid="search-input"
-            placeholder="Search messages..."
+            placeholder={t('memory.searchPlaceholder')}
             value={query}
             onChange={e => setQuery(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') void handleSearch() }}
@@ -98,13 +100,13 @@ export function MemoryViewer() {
             disabled={searching}
           >
             {searching ? <Loader2 size={16} className="spin" /> : <Search size={16} />}
-            {searching ? 'Searching...' : 'Search'}
+            {searching ? t('memory.searching') : t('memory.search')}
           </button>
         </div>
         {error && <p data-testid="search-error" className="task-empty" style={{ color: 'var(--error)' }}>{error}</p>}
         <div data-testid="search-results">
           {results.length === 0 && query && !searching ? (
-            <p className="task-empty">No results found</p>
+            <p className="task-empty">{t('memory.noResults')}</p>
           ) : (
             results.map((r, i) => (
               <div key={i} data-testid="search-result-item" className="task-item search-result-item">
@@ -123,19 +125,19 @@ export function MemoryViewer() {
 
       <div className="card">
         <div className="card-title card-title--between">
-          <span><Sparkles size={14} />Skills</span>
+          <span><Sparkles size={14} />{t('memory.skills')}</span>
           <button
             className="btn btn-ghost btn-sm"
             data-testid="load-skills-button"
             onClick={handleLoadSkills}
             disabled={skillsLoaded}
           >
-            {skillsLoaded ? 'Loaded' : 'Load Skills'}
+            {skillsLoaded ? t('memory.loaded') : t('memory.loadSkills')}
           </button>
         </div>
         <div className="skill-grid" data-testid="skills-list">
           {skills.length === 0 && skillsLoaded ? (
-            <p className="task-empty">No skills found</p>
+            <p className="task-empty">{t('memory.noSkills')}</p>
           ) : (
             skills.map(skill => (
               <div key={skill.id} className="skill-card" data-testid="skill-item">
@@ -159,19 +161,19 @@ export function MemoryViewer() {
       {/* Skill Compositions */}
       <div className="card">
         <div className="card-title card-title--between">
-          <span><Layers size={14} />Skill Compositions</span>
+          <span><Layers size={14} />{t('memory.skillCompositions')}</span>
           <button
             className="btn btn-ghost btn-sm"
             data-testid="load-compositions-button"
             onClick={handleLoadCompositions}
             disabled={compositionsLoaded}
           >
-            {compositionsLoaded ? 'Loaded' : 'Load Compositions'}
+            {compositionsLoaded ? t('memory.loaded') : t('memory.skillCompositions')}
           </button>
         </div>
         <div data-testid="compositions-list">
           {compositions.length === 0 && compositionsLoaded ? (
-            <p className="task-empty">No compositions found</p>
+            <p className="task-empty">{t('memory.noCompositions')}</p>
           ) : (
             compositions.map(comp => (
               <div key={comp.id} className="task-item search-result-item" data-testid="composition-item">
