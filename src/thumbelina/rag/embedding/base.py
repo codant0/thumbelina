@@ -10,9 +10,9 @@ class EmbeddingModel(ABC):
     """文本向量化模型接口。"""
 
     @abstractmethod
-    async def embed(self, text: str) -> list[float]:
+    def embed(self, text: str) -> list[float]:
         """将单段文本编码为向量。"""
 
     @abstractmethod
-    async def embed_batch(self, texts: Sequence[str]) -> list[list[float]]:
+    def embed_batch(self, texts: Sequence[str]) -> list[list[float]]:
         """批量将多段文本编码为向量。"""
