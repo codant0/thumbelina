@@ -12,24 +12,12 @@ from thumbelina.rag.ingestion.loader import TextLoader
 from thumbelina.rag.knowledge_base.models import Chunk
 
 
-def save_embeddings(chunks: list[Chunk], embeddings: list[list[float]]) -> None:
-    # 将索引写入向量数据库中，写入内容包含：原始文本内容、向量索引、id
-    chromadb_client = chromadb.EphemeralClient()
-    chromadb_collection = chromadb_client.get_or_create_collection(
-        name="default")
-    for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
-        chromadb_collection.add(
-            documents=chunk.content,
-            embeddings=[embedding],
-            ids=[str(i)],
-        )
-
-
 class HuggingFaceEmbedding(EmbeddingModel):
     """通过sentence-transformers使用本地模型"""
 
-    def __init__(self, model_name: str = "Qwen/Qwen3-Embedding-0.6B"):
+    def __init__(self, chromadb_collection: chromadb.Collection, model_name: str = "Qwen/Qwen3-Embedding-0.6B"):
         super().__init__()
+        self.chromadb_collection = chromadb_collection
         # 检查 HuggingFace 缓存中是否存在该模型的快照目录
         cached = try_to_load_from_cache(model_name, "config.json")
         if isinstance(cached, str) and Path(cached).exists():
@@ -42,18 +30,13 @@ class HuggingFaceEmbedding(EmbeddingModel):
             print(f"本地未找到缓存，从 HuggingFace Hub 下载: {model_name}")
             self.model = SentenceTransformer(model_name)
 
-    def embed(self, chunk: Chunk) -> list[float]:
+    def embed(self, text: str) -> list[float]:
         """单文本向量化"""
-        embeddings = self.model.encode(chunk.content).flatten().tolist()
-        save_embeddings([chunk], [embeddings])
-        return embeddings
+        return self.model.encode(text).flatten().tolist()
 
-    def embed_batch(self, chunks: list[Chunk]) -> list[list[float]]:
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
         """批量文本向量化"""
-        embeddings = self.model.encode(
-            [str(x.content) for x in chunks]).tolist()
-        save_embeddings(chunks, embeddings)
-        return embeddings
+        return self.model.encode(texts).tolist()
 
 
 if __name__ == "__main__":
@@ -66,9 +49,14 @@ if __name__ == "__main__":
         recursive_chunker = RecursiveChunker()
         chunks = recursive_chunker.chunk(document)
         first_chunk = chunks[0]
-        embedding_model = HuggingFaceEmbedding()
-        first_embed_vlaue = embedding_model.embed(first_chunk)
+        chromadb_client = chromadb.EphemeralClient()
+        chromadb_collection = chromadb_client.get_or_create_collection(
+            name="default")
+        embedding_model = HuggingFaceEmbedding(
+            chromadb_collection=chromadb_collection)
+        first_embed_vlaue = embedding_model.embed(first_chunk.content)
         print(f"size: {len(first_embed_vlaue)}, value: {first_embed_vlaue}")
 
-        all_embed_value = embedding_model.embed_batch(chunks)
+        all_embed_value = embedding_model.embed_batch(
+            [str(x.content) for x in chunks])
         print(f"size: {len(all_embed_value)}")

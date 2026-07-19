@@ -11,8 +11,8 @@
     model = get_embedding_model("hf/text-embedding-3-small")
     vec = model.embed("你好世界")
 """
-
 from thumbelina.rag.embedding.base import EmbeddingModel
+from thumbelina.rag.knowledge_base.models import Chunk
 
 
 class EmbeddingRegistry:
