@@ -9,6 +9,7 @@ import os
 # 修复 OpenMP 运行时冲突（PyTorch + ONNX Runtime）
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
+import torch
 import chromadb  # noqa: E402
 from sentence_transformers import SentenceTransformer  # noqa: E402
 

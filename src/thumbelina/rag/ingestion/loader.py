@@ -8,27 +8,45 @@
 - CodeLoader：加载源代码文件，附带语言类型元数据
 - DirectoryLoader：批量加载指定目录下所有支持的文档
 """
-
+import uuid
 from abc import ABC, abstractmethod
-
-from llama_index.core import SimpleDirectoryReader
-from llama_index_client import Document
+from pathlib import Path
+from thumbelina.rag.knowledge_base.models import Document, DocumentType
 
 
 class Loader(ABC):
+    """文档加载器接口"""
+    # 文档加载器支持的文件后缀类型
+    extensions: list[str] = []
+
     @abstractmethod
     def load(self, path: str) -> list[Document]:
-        pass
+        """加载文档"""
 
 
 class TextLoader(Loader):
-    def load(self, path) -> list[Document]:
-        return SimpleDirectoryReader(path).load_data()
+    extensions: list[str] = [".txt", ".md"]
+
+    def load(self, path: str) -> list[Document]:
+        path_obj = Path(path)
+        if not (path_obj.exists() and path_obj.is_file() and path_obj.suffix.lower() in self.extensions):
+            return None
+        
+        documents: list[Document] = []
+        documents.append(Document(
+            id=uuid.uuid4().hex,
+            name=path_obj.name,
+            source_uri=str(path_obj.resolve()),
+            document_type=DocumentType.from_value(path_obj.suffix),
+            content=str(path_obj.read_text(encoding="utf-8"))
+        ))
+        return documents
 
 
-# test code, need delete
-path = "src/thumbelina/rag/demo/data"
-loader = TextLoader()
-documents = loader.load(path)
-for i, document in enumerate(documents):
-    print(f"[{i}]: {document}\n")
+if __name__ == "__main__":
+    BASE_DIR = Path(__file__).parent
+    TEST_FILE = str(BASE_DIR / ".." / "demo" / "data" / "doc.md")
+    loader = TextLoader()
+    docs = loader.load(TEST_FILE)
+    for i, document in enumerate(docs):
+        print(f"[{i}]: {document}\n")
