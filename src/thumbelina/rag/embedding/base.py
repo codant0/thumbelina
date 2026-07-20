@@ -3,7 +3,7 @@
 from __future__ import annotations
 import chromadb
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from pydantic import BaseModel
 
 from thumbelina.rag.knowledge_base.models import Chunk
 
@@ -29,3 +29,25 @@ class EmbeddingModel(ABC):
                 embeddings=[embedding],
                 ids=[str(i)],
             )
+
+
+class VectorQueryResult(BaseModel):
+    id: str
+    content: str
+    embedding: list[float] = []
+    distance: float = 0.0
+
+class VectorStore(ABC):
+    """向量存储抽象接口"""
+
+    @abstractmethod
+    def add(self, chunks: list[Chunk], embeddings: list[list[float]]) -> None:
+        """批量写入文档块及向量"""
+
+    @abstractmethod
+    def query(self, embedding: list[float], top_k: int = 5) -> list[VectorQueryResult]:
+        """top_k向量召回"""
+
+    @abstractmethod
+    def delete(self, ids: list[str]) -> None:
+        """批量删除文档块"""

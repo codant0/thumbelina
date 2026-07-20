@@ -16,7 +16,7 @@ from pathlib import Path
 import chromadb
 
 from thumbelina.rag.embedding.base import EmbeddingModel
-from thumbelina.rag.embedding.hf_provider import HuggingFaceEmbedding
+from thumbelina.rag.embedding.provider_hf import HuggingFaceEmbedding
 from thumbelina.rag.ingestion.chunker import RecursiveChunker
 from thumbelina.rag.ingestion.loader import TextLoader
 from thumbelina.rag.knowledge_base.models import Chunk
