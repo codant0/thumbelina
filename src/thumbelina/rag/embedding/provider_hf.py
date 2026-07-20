@@ -6,7 +6,7 @@ import chromadb
 from huggingface_hub import try_to_load_from_cache
 from pathlib import Path
 from sentence_transformers import SentenceTransformer
-from thumbelina.rag.embedding.base import EmbeddingModel
+from thumbelina.rag.embedding.base import EmbeddingModel, VectorStore
 from thumbelina.rag.ingestion.chunker import RecursiveChunker
 from thumbelina.rag.ingestion.loader import TextLoader
 from thumbelina.rag.knowledge_base.models import Chunk
@@ -15,9 +15,8 @@ from thumbelina.rag.knowledge_base.models import Chunk
 class HuggingFaceEmbedding(EmbeddingModel):
     """通过sentence-transformers使用本地模型"""
 
-    def __init__(self, chromadb_collection: chromadb.Collection, model_name: str = "Qwen/Qwen3-Embedding-0.6B"):
+    def __init__(self, model_name: str = "Qwen/Qwen3-Embedding-0.6B"):
         super().__init__()
-        self.chromadb_collection = chromadb_collection
         # 检查 HuggingFace 缓存中是否存在该模型的快照目录
         cached = try_to_load_from_cache(model_name, "config.json")
         if isinstance(cached, str) and Path(cached).exists():

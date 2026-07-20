@@ -15,8 +15,9 @@ from pathlib import Path
 
 import chromadb
 
-from thumbelina.rag.embedding.base import EmbeddingModel
+from thumbelina.rag.embedding.base import EmbeddingModel, VectorStore
 from thumbelina.rag.embedding.provider_hf import HuggingFaceEmbedding
+from thumbelina.rag.embedding.vector_chroma import ChromaVectorStore
 from thumbelina.rag.ingestion.chunker import RecursiveChunker
 from thumbelina.rag.ingestion.loader import TextLoader
 from thumbelina.rag.knowledge_base.models import Chunk
@@ -33,17 +34,18 @@ class Retriever(ABC):
 class SimpleRetriever(Retriever):
     """基于余弦相似度的 top-k 检索。"""
 
-    def __init__(self, embedding_model: EmbeddingModel):
+    def __init__(self, embedding_model: EmbeddingModel, vector_store: VectorStore):
         super().__init__()
         self.embedding_model = embedding_model
+        self.vector_store = vector_store
 
     def retrieve(self, query: str, top_k: int = 5) -> list[str]:
         query_embedding = self.embedding_model.embed(query)
-        results = self.embedding_model.chromadb_collection.query(
-            query_embeddings=[query_embedding],
-            n_results=top_k
+        results = self.vector_store.query(
+            embedding=query_embedding,
+            top_k=top_k
         )
-        return results["documents"][0]
+        return [doc.content for doc in results]
 
 
 if __name__ == "__main__":
@@ -63,16 +65,16 @@ if __name__ == "__main__":
         name="default",
         embedding_function=None,
         metadata={"hnsw:space": "cosine"})
-    embedding_model = HuggingFaceEmbedding(
-        chromadb_collection=chromadb_collection)
+    vector_store: VectorStore = ChromaVectorStore(chromadb_collection)
+    embedding_model = HuggingFaceEmbedding()
     embeddings = embedding_model.embed_batch(
         [str(x.content) for x in chunks])
     # 4. 嵌入
-    embedding_model.save_embeddings(chunks, embeddings)
+    vector_store.add(chunks, embeddings)
 
     # 5. 向量召回
     query = "哆啦A梦使用的3个秘密道具是什么？"
-    retriever = SimpleRetriever(embedding_model)
+    retriever = SimpleRetriever(embedding_model=embedding_model, vector_store=vector_store)
     results = retriever.retrieve(query)
     for i, result in enumerate(results):
       print(f"result {i + 1}: {result}")
