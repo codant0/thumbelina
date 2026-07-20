@@ -39,7 +39,7 @@ class SimpleRetriever(Retriever):
         self.embedding_model = embedding_model
         self.vector_store = vector_store
 
-    def retrieve(self, query: str, top_k: int = 5) -> list[str]:
+    def retrieve(self, query: str, top_k: int = 5) -> list[Chunk]:
         query_embedding = self.embedding_model.embed(query)
         results = self.vector_store.query(
             embedding=query_embedding,

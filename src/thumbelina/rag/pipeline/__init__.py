@@ -4,3 +4,7 @@
 ---------------
 indexer.py — 协调「加载 → 分块 → 向量化 → 存储」的完整流水线
 """
+
+from thumbelina.rag.pipeline.indexer import IndexStats, Indexer
+
+__all__ = ["Indexer", "IndexStats"]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 from abc import ABC, abstractmethod
+from typing import NamedTuple
 from pydantic import BaseModel
 
 from thumbelina.rag.knowledge_base.models import Chunk
@@ -19,11 +20,9 @@ class EmbeddingModel(ABC):
         """批量将多段文本编码为向量。"""
 
 
-class VectorQueryResult(BaseModel):
-    id: str
-    content: str
-    embedding: list[float] = []
-    distance: float = 0.0
+class ScoredChunk(NamedTuple):
+    chunk: Chunk
+    score: float
 
 
 class VectorStore(ABC):
@@ -34,7 +33,7 @@ class VectorStore(ABC):
         """批量写入文档块及向量"""
 
     @abstractmethod
-    def query(self, embedding: list[float], top_k: int = 5) -> list[VectorQueryResult]:
+    def query(self, embedding: list[float], top_k: int = 5) -> list[ScoredChunk]:
         """top_k向量召回"""
 
     @abstractmethod

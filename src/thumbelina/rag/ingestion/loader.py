@@ -41,6 +41,8 @@ class TextLoader(Loader):
             content=str(path_obj.read_text(encoding="utf-8"))
         ))
         return documents
+    
+    # TODO 新增方法，根据文件后缀动态选择loader
 
 
 if __name__ == "__main__":
