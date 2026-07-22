@@ -301,6 +301,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         # Embedding 注册
         rag_embedding_registry = EmbeddingRegistry()
+        try:
+            from thumbelina.rag.embedding.provider_hf import HuggingFaceEmbedding
+
+            rag_embedding_registry.register("Qwen/Qwen3-Embedding-0.6B", HuggingFaceEmbedding)
+            logger.info("HuggingFace embedding provider registered")
+        except Exception:
+            logger.debug("HuggingFace embedding not available", exc_info=True)
 
         # 存储到 app.state
         app.state.rag_kb_repo = rag_kb_repo

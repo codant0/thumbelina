@@ -34,17 +34,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from pathlib import Path
-
-import chromadb
 
 from thumbelina.rag.embedding.base import EmbeddingModel, VectorStore
-from thumbelina.rag.embedding.provider_hf import HuggingFaceEmbedding
-from thumbelina.rag.embedding.vector_chroma import ChromaVectorStore
-from thumbelina.rag.ingestion.chunker import Chunker, RecursiveChunker
-from thumbelina.rag.ingestion.loader import Loader, TextLoader
+from thumbelina.rag.ingestion.chunker import Chunker
+from thumbelina.rag.ingestion.loader import Loader
 from thumbelina.rag.knowledge_base.models import Chunk, Document
-from thumbelina.rag.retrieval.strategies import SimpleRetriever
 
 logger = logging.getLogger(__name__)
 
@@ -206,6 +200,16 @@ class Indexer:
 
 
 if __name__ == "__main__":
+    from pathlib import Path
+
+    import chromadb
+
+    from thumbelina.rag.embedding.provider_hf import HuggingFaceEmbedding
+    from thumbelina.rag.embedding.vector_chroma import ChromaVectorStore
+    from thumbelina.rag.ingestion.chunker import RecursiveChunker
+    from thumbelina.rag.ingestion.loader import TextLoader
+    from thumbelina.rag.retrieval.strategies import SimpleRetriever
+
     loader = TextLoader()
     recursive_chunker = RecursiveChunker()
     embedder = HuggingFaceEmbedding()

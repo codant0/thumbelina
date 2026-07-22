@@ -9,15 +9,8 @@
 """
 
 from abc import ABC, abstractmethod
-from pathlib import Path
-
-import chromadb
 
 from thumbelina.rag.embedding.base import EmbeddingModel, ScoredChunk, VectorStore
-from thumbelina.rag.embedding.provider_hf import HuggingFaceEmbedding
-from thumbelina.rag.embedding.vector_chroma import ChromaVectorStore
-from thumbelina.rag.ingestion.chunker import RecursiveChunker
-from thumbelina.rag.ingestion.loader import TextLoader
 from thumbelina.rag.knowledge_base.models import Chunk
 
 
@@ -47,6 +40,15 @@ class SimpleRetriever(Retriever):
 
 
 if __name__ == "__main__":
+    from pathlib import Path
+
+    import chromadb
+
+    from thumbelina.rag.embedding.provider_hf import HuggingFaceEmbedding
+    from thumbelina.rag.embedding.vector_chroma import ChromaVectorStore
+    from thumbelina.rag.ingestion.chunker import RecursiveChunker
+    from thumbelina.rag.ingestion.loader import TextLoader
+
     # 1. 加载
     BASE_DIR = Path(__file__).parent
     TEST_FILE = str(BASE_DIR / ".." / "test_data" / "doc.md")
