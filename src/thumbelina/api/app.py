@@ -278,7 +278,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         # Pre-import torch to avoid DLL loading conflicts on Windows.
         # When torch is imported later (via sentence_transformers → transformers),
         # other C extension modules already loaded can interfere with DLL resolution.
-        import torch  # noqa: F401
+        try:
+            import torch  # noqa: F401
+        except OSError:
+            logger.warning("torch pre-import failed, embedding may not work", exc_info=True)
 
         from thumbelina.rag.embedding.registry import EmbeddingRegistry
         from thumbelina.rag.embedding.store_manager import ChromaStoreManager
