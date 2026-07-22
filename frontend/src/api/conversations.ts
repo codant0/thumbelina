@@ -31,3 +31,19 @@ export async function setConversationEndpoint(
   }
   return res.json() as Promise<Conversation>
 }
+
+export async function setConversationKnowledgeBase(
+  id: string,
+  knowledgeBaseId: string | null,
+): Promise<Conversation> {
+  const res = await fetch(`${API_BASE}/conversations/${id}/knowledge-base`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ knowledge_base_id: knowledgeBaseId }),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.detail || `HTTP ${res.status}`)
+  }
+  return res.json() as Promise<Conversation>
+}

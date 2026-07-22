@@ -8,7 +8,8 @@ import { DreamViewer } from './components/Dream/DreamViewer'
 import { SettingsPanel } from './components/Settings/SettingsPanel'
 import { PluginsPage } from './components/Plugins/PluginsPage'
 import { ChannelsPage } from './components/Channels/ChannelsPage'
-import { renameConversation, setConversationEndpoint } from './api/conversations'
+import { KnowledgeBasePage } from './components/KnowledgeBase/KnowledgeBasePage'
+import { renameConversation, setConversationEndpoint, setConversationKnowledgeBase } from './api/conversations'
 import type { Conversation } from './types/chat'
 import './App.css'
 
@@ -108,6 +109,13 @@ function App() {
     } catch { /* ignore */ }
   }, [updateConversationInState])
 
+  const handleSetKnowledgeBase = useCallback(async (id: string, knowledgeBaseId: string | null) => {
+    try {
+      const updated = await setConversationKnowledgeBase(id, knowledgeBaseId)
+      updateConversationInState(updated)
+    } catch { /* ignore */ }
+  }, [updateConversationInState])
+
   const renderPage = () => {
     switch (activePage) {
       case 'tasks':
@@ -122,6 +130,8 @@ function App() {
         return <PluginsPage />
       case 'channels':
         return <ChannelsPage />
+      case 'knowledge-base':
+        return <KnowledgeBasePage />
       case 'chat':
       default:
         return (
@@ -140,6 +150,7 @@ function App() {
               onConversationCreated={fetchConversations}
               onDefaultConversation={handleDefaultConversation}
               onSetEndpoint={handleSetEndpoint}
+              onSetKnowledgeBase={handleSetKnowledgeBase}
             />
           </>
         )

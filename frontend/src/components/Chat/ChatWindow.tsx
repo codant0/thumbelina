@@ -3,6 +3,7 @@ import { useWebSocket } from '../../hooks/useWebSocket'
 import { MessageList } from './MessageList'
 import { InputBox } from './InputBox'
 import { ConversationModelSelector } from './ConversationModelSelector'
+import { KnowledgeBaseSelector } from './KnowledgeBaseSelector'
 import { Mail } from 'lucide-react'
 import type { Conversation } from '../../types/chat'
 import { useTranslation } from '../../i18n'
@@ -13,9 +14,10 @@ interface ChatWindowProps {
   onConversationCreated?: () => void
   onDefaultConversation?: (id: string) => void
   onSetEndpoint?: (id: string, endpointId: string | null, model: string | null) => void
+  onSetKnowledgeBase?: (id: string, knowledgeBaseId: string | null) => void
 }
 
-export function ChatWindow({ conversationId, conversations, onConversationCreated, onDefaultConversation, onSetEndpoint }: ChatWindowProps) {
+export function ChatWindow({ conversationId, conversations, onConversationCreated, onDefaultConversation, onSetEndpoint, onSetKnowledgeBase }: ChatWindowProps) {
   const wsUrl = useMemo(() => {
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     return `${wsProtocol}//${window.location.host}/ws/chat`
@@ -117,6 +119,13 @@ export function ChatWindow({ conversationId, conversations, onConversationCreate
             selectedEndpointId={activeConversation?.endpoint_id ?? null}
             selectedModel={activeConversation?.model ?? null}
             onChange={(endpointId, model) => onSetEndpoint(conversationId, endpointId, model)}
+          />
+        )}
+        {onSetKnowledgeBase && conversationId && (
+          <KnowledgeBaseSelector
+            conversationId={conversationId}
+            selectedKnowledgeBaseId={activeConversation?.knowledge_base_id ?? null}
+            onChange={(kbId) => onSetKnowledgeBase(conversationId, kbId)}
           />
         )}
       </div>

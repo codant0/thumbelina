@@ -8,18 +8,20 @@ import {
   Settings,
   Blocks,
   Radio,
+  BookOpen,
 } from 'lucide-react'
 import type { ComponentType } from 'react'
 
-export type Page = 'chat' | 'tasks' | 'memory' | 'dream' | 'settings' | 'plugins' | 'channels'
+export type Page = 'chat' | 'tasks' | 'memory' | 'dream' | 'knowledge-base' | 'settings' | 'plugins' | 'channels'
 
-const navKeys: Page[] = ['chat', 'tasks', 'memory', 'dream', 'settings', 'plugins', 'channels']
+const navKeys: Page[] = ['chat', 'tasks', 'memory', 'dream', 'knowledge-base', 'settings', 'plugins', 'channels']
 
 const NAV_ICONS: Record<Page, ComponentType<{ size?: number | string }>> = {
   chat: MessageSquare,
   tasks: ListTodo,
   memory: Database,
   dream: Sparkles,
+  'knowledge-base': BookOpen,
   settings: Settings,
   plugins: Blocks,
   channels: Radio,
@@ -28,6 +30,17 @@ const NAV_ICONS: Record<Page, ComponentType<{ size?: number | string }>> = {
 interface HeaderProps {
   activePage: Page
   onNavigate: (page: Page) => void
+}
+
+const NAV_I18N: Record<Page, string> = {
+  chat: 'nav.chat',
+  tasks: 'nav.tasks',
+  memory: 'nav.memory',
+  dream: 'nav.dream',
+  'knowledge-base': 'nav.knowledgeBase',
+  settings: 'nav.settings',
+  plugins: 'nav.plugins',
+  channels: 'nav.channels',
 }
 
 export function Header({ activePage, onNavigate }: HeaderProps) {
@@ -50,7 +63,7 @@ export function Header({ activePage, onNavigate }: HeaderProps) {
               onClick={() => onNavigate(page)}
             >
               <Icon />
-              {t(`nav.${page}`)}
+              {t(NAV_I18N[page])}
             </button>
           )
         })}
