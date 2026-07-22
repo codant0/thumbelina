@@ -12,6 +12,7 @@ Thumbelina is a personal AI agent assistant built with **FastAPI** (backend) and
 
 ```bash
 pip install -e ".[dev]"          # Install in dev mode
+pip install -e ".[dev,rag]"      # Include RAG dependencies (llama-index embeddings/LLMs)
 pytest                           # Run all tests
 pytest tests/test_agent/         # Run tests for a specific module
 pytest tests/test_api/test_chat.py -x -q  # Run single file, stop on first failure
@@ -20,6 +21,7 @@ ruff format src/ tests/          # Format
 mypy src/                        # Type check (strict mode)
 thumbelina                       # Launch CLI interactive chat
 thumbelina-serve                 # Start API server on port 8000
+python start_dev.py              # Start both backend (8000) and frontend (5173) together
 ```
 
 ### Frontend (React/TypeScript)
@@ -118,6 +120,15 @@ SQLAlchemy ORM (`Conversation`, `Message`, `SkillRecord`, `CompositionRecord`, `
 - `MessageQueue` — async inter-agent messaging
 - `SharedState` — lock-protected KV store
 
+### Frontend (`frontend/src/`)
+
+React 19 + TypeScript + Vite 8. Pages: Chat, Tasks, Memory, Dream, Settings, Plugins, Channels. Three themes (dark/light/warm). i18n via `LocaleContext` (English + Chinese).
+
+- `hooks/useWebSocket.ts` — WebSocket hook for streaming chat
+- `api/` — API client modules (`conversations.ts`, `llmConfig.ts`)
+- `types/chat.ts` — TypeScript interfaces
+- `i18n/` — locale files in `locales/en.json` and `locales/zh-CN.json`
+
 ### Other Modules
 
 - **tools/**: Built-in tools (file operations, web requests, shell commands, data processing — JSON/CSV/text analysis/regex search)
@@ -135,6 +146,12 @@ SQLAlchemy ORM (`Conversation`, `Message`, `SkillRecord`, `CompositionRecord`, `
 - **Mypy**: Strict mode enabled.
 - **Streaming**: WebSocket responses stream token-by-token via `ThumbelinaAgent.stream()`.
 - **Optional dependencies**: `botpy` (QQ SDK) and ChromaDB are imported lazily with `try/except ImportError` guards.
+- **Lazy LLM fallback**: `_LazyLLMProvider` allows the server to start without LLM credentials — the agent returns a helpful message until a real provider is configured.
+- **Hot-swap**: LLM provider can be replaced at runtime via `ThumbelinaAgent.swap_provider()` without rebuilding the compiled LangGraph graph. Endpoint and preset management via `EndpointManager`/`PresetManager`.
+- **Agent isolation**: Each WebSocket connection gets a cloned agent instance with independent conversation state.
+- **Config substitution**: YAML config supports `${VAR}` environment variable substitution.
+- **Graceful degradation**: All subsystems (skills, compositions, subagents, scheduler, plugins, channels) initialize with try/except guards — the server degrades gracefully if any are unavailable.
+- **Config priority** (highest to lowest): Database overrides (via API) > Environment variables (`THUMBELINA_*` with `__` nesting) > YAML file (`thumbelina.yaml`) > Defaults.
 
 ## Configuration
 
