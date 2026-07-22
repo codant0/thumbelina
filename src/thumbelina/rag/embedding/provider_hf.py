@@ -1,7 +1,5 @@
 """hugging face 嵌入模型实现"""
 
-import torch
-
 import chromadb
 from huggingface_hub import try_to_load_from_cache
 from pathlib import Path

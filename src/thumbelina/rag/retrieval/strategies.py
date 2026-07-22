@@ -8,8 +8,6 @@
 - ReRankRetriever：用轻量级交叉编码器对 top-k 结果重排序
 """
 
-import torch
-
 from abc import ABC, abstractmethod
 from pathlib import Path
 
