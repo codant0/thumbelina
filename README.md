@@ -28,7 +28,7 @@ An AI-powered personal assistant built with [FastAPI](https://fastapi.tiangolo.c
 - **Streaming WebSocket** — Real-time token-by-token responses over WebSocket connections
 - **Security** — JWT authentication (HS256), sliding-window rate limiting, role-based access control, and data export/deletion
 - **Backup & Recovery** — JSON-based backup with metadata envelopes
-- **Web UI** — React 19 + TypeScript frontend with Chat, Tasks, Memory, Settings (LLM presets, endpoints, connection test), Plugins, Channels, and Dream pages. Supports English and Chinese via in-app language toggle, with dark/light/warm theme switching
+- **Web UI** — React 19 + TypeScript frontend with Chat, Tasks, Memory, Knowledge Base (RAG document management & retrieval testing), Settings (LLM presets, endpoints, connection test), Plugins, Channels, and Dream pages. Supports English and Chinese via in-app language toggle, with dark/light/warm theme switching
 - **Docker** — Containerized deployment with docker-compose
 
 ## Quick Start
@@ -198,8 +198,9 @@ thumbelina/
 │       ├── api/             # API client modules (conversations, llmConfig)
 │       ├── components/
 │       │   ├── Channels/    # ChannelsPage (QQ/WeChat config & status)
-│       │   ├── Chat/        # ChatWindow, InputBox, MessageList
+│       │   ├── Chat/        # ChatWindow, InputBox, MessageList, KnowledgeBaseSelector
 │       │   ├── Dream/       # Skill evolution visualization
+│       │   ├── KnowledgeBase/ # KnowledgeBasePage (KB CRUD, document management, retrieval test)
 │       │   ├── Layout/      # Header, Sidebar, ThemeToggle (dark/light/warm)
 │       │   ├── Memory/      # MemoryViewer (search + skill browser)
 │       │   ├── Plugins/     # PluginsPage (plugin list + sandbox report)
@@ -229,6 +230,7 @@ thumbelina/
 | GET | `/api/v1/conversations/{id}` | Get conversation with messages |
 | PATCH | `/api/v1/conversations/{id}` | Rename a conversation |
 | PUT | `/api/v1/conversations/{id}/endpoint` | Set per-conversation LLM endpoint and model |
+| PUT | `/api/v1/conversations/{id}/knowledge-base` | Bind a RAG knowledge base to a conversation |
 | DELETE | `/api/v1/conversations/{id}` | Delete a conversation |
 | GET | `/api/v1/tasks` | List scheduled tasks |
 | POST | `/api/v1/tasks/{id}/cancel` | Cancel a scheduled task |
@@ -274,6 +276,14 @@ thumbelina/
 | POST | `/api/v1/wechat/qrcode` | Fetch QR code for WeChat login |
 | GET | `/api/v1/wechat/qrcode/status` | Poll QR code scan status |
 | POST | `/api/v1/wechat/qrcode/confirm` | Confirm login and enable channel |
+| GET | `/api/v1/rag/knowledge-bases` | List all RAG knowledge bases |
+| POST | `/api/v1/rag/knowledge-bases` | Create a knowledge base |
+| PUT | `/api/v1/rag/knowledge-bases/{id}` | Update a knowledge base |
+| DELETE | `/api/v1/rag/knowledge-bases/{id}` | Delete a knowledge base (cascading) |
+| GET | `/api/v1/rag/knowledge-bases/{id}/documents` | List documents in a knowledge base |
+| POST | `/api/v1/rag/knowledge-bases/{id}/documents` | Upload and index a document |
+| DELETE | `/api/v1/rag/documents/{id}` | Delete a document |
+| POST | `/api/v1/rag/query` | Retrieve top-k chunks for a query |
 | WS | `/ws/chat` | Real-time streaming chat via WebSocket |
 
 ## QQ Bot Setup
