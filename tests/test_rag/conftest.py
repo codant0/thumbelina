@@ -40,13 +40,19 @@ for _mod_name in [
 # ---------------------------------------------------------------------------
 # huggingface_hub — provider_hf.py 直接调用 try_to_load_from_cache
 # ---------------------------------------------------------------------------
-_ensure_mock_module("huggingface_hub", {
-    "try_to_load_from_cache": MagicMock(return_value="/nonexistent"),
-})
+_ensure_mock_module(
+    "huggingface_hub",
+    {
+        "try_to_load_from_cache": MagicMock(return_value="/nonexistent"),
+    },
+)
 
 # ---------------------------------------------------------------------------
 # sentence_transformers — provider_hf.py 使用 SentenceTransformer
 # ---------------------------------------------------------------------------
-_ensure_mock_module("sentence_transformers", {
-    "SentenceTransformer": MagicMock(),
-})
+_ensure_mock_module(
+    "sentence_transformers",
+    {
+        "SentenceTransformer": MagicMock(),
+    },
+)

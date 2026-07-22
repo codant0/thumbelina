@@ -101,14 +101,16 @@ class TestVectorStoreABC:
             def query(self, embedding: list[float], top_k: int = 5) -> list[ScoredChunk]:
                 results = []
                 for chunk, emb in self._data.values():
-                    results.append(ScoredChunk(
-                        id=chunk.id,
-                        document_id=chunk.document_id,
-                        content=chunk.content,
-                        metadata=chunk.metadata,
-                        knowledge_base_id=chunk.knowledge_base_id,
-                        score=0.9,
-                    ))
+                    results.append(
+                        ScoredChunk(
+                            id=chunk.id,
+                            document_id=chunk.document_id,
+                            content=chunk.content,
+                            metadata=chunk.metadata,
+                            knowledge_base_id=chunk.knowledge_base_id,
+                            score=0.9,
+                        )
+                    )
                 return results[:top_k]
 
             def delete(self, ids: list[str]) -> None:

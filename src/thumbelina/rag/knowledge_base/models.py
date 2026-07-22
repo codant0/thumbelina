@@ -6,23 +6,25 @@
 - Chunk：文档片段（文本内容、向量 ID、元数据、所属文档）
 """
 
-
 from enum import Enum
+
 from pydantic import BaseModel
 
 
 class KnowledgeBase(BaseModel):
-    """知识库分组，当前只支持id 0，通用知识库"""
-    id: str = 0
-    name: str = '通用知识库'
-    description: str = '通用知识库，默认使用该知识库'
+    """知识库分组。"""
+
+    id: str = "0"
+    name: str = "通用知识库"
+    description: str = "通用知识库，默认使用该知识库"
 
 
 class DocumentType(Enum):
     """文档文件类型，即后缀"""
+
     TXT = ".txt"
-    MARKDOWN = '.md'
-    PDF = '.pdf'
+    MARKDOWN = ".md"
+    PDF = ".pdf"
 
     @classmethod
     def from_value(cls, value: str) -> "DocumentType":
@@ -35,16 +37,18 @@ class DocumentType(Enum):
 
 class Document(BaseModel):
     """文档，对应硬盘中的物理文件"""
+
     id: str
     name: str
     source_uri: str
     document_type: DocumentType
     content: str
-    knowledge_base_id: str = '0'
+    knowledge_base_id: str = "0"
 
 
 class Chunk(BaseModel):
     """切片"""
+
     id: str
     document_id: str
     content: str

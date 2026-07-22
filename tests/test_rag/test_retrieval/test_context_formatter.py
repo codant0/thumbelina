@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 import uuid
 
-import pytest
-
 from thumbelina.rag.embedding.base import ScoredChunk
 from thumbelina.rag.knowledge_base.models import Chunk
 from thumbelina.rag.retrieval.context_formatter import (

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import pytest
 import tempfile
 from pathlib import Path
+
+import pytest
 
 from thumbelina.rag.ingestion.loader import TextLoader
 from thumbelina.rag.knowledge_base.models import DocumentType

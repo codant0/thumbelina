@@ -15,18 +15,17 @@ import uuid
 if "torch" not in sys.modules:
     sys.modules["torch"] = types.ModuleType("torch")
 
-import pytest
 
-from thumbelina.rag.embedding.base import EmbeddingModel, VectorStore, ScoredChunk
+from thumbelina.rag.embedding.base import EmbeddingModel, ScoredChunk, VectorStore
 from thumbelina.rag.ingestion.chunker import Chunker
 from thumbelina.rag.ingestion.loader import Loader
 from thumbelina.rag.knowledge_base.models import Chunk, Document, DocumentType
-from thumbelina.rag.pipeline.indexer import IndexStats, Indexer
-
+from thumbelina.rag.pipeline.indexer import Indexer, IndexStats
 
 # ---------------------------------------------------------------------------
 # Fakes
 # ---------------------------------------------------------------------------
+
 
 class FakeLoader(Loader):
     def __init__(self, documents: list[Document] | None = None, raise_on: str | None = None):
@@ -86,6 +85,7 @@ class FakeVectorStore(VectorStore):
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_document(content: str = "hello world") -> Document:
     return Document(
         id=uuid.uuid4().hex,
@@ -109,6 +109,7 @@ def _make_chunk(content: str = "chunk text") -> Chunk:
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestIndexStats:
     """Tests for IndexStats dataclass."""

@@ -59,6 +59,7 @@ class TestEmbeddingRegistry:
         class AnotherEmbedding(EmbeddingModel):
             def embed(self, text: str) -> list[float]:
                 return [0.5]
+
             def embed_batch(self, texts: list[str]) -> list[list[float]]:
                 return [[0.5] for _ in texts]
 
@@ -73,6 +74,7 @@ class TestEmbeddingRegistry:
         class OverrideEmbedding(EmbeddingModel):
             def embed(self, text: str) -> list[float]:
                 return [0.9]
+
             def embed_batch(self, texts: list[str]) -> list[list[float]]:
                 return [[0.9] for _ in texts]
 

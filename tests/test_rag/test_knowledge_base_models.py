@@ -56,7 +56,7 @@ class TestKnowledgeBase:
 
     def test_default_values(self):
         kb = KnowledgeBase()
-        assert kb.id == 0
+        assert kb.id == "0"
         assert kb.name == "通用知识库"
         assert kb.description == "通用知识库，默认使用该知识库"
 

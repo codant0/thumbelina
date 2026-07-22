@@ -11,8 +11,6 @@ import types
 import uuid
 from unittest.mock import MagicMock
 
-import pytest
-
 # 在导入 strategies 之前 mock torch，避免 DLL 加载崩溃
 if "torch" not in sys.modules:
     sys.modules["torch"] = types.ModuleType("torch")

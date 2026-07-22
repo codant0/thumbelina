@@ -8,7 +8,7 @@ import uuid
 import pytest
 
 from thumbelina.rag.ingestion.chunker import FixedSizeChunker, RecursiveChunker
-from thumbelina.rag.knowledge_base.models import Chunk, Document, DocumentType
+from thumbelina.rag.knowledge_base.models import Document, DocumentType
 
 
 def _make_document(content: str, name: str = "test.md") -> Document:
