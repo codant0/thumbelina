@@ -312,3 +312,56 @@ class TestAgentMemoryIntegration:
         assistant_call = mock_memory.add_message.call_args_list[1]
         assert assistant_call.kwargs["role"] == "assistant"
         assert assistant_call.kwargs["conversation_id"] == "test-conversation-id"
+
+
+class TestAgentRAGIntegration:
+    """Tests for agent RAG integration."""
+
+    def test_rag_attributes_default_none(self):
+        """RAG components should default to None."""
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        mock_provider = _create_mock_provider()
+        agent = ThumbelinaAgent(llm_provider=mock_provider)
+
+        assert agent._rag_store_manager is None
+        assert agent._rag_embedding_registry is None
+
+    @pytest.mark.asyncio
+    async def test_get_rag_context_returns_none_without_components(self):
+        """Should return None when RAG components are not set."""
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        mock_provider = _create_mock_provider()
+        agent = ThumbelinaAgent(llm_provider=mock_provider)
+
+        result = await agent._get_rag_context("test query", "0")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_get_rag_context_returns_none_with_empty_kb_id(self):
+        """Should return None when knowledge_base_id is empty."""
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        mock_provider = _create_mock_provider()
+        agent = ThumbelinaAgent(llm_provider=mock_provider)
+
+        result = await agent._get_rag_context("test query", "")
+        assert result is None
+
+    def test_clone_copies_rag_attributes(self):
+        """clone() should copy RAG component references."""
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        mock_provider = _create_mock_provider()
+        agent = ThumbelinaAgent(llm_provider=mock_provider)
+
+        mock_store_manager = MagicMock()
+        mock_embedding_registry = MagicMock()
+        agent._rag_store_manager = mock_store_manager
+        agent._rag_embedding_registry = mock_embedding_registry
+
+        cloned = agent.clone()
+
+        assert cloned._rag_store_manager is mock_store_manager
+        assert cloned._rag_embedding_registry is mock_embedding_registry

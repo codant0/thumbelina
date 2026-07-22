@@ -269,6 +269,49 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         logger.debug("Subagent manager not initialized", exc_info=True)
 
+    # Initialize RAG components
+    rag_kb_repo = None
+    rag_doc_repo = None
+    rag_store_manager = None
+    rag_embedding_registry = None
+    try:
+        from thumbelina.rag.embedding.registry import EmbeddingRegistry
+        from thumbelina.rag.embedding.store_manager import ChromaStoreManager
+        from thumbelina.rag.knowledge_base.db import init_rag_db
+        from thumbelina.rag.knowledge_base.repository import (
+            DocumentRepository,
+            KnowledgeBaseRepository,
+        )
+
+        # 复用主数据库引擎初始化 RAG 表
+        rag_session_factory = init_rag_db(memory.repository.engine)
+        rag_kb_repo = KnowledgeBaseRepository(session_factory=rag_session_factory)
+        rag_doc_repo = DocumentRepository(session_factory=rag_session_factory)
+
+        # 向量存储
+        try:
+            import chromadb
+
+            chroma_client = chromadb.PersistentClient(path="./data/chroma")
+        except Exception:
+            import chromadb
+
+            chroma_client = chromadb.EphemeralClient()
+        rag_store_manager = ChromaStoreManager(chroma_client)
+
+        # Embedding 注册
+        rag_embedding_registry = EmbeddingRegistry()
+
+        # 存储到 app.state
+        app.state.rag_kb_repo = rag_kb_repo
+        app.state.rag_doc_repo = rag_doc_repo
+        app.state.rag_store_manager = rag_store_manager
+        app.state.rag_embedding_registry = rag_embedding_registry
+
+        logger.info("RAG components initialized")
+    except Exception:
+        logger.debug("RAG not initialized (missing dependencies)", exc_info=True)
+
     # 通知管理器
     notification_manager = NotificationManager()
     app.state.notification_manager = notification_manager
@@ -348,6 +391,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         conversation_namer=conversation_namer,
     )
     app.state.agent = agent
+
+    # Inject RAG components into agent
+    if rag_store_manager is not None:
+        agent._rag_store_manager = rag_store_manager
+    if rag_embedding_registry is not None:
+        agent._rag_embedding_registry = rag_embedding_registry
 
     # Store subsystem references for runtime hot-swap access
     app.state.skill_engine = skill_engine

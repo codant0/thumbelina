@@ -235,6 +235,9 @@ class ThumbelinaAgent:
         self.current_conversation_id: str | None = None
         # Lazily-resolved chat model; None means resolve from llm_provider.
         self._llm: BaseChatModel | None = None
+        # RAG components — injected after construction, shared via clone()
+        self._rag_store_manager: Any | None = None
+        self._rag_embedding_registry: Any | None = None
 
         # Build the combined tools list
         self.tools: list[BaseTool] = list(tools) if tools else []
@@ -351,6 +354,33 @@ class ThumbelinaAgent:
             logger.warning("Failed to get user context", exc_info=True)
         return None
 
+    async def _get_rag_context(self, query: str, knowledge_base_id: str) -> str | None:
+        """Retrieve RAG context for the given query from the specified knowledge base."""
+        if not knowledge_base_id or not self._rag_store_manager or not self._rag_embedding_registry:
+            return None
+
+        try:
+            store = self._rag_store_manager.get_or_create_store(knowledge_base_id)
+            embedder = self._rag_embedding_registry.create()
+
+            from thumbelina.rag.retrieval.context_formatter import ContextFormatter
+            from thumbelina.rag.retrieval.strategies import SimpleRetriever
+
+            retriever = SimpleRetriever(embedding_model=embedder, vector_store=store)
+            chunks = await asyncio.to_thread(retriever.retrieve, query, 5)
+
+            if not chunks:
+                return None
+
+            formatter = ContextFormatter()
+            context = formatter.format(chunks)
+            if context:
+                return f"以下是与用户问题相关的知识库内容，请参考回答：\n\n{context}"
+        except Exception:
+            logger.warning("RAG context retrieval failed", exc_info=True)
+
+        return None
+
     async def _maybe_auto_name(self) -> None:
         """Generate and persist a conversation title when none is set yet.
 
@@ -379,7 +409,7 @@ class ThumbelinaAgent:
 
     def clone(self) -> ThumbelinaAgent:
         """Create an independent clone sharing the same LLM provider and memory manager."""
-        return ThumbelinaAgent(
+        cloned = ThumbelinaAgent(
             llm_provider=self.llm_provider,
             tools=list(self.tools),
             memory_manager=self.memory_manager,
@@ -391,6 +421,9 @@ class ThumbelinaAgent:
             user_profiler=self.user_profiler,
             conversation_namer=self.conversation_namer,
         )
+        cloned._rag_store_manager = self._rag_store_manager
+        cloned._rag_embedding_registry = self._rag_embedding_registry
+        return cloned
 
     async def run(self, user_input: str) -> str:
         """Run the agent with user input and return the response."""
@@ -402,6 +435,21 @@ class ThumbelinaAgent:
         user_context = await self._get_user_context()
         if user_context:
             initial_messages.append(SystemMessage(content=user_context))
+
+        # Inject RAG context if a knowledge base is bound to the conversation
+        rag_context = None
+        if self.current_conversation_id and self.memory_manager:
+            try:
+                conv = await self.memory_manager.get_conversation(self.current_conversation_id)
+                if conv:
+                    kb_id = conv.get("knowledge_base_id")
+                    if kb_id:
+                        rag_context = await self._get_rag_context(user_input, kb_id)
+            except Exception:
+                logger.warning("Failed to get RAG context", exc_info=True)
+        if rag_context:
+            initial_messages.append(SystemMessage(content=rag_context))
+
         skill_context = await self._get_skill_context(user_input)
         if skill_context:
             initial_messages.append(SystemMessage(content=skill_context))
@@ -429,6 +477,21 @@ class ThumbelinaAgent:
         user_context = await self._get_user_context()
         if user_context:
             initial_messages.append(SystemMessage(content=user_context))
+
+        # Inject RAG context if a knowledge base is bound to the conversation
+        rag_context = None
+        if self.current_conversation_id and self.memory_manager:
+            try:
+                conv = await self.memory_manager.get_conversation(self.current_conversation_id)
+                if conv:
+                    kb_id = conv.get("knowledge_base_id")
+                    if kb_id:
+                        rag_context = await self._get_rag_context(user_input, kb_id)
+            except Exception:
+                logger.warning("Failed to get RAG context", exc_info=True)
+        if rag_context:
+            initial_messages.append(SystemMessage(content=rag_context))
+
         skill_context = await self._get_skill_context(user_input)
         if skill_context:
             initial_messages.append(SystemMessage(content=skill_context))
