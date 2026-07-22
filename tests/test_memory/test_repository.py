@@ -268,3 +268,60 @@ class TestConversationRenameAndEndpoint:
     async def test_set_endpoint_nonexistent_returns_false(self, repo: ConversationRepository):
         """set_conversation_endpoint should return False for unknown IDs."""
         assert await repo.set_conversation_endpoint("nope", "ep-1") is False
+
+
+class TestConversationKnowledgeBase:
+    """Tests for set_conversation_knowledge_base."""
+
+    @pytest.mark.asyncio
+    async def test_set_conversation_knowledge_base(self, repo: ConversationRepository):
+        """set_conversation_knowledge_base should persist knowledge_base_id."""
+        cid = await repo.create_conversation()
+        assert await repo.set_conversation_knowledge_base(cid, "kb-1") is True
+        conv = await repo.get_conversation(cid)
+        assert conv["knowledge_base_id"] == "kb-1"
+
+    @pytest.mark.asyncio
+    async def test_clear_conversation_knowledge_base(self, repo: ConversationRepository):
+        """Passing None should clear the knowledge_base_id."""
+        cid = await repo.create_conversation()
+        await repo.set_conversation_knowledge_base(cid, "kb-1")
+        assert await repo.set_conversation_knowledge_base(cid, None) is True
+        conv = await repo.get_conversation(cid)
+        assert conv["knowledge_base_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_set_knowledge_base_nonexistent_returns_false(
+        self, repo: ConversationRepository
+    ):
+        """set_conversation_knowledge_base should return False for unknown IDs."""
+        assert await repo.set_conversation_knowledge_base("nope", "kb-1") is False
+
+    @pytest.mark.asyncio
+    async def test_knowledge_base_exposed_in_list(self, repo: ConversationRepository):
+        """Knowledge base ID should be visible via get_conversations."""
+        cid = await repo.create_conversation()
+        await repo.set_conversation_knowledge_base(cid, "kb-list")
+        convs = await repo.get_conversations()
+        target = next(c for c in convs if c["id"] == cid)
+        assert target["knowledge_base_id"] == "kb-list"
+
+    @pytest.mark.asyncio
+    async def test_knowledge_base_exposed_in_get_all_with_messages(
+        self, repo: ConversationRepository
+    ):
+        """Knowledge base ID should be visible via get_all_conversations_with_messages."""
+        cid = await repo.create_conversation()
+        await repo.set_conversation_knowledge_base(cid, "kb-all")
+        convs = await repo.get_all_conversations_with_messages()
+        target = next(c for c in convs if c["id"] == cid)
+        assert target["knowledge_base_id"] == "kb-all"
+
+    @pytest.mark.asyncio
+    async def test_new_conversation_has_null_knowledge_base(
+        self, repo: ConversationRepository
+    ):
+        """A newly created conversation should have knowledge_base_id=None."""
+        cid = await repo.create_conversation()
+        conv = await repo.get_conversation(cid)
+        assert conv["knowledge_base_id"] is None

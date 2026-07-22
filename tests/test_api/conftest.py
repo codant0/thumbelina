@@ -79,6 +79,12 @@ def mock_memory():
             return True
         return False
 
+    async def set_conversation_knowledge_base(conv_id: str, knowledge_base_id) -> bool:
+        if conv_id in conversations:
+            conversations[conv_id]["knowledge_base_id"] = knowledge_base_id
+            return True
+        return False
+
     memory = MagicMock()
     memory.create_conversation = AsyncMock(return_value="test-conv-id")
     memory.get_conversation = AsyncMock(side_effect=get_conversation)
@@ -92,6 +98,9 @@ def mock_memory():
     memory.rename_conversation = AsyncMock(side_effect=rename_conversation)
     memory.set_conversation_endpoint = AsyncMock(side_effect=set_conversation_endpoint)
     memory.set_conversation_model = AsyncMock(side_effect=set_conversation_model)
+    memory.set_conversation_knowledge_base = AsyncMock(
+        side_effect=set_conversation_knowledge_base
+    )
 
     # Mock repository with ping method
     memory.repository = MagicMock()

@@ -146,6 +146,12 @@ class Conversation(Base):
         default=None,
         comment="Specific model name selected for this conversation (within the endpoint's models)",
     )
+    knowledge_base_id: Mapped[str | None] = mapped_column(
+        String(36),
+        nullable=True,
+        default=None,
+        comment="ID of the RAG knowledge base bound to this conversation",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         server_default=func.now(),

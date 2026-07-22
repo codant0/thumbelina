@@ -222,6 +222,27 @@ class MemoryManager:
         """
         return await self.repository.set_conversation_model(conversation_id, model)
 
+    async def set_conversation_knowledge_base(
+        self, conversation_id: str, knowledge_base_id: str | None
+    ) -> bool:
+        """Bind (or unbind) a RAG knowledge base to a conversation.
+
+        Parameters
+        ----------
+        conversation_id:
+            ID of the conversation to update.
+        knowledge_base_id:
+            ID of the knowledge base, or None to unbind.
+
+        Returns
+        -------
+        bool
+            True if set successfully, False if conversation not found.
+        """
+        return await self.repository.set_conversation_knowledge_base(
+            conversation_id, knowledge_base_id
+        )
+
     async def search(
         self,
         query: str,

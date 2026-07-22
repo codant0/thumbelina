@@ -162,3 +162,40 @@ def test_set_conversation_endpoint_rejects_unknown_model(client, conversation_id
         json={"endpoint_id": "ep1", "model": "not-a-model"},
     )
     assert response.status_code == 422
+
+
+def test_set_conversation_knowledge_base(client, conversation_id):
+    """PUT /conversations/{id}/knowledge-base should bind a knowledge base."""
+    response = client.put(
+        f"/api/v1/conversations/{conversation_id}/knowledge-base",
+        json={"knowledge_base_id": "kb-123"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == conversation_id
+    assert data["knowledge_base_id"] == "kb-123"
+
+
+def test_clear_conversation_knowledge_base(client, conversation_id):
+    """PUT /conversations/{id}/knowledge-base with null unbinds the knowledge base."""
+    # First bind
+    client.put(
+        f"/api/v1/conversations/{conversation_id}/knowledge-base",
+        json={"knowledge_base_id": "kb-123"},
+    )
+    # Then clear
+    response = client.put(
+        f"/api/v1/conversations/{conversation_id}/knowledge-base",
+        json={"knowledge_base_id": None},
+    )
+    assert response.status_code == 200
+    assert response.json()["knowledge_base_id"] is None
+
+
+def test_set_knowledge_base_nonexistent_conversation(client):
+    """PUT /conversations/{id}/knowledge-base should 404 for unknown IDs."""
+    response = client.put(
+        "/api/v1/conversations/nonexistent-id/knowledge-base",
+        json={"knowledge_base_id": "kb-123"},
+    )
+    assert response.status_code == 404

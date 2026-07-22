@@ -192,6 +192,7 @@ class ConversationRepository:
                     "pinned": conv.pinned or False,
                     "endpoint_id": conv.endpoint_id,
                     "model": conv.model,
+                    "knowledge_base_id": conv.knowledge_base_id,
                     "created_at": conv.created_at.isoformat(),
                     "updated_at": conv.updated_at.isoformat(),
                     "summary": conv.summary,
@@ -227,6 +228,7 @@ class ConversationRepository:
                     "pinned": conv.pinned or False,
                     "endpoint_id": conv.endpoint_id,
                     "model": conv.model,
+                    "knowledge_base_id": conv.knowledge_base_id,
                     "created_at": conv.created_at.isoformat(),
                     "updated_at": conv.updated_at.isoformat(),
                     "summary": conv.summary,
@@ -262,6 +264,7 @@ class ConversationRepository:
                 "pinned": conversation.pinned or False,
                 "endpoint_id": conversation.endpoint_id,
                 "model": conversation.model,
+                "knowledge_base_id": conversation.knowledge_base_id,
                 "created_at": conversation.created_at.isoformat(),
                 "updated_at": conversation.updated_at.isoformat(),
                 "summary": conversation.summary,
@@ -419,6 +422,39 @@ class ConversationRepository:
             True if set successfully, False if conversation not found.
         """
         return await asyncio.to_thread(self._set_model_sync, conversation_id, model)
+
+    def _set_knowledge_base_sync(
+        self, conversation_id: str, knowledge_base_id: str | None
+    ) -> bool:
+        """Synchronous implementation of set_conversation_knowledge_base."""
+        with self._get_session() as session:
+            conversation = session.get(Conversation, conversation_id)
+            if conversation is None:
+                return False
+            conversation.knowledge_base_id = knowledge_base_id
+            session.commit()
+            return True
+
+    async def set_conversation_knowledge_base(
+        self, conversation_id: str, knowledge_base_id: str | None
+    ) -> bool:
+        """Bind (or unbind) a RAG knowledge base to a conversation.
+
+        Parameters
+        ----------
+        conversation_id:
+            ID of the conversation to update.
+        knowledge_base_id:
+            ID of the knowledge base, or None to unbind.
+
+        Returns
+        -------
+        bool
+            True if set successfully, False if conversation not found.
+        """
+        return await asyncio.to_thread(
+            self._set_knowledge_base_sync, conversation_id, knowledge_base_id
+        )
 
     def _search_messages_sync(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
         """Synchronous implementation of search_messages."""

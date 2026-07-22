@@ -45,6 +45,15 @@ class SetConversationEndpointRequest(BaseModel):
     )
 
 
+class SetConversationKnowledgeBaseRequest(BaseModel):
+    """Request body for binding a knowledge base to a conversation."""
+
+    knowledge_base_id: str | None = Field(
+        default=None,
+        description="ID of the RAG knowledge base, or null to unbind",
+    )
+
+
 @router.post("/conversations", response_model=ConversationSchema)
 async def create_conversation(
     body: CreateConversationRequest | None = None,
@@ -107,6 +116,7 @@ async def get_conversation(
         pinned=conversation.get("pinned", False),
         endpoint_id=conversation.get("endpoint_id"),
         model=conversation.get("model"),
+        knowledge_base_id=conversation.get("knowledge_base_id"),
         created_at=conversation["created_at"],
         updated_at=conversation["updated_at"],
         summary=conversation.get("summary"),
@@ -169,6 +179,31 @@ async def set_conversation_endpoint(
     # Persist the per-conversation model. When clearing the endpoint, also
     # clear the model so a stale name doesn't linger.
     await memory.set_conversation_model(conversation_id, body.model if body.endpoint_id else None)
+    conv = await memory.get_conversation(conversation_id)
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return ConversationSchema(**conv)
+
+
+@router.put(
+    "/conversations/{conversation_id}/knowledge-base",
+    response_model=ConversationSchema,
+)
+async def set_conversation_knowledge_base(
+    conversation_id: str,
+    body: SetConversationKnowledgeBaseRequest,
+    memory: MemoryManager = Depends(get_memory_manager),
+) -> ConversationSchema:
+    """Bind (or unbind) a RAG knowledge base to a conversation.
+
+    ``knowledge_base_id`` must reference an existing knowledge base, or be
+    ``null`` to unbind the conversation from any knowledge base.
+    """
+    ok = await memory.set_conversation_knowledge_base(
+        conversation_id, body.knowledge_base_id
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail="Conversation not found")
     conv = await memory.get_conversation(conversation_id)
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")

@@ -18,6 +18,7 @@ export interface Conversation {
   pinned?: boolean
   endpoint_id?: string | null
   model?: string | null
+  knowledge_base_id?: string | null
   created_at: string
   updated_at: string
   summary?: string | null
