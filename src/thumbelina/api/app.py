@@ -21,6 +21,7 @@ from thumbelina.api.routes import (
     data,
     plugins,
     qq,
+    rag,
     skills,
     tasks,
     wechat,
@@ -633,6 +634,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(plugins.router, prefix="/api/v1")
     app.include_router(wechat.router, prefix="/api/v1")
     app.include_router(qq.router, prefix="/api/v1")
+    app.include_router(rag.router, prefix="/api/v1")
     app.include_router(ws_router)
 
     return app
