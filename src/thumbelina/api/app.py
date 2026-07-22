@@ -275,6 +275,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     rag_store_manager = None
     rag_embedding_registry = None
     try:
+        # Pre-import torch to avoid DLL loading conflicts on Windows.
+        # When torch is imported later (via sentence_transformers → transformers),
+        # other C extension modules already loaded can interfere with DLL resolution.
+        import torch  # noqa: F401
+
         from thumbelina.rag.embedding.registry import EmbeddingRegistry
         from thumbelina.rag.embedding.store_manager import ChromaStoreManager
         from thumbelina.rag.knowledge_base.db import init_rag_db

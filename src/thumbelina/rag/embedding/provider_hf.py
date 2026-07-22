@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -11,11 +12,51 @@ if TYPE_CHECKING:
     from sentence_transformers import SentenceTransformer
 
 
+def _ensure_torch_dll_path() -> None:
+    """Add torch's lib directory to DLL search path on Windows.
+
+    PyTorch's ``shm.dll`` depends on other DLLs in the same directory.
+    When imported inside a server process (uvicorn), the DLL search path
+    may not include torch's lib directory, causing ``WinError 127``.
+
+    This function is a safety net — the primary fix is pre-importing torch
+    in ``app.py`` lifespan before other C extensions load.
+    """
+    if os.name != "nt":
+        return
+    try:
+        import torch as _torch
+        torch_lib = str(Path(_torch.__file__).parent / "lib")
+        if hasattr(os, "add_dll_directory"):
+            os.add_dll_directory(torch_lib)
+        current_path = os.environ.get("PATH", "")
+        if torch_lib not in current_path:
+            os.environ["PATH"] = torch_lib + os.pathsep + current_path
+    except ImportError:
+        # torch not available — find path from filesystem
+        try:
+            import importlib.util
+            spec = importlib.util.find_spec("torch")
+            if spec and spec.origin:
+                torch_lib = str(Path(spec.origin).parent / "lib")
+                if Path(torch_lib).is_dir():
+                    if hasattr(os, "add_dll_directory"):
+                        os.add_dll_directory(torch_lib)
+                    current_path = os.environ.get("PATH", "")
+                    if torch_lib not in current_path:
+                        os.environ["PATH"] = torch_lib + os.pathsep + current_path
+        except (ValueError, AttributeError):
+            pass
+
+
 class HuggingFaceEmbedding(EmbeddingModel):
     """通过sentence-transformers使用本地模型"""
 
     def __init__(self, model_name: str = "Qwen/Qwen3-Embedding-0.6B"):
         super().__init__()
+        # Ensure torch DLLs can be found before importing sentence_transformers
+        _ensure_torch_dll_path()
+
         try:
             from huggingface_hub import try_to_load_from_cache
             from sentence_transformers import SentenceTransformer as _ST
