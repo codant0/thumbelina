@@ -46,7 +46,7 @@ class ChromaVectorStore(VectorStore):
         chunks: list[ScoredChunk] = []
         for i in range(len(results["ids"][0])):
             meta = results["metadatas"][0][i]
-            chunks.append(Chunk(
+            chunks.append(ScoredChunk(
                 id=results["ids"][0][i],
                 content=results["documents"][0][i],
                 document_id=meta.get("document_id", ""),
@@ -57,4 +57,5 @@ class ChromaVectorStore(VectorStore):
         return chunks
 
     def delete(self, ids: list[str]) -> None:
-        return super().delete(ids)
+        if ids:
+            self.collection.delete(ids=ids)

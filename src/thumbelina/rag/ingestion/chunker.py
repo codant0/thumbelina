@@ -30,6 +30,9 @@ class FixedSizeChunker(Chunker):
         self.chunk_size = chunk_size
         self.overlap = overlap
 
+        if (self.overlap >= chunk_size):
+            raise ValueError(f"Fixed size chunker overlap:{overlap} is bigger than chunk_size:{chunk_size}")
+
     def chunk(self, document: Document) -> list[Chunk]:
         text = document.content
         chunks: list[Chunk] = []
@@ -100,6 +103,10 @@ class RecursiveChunker(Chunker):
     @classmethod
     def recursive_split(cls, document: Document, text: str, separators: list[str], max_size: int) -> list[Chunk]:
         chunks: list[Chunk] = []
+
+        if not text:
+            return chunks
+
         if (len(text) <= max_size):
             chunks.append(cls.build_chunk(document, text))
             return chunks

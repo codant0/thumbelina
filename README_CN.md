@@ -9,10 +9,11 @@
 - **多 LLM 提供商** — 通过统一抽象层插件式支持 OpenAI、Anthropic、Ollama，支持命名预设快速切换和一键连通性测试
 - **LLM 预设管理** — 长期保存多种 LLM 配置（提供商、base URL、API 密钥、模型），支持自定义命名，一键激活任意预设
 - **LLM 连接测试** — 三层连通性验证（网络可达 → 鉴权有效 → 服务可用），覆盖任意 provider 端点
-- **DeepSeek API 兼容** — /models 端点优雅降级，通过 openai provider 配合静态模型推荐即可使用
+- **DeepSeek API 兼容** — 通过 openai provider 接入，/models 端点自动降级处理
 - **代理核心** — LangGraph 驱动的代理循环，支持工具调用和条件路由
-- **内置工具** — 文件操作、网络请求、Shell 命令、数据处理（JSON/CSV/文本分析）
-- **对话记忆** — 持久化存储（SQLite），支持关键词搜索和 LLM 生成摘要
+- **内置工具** — 文件操作、网络请求、Shell 命令、数据处理（JSON/CSV/文本分析/正则搜索）
+- **RAG（检索增强生成）** — 文档加载、分块、向量化嵌入（llama-index + HuggingFace）、向量检索（ChromaDB）、上下文感知索引流水线
+- **对话记忆** — 持久化存储（SQLite），支持关键词搜索、LLM 生成摘要和对话自动命名
 - **语义搜索** — 基于 ChromaDB 的向量语义搜索，支持关键词 + 语义混合回退
 - **技能提取与集成** — 从成功对话中自动提取可复用技能，并在代理循环中应用
 - **技能组合** — 将多个技能串联为工作流，支持 LLM 辅助建议
@@ -27,7 +28,7 @@
 - **流式 WebSocket** — 通过 WebSocket 连接实现实时逐 token 流式响应
 - **安全机制** — JWT 认证（HS256）、滑动窗口限流、基于角色的访问控制、数据导出/删除
 - **备份恢复** — 基于 JSON 的备份，支持元数据信封
-- **Web 界面** — React 19 + TypeScript 前端，包含聊天、任务、记忆、设置（LLM 预设、端点、连接测试）、插件、频道、梦境七个页面。支持页面内语言切换（中文 / English）
+- **Web 界面** — React 19 + TypeScript 前端，包含聊天、任务、记忆、设置（LLM 预设、端点、连接测试）、插件、频道、梦境七个页面。支持页面内语言切换（中文 / English）和暗色/亮色/暖色主题切换
 - **Docker** — 容器化部署，支持 docker-compose
 
 ## 快速开始
@@ -46,6 +47,9 @@ cd thumbelina
 
 # 安装 Python 依赖
 pip install -e ".[dev]"
+
+# （可选）安装 RAG 依赖（llama-index 嵌入模型与 LLM）
+pip install -e ".[dev,rag]"
 
 # 安装前端依赖
 cd frontend && npm install && cd ..
@@ -73,7 +77,7 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 3. YAML 配置文件（`thumbelina.yaml`）
 4. `thumbelina.yaml.example` 中的默认值
 
-敏感字段（API 密钥、Token 等）不存储在数据库中，请使用环境变量。
+敏感字段（API 密钥、Token 等）通过端点管理器 API 存储和管理——建议初次配置时使用环境变量。
 
 ### 运行
 
@@ -96,8 +100,16 @@ thumb
 ### Docker 部署
 
 ```bash
+# 设置必要的环境变量
+export THUMBELINA_LLM__API_KEY="sk-..."
+
+# 启动容器
 docker-compose up -d
+# 后端：http://localhost:8000
+# 前端：http://localhost:3000
 ```
+
+docker-compose 配置将 `thumbelina.yaml` 以只读方式挂载到后端容器，并使用命名卷（`thumbelina-data`）持久化数据。
 
 ## 架构概览
 
@@ -167,8 +179,14 @@ thumbelina/
 │   ├── config/              # YAML + 环境变量配置加载、Pydantic 模型
 │   ├── llm/                 # LLM 提供商抽象层（OpenAI, Anthropic, Ollama）
 │   ├── memory/              # 对话持久化、搜索、摘要、向量存储、用户建模、反馈
-│   ├── notifications/       # WebSocket 通知广播
+│   ├── notifications.py     # WebSocket 通知广播
 │   ├── plugins/             # 插件系统（注册、沙箱验证、依赖解析）
+│   ├── rag/                 # RAG：文档加载、分块、嵌入、检索、索引流水线
+│   │   ├── embedding/       # 嵌入模型抽象层（HuggingFace、ChromaDB 向量存储、注册中心）
+│   │   ├── ingestion/       # 文档加载器与分块器
+│   │   ├── knowledge_base/  # KnowledgeBase、Document、Chunk 模型与仓库
+│   │   ├── pipeline/        # 文档索引流水线
+│   │   └── retrieval/       # 检索策略与上下文格式化
 │   ├── scheduler/           # 任务调度器 + 自然语言时间解析器 + 条件触发
 │   ├── security/            # JWT 认证 + 限流器 + RBAC
 │   ├── skills/              # 技能提取、匹配、组合、持久化
@@ -177,16 +195,19 @@ thumbelina/
 ├── tests/                   # Pytest 测试套件（镜像 src/ 结构）
 ├── frontend/                # React 19 + TypeScript + Vite
 │   └── src/
+│       ├── api/             # API 客户端模块（conversations, llmConfig）
 │       ├── components/
 │       │   ├── Channels/    # ChannelsPage（QQ/微信配置与状态）
 │       │   ├── Chat/        # ChatWindow, InputBox, MessageList
 │       │   ├── Dream/       # 技能演化可视化
-│       │   ├── Layout/      # Header, Sidebar
+│       │   ├── Layout/      # Header, Sidebar, ThemeToggle（暗色/亮色/暖色）
 │       │   ├── Memory/      # MemoryViewer（搜索 + 技能浏览）
 │       │   ├── Plugins/     # PluginsPage（插件列表 + 沙箱报告）
-│       │   ├── Settings/    # SettingsPanel（LLM 配置、数据管理）
+│       │   ├── Settings/    # LLM 端点/预设管理、连接测试、速度测试
 │       │   └── Tasks/       # TaskManager（子代理 + 定时任务）
 │       ├── hooks/           # useWebSocket 自定义 Hook
+│       ├── i18n/            # 国际化（en, zh-CN）与 LocaleContext
+│       ├── test/            # 测试配置
 │       └── types/           # TypeScript 接口定义
 ├── docs/plans/              # 设计文档
 ├── Dockerfile               # 后端容器
@@ -206,6 +227,8 @@ thumbelina/
 | POST | `/api/v1/conversations` | 创建新对话 |
 | GET | `/api/v1/conversations/search/{query}` | 跨对话搜索消息 |
 | GET | `/api/v1/conversations/{id}` | 获取对话详情及消息 |
+| PATCH | `/api/v1/conversations/{id}` | 重命名对话 |
+| PUT | `/api/v1/conversations/{id}/endpoint` | 设置对话使用的 LLM 端点和模型 |
 | DELETE | `/api/v1/conversations/{id}` | 删除对话 |
 | GET | `/api/v1/tasks` | 列出定时任务 |
 | POST | `/api/v1/tasks/{id}/cancel` | 取消定时任务 |
@@ -240,6 +263,7 @@ thumbelina/
 | DELETE | `/api/v1/config/llm/endpoints/{id}` | 删除 LLM 端点 |
 | POST | `/api/v1/config/llm/endpoints/{id}/speed-test` | 对已保存端点运行速度测试 |
 | POST | `/api/v1/config/llm/endpoints/{id}/test-connection` | 对已保存端点运行连通性测试 |
+| POST | `/api/v1/config/llm/endpoints/{id}/activate` | 全局激活已保存端点（热切换 LLM） |
 | PUT | `/api/v1/config/channels/{name}` | 热切换频道配置 |
 | GET | `/api/v1/config/export` | 从数据库导出配置 |
 | POST | `/api/v1/config/reload` | 从数据库重新加载配置 |
@@ -340,16 +364,6 @@ npm run build        # 生产构建
 `thumbelina.yaml.example` — 所有字段可选，以下为默认值：
 
 ```yaml
-llm:
-  provider: openai          # openai | anthropic | ollama
-  model: gpt-4o             # 模型标识
-  api_key: ${OPENAI_API_KEY} # 支持 ${VAR} 环境变量替换
-  base_url: null            # 自定义 API 端点 URL
-  request_timeout: null     # LLM 请求超时秒数
-  streaming_enabled: true   # 启用 WebSocket 流式响应
-
-cors_origins: ["*"]         # CORS 允许的来源；生产环境应限制域名
-
 auth:
   secret_key: ""            # JWT 签名密钥，非空时启用 Bearer 认证
   required_roles: []        # 全局角色列表，空 = 允许所有已认证用户
@@ -362,34 +376,49 @@ rate_limit:
 memory:
   database_url: sqlite:///thumbelina.db
 
-channels:
-  qq:
-    enabled: false
-    app_id: ""
-    app_secret: ""
-    allowed_guilds: []
-    allowed_groups: []
-  wechat:
-    enabled: false
-    bot_token: ""             # iLink 机器人令牌
-    ilink_bot_id: ""          # iLink 机器人 ID
-    ilink_user_id: ""         # iLink 用户 ID
-    ilink_base_url: "https://ilinkai.weixin.qq.com"
-    webhook_secret: ""
-
-plugin_dirs: []             # 插件扫描目录
-
 logging:
   level: INFO               # DEBUG | INFO | WARNING | ERROR | CRITICAL
+```
+
+以下部分为可选配置——在 `thumbelina.yaml` 中取消注释即可启用：
+
+```yaml
+# llm:
+#   provider: openai          # openai | anthropic | ollama
+#   model: gpt-4o             # 模型标识
+#   api_key: ${OPENAI_API_KEY} # 支持 ${VAR} 环境变量替换
+#   base_url: null            # 自定义 API 端点 URL
+#   request_timeout: null     # LLM 请求超时秒数
+#   streaming_enabled: true   # 启用 WebSocket 流式响应
+
+# cors_origins: ["*"]         # CORS 允许的来源；生产环境应限制域名
+
+# plugin_dirs: []             # 插件扫描目录
+
+# channels:
+#   qq:
+#     enabled: false
+#     app_id: ""
+#     app_secret: ""
+#     allowed_guilds: []
+#     allowed_groups: []
+#   wechat:
+#     enabled: false
+#     bot_token: ""             # iLink 机器人令牌
+#     ilink_bot_id: ""          # iLink 机器人 ID
+#     ilink_user_id: ""         # iLink 用户 ID
+#     ilink_base_url: "https://ilinkai.weixin.qq.com"
+#     webhook_secret: ""
 ```
 
 ## 技术栈
 
 | 层级 | 技术 |
 |------|------|
-| 后端框架 | FastAPI, Uvicorn |
+| 后端框架 | FastAPI, Uvicorn, httpx |
 | 代理框架 | LangGraph, LangChain |
 | LLM 提供商 | OpenAI, Anthropic, Ollama（通过 LangChain） |
+| RAG | llama-index-core（嵌入模型、向量检索） |
 | 数据库 | SQLAlchemy + SQLite |
 | 向量存储 | ChromaDB |
 | 认证 | PyJWT (HS256) |

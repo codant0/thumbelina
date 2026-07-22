@@ -30,7 +30,7 @@ class TextLoader(Loader):
     def load(self, path: str) -> list[Document]:
         path_obj = Path(path)
         if not (path_obj.exists() and path_obj.is_file() and path_obj.suffix.lower() in self.extensions):
-            return None
+            return []
         
         documents: list[Document] = []
         documents.append(Document(

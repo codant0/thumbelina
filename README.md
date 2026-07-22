@@ -9,10 +9,11 @@ An AI-powered personal assistant built with [FastAPI](https://fastapi.tiangolo.c
 - **Multi-Provider LLM** — Pluggable support for OpenAI, Anthropic, and Ollama via a unified abstraction layer, with named presets for quick switching and one-click connectivity testing
 - **LLM Preset Management** — Save multiple LLM configurations (provider, base URL, API key, model) with custom names and activate any preset with one click
 - **LLM Connection Test** — Three-level connectivity verification (network reachability → auth validity → service availability) for any provider endpoint
-- **DeepSeek API Support** — Graceful fallback for DeepSeek's `/models` endpoint, compatible via `openai` provider with static model recommendations
+- **DeepSeek API Support** — Compatible via `openai` provider with graceful fallback for `/models` endpoint
 - **Agent Core** — LangGraph-powered agent loop with tool calling and conditional routing
-- **Built-in Tools** — File operations, web requests, shell commands, and data processing (JSON/CSV/text analysis)
-- **Conversation Memory** — Persistent storage (SQLite) with keyword search and LLM-generated summaries
+- **Built-in Tools** — File operations, web requests, shell commands, and data processing (JSON/CSV/text analysis/regex search)
+- **RAG (Retrieval-Augmented Generation)** — Document ingestion, chunking, embedding (HuggingFace via llama-index), vector retrieval (ChromaDB), and context-aware indexing pipeline
+- **Conversation Memory** — Persistent storage (SQLite) with keyword search, LLM-generated summaries, and auto-naming for new conversations
 - **Semantic Search** — Vector-based semantic search via ChromaDB, with hybrid keyword + semantic fallback
 - **Skill Extraction & Integration** — Automatically extracts reusable skills from conversations and applies them in the agent loop
 - **Skill Composition** — Chain multiple skills into workflows, with LLM-assisted suggestion
@@ -27,7 +28,7 @@ An AI-powered personal assistant built with [FastAPI](https://fastapi.tiangolo.c
 - **Streaming WebSocket** — Real-time token-by-token responses over WebSocket connections
 - **Security** — JWT authentication (HS256), sliding-window rate limiting, role-based access control, and data export/deletion
 - **Backup & Recovery** — JSON-based backup with metadata envelopes
-- **Web UI** — React 19 + TypeScript frontend with Chat, Tasks, Memory, Settings (LLM presets, endpoints, connection test), Plugins, Channels, and Dream pages. Supports English and Chinese via on-page language toggle
+- **Web UI** — React 19 + TypeScript frontend with Chat, Tasks, Memory, Settings (LLM presets, endpoints, connection test), Plugins, Channels, and Dream pages. Supports English and Chinese via in-app language toggle, with dark/light/warm theme switching
 - **Docker** — Containerized deployment with docker-compose
 
 ## Quick Start
@@ -46,6 +47,9 @@ cd thumbelina
 
 # Install Python dependencies
 pip install -e ".[dev]"
+
+# (Optional) Install RAG dependencies (llama-index embeddings & LLMs)
+pip install -e ".[dev,rag]"
 
 # Install frontend dependencies
 cd frontend && npm install && cd ..
@@ -73,7 +77,7 @@ Configuration priority (highest to lowest):
 3. YAML config file (`thumbelina.yaml`)
 4. Defaults in `thumbelina.yaml.example`
 
-Sensitive fields (API keys, tokens) are never stored in the database — use environment variables.
+Sensitive fields (API keys, tokens) stored in LLM endpoints are managed via the endpoint manager API — prefer environment variables for initial setup.
 
 ### Running
 
@@ -96,8 +100,16 @@ thumb
 ### Docker
 
 ```bash
+# Set required environment variable
+export THUMBELINA_LLM__API_KEY="sk-..."
+
+# Start containers
 docker-compose up -d
+# Backend:  http://localhost:8000
+# Frontend: http://localhost:3000
 ```
+
+The compose file mounts `thumbelina.yaml` as read-only into the backend container and uses a named volume (`thumbelina-data`) for persistent data.
 
 ## Architecture
 
@@ -167,8 +179,14 @@ thumbelina/
 │   ├── config/              # YAML + env var config loader, Pydantic models
 │   ├── llm/                 # LLM provider abstraction (OpenAI, Anthropic, Ollama)
 │   ├── memory/              # Conversation persistence, search, summarizer, vector store, user profiler, feedback
-│   ├── notifications/       # WebSocket notification broadcast
+│   ├── notifications.py     # WebSocket notification broadcast
 │   ├── plugins/             # Plugin system (register, sandbox, dependency resolution)
+│   ├── rag/                 # RAG: document ingestion, chunking, embedding, retrieval, indexing pipeline
+│   │   ├── embedding/       # Embedding model abstraction (HuggingFace, ChromaDB vector store, registry)
+│   │   ├── ingestion/       # Document loaders and chunkers
+│   │   ├── knowledge_base/  # KnowledgeBase, Document, Chunk models + repository
+│   │   ├── pipeline/        # Document indexing pipeline
+│   │   └── retrieval/       # Retrieval strategies and context formatting
 │   ├── scheduler/           # Task scheduler + natural language time parser + conditional triggers
 │   ├── security/            # JWT auth + rate limiter + RBAC
 │   ├── skills/              # Skill extraction, matching, composition, persistence
@@ -177,16 +195,19 @@ thumbelina/
 ├── tests/                   # Pytest test suite (mirrors src/ structure)
 ├── frontend/                # React 19 + TypeScript + Vite
 │   └── src/
+│       ├── api/             # API client modules (conversations, llmConfig)
 │       ├── components/
 │       │   ├── Channels/    # ChannelsPage (QQ/WeChat config & status)
 │       │   ├── Chat/        # ChatWindow, InputBox, MessageList
 │       │   ├── Dream/       # Skill evolution visualization
-│       │   ├── Layout/      # Header, Sidebar
+│       │   ├── Layout/      # Header, Sidebar, ThemeToggle (dark/light/warm)
 │       │   ├── Memory/      # MemoryViewer (search + skill browser)
 │       │   ├── Plugins/     # PluginsPage (plugin list + sandbox report)
-│       │   ├── Settings/    # SettingsPanel (LLM config, data management)
+│       │   ├── Settings/    # LLM endpoint/preset management, connection test, speed test
 │       │   └── Tasks/       # TaskManager (subagents + scheduled tasks)
 │       ├── hooks/           # useWebSocket custom hook
+│       ├── i18n/            # Internationalization (en, zh-CN) with LocaleContext
+│       ├── test/            # Test setup
 │       └── types/           # TypeScript interfaces
 ├── docs/plans/              # Design documents (Chinese)
 ├── Dockerfile               # Backend container
@@ -207,7 +228,7 @@ thumbelina/
 | GET | `/api/v1/conversations/search/{query}` | Search messages across conversations |
 | GET | `/api/v1/conversations/{id}` | Get conversation with messages |
 | PATCH | `/api/v1/conversations/{id}` | Rename a conversation |
-| PUT | `/api/v1/conversations/{id}/endpoint` | Set per-conversation model (LLM endpoint) |
+| PUT | `/api/v1/conversations/{id}/endpoint` | Set per-conversation LLM endpoint and model |
 | DELETE | `/api/v1/conversations/{id}` | Delete a conversation |
 | GET | `/api/v1/tasks` | List scheduled tasks |
 | POST | `/api/v1/tasks/{id}/cancel` | Cancel a scheduled task |
@@ -242,6 +263,7 @@ thumbelina/
 | DELETE | `/api/v1/config/llm/endpoints/{id}` | Delete an LLM endpoint |
 | POST | `/api/v1/config/llm/endpoints/{id}/speed-test` | Run a speed test against a saved endpoint |
 | POST | `/api/v1/config/llm/endpoints/{id}/test-connection` | Run a connectivity test against a saved endpoint |
+| POST | `/api/v1/config/llm/endpoints/{id}/activate` | Globally activate a saved endpoint (hot-swap LLM) |
 | PUT | `/api/v1/config/channels/{name}` | Hot-swap channel configuration |
 | GET | `/api/v1/config/export` | Export config from database |
 | POST | `/api/v1/config/reload` | Reload config from database |
@@ -342,16 +364,6 @@ npm run build        # Production build
 `thumbelina.yaml.example` — all fields optional, shown with defaults:
 
 ```yaml
-llm:
-  provider: openai          # openai | anthropic | ollama
-  model: gpt-4o             # Model identifier
-  api_key: ${OPENAI_API_KEY} # Supports ${VAR} env substitution
-  base_url: null            # Custom API endpoint URL
-  request_timeout: null     # LLM request timeout in seconds
-  streaming_enabled: true   # Enable WebSocket streaming responses
-
-cors_origins: ["*"]         # CORS allowed origins; restrict in production
-
 auth:
   secret_key: ""            # JWT signing key; Bearer auth enabled when non-empty
   required_roles: []        # Global role list; empty = all authenticated users allowed
@@ -364,34 +376,49 @@ rate_limit:
 memory:
   database_url: sqlite:///thumbelina.db
 
-channels:
-  qq:
-    enabled: false
-    app_id: ""
-    app_secret: ""
-    allowed_guilds: []
-    allowed_groups: []
-  wechat:
-    enabled: false
-    bot_token: ""             # Bot token from iLink
-    ilink_bot_id: ""          # iLink bot ID
-    ilink_user_id: ""         # iLink user ID
-    ilink_base_url: "https://ilinkai.weixin.qq.com"
-    webhook_secret: ""
-
-plugin_dirs: []             # Directories to scan for plugins
-
 logging:
   level: INFO               # DEBUG | INFO | WARNING | ERROR | CRITICAL
+```
+
+The following sections are optional — uncomment in `thumbelina.yaml` to enable:
+
+```yaml
+# llm:
+#   provider: openai          # openai | anthropic | ollama
+#   model: gpt-4o             # Model identifier
+#   api_key: ${OPENAI_API_KEY} # Supports ${VAR} env substitution
+#   base_url: null            # Custom API endpoint URL
+#   request_timeout: null     # LLM request timeout in seconds
+#   streaming_enabled: true   # Enable WebSocket streaming responses
+
+# cors_origins: ["*"]         # CORS allowed origins; restrict in production
+
+# plugin_dirs: []             # Directories to scan for plugins
+
+# channels:
+#   qq:
+#     enabled: false
+#     app_id: ""
+#     app_secret: ""
+#     allowed_guilds: []
+#     allowed_groups: []
+#   wechat:
+#     enabled: false
+#     bot_token: ""             # Bot token from iLink
+#     ilink_bot_id: ""          # iLink bot ID
+#     ilink_user_id: ""         # iLink user ID
+#     ilink_base_url: "https://ilinkai.weixin.qq.com"
+#     webhook_secret: ""
 ```
 
 ## Tech Stack
 
 | Layer | Technology |
 |-------|------------|
-| Backend | FastAPI, Uvicorn |
+| Backend | FastAPI, Uvicorn, httpx |
 | Agent Framework | LangGraph, LangChain |
 | LLM Providers | OpenAI, Anthropic, Ollama (via LangChain) |
+| RAG | llama-index-core (embeddings, vector retrieval) |
 | Database | SQLAlchemy + SQLite |
 | Vector Store | ChromaDB |
 | Auth | PyJWT (HS256) |

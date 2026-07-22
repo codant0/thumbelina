@@ -15,7 +15,7 @@ from pathlib import Path
 
 import chromadb
 
-from thumbelina.rag.embedding.base import EmbeddingModel, VectorStore
+from thumbelina.rag.embedding.base import EmbeddingModel, ScoredChunk, VectorStore
 from thumbelina.rag.embedding.provider_hf import HuggingFaceEmbedding
 from thumbelina.rag.embedding.vector_chroma import ChromaVectorStore
 from thumbelina.rag.ingestion.chunker import RecursiveChunker
@@ -39,19 +39,19 @@ class SimpleRetriever(Retriever):
         self.embedding_model = embedding_model
         self.vector_store = vector_store
 
-    def retrieve(self, query: str, top_k: int = 5) -> list[Chunk]:
+    def retrieve(self, query: str, top_k: int = 5) -> list[ScoredChunk]:
         query_embedding = self.embedding_model.embed(query)
         results = self.vector_store.query(
             embedding=query_embedding,
             top_k=top_k
         )
-        return [doc.content for doc in results]
+        return results
 
 
 if __name__ == "__main__":
     # 1. 加载
     BASE_DIR = Path(__file__).parent
-    TEST_FILE = str(BASE_DIR / ".." / "demo" / "data" / "doc.md")
+    TEST_FILE = str(BASE_DIR / ".." / "test_data" / "doc.md")
     loader = TextLoader()
     documents = loader.load(TEST_FILE)
     for i, document in enumerate(documents):

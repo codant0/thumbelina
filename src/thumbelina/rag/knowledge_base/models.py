@@ -21,7 +21,7 @@ class KnowledgeBase(BaseModel):
 class DocumentType(Enum):
     """文档文件类型，即后缀"""
     TXT = ".txt"
-    MARDOWN = '.md'
+    MARKDOWN = '.md'
     PDF = '.pdf'
 
     @classmethod
@@ -29,8 +29,8 @@ class DocumentType(Enum):
         """转枚举"""
         try:
             return cls(value.lower())
-        except KeyError:
-            return None
+        except ValueError as e:
+            raise ValueError(f"invalid value: {value}") from e
 
 
 class Document(BaseModel):

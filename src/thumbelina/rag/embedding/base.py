@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import NamedTuple
 from pydantic import BaseModel
 
 from thumbelina.rag.knowledge_base.models import Chunk
@@ -20,9 +19,9 @@ class EmbeddingModel(ABC):
         """批量将多段文本编码为向量。"""
 
 
-class ScoredChunk(NamedTuple):
-    chunk: Chunk
-    score: float
+class ScoredChunk(Chunk):
+    """带检索分数的文档片段，继承 Chunk 的全部字段。"""
+    score: float = 0.0
 
 
 class VectorStore(ABC):
