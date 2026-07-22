@@ -8,6 +8,15 @@ from typing import TYPE_CHECKING
 
 from thumbelina.rag.embedding.base import EmbeddingModel
 
+# Pre-import torch at module level to ensure its DLLs are loaded before
+# sentence_transformers → transformers triggers a conflicting import chain.
+# This must happen before any other C extension modules interfere with DLL
+# resolution on Windows.
+try:
+    import torch  # noqa: F401
+except OSError:
+    pass
+
 if TYPE_CHECKING:
     from sentence_transformers import SentenceTransformer
 

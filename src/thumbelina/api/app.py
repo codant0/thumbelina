@@ -2,6 +2,15 @@
 
 from __future__ import annotations
 
+# Pre-import torch BEFORE any other modules to avoid DLL loading conflicts
+# on Windows. When torch is imported later via sentence_transformers →
+# transformers, other C extension modules already loaded interfere with
+# DLL resolution, causing WinError 127 on shm.dll.
+try:
+    import torch  # noqa: F401, I001
+except OSError:
+    pass
+
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
