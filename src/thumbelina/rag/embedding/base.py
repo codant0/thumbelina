@@ -1,8 +1,8 @@
 """向量化模型的抽象接口。"""
 
 from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from pydantic import BaseModel
 
 from thumbelina.rag.knowledge_base.models import Chunk
 
@@ -38,3 +38,25 @@ class VectorStore(ABC):
     @abstractmethod
     def delete(self, ids: list[str]) -> None:
         """批量删除文档块"""
+
+    @abstractmethod
+    def query_by_metadata(self, where: dict[str, str], limit: int = 100) -> list[Chunk]:
+        """按元数据条件查询文档块（不涉及向量检索）。
+
+        Parameters
+        ----------
+        where:
+            过滤条件键值对，例如 ``{"document_id": "abc"}``。
+        limit:
+            最大返回条数，默认 100。
+        """
+
+    @abstractmethod
+    def delete_by_metadata(self, where: dict[str, str]) -> int:
+        """按元数据条件批量删除文档块。
+
+        Returns
+        -------
+        int
+            实际删除的文档块数量。
+        """

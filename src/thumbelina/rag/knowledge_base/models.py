@@ -25,6 +25,8 @@ class DocumentType(Enum):
     TXT = ".txt"
     MARKDOWN = ".md"
     PDF = ".pdf"
+    HTM = ".htm"
+    HTML = ".html"
 
     @classmethod
     def from_value(cls, value: str) -> "DocumentType":

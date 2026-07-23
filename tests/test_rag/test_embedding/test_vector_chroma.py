@@ -137,3 +137,87 @@ class TestChromaVectorStore:
         results = store.query(embedding=[0.1] * 10, top_k=1)
         assert len(results) == 1
         assert results[0].content == "old content"
+
+    # ── query_by_metadata ──
+
+    def test_query_by_metadata_returns_matching_chunks(self, store):
+        chunk1 = _make_chunk("doc1 chunk1", document_id="doc-a")
+        chunk2 = _make_chunk("doc1 chunk2", document_id="doc-a")
+        chunk3 = _make_chunk("doc2 chunk1", document_id="doc-b")
+        store.add([chunk1, chunk2, chunk3], [[0.1] * 10, [0.2] * 10, [0.3] * 10])
+
+        results = store.query_by_metadata(where={"document_id": "doc-a"})
+        assert len(results) == 2
+        assert all(c.document_id == "doc-a" for c in results)
+        contents = {c.content for c in results}
+        assert contents == {"doc1 chunk1", "doc1 chunk2"}
+
+    def test_query_by_metadata_returns_empty_for_no_match(self, store):
+        chunk = _make_chunk("hello", document_id="doc-x")
+        store.add([chunk], [[0.1] * 10])
+
+        results = store.query_by_metadata(where={"document_id": "nonexistent"})
+        assert results == []
+
+    def test_query_by_metadata_empty_store(self, store):
+        results = store.query_by_metadata(where={"document_id": "any"})
+        assert results == []
+
+    def test_query_by_metadata_respects_limit(self, store):
+        for i in range(5):
+            store.add(
+                [_make_chunk(f"chunk {i}", document_id="doc-lim")],
+                [[float(i)] * 10],
+            )
+
+        results = store.query_by_metadata(where={"document_id": "doc-lim"}, limit=2)
+        assert len(results) == 2
+
+    def test_query_by_metadata_returns_chunk_fields(self, store):
+        meta = json.dumps({"source": "readme.md"})
+        chunk = _make_chunk("content", document_id="doc-f", metadata=meta)
+        store.add([chunk], [[0.1] * 10])
+
+        results = store.query_by_metadata(where={"document_id": "doc-f"})
+        assert len(results) == 1
+        c = results[0]
+        assert c.id == chunk.id
+        assert c.content == "content"
+        assert c.document_id == "doc-f"
+        assert c.knowledge_base_id == "0"
+        assert c.metadata == meta
+
+    # ── delete_by_metadata ──
+
+    def test_delete_by_metadata_removes_matching(self, store):
+        chunk1 = _make_chunk("a", document_id="doc-del")
+        chunk2 = _make_chunk("b", document_id="doc-del")
+        chunk3 = _make_chunk("c", document_id="doc-keep")
+        store.add([chunk1, chunk2, chunk3], [[0.1] * 10, [0.2] * 10, [0.3] * 10])
+
+        deleted = store.delete_by_metadata(where={"document_id": "doc-del"})
+        assert deleted == 2
+        assert store.collection.count() == 1
+
+    def test_delete_by_metadata_returns_zero_for_no_match(self, store):
+        chunk = _make_chunk("x", document_id="doc-x")
+        store.add([chunk], [[0.1] * 10])
+
+        deleted = store.delete_by_metadata(where={"document_id": "nonexistent"})
+        assert deleted == 0
+        assert store.collection.count() == 1
+
+    def test_delete_by_metadata_empty_store(self, store):
+        deleted = store.delete_by_metadata(where={"document_id": "any"})
+        assert deleted == 0
+
+    def test_delete_by_metadata_preserves_other_docs(self, store):
+        chunk1 = _make_chunk("keep me", document_id="doc-keep")
+        chunk2 = _make_chunk("delete me", document_id="doc-del")
+        store.add([chunk1, chunk2], [[0.1] * 10, [0.2] * 10])
+
+        store.delete_by_metadata(where={"document_id": "doc-del"})
+
+        remaining = store.query_by_metadata(where={"document_id": "doc-keep"})
+        assert len(remaining) == 1
+        assert remaining[0].content == "keep me"

@@ -67,6 +67,13 @@ class DocumentResponse(BaseModel):
     created_at: str
 
 
+class ChunkResponse(BaseModel):
+    id: str
+    document_id: str
+    content: str
+    metadata: str | None = None
+
+
 # ---------- Helpers ----------
 
 
@@ -274,11 +281,47 @@ async def delete_document(doc_id: str, request: Request) -> dict:
     if doc is None:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    # v1: only delete metadata; vector cleanup will be addressed later
+    # 清理向量库中属于该文档的 chunks
+    store_manager = getattr(request.app.state, "rag_store_manager", None)
+    if store_manager:
+        try:
+            store = store_manager.get_or_create_store(doc.knowledge_base_id)
+            store.delete_by_metadata(where={"document_id": doc_id})
+        except Exception as exc:
+            logger.warning("Failed to delete vectors for doc %s: %s", doc_id, exc)
+
     deleted = await doc_repo.delete(doc_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Document not found")
     return {"deleted": True}
+
+
+@router.get(
+    "/documents/{doc_id}/chunks", response_model=list[ChunkResponse]
+)
+async def list_document_chunks(
+    doc_id: str, request: Request
+) -> list[ChunkResponse]:
+    doc_repo = _get_doc_repo(request)
+    doc = await doc_repo.get(doc_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    store_manager = getattr(request.app.state, "rag_store_manager", None)
+    if store_manager is None:
+        raise HTTPException(status_code=503, detail="RAG not initialized")
+
+    store = store_manager.get_or_create_store(doc.knowledge_base_id)
+    chunks = store.query_by_metadata(where={"document_id": doc_id})
+    return [
+        ChunkResponse(
+            id=c.id,
+            document_id=c.document_id,
+            content=c.content,
+            metadata=c.metadata,
+        )
+        for c in chunks
+    ]
 
 
 # ---------- Query endpoint ----------

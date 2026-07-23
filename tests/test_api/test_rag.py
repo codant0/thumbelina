@@ -377,3 +377,100 @@ class TestRAGQuery:
         )
         assert resp.status_code == 200
         assert resp.json()["results"] == []
+
+
+# ---------- Document Chunks Tests ----------
+
+
+class TestDocumentChunks:
+    def test_list_document_chunks(self, rag_client, mock_rag_pipeline):
+        """GET /documents/{doc_id}/chunks 应返回该文档的所有 chunks。"""
+        mock_stats = MagicMock()
+        mock_stats.indexed_count = 2
+        mock_rag_pipeline.return_value.index.return_value = mock_stats
+
+        upload_resp = rag_client.post(
+            "/api/v1/rag/knowledge-bases/0/documents",
+            files={"file": ("test.md", b"# Test\nHello", "text/markdown")},
+        )
+        doc_id = upload_resp.json()["id"]
+
+        # Mock the vector store's query_by_metadata
+        mock_store = MagicMock()
+        mock_chunk1 = MagicMock()
+        mock_chunk1.id = "chunk-1"
+        mock_chunk1.document_id = doc_id
+        mock_chunk1.content = "chunk content 1"
+        mock_chunk1.metadata = "{}"
+        mock_chunk2 = MagicMock()
+        mock_chunk2.id = "chunk-2"
+        mock_chunk2.document_id = doc_id
+        mock_chunk2.content = "chunk content 2"
+        mock_chunk2.metadata = "{}"
+        mock_store.query_by_metadata.return_value = [mock_chunk1, mock_chunk2]
+
+        store_manager = rag_client.app.state.rag_store_manager
+        store_manager.get_or_create_store.return_value = mock_store
+
+        resp = rag_client.get(f"/api/v1/rag/documents/{doc_id}/chunks")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 2
+        assert data[0]["id"] == "chunk-1"
+        assert data[0]["content"] == "chunk content 1"
+        assert data[1]["id"] == "chunk-2"
+
+        # Verify query_by_metadata was called with correct filter
+        mock_store.query_by_metadata.assert_called_once_with(
+            where={"document_id": doc_id}
+        )
+
+    def test_list_chunks_nonexistent_document_returns_404(self, rag_client):
+        resp = rag_client.get("/api/v1/rag/documents/no-such/chunks")
+        assert resp.status_code == 404
+
+    def test_list_chunks_empty(self, rag_client, mock_rag_pipeline):
+        """文档存在但没有 chunks 时返回空列表。"""
+        mock_stats = MagicMock()
+        mock_stats.indexed_count = 0
+        mock_rag_pipeline.return_value.index.return_value = mock_stats
+
+        upload_resp = rag_client.post(
+            "/api/v1/rag/knowledge-bases/0/documents",
+            files={"file": ("empty.md", b"", "text/markdown")},
+        )
+        doc_id = upload_resp.json()["id"]
+
+        mock_store = MagicMock()
+        mock_store.query_by_metadata.return_value = []
+        store_manager = rag_client.app.state.rag_store_manager
+        store_manager.get_or_create_store.return_value = mock_store
+
+        resp = rag_client.get(f"/api/v1/rag/documents/{doc_id}/chunks")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_delete_document_cleans_vectors(self, rag_client, mock_rag_pipeline):
+        """DELETE /documents/{doc_id} 应同时清理向量库中的 chunks。"""
+        mock_stats = MagicMock()
+        mock_stats.indexed_count = 1
+        mock_rag_pipeline.return_value.index.return_value = mock_stats
+
+        upload_resp = rag_client.post(
+            "/api/v1/rag/knowledge-bases/0/documents",
+            files={"file": ("del.md", b"content", "text/markdown")},
+        )
+        doc_id = upload_resp.json()["id"]
+
+        mock_store = MagicMock()
+        store_manager = rag_client.app.state.rag_store_manager
+        store_manager.get_or_create_store.return_value = mock_store
+
+        resp = rag_client.delete(f"/api/v1/rag/documents/{doc_id}")
+        assert resp.status_code == 200
+        assert resp.json()["deleted"] is True
+
+        # Verify vector cleanup was called
+        mock_store.delete_by_metadata.assert_called_once_with(
+            where={"document_id": doc_id}
+        )

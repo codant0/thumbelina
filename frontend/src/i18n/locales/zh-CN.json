@@ -27,7 +27,8 @@
     "test": "测试",
     "testing": "测试中…",
     "show": "显示",
-    "hide": "隐藏"
+    "hide": "隐藏",
+    "refresh": "刷新"
   },
   "settings": {
     "title": "设置",
@@ -300,7 +301,20 @@
     "updateSuccess": "知识库已更新",
     "updateFailed": "更新知识库失败",
     "fetchFailed": "加载知识库失败",
-    "score": "相似度"
+    "score": "相似度",
+    "overview": "概览",
+    "totalChunks": "分块",
+    "createdAt": "创建于",
+    "dropzoneActive": "释放以上传文件",
+    "queryResultCount": "找到 {count} 条结果",
+    "queryDuration": "耗时 {duration}s",
+    "mobileSelectKb": "选择知识库",
+    "viewChunks": "查看分块",
+    "hideChunks": "收起",
+    "loadingChunks": "加载分块中…",
+    "noChunks": "暂无分块数据",
+    "chunkIndex": "序号",
+    "chunkContent": "内容"
   },
   "theme": {
     "dark": "深色",

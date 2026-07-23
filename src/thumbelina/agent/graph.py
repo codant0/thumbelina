@@ -499,19 +499,41 @@ class ThumbelinaAgent:
 
         initial_state: AgentState = {"messages": initial_messages}
         full_response = ""
+        pending = ""
+        # Batch tokens before yielding: send when buffer reaches size OR timeout
+        BATCH_SIZE = 30  # characters per batch
+        FLUSH_INTERVAL = 0.05  # seconds (50ms) - flush even if batch size not reached
+        last_flush = asyncio.get_event_loop().time()
 
-        async for event in self.graph.astream(initial_state, stream_mode="updates"):
-            for node_name, state_update in event.items():
-                if "messages" in state_update:
-                    for message in state_update["messages"]:
-                        if (
-                            isinstance(message, AIMessage)
-                            and message.content
-                            and not message.tool_calls
-                        ):
-                            chunk = str(message.content)
-                            full_response += chunk
-                            yield chunk
+        async for event in self.graph.astream(initial_state, stream_mode="messages"):
+            # event is a tuple: (message_chunk, metadata)
+            if not isinstance(event, tuple) or len(event) < 1:
+                continue
+
+            message_chunk = event[0]
+
+            # Check if this is an AIMessageChunk with content
+            if (
+                hasattr(message_chunk, "content")
+                and message_chunk.content
+                and hasattr(message_chunk, "type")
+                and message_chunk.type == "AIMessageChunk"
+                and not getattr(message_chunk, "tool_calls", None)
+            ):
+                content = str(message_chunk.content)
+                full_response += content
+                pending += content
+
+                # Yield when buffer reaches batch size or time interval
+                now = asyncio.get_event_loop().time()
+                if len(pending) >= BATCH_SIZE or (now - last_flush) >= FLUSH_INTERVAL:
+                    yield pending
+                    pending = ""
+                    last_flush = now
+
+        # Yield any remaining content
+        if pending:
+            yield pending
 
         if full_response:
             await self._persist_message("assistant", full_response)

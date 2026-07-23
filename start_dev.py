@@ -102,7 +102,8 @@ def main():
     _start_process(
         "backend",
         [sys.executable, "-m", "uvicorn", "thumbelina.api.app:create_app",
-         "--factory", "--reload", "--host", "0.0.0.0", "--port", "8000"],
+         "--factory", "--reload", "--host", "0.0.0.0", "--port", "8000",
+         "--log-level", "info"],
         str(root), procs, output_buffers, threads,
     )
 

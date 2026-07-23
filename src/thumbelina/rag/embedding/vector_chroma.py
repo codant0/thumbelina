@@ -1,6 +1,7 @@
 """chromadb 向量存储实现"""
 
 import chromadb
+
 from thumbelina.rag.embedding.base import ScoredChunk, VectorStore
 from thumbelina.rag.knowledge_base.models import Chunk
 
@@ -59,3 +60,30 @@ class ChromaVectorStore(VectorStore):
     def delete(self, ids: list[str]) -> None:
         if ids:
             self.collection.delete(ids=ids)
+
+    def query_by_metadata(self, where: dict[str, str], limit: int = 100) -> list[Chunk]:
+        """按元数据条件查询文档块。"""
+        results = self.collection.get(
+            where=where,
+            include=["documents", "metadatas"],
+            limit=limit,
+        )
+        chunks: list[Chunk] = []
+        for i in range(len(results["ids"])):
+            meta = results["metadatas"][i]
+            chunks.append(Chunk(
+                id=results["ids"][i],
+                content=results["documents"][i],
+                document_id=meta.get("document_id", ""),
+                knowledge_base_id=meta.get("knowledge_base_id", ""),
+                metadata=meta.get("metadata", "{}"),
+            ))
+        return chunks
+
+    def delete_by_metadata(self, where: dict[str, str]) -> int:
+        """按元数据条件批量删除文档块，返回删除数量。"""
+        results = self.collection.get(where=where, include=[])
+        ids = results["ids"]
+        if ids:
+            self.collection.delete(ids=ids)
+        return len(ids)

@@ -124,29 +124,46 @@ async def websocket_chat(websocket: WebSocket) -> None:
 
             # Check if this is the WeChat conversation using the cached ID
             wechat_cid = getattr(websocket.app.state, "wechat_conversation_id", None)
-            if cid and wechat_cid and cid == wechat_cid:
+            is_wechat_conversation = cid and wechat_cid and cid == wechat_cid
+
+            if is_wechat_conversation:
                 wechat_channel = getattr(websocket.app.state, "wechat_channel", None)
                 if wechat_channel is not None:
                     try:
-                        # Apply the conversation's endpoint to the WeChat
-                        # channel agent so the user's model selection actually
-                        # takes effect. The call above applied it to the WS
-                        # clone, but handle_incoming uses a different agent.
+                        # Apply the conversation's endpoint to the WeChat channel agent
                         await _apply_conversation_endpoint(websocket, wechat_channel._agent, cid)
-                        response = await wechat_channel.handle_incoming(
-                            user_id="frontend",
-                            text=parsed.message,
-                            msg_type="text",
-                            source="frontend",
-                        )
-                        # Send response back to the originating WebSocket client
-                        await websocket.send_json({"response": response, "conversation_id": cid})
-                        await websocket.send_json({"done": True, "conversation_id": cid})
+                    except Exception as exc:
+                        logger.warning("Failed to apply WeChat endpoint: %s", exc)
 
-                        # Forward only the reply to WeChat. iLink's bot
-                        # sendmessage always sends as the bot, so the user's
-                        # web-side question would be indistinguishable from a
-                        # bot reply in WeChat — only forward the reply.
+            # Use streaming for frontend, regardless of WeChat binding
+            try:
+                streaming = websocket.app.state.config.llm.streaming_enabled
+                full_response = ""
+                if streaming:
+                    try:
+                        async for chunk in agent.stream(parsed.message):
+                            full_response += chunk
+                            await websocket.send_json({"chunk": chunk, "conversation_id": cid})
+                    except Exception:
+                        # Fallback to non-streaming if streaming fails
+                        full_response = await agent.run(parsed.message)
+                        await websocket.send_json({"response": full_response, "conversation_id": cid})
+                else:
+                    full_response = await agent.run(parsed.message)
+                    await websocket.send_json({"response": full_response, "conversation_id": cid})
+
+                await websocket.send_json(
+                    {
+                        "done": True,
+                        "conversation_id": cid,
+                        "streaming_mode": streaming,
+                    }
+                )
+
+                # Sync to WeChat if this is a WeChat conversation
+                if is_wechat_conversation and full_response:
+                    wechat_channel = getattr(websocket.app.state, "wechat_channel", None)
+                    if wechat_channel is not None:
                         logger.info("Sending frontend message response to WeChat")
                         try:
                             last_wechat_user = getattr(wechat_channel, "_last_wechat_user_id", None)
@@ -155,7 +172,7 @@ async def websocket_chat(websocket: WebSocket) -> None:
                             if last_wechat_user:
                                 await wechat_channel.send_message(
                                     last_wechat_user,
-                                    response,
+                                    full_response,
                                     context_token=last_context_token,
                                 )
                                 logger.info("Sent response to WeChat user %s", last_wechat_user)
@@ -163,34 +180,7 @@ async def websocket_chat(websocket: WebSocket) -> None:
                                 logger.warning("No WeChat user ID available to send response to")
                         except Exception as send_exc:
                             logger.warning("Failed to send response to WeChat: %s", send_exc)
-                    except Exception as exc:
-                        logger.warning("WeChat channel handle_incoming failed: %s", exc)
-                        await websocket.send_json({"error": str(exc), "conversation_id": cid})
-                else:
-                    logger.warning("WeChat channel not available on app.state")
-                    await websocket.send_json(
-                        {
-                            "error": "WeChat channel not available",
-                            "conversation_id": cid,
-                        }
-                    )
-                continue
 
-            try:
-                streaming = websocket.app.state.config.llm.streaming_enabled
-                if streaming:
-                    async for chunk in agent.stream(parsed.message):
-                        await websocket.send_json({"chunk": chunk, "conversation_id": cid})
-                else:
-                    response = await agent.run(parsed.message)
-                    await websocket.send_json({"response": response, "conversation_id": cid})
-                await websocket.send_json(
-                    {
-                        "done": True,
-                        "conversation_id": cid,
-                        "streaming_mode": streaming,
-                    }
-                )
             except Exception as exc:
                 await websocket.send_json({"error": str(exc), "conversation_id": cid})
 

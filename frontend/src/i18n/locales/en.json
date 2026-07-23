@@ -27,7 +27,8 @@
     "test": "Test",
     "testing": "Testing…",
     "show": "Show",
-    "hide": "Hide"
+    "hide": "Hide",
+    "refresh": "Refresh"
   },
   "settings": {
     "title": "Settings",
@@ -300,7 +301,20 @@
     "updateSuccess": "Knowledge base updated",
     "updateFailed": "Failed to update knowledge base",
     "fetchFailed": "Failed to load knowledge bases",
-    "score": "Score"
+    "score": "Score",
+    "overview": "Overview",
+    "totalChunks": "Chunks",
+    "createdAt": "Created",
+    "dropzoneActive": "Release to upload",
+    "queryResultCount": "Found {count} results",
+    "queryDuration": "{duration}s",
+    "mobileSelectKb": "Select Knowledge Base",
+    "viewChunks": "View Chunks",
+    "hideChunks": "Hide",
+    "loadingChunks": "Loading chunks…",
+    "noChunks": "No chunks found",
+    "chunkIndex": "#",
+    "chunkContent": "Content"
   },
   "theme": {
     "dark": "Dark",

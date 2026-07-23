@@ -12,7 +12,6 @@
     vec = model.embed("你好世界")
 """
 from thumbelina.rag.embedding.base import EmbeddingModel
-from thumbelina.rag.knowledge_base.models import Chunk
 
 
 class EmbeddingRegistry:
