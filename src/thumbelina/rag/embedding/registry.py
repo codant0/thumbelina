@@ -11,11 +11,13 @@
     model = get_embedding_model("hf/text-embedding-3-small")
     vec = model.embed("你好世界")
 """
+
 from thumbelina.rag.embedding.base import EmbeddingModel
 
 
 class EmbeddingRegistry:
     """Embedding模型注册中心（单例）"""
+
     _instance = None
     _model: dict[str, type[EmbeddingModel]] = {}
     # 当前只支持hugging_face

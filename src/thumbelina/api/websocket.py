@@ -147,7 +147,9 @@ async def websocket_chat(websocket: WebSocket) -> None:
                     except Exception:
                         # Fallback to non-streaming if streaming fails
                         full_response = await agent.run(parsed.message)
-                        await websocket.send_json({"response": full_response, "conversation_id": cid})
+                        await websocket.send_json(
+                            {"response": full_response, "conversation_id": cid}
+                        )
                 else:
                     full_response = await agent.run(parsed.message)
                     await websocket.send_json({"response": full_response, "conversation_id": cid})

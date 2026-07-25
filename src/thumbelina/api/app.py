@@ -626,6 +626,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     FastAPI
         The configured FastAPI application instance.
     """
+    # 初始化日志系统（必须在其他模块导入之前）
+    from thumbelina.logging_config import setup_logging
+
+    setup_logging()
+
     config_path: str | None = None
     if config is None:
         from thumbelina.config.loader import resolve_config_path

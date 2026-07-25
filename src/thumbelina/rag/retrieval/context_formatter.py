@@ -101,9 +101,7 @@ class ContextFormatter:
         fragments: list[str] = []
         for i, item in enumerate(chunks, start=1):
             if isinstance(item, ScoredChunk):
-                fragments.append(
-                    self._format_chunk(item, index=i, score=item.score)
-                )
+                fragments.append(self._format_chunk(item, index=i, score=item.score))
             elif isinstance(item, Chunk):
                 fragments.append(self._format_chunk(item, index=i))
             else:

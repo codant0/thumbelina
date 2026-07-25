@@ -423,9 +423,7 @@ class ConversationRepository:
         """
         return await asyncio.to_thread(self._set_model_sync, conversation_id, model)
 
-    def _set_knowledge_base_sync(
-        self, conversation_id: str, knowledge_base_id: str | None
-    ) -> bool:
+    def _set_knowledge_base_sync(self, conversation_id: str, knowledge_base_id: str | None) -> bool:
         """Synchronous implementation of set_conversation_knowledge_base."""
         with self._get_session() as session:
             conversation = session.get(Conversation, conversation_id)

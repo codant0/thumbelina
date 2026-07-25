@@ -98,9 +98,7 @@ def mock_memory():
     memory.rename_conversation = AsyncMock(side_effect=rename_conversation)
     memory.set_conversation_endpoint = AsyncMock(side_effect=set_conversation_endpoint)
     memory.set_conversation_model = AsyncMock(side_effect=set_conversation_model)
-    memory.set_conversation_knowledge_base = AsyncMock(
-        side_effect=set_conversation_knowledge_base
-    )
+    memory.set_conversation_knowledge_base = AsyncMock(side_effect=set_conversation_knowledge_base)
 
     # Mock repository with ping method
     memory.repository = MagicMock()

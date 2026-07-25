@@ -215,11 +215,12 @@ if __name__ == "__main__":
     embedder = HuggingFaceEmbedding()
     chromadb_client = chromadb.EphemeralClient()
     chromadb_collection = chromadb_client.get_or_create_collection(
-        name="default",
-        embedding_function=None,
-        metadata={"hnsw:space": "cosine"})
+        name="default", embedding_function=None, metadata={"hnsw:space": "cosine"}
+    )
     vector_store: VectorStore = ChromaVectorStore(chromadb_collection)
-    indexer = Indexer(loader=loader, chunker=recursive_chunker, embedder=embedder, vector_store=vector_store)
+    indexer = Indexer(
+        loader=loader, chunker=recursive_chunker, embedder=embedder, vector_store=vector_store
+    )
 
     BASE_DIR = Path(__file__).parent
     TEST_FILE = str(BASE_DIR / ".." / "test_data" / "doc.md")
@@ -230,4 +231,4 @@ if __name__ == "__main__":
     retriever = SimpleRetriever(embedding_model=embedder, vector_store=vector_store)
     results = retriever.retrieve(query)
     for i, result in enumerate(results):
-      print(f"result {i + 1}: {result}")
+        print(f"result {i + 1}: {result}")

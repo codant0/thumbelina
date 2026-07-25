@@ -68,9 +68,7 @@ def rag_client(client):
         kb_store[kb_id] = kb
         return kb
 
-    async def _kb_update(
-        kb_id: str, name: str | None = None, description: str | None = None
-    ):
+    async def _kb_update(kb_id: str, name: str | None = None, description: str | None = None):
         kb = kb_store.get(kb_id)
         if kb is None:
             raise ValueError(f"知识库 {kb_id} 不存在")
@@ -126,9 +124,7 @@ def rag_client(client):
         return True
 
     async def _doc_delete_by_kb(kb_id: str) -> int:
-        to_delete = [
-            did for did, d in doc_store.items() if d.knowledge_base_id == kb_id
-        ]
+        to_delete = [did for did, d in doc_store.items() if d.knowledge_base_id == kb_id]
         for did in to_delete:
             del doc_store[did]
         return len(to_delete)
@@ -218,9 +214,7 @@ def mock_rag_retrieval():
 
         mock_retriever_cls = MagicMock()
         mock_retriever_cls.return_value.retrieve.return_value = []
-        sys.modules["thumbelina.rag.retrieval.strategies"].SimpleRetriever = (
-            mock_retriever_cls
-        )
+        sys.modules["thumbelina.rag.retrieval.strategies"].SimpleRetriever = mock_retriever_cls
 
         yield mock_retriever_cls
     finally:
@@ -255,15 +249,11 @@ class TestKnowledgeBaseCRUD:
     def test_create_duplicate_name_allowed(self, rag_client):
         """不同知识库可以同名。"""
         rag_client.post("/api/v1/rag/knowledge-bases", json={"name": "A"})
-        resp = rag_client.post(
-            "/api/v1/rag/knowledge-bases", json={"name": "A"}
-        )
+        resp = rag_client.post("/api/v1/rag/knowledge-bases", json={"name": "A"})
         assert resp.status_code == 200
 
     def test_update_knowledge_base(self, rag_client):
-        create_resp = rag_client.post(
-            "/api/v1/rag/knowledge-bases", json={"name": "A"}
-        )
+        create_resp = rag_client.post("/api/v1/rag/knowledge-bases", json={"name": "A"})
         kb_id = create_resp.json()["id"]
         resp = rag_client.put(
             f"/api/v1/rag/knowledge-bases/{kb_id}",
@@ -273,9 +263,7 @@ class TestKnowledgeBaseCRUD:
         assert resp.json()["name"] == "B"
 
     def test_delete_knowledge_base(self, rag_client):
-        create_resp = rag_client.post(
-            "/api/v1/rag/knowledge-bases", json={"name": "X"}
-        )
+        create_resp = rag_client.post("/api/v1/rag/knowledge-bases", json={"name": "X"})
         kb_id = create_resp.json()["id"]
         resp = rag_client.delete(f"/api/v1/rag/knowledge-bases/{kb_id}")
         assert resp.status_code == 200
@@ -286,9 +274,7 @@ class TestKnowledgeBaseCRUD:
         assert resp.status_code == 400
 
     def test_update_nonexistent_kb_returns_404(self, rag_client):
-        resp = rag_client.put(
-            "/api/v1/rag/knowledge-bases/no-such", json={"name": "X"}
-        )
+        resp = rag_client.put("/api/v1/rag/knowledge-bases/no-such", json={"name": "X"})
         assert resp.status_code == 404
 
 
@@ -421,9 +407,7 @@ class TestDocumentChunks:
         assert data[1]["id"] == "chunk-2"
 
         # Verify query_by_metadata was called with correct filter
-        mock_store.query_by_metadata.assert_called_once_with(
-            where={"document_id": doc_id}
-        )
+        mock_store.query_by_metadata.assert_called_once_with(where={"document_id": doc_id})
 
     def test_list_chunks_nonexistent_document_returns_404(self, rag_client):
         resp = rag_client.get("/api/v1/rag/documents/no-such/chunks")
@@ -471,6 +455,4 @@ class TestDocumentChunks:
         assert resp.json()["deleted"] is True
 
         # Verify vector cleanup was called
-        mock_store.delete_by_metadata.assert_called_once_with(
-            where={"document_id": doc_id}
-        )
+        mock_store.delete_by_metadata.assert_called_once_with(where={"document_id": doc_id})

@@ -21,6 +21,7 @@ class EmbeddingModel(ABC):
 
 class ScoredChunk(Chunk):
     """带检索分数的文档片段，继承 Chunk 的全部字段。"""
+
     score: float = 0.0
 
 

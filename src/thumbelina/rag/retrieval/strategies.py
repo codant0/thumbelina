@@ -32,10 +32,7 @@ class SimpleRetriever(Retriever):
 
     def retrieve(self, query: str, top_k: int = 5) -> list[ScoredChunk]:
         query_embedding = self.embedding_model.embed(query)
-        results = self.vector_store.query(
-            embedding=query_embedding,
-            top_k=top_k
-        )
+        results = self.vector_store.query(embedding=query_embedding, top_k=top_k)
         return results
 
 
@@ -62,13 +59,11 @@ if __name__ == "__main__":
     # 3. 向量化
     chromadb_client = chromadb.EphemeralClient()
     chromadb_collection = chromadb_client.get_or_create_collection(
-        name="default",
-        embedding_function=None,
-        metadata={"hnsw:space": "cosine"})
+        name="default", embedding_function=None, metadata={"hnsw:space": "cosine"}
+    )
     vector_store: VectorStore = ChromaVectorStore(chromadb_collection)
     embedding_model = HuggingFaceEmbedding()
-    embeddings = embedding_model.embed_batch(
-        [str(x.content) for x in chunks])
+    embeddings = embedding_model.embed_batch([str(x.content) for x in chunks])
     # 4. 嵌入
     vector_store.add(chunks, embeddings)
 
@@ -77,4 +72,4 @@ if __name__ == "__main__":
     retriever = SimpleRetriever(embedding_model=embedding_model, vector_store=vector_store)
     results = retriever.retrieve(query)
     for i, result in enumerate(results):
-      print(f"result {i + 1}: {result}")
+        print(f"result {i + 1}: {result}")

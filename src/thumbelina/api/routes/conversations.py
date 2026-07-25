@@ -199,9 +199,7 @@ async def set_conversation_knowledge_base(
     ``knowledge_base_id`` must reference an existing knowledge base, or be
     ``null`` to unbind the conversation from any knowledge base.
     """
-    ok = await memory.set_conversation_knowledge_base(
-        conversation_id, body.knowledge_base_id
-    )
+    ok = await memory.set_conversation_knowledge_base(conversation_id, body.knowledge_base_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Conversation not found")
     conv = await memory.get_conversation(conversation_id)

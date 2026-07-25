@@ -23,11 +23,13 @@ class ChromaVectorStore(VectorStore):
             ids.append(chunk.id)
             documents.append(chunk.content)
             # ChromaDB metadata 必须是 dict，值只能是 str/int/float/bool
-            metadatas.append({
-                "document_id": chunk.document_id,
-                "knowledge_base_id": chunk.knowledge_base_id,
-                "metadata": chunk.metadata,  # JSON 字符串，直接存储
-            })
+            metadatas.append(
+                {
+                    "document_id": chunk.document_id,
+                    "knowledge_base_id": chunk.knowledge_base_id,
+                    "metadata": chunk.metadata,  # JSON 字符串，直接存储
+                }
+            )
 
         self.collection.add(
             ids=ids,
@@ -47,14 +49,16 @@ class ChromaVectorStore(VectorStore):
         chunks: list[ScoredChunk] = []
         for i in range(len(results["ids"][0])):
             meta = results["metadatas"][0][i]
-            chunks.append(ScoredChunk(
-                id=results["ids"][0][i],
-                content=results["documents"][0][i],
-                document_id=meta.get("document_id", ""),
-                knowledge_base_id=meta.get("knowledge_base_id", ""),
-                metadata=meta.get("metadata", "{}"),
-                score=1 - results["distances"][0][i],
-            ))
+            chunks.append(
+                ScoredChunk(
+                    id=results["ids"][0][i],
+                    content=results["documents"][0][i],
+                    document_id=meta.get("document_id", ""),
+                    knowledge_base_id=meta.get("knowledge_base_id", ""),
+                    metadata=meta.get("metadata", "{}"),
+                    score=1 - results["distances"][0][i],
+                )
+            )
         return chunks
 
     def delete(self, ids: list[str]) -> None:
@@ -71,13 +75,15 @@ class ChromaVectorStore(VectorStore):
         chunks: list[Chunk] = []
         for i in range(len(results["ids"])):
             meta = results["metadatas"][i]
-            chunks.append(Chunk(
-                id=results["ids"][i],
-                content=results["documents"][i],
-                document_id=meta.get("document_id", ""),
-                knowledge_base_id=meta.get("knowledge_base_id", ""),
-                metadata=meta.get("metadata", "{}"),
-            ))
+            chunks.append(
+                Chunk(
+                    id=results["ids"][i],
+                    content=results["documents"][i],
+                    document_id=meta.get("document_id", ""),
+                    knowledge_base_id=meta.get("knowledge_base_id", ""),
+                    metadata=meta.get("metadata", "{}"),
+                )
+            )
         return chunks
 
     def delete_by_metadata(self, where: dict[str, str]) -> int:

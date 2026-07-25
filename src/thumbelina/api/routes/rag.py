@@ -168,12 +168,8 @@ async def delete_knowledge_base(kb_id: str, request: Request) -> dict:
 # ---------- Document endpoints ----------
 
 
-@router.get(
-    "/knowledge-bases/{kb_id}/documents", response_model=list[DocumentResponse]
-)
-async def list_documents(
-    kb_id: str, request: Request
-) -> list[DocumentResponse]:
+@router.get("/knowledge-bases/{kb_id}/documents", response_model=list[DocumentResponse])
+async def list_documents(kb_id: str, request: Request) -> list[DocumentResponse]:
     repo = _get_doc_repo(request)
     docs = await repo.list_by_kb(kb_id)
     return [
@@ -189,12 +185,8 @@ async def list_documents(
     ]
 
 
-@router.post(
-    "/knowledge-bases/{kb_id}/documents", response_model=DocumentResponse
-)
-async def upload_document(
-    kb_id: str, file: UploadFile, request: Request
-) -> DocumentResponse:
+@router.post("/knowledge-bases/{kb_id}/documents", response_model=DocumentResponse)
+async def upload_document(kb_id: str, file: UploadFile, request: Request) -> DocumentResponse:
     # Verify knowledge base exists
     kb_repo = _get_kb_repo(request)
     kb = await kb_repo.get(kb_id)
@@ -227,16 +219,12 @@ async def upload_document(
 
         registry = getattr(request.app.state, "rag_embedding_registry", None)
         if registry is None:
-            raise HTTPException(
-                status_code=503, detail="RAG embedding registry not available"
-            )
+            raise HTTPException(status_code=503, detail="RAG embedding registry not available")
         embedder = registry.create()
 
         store_manager = getattr(request.app.state, "rag_store_manager", None)
         if store_manager is None:
-            raise HTTPException(
-                status_code=503, detail="RAG store manager not available"
-            )
+            raise HTTPException(status_code=503, detail="RAG store manager not available")
         vector_store = store_manager.get_or_create_store(kb_id)
 
         kb_indexer = Indexer(
@@ -296,12 +284,8 @@ async def delete_document(doc_id: str, request: Request) -> dict:
     return {"deleted": True}
 
 
-@router.get(
-    "/documents/{doc_id}/chunks", response_model=list[ChunkResponse]
-)
-async def list_document_chunks(
-    doc_id: str, request: Request
-) -> list[ChunkResponse]:
+@router.get("/documents/{doc_id}/chunks", response_model=list[ChunkResponse])
+async def list_document_chunks(doc_id: str, request: Request) -> list[ChunkResponse]:
     doc_repo = _get_doc_repo(request)
     doc = await doc_repo.get(doc_id)
     if doc is None:
@@ -328,9 +312,7 @@ async def list_document_chunks(
 
 
 @router.post("/query", response_model=QueryResponse)
-async def query_knowledge_base(
-    body: QueryRequest, request: Request
-) -> QueryResponse:
+async def query_knowledge_base(body: QueryRequest, request: Request) -> QueryResponse:
     store_manager = getattr(request.app.state, "rag_store_manager", None)
     if store_manager is None:
         raise HTTPException(status_code=503, detail="RAG not initialized")
@@ -344,14 +326,10 @@ async def query_knowledge_base(
 
     from thumbelina.rag.retrieval.strategies import SimpleRetriever
 
-    retriever = SimpleRetriever(
-        embedding_model=embedder, vector_store=vector_store
-    )
+    retriever = SimpleRetriever(embedding_model=embedder, vector_store=vector_store)
 
     try:
-        chunks = await asyncio.to_thread(
-            retriever.retrieve, body.query, body.top_k
-        )
+        chunks = await asyncio.to_thread(retriever.retrieve, body.query, body.top_k)
     except Exception as exc:
         logger.warning("RAG query failed: %s", exc)
         chunks = []

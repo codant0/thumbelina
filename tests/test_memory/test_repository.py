@@ -291,9 +291,7 @@ class TestConversationKnowledgeBase:
         assert conv["knowledge_base_id"] is None
 
     @pytest.mark.asyncio
-    async def test_set_knowledge_base_nonexistent_returns_false(
-        self, repo: ConversationRepository
-    ):
+    async def test_set_knowledge_base_nonexistent_returns_false(self, repo: ConversationRepository):
         """set_conversation_knowledge_base should return False for unknown IDs."""
         assert await repo.set_conversation_knowledge_base("nope", "kb-1") is False
 
@@ -318,9 +316,7 @@ class TestConversationKnowledgeBase:
         assert target["knowledge_base_id"] == "kb-all"
 
     @pytest.mark.asyncio
-    async def test_new_conversation_has_null_knowledge_base(
-        self, repo: ConversationRepository
-    ):
+    async def test_new_conversation_has_null_knowledge_base(self, repo: ConversationRepository):
         """A newly created conversation should have knowledge_base_id=None."""
         cid = await repo.create_conversation()
         conv = await repo.get_conversation(cid)

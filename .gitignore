@@ -47,3 +47,8 @@ Thumbs.db
 /TODO
 *.skill
 /data
+
+# 日志文件
+logs/
+*.log
+*.log.gz

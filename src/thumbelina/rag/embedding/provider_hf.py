@@ -35,6 +35,7 @@ def _ensure_torch_dll_path() -> None:
         return
     try:
         import torch as _torch
+
         torch_lib = str(Path(_torch.__file__).parent / "lib")
         if hasattr(os, "add_dll_directory"):
             os.add_dll_directory(torch_lib)
@@ -45,6 +46,7 @@ def _ensure_torch_dll_path() -> None:
         # torch not available — find path from filesystem
         try:
             import importlib.util
+
             spec = importlib.util.find_spec("torch")
             if spec and spec.origin:
                 torch_lib = str(Path(spec.origin).parent / "lib")
@@ -81,8 +83,7 @@ class HuggingFaceEmbedding(EmbeddingModel):
             # 缓存存在，拿到快照目录（config.json 所在目录的父级）
             snapshot_dir = str(Path(cached).parent)
             print(f"使用本地缓存模型: {snapshot_dir}")
-            self.model: SentenceTransformer = _ST(
-                snapshot_dir, local_files_only=True)
+            self.model: SentenceTransformer = _ST(snapshot_dir, local_files_only=True)
         else:
             print(f"本地未找到缓存，从 HuggingFace Hub 下载: {model_name}")
             self.model = _ST(model_name)

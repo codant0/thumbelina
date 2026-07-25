@@ -1,0 +1,25 @@
+version: 1
+disable_existing_loggers: false
+
+# loguru 配置
+loguru:
+  handlers:
+    # 控制台输出（保留彩色）
+    - sink: stderr
+      level: INFO
+      format: "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
+      colorize: true
+
+    # 后端文件日志（大小+时间双条件滚动）
+    - sink: logs/backend.log
+      level: DEBUG
+      format: "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}"
+      rotation: "50 MB"          # 文件超过 50MB 时滚动
+      retention: "30 days"       # 保留 30 天的日志
+      compression: "gz"          # 滚动后压缩为 .gz
+      encoding: utf-8
+
+# 标准 logging 拦截配置
+intercept:
+  loggers: ["*"]                  # 拦截所有 logger
+  ignore: ["uvicorn.access"]      # 不拦截 uvicorn 访问日志

@@ -15,8 +15,7 @@
 
 --- 
 
-由于已学习过基本的Langchain内容，本次选择使用LlamaIndex框架进行。LlamaIndex优势：封装度更高，代码量更低
-
+本次RAG选择自研+lLamaIndex方案
 向量化存储选择Chroma方案
 
 RAG学习
@@ -145,3 +144,15 @@ RAG学习
 3. 多跳推理？
 
 优先级排序：数据清洗和预处理 => 分块策略 => 混合检索+rerank => query改写 => embedding模型的选择 => 其他花活
+
+
+# 实战
+## Loader
+
+### TextLoader
+纯文本文件加载
+
+当前支持的文件类型：
+* .txt
+* .md （TODO：待优化，markdown中存在表格数据，直接用该方式加载可能会导致丢失信息？或是在chunk阶段处理？）
+* 
