@@ -242,7 +242,10 @@ async def upload_document(kb_id: str, file: UploadFile, request: Request) -> Doc
         for d in documents:
             d.name = original_filename
             d.source_uri = original_filename
+        # TODO 当前的loader只支持单个文件加载，后续补齐文件夹loader时需修改
         doc_id = documents[0].id if documents else uuid.uuid4().hex
+        sha256 = documents[0].sha256
+        sim_hash_64 = documents[0].sim_hash_64
         stats = await asyncio.to_thread(kb_indexer.index_documents, documents)
 
         # Save document metadata，使用与 ChromaDB 中相同的 document_id
@@ -252,6 +255,8 @@ async def upload_document(kb_id: str, file: UploadFile, request: Request) -> Doc
             name=original_filename,
             source_uri=original_filename,
             doc_type=doc_type.value,
+            sha256=sha256,
+            sim_hash_64=sim_hash_64,
             chunk_count=stats.indexed_count,
             doc_id=doc_id,
         )

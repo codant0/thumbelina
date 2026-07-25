@@ -175,6 +175,8 @@ class DocumentRepository:
                 name=name,
                 source_uri=source_uri,
                 doc_type=doc_type,
+                sha256=sha256,
+                sim_hash_64=sim_hash_64,
                 chunk_count=chunk_count,
             )
             session.add(doc)
@@ -188,12 +190,14 @@ class DocumentRepository:
         name: str,
         source_uri: str,
         doc_type: str,
+        sha256: str,
+        sim_hash_64: str,
         chunk_count: int = 0,
         doc_id: str | None = None,
     ) -> DocumentRecord:
         """注册文档元数据到指定知识库。"""
         return await asyncio.to_thread(
-            self._create_sync, kb_id, name, source_uri, doc_type, chunk_count, doc_id
+            self._create_sync, kb_id, name, source_uri, doc_type, sha256, sim_hash_64, chunk_count, doc_id
         )
 
     # ---- get ----

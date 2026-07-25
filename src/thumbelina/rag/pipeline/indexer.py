@@ -103,8 +103,11 @@ class Indexer:
         if not documents:
             return stats
 
-        # 2. 分块 → 3. 向量化 → 4. 写入
+        # 2. 去重 -> 分块 → 3. 向量化 → 4. 写入
         for document in documents:
+            # 去重
+            
+
             chunks = self._chunk(document, stats)
             if not chunks:
                 continue

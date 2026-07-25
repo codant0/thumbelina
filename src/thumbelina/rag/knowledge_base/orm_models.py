@@ -45,7 +45,8 @@ class DocumentRecord(RagBase):
     name: Mapped[str] = mapped_column(String(500), nullable=False)
     source_uri: Mapped[str] = mapped_column(String(1000), nullable=False)
     doc_type: Mapped[str] = mapped_column(String(20), nullable=False)
-
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    sim_hash_64: Mapped[str] = mapped_column(String(64), nullable=False)
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 

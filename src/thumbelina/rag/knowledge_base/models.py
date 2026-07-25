@@ -45,6 +45,8 @@ class Document(BaseModel):
     source_uri: str
     document_type: DocumentType
     content: str
+    sha256: str
+    sim_hash_64: str
     knowledge_base_id: str = "0"
 
 
