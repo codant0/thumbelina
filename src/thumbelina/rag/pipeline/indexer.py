@@ -112,6 +112,33 @@ class Indexer:
 
         return stats
 
+    def index_documents(self, documents: list[Document]) -> IndexStats:
+        """对已加载的文档执行索引（跳过加载步骤）。
+
+        适用于调用方已通过 loader.load() 获取文档对象、
+        需要保留 document ID 以供后续元数据关联的场景。
+
+        Parameters
+        ----------
+        documents:
+            已加载的文档列表。
+
+        Returns
+        -------
+        IndexStats
+            本次索引的统计信息。
+        """
+        stats = IndexStats()
+        stats.document_count = len(documents)
+
+        for document in documents:
+            chunks = self._chunk(document, stats)
+            if not chunks:
+                continue
+            self._embed_and_store(chunks, stats)
+
+        return stats
+
     def index_batch(self, paths: list[str]) -> IndexStats:
         """批量索引多个文件。
 

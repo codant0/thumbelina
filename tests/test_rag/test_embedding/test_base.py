@@ -117,6 +117,12 @@ class TestVectorStoreABC:
                 for doc_id in ids:
                     self._data.pop(doc_id, None)
 
+            def query_by_metadata(self, where: dict[str, str], limit: int = 100) -> list:
+                return []
+
+            def delete_by_metadata(self, where: dict[str, str]) -> int:
+                return 0
+
         store = InMemoryVectorStore()
         assert store is not None
         assert store.query([0.1], top_k=5) == []

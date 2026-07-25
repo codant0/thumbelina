@@ -166,10 +166,11 @@ class DocumentRepository:
         source_uri: str,
         doc_type: str,
         chunk_count: int = 0,
+        doc_id: str | None = None,
     ) -> DocumentRecord:
         with self._get_session() as session:
             doc = DocumentRecord(
-                id=uuid.uuid4().hex,
+                id=doc_id or uuid.uuid4().hex,
                 knowledge_base_id=kb_id,
                 name=name,
                 source_uri=source_uri,
@@ -188,10 +189,11 @@ class DocumentRepository:
         source_uri: str,
         doc_type: str,
         chunk_count: int = 0,
+        doc_id: str | None = None,
     ) -> DocumentRecord:
         """注册文档元数据到指定知识库。"""
         return await asyncio.to_thread(
-            self._create_sync, kb_id, name, source_uri, doc_type, chunk_count
+            self._create_sync, kb_id, name, source_uri, doc_type, chunk_count, doc_id
         )
 
     # ---- get ----

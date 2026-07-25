@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, type FormEvent } from 'react'
 import {
   BookOpen, Plus, Trash2, Edit2, Check, X, Upload, Search, FileText,
-  UploadCloud, ChevronDown, ChevronRight, Database, Clock, RefreshCw,
+  UploadCloud, ChevronDown, Database, Clock, RefreshCw, Copy,
 } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import { Toast } from '../Settings/Toast'
@@ -326,6 +326,24 @@ export function KnowledgeBasePage() {
     setMobileMenuOpen(false)
     setDeleteConfirm(null)
   }
+
+  // ── Copy to clipboard helper ───────────────────────────
+
+  const copyToClipboard = useCallback(async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      showToast(t('knowledgeBase.copiedToClipboard'))
+    } catch {
+      // Fallback for older browsers
+      const ta = document.createElement('textarea')
+      ta.value = text
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+      showToast(t('knowledgeBase.copiedToClipboard'))
+    }
+  }, [showToast, t])
 
   // ── Score rendering helper ─────────────────────────────
 
@@ -679,20 +697,18 @@ export function KnowledgeBasePage() {
                             {doc.name}
                           </span>
                           <span className="badge badge-neutral">{doc.doc_type}</span>
-                          <span>{doc.chunk_count}</span>
+                          <button
+                            className={`kb-doc-table__chunk-btn${expandedDocId === doc.id ? ' kb-doc-table__chunk-btn--active' : ''}`}
+                            onClick={() => void handleToggleChunks(doc.id)}
+                            title={expandedDocId === doc.id ? t('knowledgeBase.hideChunks') : t('knowledgeBase.viewChunks')}
+                            disabled={doc.chunk_count === 0}
+                          >
+                            {doc.chunk_count}
+                          </button>
                           <span className="kb-doc-table__time">
                             {new Date(doc.created_at).toLocaleString()}
                           </span>
                           <div className="kb-doc-table__actions">
-                            <button
-                              className="btn btn-ghost btn-sm"
-                              onClick={() => void handleToggleChunks(doc.id)}
-                              title={expandedDocId === doc.id ? t('knowledgeBase.hideChunks') : t('knowledgeBase.viewChunks')}
-                            >
-                              {expandedDocId === doc.id
-                                ? <ChevronDown size={12} />
-                                : <ChevronRight size={12} />}
-                            </button>
                             <button
                               className="btn btn-ghost btn-sm"
                               onClick={() => void handleDeleteDocument(doc.id)}
@@ -714,17 +730,57 @@ export function KnowledgeBasePage() {
                                 <span>{t('knowledgeBase.noChunks')}</span>
                               </div>
                             ) : (
-                              <div className="kb-chunks-list">
-                                {docChunks.map((chunk, idx) => (
-                                  <div key={chunk.id} className="kb-chunk-item">
-                                    <div className="kb-chunk-item__header">
-                                      <span className="kb-chunk-item__index">#{idx + 1}</span>
-                                      <span className="kb-chunk-item__id" title={chunk.id}>{chunk.id.slice(0, 8)}…</span>
-                                    </div>
-                                    <pre className="kb-chunk-item__content">{chunk.content}</pre>
-                                  </div>
-                                ))}
-                              </div>
+                              <>
+                                <div className="kb-chunks-panel__stats">
+                                  <span className="kb-chunks-panel__stat">
+                                    {t('knowledgeBase.chunkTotal')}: <strong>{docChunks.length}</strong>
+                                  </span>
+                                  <span className="kb-chunks-panel__stat">
+                                    {t('knowledgeBase.chunkTotalChars')}: <strong>
+                                      {docChunks.reduce((sum, c) => sum + c.content.length, 0).toLocaleString()}
+                                    </strong>
+                                  </span>
+                                </div>
+                                <div className="kb-chunks-list">
+                                  {docChunks.map((chunk, idx) => {
+                                    let parsedMeta: Record<string, unknown> | null = null
+                                    if (chunk.metadata) {
+                                      try { parsedMeta = JSON.parse(chunk.metadata) } catch { /* ignore */ }
+                                    }
+                                    return (
+                                      <div key={chunk.id} className="kb-chunk-item">
+                                        <div className="kb-chunk-item__header">
+                                          <span className="kb-chunk-item__index">#{idx + 1}</span>
+                                          <span className="kb-chunk-item__chars">
+                                            {chunk.content.length} {t('knowledgeBase.chunkChars')}
+                                          </span>
+                                          <span className="kb-chunk-item__id" title={chunk.id}>
+                                            {chunk.id.slice(0, 8)}…
+                                          </span>
+                                          <button
+                                            className="btn btn-ghost btn-sm kb-chunk-item__copy"
+                                            onClick={() => void copyToClipboard(chunk.content)}
+                                            title={t('knowledgeBase.copyContent')}
+                                          >
+                                            <Copy size={11} />
+                                          </button>
+                                        </div>
+                                        {parsedMeta && Object.keys(parsedMeta).length > 0 && (
+                                          <div className="kb-chunk-item__meta">
+                                            {Object.entries(parsedMeta).map(([k, v]) => (
+                                              <span key={k} className="kb-chunk-item__meta-tag">
+                                                <span className="kb-chunk-item__meta-key">{k}:</span>
+                                                <span className="kb-chunk-item__meta-val">{String(v)}</span>
+                                              </span>
+                                            ))}
+                                          </div>
+                                        )}
+                                        <pre className="kb-chunk-item__content">{chunk.content}</pre>
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                              </>
                             )}
                           </div>
                         )}

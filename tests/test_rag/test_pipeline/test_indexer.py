@@ -80,6 +80,12 @@ class FakeVectorStore(VectorStore):
     def delete(self, ids: list[str]) -> None:
         pass
 
+    def query_by_metadata(self, where: dict[str, str], limit: int = 100) -> list[Chunk]:
+        return []
+
+    def delete_by_metadata(self, where: dict[str, str]) -> int:
+        return 0
+
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -103,12 +103,13 @@ def rag_client(client):
         source_uri: str,
         doc_type: str,
         chunk_count: int = 0,
+        doc_id: str | None = None,
     ):
         nonlocal _doc_counter
         _doc_counter += 1
-        doc_id = f"doc-{_doc_counter}"
-        doc = _make_doc(doc_id, kb_id, name, doc_type, chunk_count)
-        doc_store[doc_id] = doc
+        resolved_id = doc_id or f"doc-{_doc_counter}"
+        doc = _make_doc(resolved_id, kb_id, name, doc_type, chunk_count)
+        doc_store[resolved_id] = doc
         return doc
 
     async def _doc_get(doc_id: str):
@@ -170,7 +171,7 @@ def _install_mock_module(module_path: str, attrs: dict | None = None) -> None:
 
 @pytest.fixture(autouse=False)
 def mock_rag_pipeline():
-    """Fake thumbelina.rag.pipeline.indexer to avoid importing torch."""
+    """Fake thumbelina.rag modules to avoid importing torch / reading files."""
     saved = {}
     try:
         # Install fake modules for the import chain
@@ -178,16 +179,33 @@ def mock_rag_pipeline():
             "torch",
             "thumbelina.rag.embedding.provider_hf",
             "thumbelina.rag.pipeline.indexer",
+            "thumbelina.rag.ingestion.loader",
+            "thumbelina.rag.ingestion.chunker",
         ]:
             saved[mod_path] = sys.modules.get(mod_path)
             if mod_path not in sys.modules:
                 sys.modules[mod_path] = ModuleType(mod_path)
 
+        # Mock Indexer
         mock_indexer_cls = MagicMock()
         mock_stats = MagicMock()
         mock_stats.indexed_count = 0
         mock_indexer_cls.return_value.index.return_value = mock_stats
+        mock_indexer_cls.return_value.index_documents.return_value = mock_stats
         sys.modules["thumbelina.rag.pipeline.indexer"].Indexer = mock_indexer_cls
+
+        # Mock TextLoader — 返回一个带随机 ID 的假 Document
+        import uuid
+
+        mock_loader_cls = MagicMock()
+        fake_doc = MagicMock()
+        fake_doc.id = uuid.uuid4().hex
+        mock_loader_cls.return_value.load.return_value = [fake_doc]
+        sys.modules["thumbelina.rag.ingestion.loader"].TextLoader = mock_loader_cls
+
+        # Mock RecursiveChunker
+        mock_chunker_cls = MagicMock()
+        sys.modules["thumbelina.rag.ingestion.chunker"].RecursiveChunker = mock_chunker_cls
 
         yield mock_indexer_cls
     finally:
@@ -291,6 +309,7 @@ class TestDocumentManagement:
         mock_stats = MagicMock()
         mock_stats.indexed_count = 3
         mock_rag_pipeline.return_value.index.return_value = mock_stats
+        mock_rag_pipeline.return_value.index_documents.return_value = mock_stats
 
         resp = rag_client.post(
             "/api/v1/rag/knowledge-bases/0/documents",
@@ -313,6 +332,7 @@ class TestDocumentManagement:
         mock_stats = MagicMock()
         mock_stats.indexed_count = 2
         mock_rag_pipeline.return_value.index.return_value = mock_stats
+        mock_rag_pipeline.return_value.index_documents.return_value = mock_stats
 
         upload_resp = rag_client.post(
             "/api/v1/rag/knowledge-bases/0/documents",
@@ -374,6 +394,7 @@ class TestDocumentChunks:
         mock_stats = MagicMock()
         mock_stats.indexed_count = 2
         mock_rag_pipeline.return_value.index.return_value = mock_stats
+        mock_rag_pipeline.return_value.index_documents.return_value = mock_stats
 
         upload_resp = rag_client.post(
             "/api/v1/rag/knowledge-bases/0/documents",
@@ -418,6 +439,7 @@ class TestDocumentChunks:
         mock_stats = MagicMock()
         mock_stats.indexed_count = 0
         mock_rag_pipeline.return_value.index.return_value = mock_stats
+        mock_rag_pipeline.return_value.index_documents.return_value = mock_stats
 
         upload_resp = rag_client.post(
             "/api/v1/rag/knowledge-bases/0/documents",
@@ -439,6 +461,7 @@ class TestDocumentChunks:
         mock_stats = MagicMock()
         mock_stats.indexed_count = 1
         mock_rag_pipeline.return_value.index.return_value = mock_stats
+        mock_rag_pipeline.return_value.index_documents.return_value = mock_stats
 
         upload_resp = rag_client.post(
             "/api/v1/rag/knowledge-bases/0/documents",

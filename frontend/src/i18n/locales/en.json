@@ -314,7 +314,13 @@
     "loadingChunks": "Loading chunks…",
     "noChunks": "No chunks found",
     "chunkIndex": "#",
-    "chunkContent": "Content"
+    "chunkContent": "Content",
+    "chunkChars": "chars",
+    "chunkTotal": "Total chunks",
+    "chunkTotalChars": "Total chars",
+    "copyContent": "Copy content",
+    "copiedToClipboard": "Copied to clipboard",
+    "chunkMeta": "Metadata"
   },
   "theme": {
     "dark": "Dark",

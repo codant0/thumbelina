@@ -46,6 +46,12 @@ class FakeVectorStore(VectorStore):
     def delete(self, ids):
         pass
 
+    def query_by_metadata(self, where: dict[str, str], limit: int = 100) -> list:
+        return []
+
+    def delete_by_metadata(self, where: dict[str, str]) -> int:
+        return 0
+
 
 def _make_scored_chunk(content: str, score: float = 0.9) -> ScoredChunk:
     return ScoredChunk(

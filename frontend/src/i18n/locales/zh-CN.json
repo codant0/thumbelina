@@ -314,7 +314,13 @@
     "loadingChunks": "加载分块中…",
     "noChunks": "暂无分块数据",
     "chunkIndex": "序号",
-    "chunkContent": "内容"
+    "chunkContent": "内容",
+    "chunkChars": "字符",
+    "chunkTotal": "分块总数",
+    "chunkTotalChars": "总字符数",
+    "copyContent": "复制内容",
+    "copiedToClipboard": "已复制到剪贴板",
+    "chunkMeta": "元数据"
   },
   "theme": {
     "dark": "深色",

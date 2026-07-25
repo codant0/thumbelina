@@ -227,22 +227,33 @@ async def upload_document(kb_id: str, file: UploadFile, request: Request) -> Doc
             raise HTTPException(status_code=503, detail="RAG store manager not available")
         vector_store = store_manager.get_or_create_store(kb_id)
 
+        # 使用共享的 loader 实例，确保 document_id 与 ChromaDB 中存储的一致
+        loader = TextLoader()
         kb_indexer = Indexer(
-            loader=TextLoader(),
+            loader=loader,
             chunker=RecursiveChunker(),
             embedder=embedder,
             vector_store=vector_store,
         )
-        stats = await asyncio.to_thread(kb_indexer.index, tmp_path)
+        # 先加载文档获取 ID，再用 index_documents 跳过重复加载
+        documents = await asyncio.to_thread(loader.load, tmp_path)
+        # 用原始文件名覆盖临时文件名
+        original_filename = file.filename or "unknown"
+        for d in documents:
+            d.name = original_filename
+            d.source_uri = original_filename
+        doc_id = documents[0].id if documents else uuid.uuid4().hex
+        stats = await asyncio.to_thread(kb_indexer.index_documents, documents)
 
-        # Save document metadata
+        # Save document metadata，使用与 ChromaDB 中相同的 document_id
         doc_repo = _get_doc_repo(request)
         doc = await doc_repo.create(
             kb_id=kb_id,
-            name=file.filename or "unknown",
-            source_uri=tmp_path,
+            name=original_filename,
+            source_uri=original_filename,
             doc_type=doc_type.value,
             chunk_count=stats.indexed_count,
+            doc_id=doc_id,
         )
 
         return DocumentResponse(
