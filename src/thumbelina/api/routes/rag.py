@@ -229,11 +229,13 @@ async def upload_document(kb_id: str, file: UploadFile, request: Request) -> Doc
 
         # 使用共享的 loader 实例，确保 document_id 与 ChromaDB 中存储的一致
         loader = TextLoader()
+        doc_repo = _get_doc_repo(request)
         kb_indexer = Indexer(
             loader=loader,
             chunker=RecursiveChunker(),
             embedder=embedder,
             vector_store=vector_store,
+            doc_repo=doc_repo
         )
         # 先加载文档获取 ID，再用 index_documents 跳过重复加载
         documents = await asyncio.to_thread(loader.load, tmp_path)
@@ -249,7 +251,6 @@ async def upload_document(kb_id: str, file: UploadFile, request: Request) -> Doc
         stats = await asyncio.to_thread(kb_indexer.index_documents, documents)
 
         # Save document metadata，使用与 ChromaDB 中相同的 document_id
-        doc_repo = _get_doc_repo(request)
         doc = await doc_repo.create(
             kb_id=kb_id,
             name=original_filename,
