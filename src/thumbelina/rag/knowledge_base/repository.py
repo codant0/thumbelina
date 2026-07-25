@@ -165,6 +165,8 @@ class DocumentRepository:
         name: str,
         source_uri: str,
         doc_type: str,
+        sha256: str,
+        sim_hash_64: str,
         chunk_count: int = 0,
         doc_id: str | None = None,
     ) -> DocumentRecord:
@@ -209,6 +211,20 @@ class DocumentRepository:
     async def get(self, doc_id: str) -> DocumentRecord | None:
         """按 ID 获取文档，不存在返回 None。"""
         return await asyncio.to_thread(self._get_sync, doc_id)
+    
+    def _get_by_sha256(self, sha256: bytes) -> DocumentRecord:
+        with self._get_session() as session:
+            stmt = (
+                select(DocumentRecord)
+                .where(DocumentRecord.sha256 == sha256)
+                .limit(1)
+            )
+            return session.execute(stmt).scalar()
+
+    async def get_by_sha256(self, sha256: bytes) -> DocumentRecord:
+        """根据sha256值获取知识库"""
+        return await asyncio.to_thread(self._get_by_sha256, sha256)
+
 
     # ---- list_by_kb ----
 

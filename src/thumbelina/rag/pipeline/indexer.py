@@ -39,6 +39,7 @@ from thumbelina.rag.embedding.base import EmbeddingModel, VectorStore
 from thumbelina.rag.ingestion.chunker import Chunker
 from thumbelina.rag.ingestion.loader import Loader
 from thumbelina.rag.knowledge_base.models import Chunk, Document
+from thumbelina.rag.knowledge_base.repository import DocumentRepository
 
 logger = logging.getLogger(__name__)
 
@@ -77,11 +78,13 @@ class Indexer:
         chunker: Chunker,
         embedder: EmbeddingModel,
         vector_store: VectorStore,
+        doc_repo: DocumentRepository | None = None,
     ) -> None:
         self.loader = loader
         self.chunker = chunker
         self.embedder = embedder
         self.vector_store = vector_store
+        self.doc_repo = doc_repo
 
     def index(self, path: str) -> IndexStats:
         """对单个文件执行完整的索引流程。
@@ -106,7 +109,12 @@ class Indexer:
         # 2. 去重 -> 分块 → 3. 向量化 → 4. 写入
         for document in documents:
             # 去重
-            
+            if self.doc_repo and document.sha256:
+                same_document = self.doc_repo._get_by_sha256(document.sha256)
+                if same_document:
+                    msg = f"存在相同文件 [{same_document.name}], 跳过"
+                    stats.errors.append(msg)
+                    return stats
 
             chunks = self._chunk(document, stats)
             if not chunks:

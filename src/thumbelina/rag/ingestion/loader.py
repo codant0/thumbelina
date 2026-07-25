@@ -29,10 +29,10 @@ class Loader(ABC):
     def load(self, path: str) -> list[Document]:
         """加载文档"""
 
-    def _get_sha256(self, content: str) -> str:
+    def _get_sha256(self, content: str) -> bytes:
         return hashlib.sha256(content.encode()).hexdigest()
     
-    def _get_sim_hash_64(self, content: str) -> str:
+    def _get_sim_hash_64(self, content: str) -> bytes:
         # 依赖三方库实现，默认返回是64位
         return Simhash(content).value
 
