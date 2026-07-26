@@ -139,9 +139,16 @@ class Indexer:
                 ):
                     logger.info("近似重复")
                     logger.info(dedup_result.message)
+                    old_doc_id = dedup_result.existing_doc_id
                     if self.doc_repo:
-                        self.doc_repo.delete_sync(dedup_result.existing_doc_id)
-                        self.vector_store.delete(dedup_result.existing_doc_id)
+                        self.doc_repo.delete_sync(old_doc_id)
+                    # 清理向量库中属于旧文档的 chunks
+                    self.vector_store.delete_by_metadata(
+                        where={"document_id": old_doc_id}
+                    )
+                    # 清理旧文档的 chunk 指纹
+                    if self.chunk_dedup:
+                        self.chunk_dedup.remove_fingerprints_by_doc(old_doc_id)
 
             chunks = self._chunk(document, stats)
             if not chunks:
@@ -219,11 +226,16 @@ class Indexer:
     def _embed_and_store(self, chunks: list[Chunk], stats: IndexStats) -> None:
         """步骤 3 + 4：向量化并写入向量库。"""
 
-        # 分块级去重
+        # 分块级去重（替换策略：删除旧的，全量写入新的）
         if self.chunk_dedup and chunks:
             chunks, dedup_stats = self.chunk_dedup.deduplicate(chunks, chunks[0].knowledge_base_id)
-            if dedup_stats.total_removed > 0:
-                logger.info("分块去重: 过滤 %d 个重复 chunk", dedup_stats.total_removed)
+            if dedup_stats.removed_old_ids:
+                self.vector_store.delete(list(dedup_stats.removed_old_ids))
+                logger.info(
+                    "分块去重: 删除 %d 个旧 chunk, 保留 %d 个新 chunk",
+                    len(dedup_stats.removed_old_ids),
+                    len(chunks),
+                )
 
         if not chunks:
             return

@@ -52,3 +52,6 @@ Thumbs.db
 logs/
 *.log
 *.log.gz
+
+# AI
+.claude

@@ -1,24 +1,29 @@
 """分块级去重器。
 
-三级漏斗策略：
+三级漏斗策略（替换模式）：
 
-    1. SHA-256 精确去重（微秒级）—— 文本完全一致的 chunk 直接跳过
-    2. MinHash 近似去重（毫秒级）—— Jaccard ≥ 阈值的近似 chunk 跳过
-    3. Embedding 语义去重（秒级，可选）—— 余弦相似度 ≥ 阈值的语义重复 chunk 跳过
+    1. SHA-256 精确去重（微秒级）—— 文本完全一致的旧 chunk 指纹被删除，新 chunk 保留
+    2. MinHash 近似去重（毫秒级）—— Jaccard ≥ 阈值的旧 chunk 指纹被删除，新 chunk 保留
+    3. Embedding 语义去重（秒级，可选）—— 余弦相似度 ≥ 阈值的批次内重复 chunk 被过滤
+
+核心语义：检测到与已有数据重复时，删除旧 chunk，全量写入新 chunk（替换策略）。
+批次内仅执行精确去重（完全相同的内容只保留一个），不做近似去重。
 
 典型用法::
 
     dedup = ChunkDeduplicator(engine)
-    result_chunks, stats = dedup.deduplicate(chunks, kb_id="0")
-    # ... 将 result_chunks 写入 ChromaDB ...
-    dedup.register_chunks(result_chunks)
+    all_chunks, stats = dedup.deduplicate(chunks, kb_id="0")
+    # stats.removed_old_ids 记录了需要从向量库删除的旧 chunk ID
+    vector_store.delete(list(stats.removed_old_ids))
+    vector_store.add(all_chunks, embeddings)
+    dedup.register_chunks(all_chunks)
 """
 
 from __future__ import annotations
 
 import hashlib
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 from datasketch import MinHash
@@ -50,6 +55,7 @@ class ChunkDedupStats:
     minhash_dup_count: int = 0
     embedding_dup_count: int = 0
     output_count: int = 0
+    removed_old_ids: set[str] = field(default_factory=set)
 
     @property
     def total_removed(self) -> int:
@@ -60,10 +66,10 @@ class ChunkDedupStats:
 # 核心类
 # ---------------------------------------------------------------------------
 class ChunkDeduplicator:
-    """分块级去重器。
+    """分块级去重器（替换模式）。
 
     在 chunk 生成之后、embedding 计算之前执行，
-    过滤已存在于向量库中的重复或近似 chunk。
+    检测已存在于向量库中的重复或近似 chunk，删除旧记录，保留全部新 chunk。
 
     Parameters
     ----------
@@ -230,11 +236,69 @@ class ChunkDeduplicator:
                 found.update(row[0] for row in rows)
         return found
 
+    def _query_hash_and_ids(
+        self, kb_id: str, hashes: list[bytes]
+    ) -> list[tuple[str, bytes]]:
+        """批量查询匹配哈希的旧 chunk ID 和 content_hash。
+
+        Returns
+        -------
+        list[tuple[str, bytes]]
+            (chunk_id, content_hash) 列表。
+        """
+        results: list[tuple[str, bytes]] = []
+        batch_size = 500
+        with self.engine.connect() as conn:
+            for i in range(0, len(hashes), batch_size):
+                batch = hashes[i : i + batch_size]
+                placeholders = ", ".join(f":h{j}" for j in range(len(batch)))
+                params: dict[str, object] = {"kb_id": kb_id}
+                params.update({f"h{j}": h for j, h in enumerate(batch)})
+                rows = conn.execute(
+                    text(
+                        f"SELECT id, content_hash FROM rag_chunk_fingerprints "
+                        f"WHERE kb_id = :kb_id AND content_hash IN ({placeholders})"
+                    ),
+                    params,
+                ).fetchall()
+                results.extend((row[0], row[1]) for row in rows)
+        return results
+
+    def _remove_fingerprints(self, chunk_ids: list[str]) -> None:
+        """从 rag_chunk_fingerprints 表中按 chunk ID 批量删除记录。"""
+        if not chunk_ids:
+            return
+        batch_size = 500
+        with self.engine.begin() as conn:
+            for i in range(0, len(chunk_ids), batch_size):
+                batch = chunk_ids[i : i + batch_size]
+                placeholders = ", ".join(f":id{j}" for j in range(len(batch)))
+                params: dict[str, object] = {f"id{j}": cid for j, cid in enumerate(batch)}
+                conn.execute(
+                    text(
+                        f"DELETE FROM rag_chunk_fingerprints "
+                        f"WHERE id IN ({placeholders})"
+                    ),
+                    params,
+                )
+
+    def remove_fingerprints_by_doc(self, doc_id: str) -> None:
+        """删除指定文档关联的所有 chunk 指纹记录。
+
+        供 Indexer 在文档级近似重复删除时调用，
+        确保旧文档的指纹不会残留（不依赖 FK CASCADE）。
+        """
+        with self.engine.begin() as conn:
+            conn.execute(
+                text("DELETE FROM rag_chunk_fingerprints WHERE document_id = :doc_id"),
+                {"doc_id": doc_id},
+            )
+
     def _exact_dedup(self, chunks: list[Chunk], stats: ChunkDedupStats) -> list[Chunk]:
         """第一级：SHA-256 精确去重。
 
-        1. 批次内去重（纯内存，同一上传文件中的重复 chunk）
-        2. 跨批次去重（SQL 查询本次候选哈希是否已存在于指纹表）
+        1. 批次内去重（纯内存，同一上传文件中的重复 chunk 只保留第一个）
+        2. 跨批次去重：删除已有指纹，保留全部新 chunk（替换策略）
         """
         # --- 批次内去重 ---
         seen: set[bytes] = set()
@@ -252,20 +316,19 @@ class ChunkDeduplicator:
         if not unique_chunks:
             return []
 
-        # --- 跨批次去重 ---
+        # --- 跨批次去重：删除旧指纹，保留全部新 chunk ---
         kb_id = unique_chunks[0].knowledge_base_id
         candidate_hashes = [c._content_hash for c in unique_chunks]  # type: ignore[attr-defined]
-        existing = self._query_hashes_exist(kb_id, candidate_hashes)
+        existing_info = self._query_hash_and_ids(kb_id, candidate_hashes)
 
-        result: list[Chunk] = []
-        for chunk in unique_chunks:
-            if chunk._content_hash in existing:  # type: ignore[attr-defined]
-                stats.exact_dup_count += 1
-                logger.debug("跨批次精确去重: chunk %s", chunk.id[:8])
-                continue
-            result.append(chunk)
+        if existing_info:
+            old_ids = [row[0] for row in existing_info]
+            self._remove_fingerprints(old_ids)
+            stats.removed_old_ids.update(old_ids)
+            stats.exact_dup_count += len(old_ids)
+            logger.debug("跨批次精确去重: 删除 %d 个旧指纹", len(old_ids))
 
-        return result
+        return unique_chunks
 
     # ------------------------------------------------------------------
     # 第二级：MinHash 近似去重
@@ -299,49 +362,48 @@ class ChunkDeduplicator:
     def _minhash_dedup(self, candidates: list[Chunk], stats: ChunkDedupStats) -> list[Chunk]:
         """第二级：MinHash 近似去重。
 
-        1. 从指纹表取出已有签名，一次性反序列化为 MinHash 对象列表
+        1. 从指纹表取出已有签名，一次性反序列化为 (chunk_id, MinHash) 对
         2. 对每个候选计算 MinHash，与已有列表比较 Jaccard
-        3. 新保留的 chunk 也加入比较列表（批次内近似去重）
+        3. 匹配的旧指纹被删除，全部新 chunk 保留（替换策略）
         """
         kb_id = candidates[0].knowledge_base_id
 
         # 一次性取出并反序列化
-        existing_mh: list[MinHash] = []
+        existing_mh: list[tuple[str, MinHash]] = []
         with self.engine.connect() as conn:
             rows = conn.execute(
                 text(
-                    "SELECT minhash_sig FROM rag_chunk_fingerprints "
+                    "SELECT id, minhash_sig FROM rag_chunk_fingerprints "
                     "WHERE kb_id = :kb_id AND minhash_sig IS NOT NULL"
                 ),
                 {"kb_id": kb_id},
             ).fetchall()
             for row in rows:
-                existing_mh.append(self._deserialize_minhash(row[0]))
+                existing_mh.append((row[0], self._deserialize_minhash(row[1])))
 
         logger.debug("MinHash 去重: 已有签名 %d 条", len(existing_mh))
 
-        result: list[Chunk] = []
+        matched_old_ids: list[str] = []
         for chunk in candidates:
             mh = self._compute_minhash_obj(chunk.content)
             chunk._minhash_sig = self._serialize_minhash(mh)  # type: ignore[attr-defined]
 
-            is_dup = False
-            for existing in existing_mh:
+            for old_id, existing in existing_mh:
                 if mh.jaccard(existing) >= self.jaccard_threshold:
-                    is_dup = True
+                    matched_old_ids.append(old_id)
                     stats.minhash_dup_count += 1
                     logger.debug(
-                        "MinHash 去重: chunk %s Jaccard=%.3f",
-                        chunk.id[:8],
+                        "MinHash 去重: 删除旧 chunk %s Jaccard=%.3f",
+                        old_id[:8],
                         mh.jaccard(existing),
                     )
                     break
 
-            if not is_dup:
-                result.append(chunk)
-                existing_mh.append(mh)  # 批次内近似去重
+        if matched_old_ids:
+            self._remove_fingerprints(matched_old_ids)
+            stats.removed_old_ids.update(matched_old_ids)
 
-        return result
+        return candidates
 
     # ------------------------------------------------------------------
     # 第三级（可选）：Embedding 语义去重
