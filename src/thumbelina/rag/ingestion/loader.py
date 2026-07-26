@@ -99,6 +99,8 @@ class HTMLLoader(Loader):
                 source_uri=str(path_obj.resolve()),
                 document_type=DocumentType.HTML,
                 content=text,
+                sha256=self._get_sha256(text),
+                sim_hash_64=self._get_sim_hash_64(text),
             )
         ]
 
@@ -114,6 +116,8 @@ class HTMLLoader(Loader):
                 source_uri=path,
                 document_type=DocumentType.HTML,
                 content=text,
+                sha256=self._get_sha256(text),
+                sim_hash_64=self._get_sim_hash_64(text),
             )
         ]
 
@@ -122,7 +126,7 @@ class HTMLLoader(Loader):
         soup = BeautifulSoup(content, "html.parser")
 
         # 移除无关标签
-        for tag in soup(["script", "stype", "nav", "footer", "header"]):
+        for tag in soup(["script", "style", "nav", "footer", "header"]):
             tag.decompose()
 
         return soup.get_text(separator="\n", strip=True)

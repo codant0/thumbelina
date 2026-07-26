@@ -113,6 +113,29 @@ def _get_doc_repo(request: Request) -> DocumentRepository:
     return repo
 
 
+def _delete_chunk_fingerprints(request: Request, *, doc_id: str | None = None, kb_id: str | None = None) -> None:
+    """手动清理 chunk 指纹记录（FK CASCADE 未启用时的保底措施）。"""
+    engine = getattr(request.app.state, "engine", None)
+    if engine is None:
+        return
+    try:
+        from sqlalchemy import text as sql_text
+
+        with engine.begin() as conn:
+            if doc_id:
+                conn.execute(
+                    sql_text("DELETE FROM rag_chunk_fingerprints WHERE document_id = :doc_id"),
+                    {"doc_id": doc_id},
+                )
+            elif kb_id:
+                conn.execute(
+                    sql_text("DELETE FROM rag_chunk_fingerprints WHERE kb_id = :kb_id"),
+                    {"kb_id": kb_id},
+                )
+    except Exception as exc:
+        logger.warning("清理 chunk 指纹失败: %s", exc)
+
+
 # ---------- Knowledge Base endpoints ----------
 
 
@@ -173,17 +196,21 @@ async def update_knowledge_base(
 async def delete_knowledge_base(kb_id: str, request: Request) -> dict:
     repo = _get_kb_repo(request)
     doc_repo = _get_doc_repo(request)
+    # 1. 先清理 ChromaDB 向量库
+    store_manager = getattr(request.app.state, "rag_store_manager", None)
+    if store_manager:
+        store_manager.delete_store(kb_id)
+    # 2. 清理 chunk 指纹
+    _delete_chunk_fingerprints(request, kb_id=kb_id)
+    # 3. 删除文档元数据
+    await doc_repo.delete_by_kb(kb_id)
+    # 4. 最后删除知识库记录
     try:
         deleted = await repo.delete(kb_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     if not deleted:
         raise HTTPException(status_code=404, detail="Knowledge base not found")
-    # Cascade: delete document metadata and vector store
-    await doc_repo.delete_by_kb(kb_id)
-    store_manager = getattr(request.app.state, "rag_store_manager", None)
-    if store_manager:
-        store_manager.delete_store(kb_id)
     return {"deleted": True}
 
 
@@ -228,7 +255,7 @@ async def upload_document(kb_id: str, file: UploadFile, request: Request) -> Doc
     # Save file to temporary location
     tmp_dir = Path("/tmp_file")
     tmp_dir.mkdir(exist_ok=True)
-    tmp_path = tmp_dir / file.filename
+    tmp_path = tmp_dir / Path(file.filename).name
     with open(tmp_path, "wb") as f:
         while chunk := await file.read(1024 * 1024):  # 每次 1MB
             f.write(chunk)
@@ -325,6 +352,8 @@ async def delete_document(doc_id: str, request: Request) -> dict:
         except Exception as exc:
             logger.warning(
                 "Failed to delete vectors for doc %s: %s", doc_id, exc)
+    # 清理 chunk 指纹
+    _delete_chunk_fingerprints(request, doc_id=doc_id)
 
     deleted = await doc_repo.delete(doc_id)
     if not deleted:

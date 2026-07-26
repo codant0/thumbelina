@@ -20,6 +20,7 @@ class EmbeddingRegistry:
 
     _instance = None
     _model: dict[str, type[EmbeddingModel]] = {}
+    _instance_cache: dict[str, EmbeddingModel] = {}
     # 当前只支持hugging_face
     _default_provider: str = "hf"
     _default_model: str = "Qwen/Qwen3-Embedding-0.6B"
@@ -34,8 +35,10 @@ class EmbeddingRegistry:
         self._model[model_name] = model_cls
 
     def create(self, model_name: str | None = None, **kwargs) -> EmbeddingModel:
-        """创建模型实例"""
+        """创建模型实例（按 model_name 缓存，避免重复加载）。"""
         model_name = model_name or self._default_model
         if model_name not in self._model:
             raise ValueError(f"Unknown embedding model: {model_name}")
-        return self._model[model_name](**kwargs)
+        if model_name not in self._instance_cache:
+            self._instance_cache[model_name] = self._model[model_name](**kwargs)
+        return self._instance_cache[model_name]
