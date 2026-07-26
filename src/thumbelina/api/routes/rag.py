@@ -5,20 +5,20 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from pathlib import Path
-import tempfile
 import uuid
-from thumbelina.rag.ingestion.chunker import RecursiveChunker
-from thumbelina.rag.ingestion.document_dedup import DocumentDeduplicator
-from thumbelina.rag.ingestion.loader import TextLoader
-from thumbelina.rag.pipeline.indexer import Indexer
+from pathlib import Path
+
 from fastapi import APIRouter, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 
+from thumbelina.rag.ingestion.chunker import RecursiveChunker
+from thumbelina.rag.ingestion.document_dedup import DocumentDeduplicator
+from thumbelina.rag.ingestion.loader import TextLoader
 from thumbelina.rag.knowledge_base.repository import (
     DocumentRepository,
     KnowledgeBaseRepository,
 )
+from thumbelina.rag.pipeline.indexer import Indexer
 
 logger = logging.getLogger(__name__)
 
@@ -254,6 +254,10 @@ async def upload_document(kb_id: str, file: UploadFile, request: Request) -> Doc
         doc_deduplicator = (
             DocumentDeduplicator(doc_repo=doc_repo) if doc_repo else None
         )
+
+        # 获取主数据库引擎，用于分块级去重
+        engine = getattr(request.app.state, "engine", None)
+
         kb_indexer = Indexer(
             loader=loader,
             chunker=RecursiveChunker(),
@@ -261,6 +265,8 @@ async def upload_document(kb_id: str, file: UploadFile, request: Request) -> Doc
             vector_store=vector_store,
             doc_repo=doc_repo,
             doc_deduplicator=doc_deduplicator,
+            engine=engine,
+            chunk_dedup_enabled=True,
         )
 
         stats = await asyncio.to_thread(kb_indexer.index_batch, [tmp_path])

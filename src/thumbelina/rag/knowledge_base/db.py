@@ -69,6 +69,7 @@ def init_rag_db(engine: Engine) -> sessionmaker[Session]:
     RagBase.metadata.create_all(engine)
     _migrate_sha256_simhash_to_blob(engine)
     _create_simhash_index(engine)
+    _create_chunk_fingerprints_table(engine)
     _ensure_default_knowledge_base(engine)
     return sessionmaker(bind=engine, expire_on_commit=False)
 
@@ -205,6 +206,42 @@ def _migrate_sha256_simhash_to_blob(engine: Engine) -> None:
     except Exception as exc:
         logger.error("rag_documents 表迁移失败: %s", exc)
         raise
+
+
+def _create_chunk_fingerprints_table(engine: Engine) -> None:
+    """创建 chunk 指纹表及索引（如果不存在）。
+
+    用于分块级去重：存储每个 chunk 的 SHA-256 哈希和 MinHash 签名。
+    文档删除时通过外键级联清理。
+    """
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS rag_chunk_fingerprints (
+                    id            TEXT PRIMARY KEY,
+                    document_id   TEXT NOT NULL,
+                    kb_id         TEXT NOT NULL,
+                    content_hash  BLOB NOT NULL,
+                    minhash_sig   BLOB,
+                    created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (document_id) REFERENCES rag_documents(id) ON DELETE CASCADE
+                )
+            """))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_chunk_fingerprint_hash "
+                "ON rag_chunk_fingerprints(content_hash)"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_chunk_fingerprint_kb "
+                "ON rag_chunk_fingerprints(kb_id)"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_chunk_fingerprint_doc "
+                "ON rag_chunk_fingerprints(document_id)"
+            ))
+        logger.info("rag_chunk_fingerprints 表就绪")
+    except Exception as exc:
+        logger.warning("创建 rag_chunk_fingerprints 表失败: %s", exc)
 
 
 def _ensure_default_knowledge_base(engine: Engine) -> None:

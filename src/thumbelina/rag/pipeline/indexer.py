@@ -35,7 +35,10 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
+from sqlalchemy import Engine
+
 from thumbelina.rag.embedding.base import EmbeddingModel, VectorStore
+from thumbelina.rag.ingestion.chunk_dedup import ChunkDeduplicator
 from thumbelina.rag.ingestion.chunker import Chunker
 from thumbelina.rag.ingestion.document_dedup import DedupAction, DocumentDeduplicator
 from thumbelina.rag.ingestion.loader import Loader
@@ -82,6 +85,8 @@ class Indexer:
         vector_store: VectorStore,
         doc_repo: DocumentRepository | None = None,
         doc_deduplicator: DocumentDeduplicator | None = None,
+        engine: Engine | None = None,
+        chunk_dedup_enabled: bool = True,
     ) -> None:
         self.loader = loader
         self.chunker = chunker
@@ -89,6 +94,11 @@ class Indexer:
         self.vector_store = vector_store
         self.doc_repo = doc_repo
         self.doc_deduplicator = doc_deduplicator
+
+        # 分块级去重器
+        self.chunk_dedup: ChunkDeduplicator | None = None
+        if engine and chunk_dedup_enabled:
+            self.chunk_dedup = ChunkDeduplicator(engine)
 
     def index(self, path: str) -> IndexStats:
         """对单个文件执行完整的索引流程。
@@ -208,6 +218,16 @@ class Indexer:
 
     def _embed_and_store(self, chunks: list[Chunk], stats: IndexStats) -> None:
         """步骤 3 + 4：向量化并写入向量库。"""
+
+        # 分块级去重
+        if self.chunk_dedup and chunks:
+            chunks, dedup_stats = self.chunk_dedup.deduplicate(chunks, chunks[0].knowledge_base_id)
+            if dedup_stats.total_removed > 0:
+                logger.info("分块去重: 过滤 %d 个重复 chunk", dedup_stats.total_removed)
+
+        if not chunks:
+            return
+
         texts = [c.content for c in chunks]
 
         try:
@@ -225,6 +245,16 @@ class Indexer:
             logger.error(msg)
             stats.errors.append(msg)
             return
+
+        # 注册已入库 chunk 的指纹
+        if self.chunk_dedup:
+            try:
+                self.chunk_dedup.register_chunks(chunks)
+            except Exception:
+                logger.warning(
+                    "指纹注册失败，去重索引可能不一致。如需修复，请删除相关文档后重新上传。",
+                    exc_info=True,
+                )
 
         stats.indexed_count += len(chunks)
 
@@ -258,8 +288,7 @@ if __name__ == "__main__":
 
     # 向量召回
     query = "哆啦A梦使用的3个秘密道具是什么？"
-    retriever = SimpleRetriever(
-        embedding_model=embedder, vector_store=vector_store)
+    retriever = SimpleRetriever(embedding_model=embedder, vector_store=vector_store)
     results = retriever.retrieve(query)
     for i, result in enumerate(results):
         print(f"result {i + 1}: {result}")

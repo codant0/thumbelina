@@ -327,6 +327,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.debug("HuggingFace embedding not available", exc_info=True)
 
         # 存储到 app.state
+        app.state.engine = memory.repository.engine
         app.state.rag_kb_repo = rag_kb_repo
         app.state.rag_doc_repo = rag_doc_repo
         app.state.rag_store_manager = rag_store_manager
