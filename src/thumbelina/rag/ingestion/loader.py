@@ -52,7 +52,7 @@ class TextLoader(Loader):
             raise TypeError(f"Invalid file: {path}")
 
         content = str(path_obj.read_text(encoding="utf-8"))
-        
+
         return [
             Document(
                 id=uuid.uuid4().hex,
@@ -103,6 +103,12 @@ class HTMLLoader(Loader):
                 sim_hash_64=self._get_sim_hash_64(text),
             )
         ]
+
+    def load_url(self, url: str) -> list[Document]:
+        """公开方法：从 URL 抓取并解析网页内容。"""
+        if not url.lower().startswith(("http://", "https://")):
+            raise ValueError(f"Invalid URL: {url}")
+        return self._load_by_url(path=url)
 
     def _load_by_url(self, path: str) -> list[Document]:
         resp = requests.get(url=path, timeout=10)

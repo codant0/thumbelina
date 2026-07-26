@@ -1,45 +1,21 @@
 import { useState, useEffect, useCallback, useRef, type FormEvent } from 'react'
 import {
   BookOpen, Plus, Trash2, Edit2, Check, X, Upload, Search, FileText,
-  UploadCloud, ChevronDown, Database, Clock, RefreshCw, Copy,
+  UploadCloud, ChevronDown, Database, Clock, RefreshCw, Copy, Link, FolderOpen,
 } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import { Toast } from '../Settings/Toast'
+import type { KnowledgeBase, RagDocument, QueryResult, ChunkItem } from '../../types/rag'
+import * as ragApi from '../../api/rag'
 
-interface KnowledgeBase {
-  id: string
-  name: string
-  description?: string | null
-  document_count?: number
-  created_at: string
-  updated_at: string
-}
+type UploadMode = 'file' | 'url' | 'folder'
 
-interface Document {
-  id: string
-  name: string
-  doc_type: string
-  chunk_count: number
-  created_at: string
-}
-
-interface QueryResult {
-  content: string
-  score: number
-  metadata?: Record<string, unknown>
-}
-
-interface ChunkItem {
-  id: string
-  document_id: string
-  content: string
-  metadata?: string
-}
+const SUPPORTED_EXTENSIONS = '.txt,.md,.pdf,.htm,.html'
 
 export function KnowledgeBasePage() {
   const [kbs, setKbs] = useState<KnowledgeBase[]>([])
   const [selectedKb, setSelectedKb] = useState<KnowledgeBase | null>(null)
-  const [documents, setDocuments] = useState<Document[]>([])
+  const [documents, setDocuments] = useState<RagDocument[]>([])
   const [loading, setLoading] = useState(true)
   const [editingKb, setEditingKb] = useState<KnowledgeBase | null>(null)
   const [creating, setCreating] = useState(false)
@@ -60,7 +36,19 @@ export function KnowledgeBasePage() {
   const [expandedDocId, setExpandedDocId] = useState<string | null>(null)
   const [docChunks, setDocChunks] = useState<ChunkItem[]>([])
   const [chunksLoading, setChunksLoading] = useState(false)
+  const [uploadMode, setUploadMode] = useState<UploadMode>('file')
+  const [urlInput, setUrlInput] = useState('')
+  const [urlUploading, setUrlUploading] = useState(false)
+  const [urlError, setUrlError] = useState('')
+  const [folderFiles, setFolderFiles] = useState<File[]>([])
+  const [folderFiltered, setFolderFiltered] = useState(0)
+  const [batchUploading, setBatchUploading] = useState(false)
+  const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null)
+  const [batchSummary, setBatchSummary] = useState<{
+    uploaded: number; skipped: number; errors: number
+  } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const folderInputRef = useRef<HTMLInputElement>(null)
   const dropzoneRef = useRef<HTMLDivElement>(null)
   const { t } = useTranslation()
 
@@ -73,11 +61,8 @@ export function KnowledgeBasePage() {
 
   const loadKbs = useCallback(async () => {
     try {
-      const res = await fetch('/api/v1/rag/knowledge-bases')
-      if (res.ok) {
-        const data = await res.json()
-        setKbs(Array.isArray(data) ? data : [])
-      }
+      const data = await ragApi.listKnowledgeBases()
+      setKbs(Array.isArray(data) ? data : [])
     } catch {
       // ignore
     } finally {
@@ -87,11 +72,8 @@ export function KnowledgeBasePage() {
 
   const loadDocuments = useCallback(async (kbId: string) => {
     try {
-      const res = await fetch(`/api/v1/rag/knowledge-bases/${kbId}/documents`)
-      if (res.ok) {
-        const data = await res.json()
-        setDocuments(Array.isArray(data) ? data : [])
-      }
+      const data = await ragApi.listDocuments(kbId)
+      setDocuments(Array.isArray(data) ? data : [])
     } catch {
       setDocuments([])
     }
@@ -115,21 +97,12 @@ export function KnowledgeBasePage() {
     e.preventDefault()
     setSaving(true)
     try {
-      const res = await fetch('/api/v1/rag/knowledge-bases', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: kbForm.name, description: kbForm.description || null }),
-      })
-      if (res.ok) {
-        const kb: KnowledgeBase = await res.json()
-        setKbs(prev => [...prev, kb])
-        setSelectedKb(kb)
-        setCreating(false)
-        setKbForm({ name: '', description: '' })
-        showToast(t('knowledgeBase.createSuccess'))
-      } else {
-        showToast(t('knowledgeBase.createFailed'), true)
-      }
+      const kb = await ragApi.createKnowledgeBase(kbForm.name, kbForm.description)
+      setKbs(prev => [...prev, kb])
+      setSelectedKb(kb)
+      setCreating(false)
+      setKbForm({ name: '', description: '' })
+      showToast(t('knowledgeBase.createSuccess'))
     } catch {
       showToast(t('knowledgeBase.createFailed'), true)
     } finally {
@@ -142,21 +115,15 @@ export function KnowledgeBasePage() {
     if (!editingKb) return
     setSaving(true)
     try {
-      const res = await fetch(`/api/v1/rag/knowledge-bases/${editingKb.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: kbForm.name, description: kbForm.description || null }),
+      const updated = await ragApi.updateKnowledgeBase(editingKb.id, {
+        name: kbForm.name,
+        description: kbForm.description || null,
       })
-      if (res.ok) {
-        const updated: KnowledgeBase = await res.json()
-        setKbs(prev => prev.map(k => (k.id === updated.id ? updated : k)))
-        if (selectedKb?.id === updated.id) setSelectedKb(updated)
-        setEditingKb(null)
-        setKbForm({ name: '', description: '' })
-        showToast(t('knowledgeBase.updateSuccess'))
-      } else {
-        showToast(t('knowledgeBase.updateFailed'), true)
-      }
+      setKbs(prev => prev.map(k => (k.id === updated.id ? updated : k)))
+      if (selectedKb?.id === updated.id) setSelectedKb(updated)
+      setEditingKb(null)
+      setKbForm({ name: '', description: '' })
+      showToast(t('knowledgeBase.updateSuccess'))
     } catch {
       showToast(t('knowledgeBase.updateFailed'), true)
     } finally {
@@ -166,14 +133,10 @@ export function KnowledgeBasePage() {
 
   const handleDelete = async (kbId: string) => {
     try {
-      const res = await fetch(`/api/v1/rag/knowledge-bases/${kbId}`, { method: 'DELETE' })
-      if (res.ok) {
-        setKbs(prev => prev.filter(k => k.id !== kbId))
-        if (selectedKb?.id === kbId) setSelectedKb(null)
-        showToast(t('knowledgeBase.deleteSuccess'))
-      } else {
-        showToast(t('knowledgeBase.deleteFailed'), true)
-      }
+      await ragApi.deleteKnowledgeBase(kbId)
+      setKbs(prev => prev.filter(k => k.id !== kbId))
+      if (selectedKb?.id === kbId) setSelectedKb(null)
+      showToast(t('knowledgeBase.deleteSuccess'))
     } catch {
       showToast(t('knowledgeBase.deleteFailed'), true)
     }
@@ -187,20 +150,10 @@ export function KnowledgeBasePage() {
     setUploading(true)
     try {
       for (const file of Array.from(files)) {
-        const formData = new FormData()
-        formData.append('file', file)
-        const res = await fetch(`/api/v1/rag/knowledge-bases/${selectedKb.id}/documents`, {
-          method: 'POST',
-          body: formData,
-        })
-        if (!res.ok) {
-          let detail = t('knowledgeBase.uploadFailed')
-          try {
-            const errBody = await res.json()
-            if (res.status >= 400 && res.status < 500 && errBody?.detail) {
-              detail = errBody.detail
-            }
-          } catch { /* ignore parse error */ }
+        try {
+          await ragApi.uploadDocument(selectedKb.id, file)
+        } catch (err) {
+          const detail = err instanceof Error ? err.message : t('knowledgeBase.uploadFailed')
           showToast(detail, true)
           return
         }
@@ -216,16 +169,76 @@ export function KnowledgeBasePage() {
     }
   }, [selectedKb, showToast, t, loadDocuments, loadKbs])
 
+  const handleUrlUpload = useCallback(async () => {
+    if (!selectedKb || !urlInput.trim()) return
+    const url = urlInput.trim()
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      setUrlError(t('knowledgeBase.urlInvalid'))
+      return
+    }
+    setUrlError('')
+    setUrlUploading(true)
+    try {
+      await ragApi.uploadDocumentByUrl(selectedKb.id, url)
+      showToast(t('knowledgeBase.uploadSuccess'))
+      setUrlInput('')
+      await loadDocuments(selectedKb.id)
+      await loadKbs()
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : t('knowledgeBase.uploadFailed')
+      showToast(detail, true)
+    } finally {
+      setUrlUploading(false)
+    }
+  }, [selectedKb, urlInput, showToast, t, loadDocuments, loadKbs])
+
+  const handleFolderSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files || files.length === 0) {
+      setFolderFiles([])
+      setFolderFiltered(0)
+      return
+    }
+    const allFiles = Array.from(files)
+    const supportedExts = ['.txt', '.md', '.pdf', '.htm', '.html']
+    const valid = allFiles.filter(f => {
+      const ext = '.' + f.name.split('.').pop()?.toLowerCase()
+      return supportedExts.includes(ext)
+    })
+    setFolderFiles(valid)
+    setFolderFiltered(allFiles.length - valid.length)
+    setBatchSummary(null)
+  }, [])
+
+  const handleFolderUpload = useCallback(async () => {
+    if (!selectedKb || folderFiles.length === 0) return
+    setBatchUploading(true)
+    setBatchSummary(null)
+    setBatchProgress({ done: 0, total: folderFiles.length })
+    try {
+      const result = await ragApi.uploadDocumentsBatch(selectedKb.id, folderFiles)
+      setBatchSummary({
+        uploaded: result.uploaded.length,
+        skipped: result.skipped.length,
+        errors: result.errors.length,
+      })
+      setBatchProgress({ done: folderFiles.length, total: folderFiles.length })
+      await loadDocuments(selectedKb.id)
+      await loadKbs()
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : t('knowledgeBase.uploadFailed')
+      showToast(detail, true)
+    } finally {
+      setBatchUploading(false)
+    }
+  }, [selectedKb, folderFiles, showToast, t, loadDocuments, loadKbs])
+
   const handleDeleteDocument = async (docId: string) => {
     try {
-      const res = await fetch(`/api/v1/rag/documents/${docId}`, { method: 'DELETE' })
-      if (res.ok) {
-        setDocuments(prev => prev.filter(d => d.id !== docId))
-        showToast(t('knowledgeBase.deleteSuccess'))
-        await loadKbs()
-      } else {
-        showToast(t('knowledgeBase.deleteFailed'), true)
-      }
+      await ragApi.deleteDocument(docId)
+      setDocuments(prev => prev.filter(d => d.id !== docId))
+      showToast(t('knowledgeBase.deleteSuccess'))
+      await loadKbs()
     } catch {
       showToast(t('knowledgeBase.deleteFailed'), true)
     }
@@ -241,11 +254,8 @@ export function KnowledgeBasePage() {
     setChunksLoading(true)
     setDocChunks([])
     try {
-      const res = await fetch(`/api/v1/rag/documents/${docId}/chunks`)
-      if (res.ok) {
-        const data = await res.json()
-        setDocChunks(Array.isArray(data) ? data : [])
-      }
+      const data = await ragApi.listDocumentChunks(docId)
+      setDocChunks(Array.isArray(data) ? data : [])
     } catch {
       setDocChunks([])
     } finally {
@@ -287,20 +297,10 @@ export function KnowledgeBasePage() {
     setQueryDuration(null)
     const start = performance.now()
     try {
-      const res = await fetch('/api/v1/rag/query', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: queryText.trim(),
-          knowledge_base_id: selectedKb.id,
-        }),
-      })
+      const results = await ragApi.queryKnowledgeBase(selectedKb.id, queryText.trim())
       const elapsed = ((performance.now() - start) / 1000).toFixed(2)
       setQueryDuration(elapsed)
-      if (res.ok) {
-        const data = await res.json()
-        setQueryResults(Array.isArray(data) ? data : Array.isArray(data.results) ? data.results : [])
-      }
+      setQueryResults(results)
     } catch {
       // ignore
     } finally {
@@ -332,6 +332,14 @@ export function KnowledgeBasePage() {
     setSelectedKb(kb)
     setMobileMenuOpen(false)
     setDeleteConfirm(null)
+    // Reset upload state when switching KB
+    setUploadMode('file')
+    setUrlInput('')
+    setUrlError('')
+    setFolderFiles([])
+    setFolderFiltered(0)
+    setBatchSummary(null)
+    setBatchProgress(null)
   }
 
   // ── Copy to clipboard helper ───────────────────────────
@@ -642,44 +650,178 @@ export function KnowledgeBasePage() {
                     >
                       <RefreshCw size={14} className={refreshingDocs ? 'spin' : ''} />
                     </button>
+                  </div>
+                </div>
+
+                {/* Upload Mode Tabs */}
+                <div className="kb-upload-tabs" role="tablist">
+                  <button
+                    className={`kb-upload-tab${uploadMode === 'file' ? ' kb-upload-tab--active' : ''}`}
+                    onClick={() => setUploadMode('file')}
+                    role="tab"
+                    aria-selected={uploadMode === 'file'}
+                  >
+                    <Upload size={14} />{t('knowledgeBase.uploadModeFile')}
+                  </button>
+                  <button
+                    className={`kb-upload-tab${uploadMode === 'url' ? ' kb-upload-tab--active' : ''}`}
+                    onClick={() => setUploadMode('url')}
+                    role="tab"
+                    aria-selected={uploadMode === 'url'}
+                  >
+                    <Link size={14} />{t('knowledgeBase.uploadModeUrl')}
+                  </button>
+                  <button
+                    className={`kb-upload-tab${uploadMode === 'folder' ? ' kb-upload-tab--active' : ''}`}
+                    onClick={() => setUploadMode('folder')}
+                    role="tab"
+                    aria-selected={uploadMode === 'folder'}
+                  >
+                    <FolderOpen size={14} />{t('knowledgeBase.uploadModeFolder')}
+                  </button>
+                </div>
+
+                {/* File Upload Panel */}
+                {uploadMode === 'file' && (
+                  <>
                     <button
                       className="btn btn-primary btn-sm"
                       onClick={() => fileInputRef.current?.click()}
                       disabled={uploading}
                       data-testid="kb-upload-button"
+                      style={{ marginBottom: 'var(--sp-2)' }}
                     >
                       <Upload size={14} />
                       {uploading ? t('common.saving') : t('knowledgeBase.uploadDocument')}
                     </button>
-                  </div>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".txt,.md"
-                    multiple
-                    hidden
-                    onChange={e => void handleUpload(e.target.files)}
-                  />
-                </div>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept={SUPPORTED_EXTENSIONS}
+                      multiple
+                      hidden
+                      onChange={e => void handleUpload(e.target.files)}
+                    />
 
-                {/* Drag-and-drop zone */}
-                <div
-                  ref={dropzoneRef}
-                  className={`kb-doc-dropzone${isDragOver ? ' kb-doc-dropzone--active' : ''}`}
-                  onDragOver={handleDragOver}
-                  onDragEnter={handleDragOver}
-                  onDragLeave={handleDragLeave}
-                  onDrop={handleDrop}
-                  onClick={() => fileInputRef.current?.click()}
-                  role="region"
-                  aria-label={t('knowledgeBase.dragDropHint')}
-                >
-                  <UploadCloud size={32} className="kb-doc-dropzone__icon" />
-                  <p className="kb-doc-dropzone__text">
-                    {isDragOver ? t('knowledgeBase.dropzoneActive') : t('knowledgeBase.dragDropHint')}
-                  </p>
-                  <p className="kb-doc-dropzone__formats">{t('knowledgeBase.supportedFormats')}</p>
-                </div>
+                    <div
+                      ref={dropzoneRef}
+                      className={`kb-doc-dropzone${isDragOver ? ' kb-doc-dropzone--active' : ''}`}
+                      onDragOver={handleDragOver}
+                      onDragEnter={handleDragOver}
+                      onDragLeave={handleDragLeave}
+                      onDrop={handleDrop}
+                      onClick={() => fileInputRef.current?.click()}
+                      role="region"
+                      aria-label={t('knowledgeBase.dragDropHint')}
+                    >
+                      <UploadCloud size={32} className="kb-doc-dropzone__icon" />
+                      <p className="kb-doc-dropzone__text">
+                        {isDragOver ? t('knowledgeBase.dropzoneActive') : t('knowledgeBase.dragDropHint')}
+                      </p>
+                      <p className="kb-doc-dropzone__formats">{t('knowledgeBase.supportedFormats')}</p>
+                    </div>
+                  </>
+                )}
+
+                {/* URL Upload Panel */}
+                {uploadMode === 'url' && (
+                  <div className={`kb-url-upload${urlError ? ' kb-url-upload--invalid' : ''}`}>
+                    <input
+                      type="url"
+                      className="form-input"
+                      value={urlInput}
+                      onChange={e => {
+                        setUrlInput(e.target.value)
+                        setUrlError('')
+                      }}
+                      placeholder={t('knowledgeBase.urlPlaceholder')}
+                      onKeyDown={e => { if (e.key === 'Enter') void handleUrlUpload() }}
+                      disabled={urlUploading}
+                    />
+                    <button
+                      className="btn btn-primary btn-sm"
+                      onClick={() => void handleUrlUpload()}
+                      disabled={urlUploading || !urlInput.trim()}
+                    >
+                      {urlUploading ? t('common.saving') : t('knowledgeBase.urlFetch')}
+                    </button>
+                    {urlError && <p className="kb-url-upload__error">{urlError}</p>}
+                  </div>
+                )}
+
+                {/* Folder Upload Panel */}
+                {uploadMode === 'folder' && (
+                  <div className="kb-folder-upload">
+                    <input
+                      ref={folderInputRef}
+                      type="file"
+                      // @ts-expect-error webkitdirectory is non-standard
+                      webkitdirectory=""
+                      directory=""
+                      multiple
+                      hidden
+                      onChange={handleFolderSelect}
+                    />
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => folderInputRef.current?.click()}
+                      disabled={batchUploading}
+                    >
+                      <FolderOpen size={14} />{t('knowledgeBase.selectFolder')}
+                    </button>
+                    {folderFiles.length > 0 && (
+                      <p className="kb-folder-upload__info">
+                        <strong>{t('knowledgeBase.filesSelected', { count: String(folderFiles.length) })}</strong>
+                        {folderFiltered > 0 && (
+                          <span className="kb-folder-upload__filtered">
+                            {' · '}{t('knowledgeBase.filesFiltered', { count: String(folderFiltered) })}
+                          </span>
+                        )}
+                      </p>
+                    )}
+                    {folderFiles.length > 0 && !batchUploading && !batchSummary && (
+                      <button
+                        className="btn btn-primary btn-sm"
+                        onClick={() => void handleFolderUpload()}
+                      >
+                        <Upload size={14} />
+                        {t('knowledgeBase.uploadDocument')} ({folderFiles.length})
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Batch Progress */}
+                {batchUploading && batchProgress && (
+                  <div className="kb-batch-progress">
+                    <div className="kb-batch-progress__bar">
+                      <div
+                        className="kb-batch-progress__fill"
+                        style={{ width: `${(batchProgress.done / batchProgress.total) * 100}%` }}
+                      />
+                    </div>
+                    <span>
+                      {t('knowledgeBase.batchUploading', {
+                        done: String(batchProgress.done),
+                        total: String(batchProgress.total),
+                      })}
+                    </span>
+                  </div>
+                )}
+
+                {/* Batch Summary */}
+                {batchSummary && (
+                  <div className="kb-batch-summary kb-batch-summary--success">
+                    <span className="kb-batch-summary__item">
+                      <Check size={14} />
+                      {t('knowledgeBase.batchComplete', {
+                        uploaded: String(batchSummary.uploaded),
+                        skipped: String(batchSummary.skipped),
+                        errors: String(batchSummary.errors),
+                      })}
+                    </span>
+                  </div>
+                )}
 
                 {documents.length === 0 ? (
                   <div className="kb-empty-state">

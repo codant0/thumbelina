@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from datetime import datetime
 from types import ModuleType
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -104,6 +104,7 @@ def rag_client(client):
         doc_type: str,
         chunk_count: int = 0,
         doc_id: str | None = None,
+        **_kwargs,
     ):
         nonlocal _doc_counter
         _doc_counter += 1
@@ -152,6 +153,7 @@ def rag_client(client):
     app.state.rag_doc_repo = doc_repo
     app.state.rag_store_manager = store_manager
     app.state.rag_embedding_registry = embedding_registry
+    app.state.engine = MagicMock()
 
     return client
 
@@ -171,76 +173,41 @@ def _install_mock_module(module_path: str, attrs: dict | None = None) -> None:
 
 @pytest.fixture(autouse=False)
 def mock_rag_pipeline():
-    """Fake thumbelina.rag modules to avoid importing torch / reading files."""
-    saved = {}
-    try:
-        # Install fake modules for the import chain
-        for mod_path in [
-            "torch",
-            "thumbelina.rag.embedding.provider_hf",
-            "thumbelina.rag.pipeline.indexer",
-            "thumbelina.rag.ingestion.loader",
-            "thumbelina.rag.ingestion.chunker",
-        ]:
-            saved[mod_path] = sys.modules.get(mod_path)
-            if mod_path not in sys.modules:
-                sys.modules[mod_path] = ModuleType(mod_path)
+    """Patch Indexer/Loaders in the rag route module to avoid importing torch."""
+    import uuid
 
-        # Mock Indexer
-        mock_indexer_cls = MagicMock()
-        mock_stats = MagicMock()
-        mock_stats.indexed_count = 0
-        mock_indexer_cls.return_value.index.return_value = mock_stats
-        mock_indexer_cls.return_value.index_documents.return_value = mock_stats
-        sys.modules["thumbelina.rag.pipeline.indexer"].Indexer = mock_indexer_cls
+    mock_indexer_cls = MagicMock()
+    mock_stats = MagicMock()
+    mock_stats.indexed_count = 0
+    mock_stats.errors = []
+    mock_stats.documents = []
+    mock_indexer_cls.return_value.index.return_value = mock_stats
+    mock_indexer_cls.return_value.index_documents.return_value = mock_stats
+    mock_indexer_cls.return_value.index_batch.return_value = mock_stats
 
-        # Mock TextLoader — 返回一个带随机 ID 的假 Document
-        import uuid
+    mock_text_loader_cls = MagicMock()
+    mock_html_loader_cls = MagicMock()
+    mock_chunker_cls = MagicMock()
+    mock_dedup_cls = MagicMock()
 
-        mock_loader_cls = MagicMock()
-        fake_doc = MagicMock()
-        fake_doc.id = uuid.uuid4().hex
-        mock_loader_cls.return_value.load.return_value = [fake_doc]
-        sys.modules["thumbelina.rag.ingestion.loader"].TextLoader = mock_loader_cls
-
-        # Mock RecursiveChunker
-        mock_chunker_cls = MagicMock()
-        sys.modules["thumbelina.rag.ingestion.chunker"].RecursiveChunker = mock_chunker_cls
-
+    with (
+        patch("thumbelina.api.routes.rag.Indexer", mock_indexer_cls),
+        patch("thumbelina.api.routes.rag.TextLoader", mock_text_loader_cls),
+        patch("thumbelina.api.routes.rag.HTMLLoader", mock_html_loader_cls),
+        patch("thumbelina.api.routes.rag.RecursiveChunker", mock_chunker_cls),
+        patch("thumbelina.api.routes.rag.DocumentDeduplicator", mock_dedup_cls),
+    ):
         yield mock_indexer_cls
-    finally:
-        for mod_path, original in saved.items():
-            if original is None:
-                sys.modules.pop(mod_path, None)
-            else:
-                sys.modules[mod_path] = original
 
 
 @pytest.fixture(autouse=False)
 def mock_rag_retrieval():
-    """Fake thumbelina.rag.retrieval.strategies to avoid importing torch."""
-    saved = {}
-    try:
-        for mod_path in [
-            "torch",
-            "thumbelina.rag.embedding.provider_hf",
-            "thumbelina.rag.retrieval.strategies",
-        ]:
-            saved[mod_path] = sys.modules.get(mod_path)
-            if mod_path not in sys.modules:
-                sys.modules[mod_path] = ModuleType(mod_path)
+    """Patch SimpleRetriever in the rag route module to avoid importing torch."""
+    mock_retriever_cls = MagicMock()
+    mock_retriever_cls.return_value.retrieve.return_value = []
 
-        mock_retriever_cls = MagicMock()
-        mock_retriever_cls.return_value.retrieve.return_value = []
-        sys.modules["thumbelina.rag.retrieval.strategies"].SimpleRetriever = mock_retriever_cls
-
+    with patch("thumbelina.rag.retrieval.strategies.SimpleRetriever", mock_retriever_cls):
         yield mock_retriever_cls
-    finally:
-        for mod_path, original in saved.items():
-            if original is None:
-                sys.modules.pop(mod_path, None)
-            else:
-                sys.modules[mod_path] = original
 
 
 # ---------- Knowledge Base CRUD Tests ----------
@@ -306,10 +273,19 @@ class TestDocumentManagement:
         assert resp.json() == []
 
     def test_upload_document(self, rag_client, mock_rag_pipeline):
+        import uuid
+
         mock_stats = MagicMock()
         mock_stats.indexed_count = 3
-        mock_rag_pipeline.return_value.index.return_value = mock_stats
-        mock_rag_pipeline.return_value.index_documents.return_value = mock_stats
+        mock_stats.errors = []
+        fake_doc = MagicMock()
+        fake_doc.id = uuid.uuid4().hex
+        fake_doc.name = "test.md"
+        fake_doc.source_uri = "/tmp/test.md"
+        fake_doc.sha256 = b"\x00" * 32
+        fake_doc.sim_hash_64 = b"\x00" * 8
+        mock_stats.documents = [fake_doc]
+        mock_rag_pipeline.return_value.index_batch.return_value = mock_stats
 
         resp = rag_client.post(
             "/api/v1/rag/knowledge-bases/0/documents",
@@ -329,10 +305,19 @@ class TestDocumentManagement:
         assert resp.status_code == 400
 
     def test_delete_document(self, rag_client, mock_rag_pipeline):
+        import uuid
+
         mock_stats = MagicMock()
         mock_stats.indexed_count = 2
-        mock_rag_pipeline.return_value.index.return_value = mock_stats
-        mock_rag_pipeline.return_value.index_documents.return_value = mock_stats
+        mock_stats.errors = []
+        fake_doc = MagicMock()
+        fake_doc.id = uuid.uuid4().hex
+        fake_doc.name = "a.md"
+        fake_doc.source_uri = "/tmp/a.md"
+        fake_doc.sha256 = b"\x00" * 32
+        fake_doc.sim_hash_64 = b"\x00" * 8
+        mock_stats.documents = [fake_doc]
+        mock_rag_pipeline.return_value.index_batch.return_value = mock_stats
 
         upload_resp = rag_client.post(
             "/api/v1/rag/knowledge-bases/0/documents",
@@ -391,10 +376,19 @@ class TestRAGQuery:
 class TestDocumentChunks:
     def test_list_document_chunks(self, rag_client, mock_rag_pipeline):
         """GET /documents/{doc_id}/chunks 应返回该文档的所有 chunks。"""
+        import uuid
+
         mock_stats = MagicMock()
         mock_stats.indexed_count = 2
-        mock_rag_pipeline.return_value.index.return_value = mock_stats
-        mock_rag_pipeline.return_value.index_documents.return_value = mock_stats
+        mock_stats.errors = []
+        fake_doc = MagicMock()
+        fake_doc.id = uuid.uuid4().hex
+        fake_doc.name = "test.md"
+        fake_doc.source_uri = "/tmp/test.md"
+        fake_doc.sha256 = b"\x00" * 32
+        fake_doc.sim_hash_64 = b"\x00" * 8
+        mock_stats.documents = [fake_doc]
+        mock_rag_pipeline.return_value.index_batch.return_value = mock_stats
 
         upload_resp = rag_client.post(
             "/api/v1/rag/knowledge-bases/0/documents",
@@ -436,10 +430,19 @@ class TestDocumentChunks:
 
     def test_list_chunks_empty(self, rag_client, mock_rag_pipeline):
         """文档存在但没有 chunks 时返回空列表。"""
+        import uuid
+
         mock_stats = MagicMock()
         mock_stats.indexed_count = 0
-        mock_rag_pipeline.return_value.index.return_value = mock_stats
-        mock_rag_pipeline.return_value.index_documents.return_value = mock_stats
+        mock_stats.errors = []
+        fake_doc = MagicMock()
+        fake_doc.id = uuid.uuid4().hex
+        fake_doc.name = "empty.md"
+        fake_doc.source_uri = "/tmp/empty.md"
+        fake_doc.sha256 = b"\x00" * 32
+        fake_doc.sim_hash_64 = b"\x00" * 8
+        mock_stats.documents = [fake_doc]
+        mock_rag_pipeline.return_value.index_batch.return_value = mock_stats
 
         upload_resp = rag_client.post(
             "/api/v1/rag/knowledge-bases/0/documents",
@@ -458,10 +461,19 @@ class TestDocumentChunks:
 
     def test_delete_document_cleans_vectors(self, rag_client, mock_rag_pipeline):
         """DELETE /documents/{doc_id} 应同时清理向量库中的 chunks。"""
+        import uuid
+
         mock_stats = MagicMock()
         mock_stats.indexed_count = 1
-        mock_rag_pipeline.return_value.index.return_value = mock_stats
-        mock_rag_pipeline.return_value.index_documents.return_value = mock_stats
+        mock_stats.errors = []
+        fake_doc = MagicMock()
+        fake_doc.id = uuid.uuid4().hex
+        fake_doc.name = "del.md"
+        fake_doc.source_uri = "/tmp/del.md"
+        fake_doc.sha256 = b"\x00" * 32
+        fake_doc.sim_hash_64 = b"\x00" * 8
+        mock_stats.documents = [fake_doc]
+        mock_rag_pipeline.return_value.index_batch.return_value = mock_stats
 
         upload_resp = rag_client.post(
             "/api/v1/rag/knowledge-bases/0/documents",

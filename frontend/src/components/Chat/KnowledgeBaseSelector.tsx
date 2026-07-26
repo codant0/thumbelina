@@ -1,11 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { BookOpen, Check, ChevronDown } from 'lucide-react'
 import { useTranslation } from '../../i18n'
-
-interface KnowledgeBase {
-  id: string
-  name: string
-}
+import * as ragApi from '../../api/rag'
+import type { KnowledgeBase } from '../../types/rag'
 
 interface KnowledgeBaseSelectorProps {
   conversationId?: string
@@ -26,8 +23,7 @@ export function KnowledgeBaseSelector({
 
   useEffect(() => {
     let cancelled = false
-    fetch('/api/v1/rag/knowledge-bases')
-      .then(res => (res.ok ? res.json() : []))
+    ragApi.listKnowledgeBases()
       .then(data => {
         if (!cancelled) setKbs(Array.isArray(data) ? data : [])
       })

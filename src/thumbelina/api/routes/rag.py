@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from thumbelina.rag.ingestion.chunker import RecursiveChunker
 from thumbelina.rag.ingestion.document_dedup import DocumentDeduplicator
-from thumbelina.rag.ingestion.loader import TextLoader
+from thumbelina.rag.ingestion.loader import HTMLLoader, TextLoader
 from thumbelina.rag.knowledge_base.repository import (
     DocumentRepository,
     KnowledgeBaseRepository,
@@ -78,6 +78,16 @@ class ChunkResponse(BaseModel):
     metadata: str | None = None
 
 
+class UrlUploadRequest(BaseModel):
+    url: str = Field(..., min_length=1, description="要抓取的网页 URL")
+
+
+class BatchUploadResponse(BaseModel):
+    uploaded: list[DocumentResponse]
+    skipped: list[str]
+    errors: list[dict[str, str]]
+
+
 class SimHashQueryRequest(BaseModel):
     sim_hash: str = Field(
         ..., min_length=16, max_length=16, description="十六进制 SimHash（16 字符）"
@@ -113,7 +123,9 @@ def _get_doc_repo(request: Request) -> DocumentRepository:
     return repo
 
 
-def _delete_chunk_fingerprints(request: Request, *, doc_id: str | None = None, kb_id: str | None = None) -> None:
+def _delete_chunk_fingerprints(
+    request: Request, *, doc_id: str | None = None, kb_id: str | None = None
+) -> None:
     """手动清理 chunk 指纹记录（FK CASCADE 未启用时的保底措施）。"""
     engine = getattr(request.app.state, "engine", None)
     if engine is None:
@@ -262,40 +274,7 @@ async def upload_document(kb_id: str, file: UploadFile, request: Request) -> Doc
     await file.close()
 
     try:
-        # Build indexer from app.state components
-        registry = getattr(request.app.state, "rag_embedding_registry", None)
-        if registry is None:
-            raise HTTPException(
-                status_code=503, detail="RAG embedding registry not available")
-        embedder = registry.create()
-
-        store_manager = getattr(request.app.state, "rag_store_manager", None)
-        if store_manager is None:
-            raise HTTPException(
-                status_code=503, detail="RAG store manager not available")
-        vector_store = store_manager.get_or_create_store(kb_id)
-
-        # 使用共享的 loader 实例，确保 document_id 与 ChromaDB 中存储的一致
-        loader = TextLoader()
-        doc_repo = _get_doc_repo(request)
-        doc_deduplicator = (
-            DocumentDeduplicator(doc_repo=doc_repo) if doc_repo else None
-        )
-
-        # 获取主数据库引擎，用于分块级去重
-        engine = getattr(request.app.state, "engine", None)
-
-        kb_indexer = Indexer(
-            loader=loader,
-            chunker=RecursiveChunker(),
-            embedder=embedder,
-            vector_store=vector_store,
-            doc_repo=doc_repo,
-            doc_deduplicator=doc_deduplicator,
-            engine=engine,
-            chunk_dedup_enabled=True,
-        )
-
+        kb_indexer = _build_indexer(request, kb_id)
         stats = await asyncio.to_thread(kb_indexer.index_batch, [tmp_path])
         logger.debug(f"index stats: {stats}")
         if stats.errors:
@@ -303,11 +282,10 @@ async def upload_document(kb_id: str, file: UploadFile, request: Request) -> Doc
                 status_code=400, detail="; ".join(stats.errors)
             )
 
-        # TODO 当前的loader只支持单个文件加载，后续补齐文件夹loader时需修改
-        documents = stats.documents
-        document = documents[0]
+        document = stats.documents[0]
 
-        # Save document metadata，使用与 ChromaDB 中相同的 document_id
+        # Save document metadata
+        doc_repo = _get_doc_repo(request)
         doc = await doc_repo.create(
             kb_id=kb_id,
             name=document.name,
@@ -334,6 +312,181 @@ async def upload_document(kb_id: str, file: UploadFile, request: Request) -> Doc
                 os.unlink(tmp_path)
             except OSError:
                 pass
+
+
+def _build_indexer(request: Request, kb_id: str) -> Indexer:
+    """从 app.state 构建 Indexer 实例（复用已有组件）。"""
+    registry = getattr(request.app.state, "rag_embedding_registry", None)
+    if registry is None:
+        raise HTTPException(
+            status_code=503, detail="RAG embedding registry not available")
+    embedder = registry.create()
+
+    store_manager = getattr(request.app.state, "rag_store_manager", None)
+    if store_manager is None:
+        raise HTTPException(
+            status_code=503, detail="RAG store manager not available")
+    vector_store = store_manager.get_or_create_store(kb_id)
+
+    doc_repo = _get_doc_repo(request)
+    doc_deduplicator = (
+        DocumentDeduplicator(doc_repo=doc_repo) if doc_repo else None
+    )
+    engine = getattr(request.app.state, "engine", None)
+
+    return Indexer(
+        loader=TextLoader(),
+        chunker=RecursiveChunker(),
+        embedder=embedder,
+        vector_store=vector_store,
+        doc_repo=doc_repo,
+        doc_deduplicator=doc_deduplicator,
+        engine=engine,
+        chunk_dedup_enabled=True,
+    )
+
+
+@router.post("/knowledge-bases/{kb_id}/documents/url", response_model=DocumentResponse)
+async def upload_document_by_url(
+    kb_id: str, body: UrlUploadRequest, request: Request
+) -> DocumentResponse:
+    """通过 URL 抓取网页内容并索引为文档。"""
+    kb_repo = _get_kb_repo(request)
+    kb = await kb_repo.get(kb_id)
+    if kb is None:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+
+    url = body.url.strip()
+    if not url.lower().startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="URL 必须以 http:// 或 https:// 开头")
+
+    html_loader = HTMLLoader()
+    try:
+        documents = await asyncio.to_thread(html_loader.load_url, url)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"抓取网页失败: {exc}")
+
+    if not documents:
+        raise HTTPException(status_code=400, detail="未能从 URL 提取到内容")
+
+    # 将抓取的内容写入临时文件，走标准索引流水线
+    doc_content = documents[0]
+    tmp_path = Path("/tmp_file") / f"url_{uuid.uuid4().hex}.html"
+    tmp_path.parent.mkdir(exist_ok=True)
+    tmp_path.write_text(doc_content.content, encoding="utf-8")
+
+    try:
+        kb_indexer = _build_indexer(request, kb_id)
+        stats = await asyncio.to_thread(kb_indexer.index_batch, [tmp_path])
+        if stats.errors:
+            raise HTTPException(status_code=400, detail="; ".join(stats.errors))
+
+        document = stats.documents[0]
+        doc_repo = _get_doc_repo(request)
+        doc = await doc_repo.create(
+            kb_id=kb_id,
+            name=document.name,
+            source_uri=url,
+            doc_type="html",
+            sha256=document.sha256,
+            sim_hash_64=document.sim_hash_64,
+            chunk_count=stats.indexed_count,
+            doc_id=document.id,
+        )
+
+        return DocumentResponse(
+            id=doc.id,
+            knowledge_base_id=doc.knowledge_base_id,
+            name=doc.name,
+            doc_type=doc.doc_type,
+            chunk_count=doc.chunk_count,
+            created_at=str(doc.created_at),
+        )
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
+@router.post(
+    "/knowledge-bases/{kb_id}/documents/batch",
+    response_model=BatchUploadResponse,
+)
+async def upload_documents_batch(
+    kb_id: str, files: list[UploadFile], request: Request
+) -> BatchUploadResponse:
+    """批量上传多个文件，过滤不支持的类型并跳过已存在的文档。"""
+    kb_repo = _get_kb_repo(request)
+    kb = await kb_repo.get(kb_id)
+    if kb is None:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+
+    from thumbelina.rag.knowledge_base.models import DocumentType
+
+    uploaded: list[DocumentResponse] = []
+    skipped: list[str] = []
+    errors: list[dict[str, str]] = []
+
+    for file in files:
+        filename = file.filename or ""
+        ext = os.path.splitext(filename)[1]
+        try:
+            doc_type = DocumentType.from_value(ext)
+        except ValueError:
+            skipped.append(filename)
+            continue
+
+        tmp_path = Path("/tmp_file") / f"batch_{uuid.uuid4().hex}_{Path(filename).name}"
+        tmp_path.parent.mkdir(exist_ok=True)
+        try:
+            with open(tmp_path, "wb") as f:
+                while chunk := await file.read(1024 * 1024):
+                    f.write(chunk)
+            await file.close()
+
+            kb_indexer = _build_indexer(request, kb_id)
+            stats = await asyncio.to_thread(kb_indexer.index_batch, [tmp_path])
+
+            if stats.errors:
+                errors.append({"filename": filename, "error": "; ".join(stats.errors)})
+                continue
+
+            if not stats.documents:
+                skipped.append(filename)
+                continue
+
+            document = stats.documents[0]
+            doc_repo = _get_doc_repo(request)
+            doc = await doc_repo.create(
+                kb_id=kb_id,
+                name=document.name,
+                source_uri=str(tmp_path),
+                doc_type=doc_type.value,
+                sha256=document.sha256,
+                sim_hash_64=document.sim_hash_64,
+                chunk_count=stats.indexed_count,
+                doc_id=document.id,
+            )
+            uploaded.append(
+                DocumentResponse(
+                    id=doc.id,
+                    knowledge_base_id=doc.knowledge_base_id,
+                    name=doc.name,
+                    doc_type=doc.doc_type,
+                    chunk_count=doc.chunk_count,
+                    created_at=str(doc.created_at),
+                )
+            )
+        except Exception as exc:
+            errors.append({"filename": filename, "error": str(exc)})
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    return BatchUploadResponse(uploaded=uploaded, skipped=skipped, errors=errors)
 
 
 @router.delete("/documents/{doc_id}")
