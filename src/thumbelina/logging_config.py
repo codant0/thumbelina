@@ -73,6 +73,10 @@ def setup_logging(config_path: str = "logging.yaml") -> None:
     log_dir = Path("logs")
     log_dir.mkdir(exist_ok=True)
 
+    # 确保 stderr 使用 UTF-8（Windows 下默认为 GBK，中文会乱码）
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8")
+
     # 清除 loguru 默认 handler
     logger.remove()
 

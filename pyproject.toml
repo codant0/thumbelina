@@ -41,6 +41,7 @@ dev = [
 rag = [
     "llama-index-embeddings-huggingface>=0.5",
     "llama-index-llms-openai-like>=0.3",
+    "sqlite-vec>=0.1",
 ]
 
 [project.scripts]

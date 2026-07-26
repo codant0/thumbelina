@@ -76,6 +76,8 @@ class TestDocument:
             "source_uri": "/tmp/test.md",
             "document_type": DocumentType.MARKDOWN,
             "content": "Hello world",
+            "sha256": b"\x00" * 32,
+            "sim_hash_64": b"\x00" * 8,
         }
         defaults.update(kwargs)
         return Document(**defaults)

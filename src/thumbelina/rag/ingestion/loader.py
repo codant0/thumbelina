@@ -13,10 +13,12 @@ import hashlib
 import uuid
 from abc import ABC, abstractmethod
 from pathlib import Path
-from simhash import Simhash
+
 import requests
-from thumbelina.rag.knowledge_base.models import Document, DocumentType
 from bs4 import BeautifulSoup
+from simhash import Simhash
+
+from thumbelina.rag.knowledge_base.models import Document, DocumentType
 
 
 class Loader(ABC):
@@ -30,44 +32,38 @@ class Loader(ABC):
         """加载文档"""
 
     def _get_sha256(self, content: str) -> bytes:
-        return hashlib.sha256(content.encode()).hexdigest()
-    
+        return hashlib.sha256(content.encode()).digest()
+
     def _get_sim_hash_64(self, content: str) -> bytes:
         # 依赖三方库实现，默认返回是64位
-        return Simhash(content).value
+        return Simhash(content).value.to_bytes(8, "big")
 
 
 class TextLoader(Loader):
     """纯文本文档加载器"""
 
-    extensions: list[str] = [
-        DocumentType.TXT.value, DocumentType.MARKDOWN.value]
+    extensions: list[str] = [DocumentType.TXT.value, DocumentType.MARKDOWN.value]
 
     def load(self, path: str) -> list[Document]:
         path_obj = Path(path)
         if not (
-            path_obj.exists() and path_obj.is_file(
-            ) and path_obj.suffix.lower() in self.extensions
+            path_obj.exists() and path_obj.is_file() and path_obj.suffix.lower() in self.extensions
         ):
             raise TypeError(f"Invalid file: {path}")
 
-        documents: list[Document] = []
-        for document in documents:
-            content = str(path_obj.read_text(encoding="utf-8"))
-            documents.append(
-                Document(
-                    id=uuid.uuid4().hex,
-                    name=path_obj.name,
-                    source_uri=str(path_obj.resolve()),
-                    document_type=DocumentType.from_value(path_obj.suffix),
-                    content=content,
-                    sha256=self._get_sha256(content),
-                    sim_hash_64=self._get_sim_hash_64(content)
-                )
-        )
-
+        content = str(path_obj.read_text(encoding="utf-8"))
         
-        return documents
+        return [
+            Document(
+                id=uuid.uuid4().hex,
+                name=path_obj.name,
+                source_uri=str(path_obj.resolve()),
+                document_type=DocumentType.from_value(path_obj.suffix),
+                content=content,
+                sha256=self._get_sha256(content),
+                sim_hash_64=self._get_sim_hash_64(content),
+            )
+        ]
 
     # TODO 新增方法，根据文件后缀动态选择loader
 
@@ -90,8 +86,7 @@ class HTMLLoader(Loader):
     def _load_file(self, path: str) -> list[Document]:
         path_obj = Path(path)
         if not (
-            path_obj.exists() and path_obj.is_file(
-            ) and path_obj.suffix.lower() in self.extensions
+            path_obj.exists() and path_obj.is_file() and path_obj.suffix.lower() in self.extensions
         ):
             raise TypeError(f"Invalid file: {path}")
         content = path_obj.read_text(encoding="utf-8")

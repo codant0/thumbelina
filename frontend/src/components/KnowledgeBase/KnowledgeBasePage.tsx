@@ -194,7 +194,14 @@ export function KnowledgeBasePage() {
           body: formData,
         })
         if (!res.ok) {
-          showToast(t('knowledgeBase.uploadFailed'), true)
+          let detail = t('knowledgeBase.uploadFailed')
+          try {
+            const errBody = await res.json()
+            if (res.status >= 400 && res.status < 500 && errBody?.detail) {
+              detail = errBody.detail
+            }
+          } catch { /* ignore parse error */ }
+          showToast(detail, true)
           return
         }
       }

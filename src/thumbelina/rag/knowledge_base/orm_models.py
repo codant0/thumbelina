@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Integer, LargeBinary, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -45,8 +45,8 @@ class DocumentRecord(RagBase):
     name: Mapped[str] = mapped_column(String(500), nullable=False)
     source_uri: Mapped[str] = mapped_column(String(1000), nullable=False)
     doc_type: Mapped[str] = mapped_column(String(20), nullable=False)
-    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
-    sim_hash_64: Mapped[str] = mapped_column(String(64), nullable=False)
+    sha256: Mapped[bytes] = mapped_column(LargeBinary(32), nullable=False)
+    sim_hash_64: Mapped[bytes] = mapped_column(LargeBinary(8), nullable=False)
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 

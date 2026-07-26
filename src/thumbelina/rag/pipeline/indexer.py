@@ -48,6 +48,7 @@ logger = logging.getLogger(__name__)
 class IndexStats:
     """索引统计信息。"""
 
+    documents: list[Document] = field(default_factory=list)
     document_count: int = 0
     chunk_count: int = 0
     indexed_count: int = 0
@@ -100,11 +101,13 @@ class Indexer:
             本次索引的统计信息。
         """
         stats = IndexStats()
+        logger.info(f"index path: {path}")
 
         # 1. 加载
         documents = self._load(path, stats)
         if not documents:
             return stats
+        stats.documents = documents
 
         # 2. 去重 -> 分块 → 3. 向量化 → 4. 写入
         for document in documents:
@@ -113,6 +116,7 @@ class Indexer:
                 same_document = self.doc_repo._get_by_sha256(document.sha256)
                 if same_document:
                     msg = f"存在相同文件 [{same_document.name}], 跳过"
+                    logger.info(msg)
                     stats.errors.append(msg)
                     return stats
 
@@ -121,33 +125,7 @@ class Indexer:
                 continue
             self._embed_and_store(chunks, stats)
 
-        return stats
-
-    def index_documents(self, documents: list[Document]) -> IndexStats:
-        """对已加载的文档执行索引（跳过加载步骤）。
-
-        适用于调用方已通过 loader.load() 获取文档对象、
-        需要保留 document ID 以供后续元数据关联的场景。
-
-        Parameters
-        ----------
-        documents:
-            已加载的文档列表。
-
-        Returns
-        -------
-        IndexStats
-            本次索引的统计信息。
-        """
-        stats = IndexStats()
-        stats.document_count = len(documents)
-
-        for document in documents:
-            chunks = self._chunk(document, stats)
-            if not chunks:
-                continue
-            self._embed_and_store(chunks, stats)
-
+        logger.info(f"file index result: {stats}")
         return stats
 
     def index_batch(self, paths: list[str]) -> IndexStats:
@@ -166,6 +144,7 @@ class Indexer:
         total = IndexStats()
         for path in paths:
             result = self.index(path)
+            total.documents.extend(result.documents)
             total.document_count += result.document_count
             total.chunk_count += result.chunk_count
             total.indexed_count += result.indexed_count

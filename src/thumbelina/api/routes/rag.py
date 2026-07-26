@@ -5,9 +5,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from pathlib import Path
 import tempfile
 import uuid
-
+from thumbelina.rag.ingestion.chunker import RecursiveChunker
+from thumbelina.rag.ingestion.loader import TextLoader
+from thumbelina.rag.pipeline.indexer import Indexer
 from fastapi import APIRouter, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 
@@ -72,6 +75,24 @@ class ChunkResponse(BaseModel):
     document_id: str
     content: str
     metadata: str | None = None
+
+
+class SimHashQueryRequest(BaseModel):
+    sim_hash: str = Field(
+        ..., min_length=16, max_length=16, description="十六进制 SimHash（16 字符）"
+    )
+    threshold: int = Field(ge=0, le=64, description="汉明距离阈值")
+    direction: str = Field(
+        default="le", pattern="^(le|ge)$", description="le=相似, ge=差异")
+    knowledge_base_id: str | None = None
+    limit: int = Field(default=100, ge=1, le=1000)
+
+
+class SimHashResultDocument(BaseModel):
+    id: str
+    name: str
+    sim_hash: str
+    distance: int
 
 
 # ---------- Helpers ----------
@@ -204,27 +225,26 @@ async def upload_document(kb_id: str, file: UploadFile, request: Request) -> Doc
         raise HTTPException(status_code=400, detail="Unsupported file type")
 
     # Save file to temporary location
-    content = await file.read()
-    suffix = os.path.splitext(file.filename or ".txt")[1]
-    tmp_path: str | None = None
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix, mode="wb") as tmp:
-        tmp.write(content)
-        tmp_path = tmp.name
+    tmp_dir = Path("/tmp_file")
+    tmp_dir.mkdir(exist_ok=True)
+    tmp_path = tmp_dir / file.filename
+    with open(tmp_path, "wb") as f:
+        while chunk := await file.read(1024 * 1024):  # 每次 1MB
+            f.write(chunk)
+    await file.close()
 
     try:
         # Build indexer from app.state components
-        from thumbelina.rag.ingestion.chunker import RecursiveChunker
-        from thumbelina.rag.ingestion.loader import TextLoader
-        from thumbelina.rag.pipeline.indexer import Indexer
-
         registry = getattr(request.app.state, "rag_embedding_registry", None)
         if registry is None:
-            raise HTTPException(status_code=503, detail="RAG embedding registry not available")
+            raise HTTPException(
+                status_code=503, detail="RAG embedding registry not available")
         embedder = registry.create()
 
         store_manager = getattr(request.app.state, "rag_store_manager", None)
         if store_manager is None:
-            raise HTTPException(status_code=503, detail="RAG store manager not available")
+            raise HTTPException(
+                status_code=503, detail="RAG store manager not available")
         vector_store = store_manager.get_or_create_store(kb_id)
 
         # 使用共享的 loader 实例，确保 document_id 与 ChromaDB 中存储的一致
@@ -235,31 +255,30 @@ async def upload_document(kb_id: str, file: UploadFile, request: Request) -> Doc
             chunker=RecursiveChunker(),
             embedder=embedder,
             vector_store=vector_store,
-            doc_repo=doc_repo
+            doc_repo=doc_repo,
         )
-        # 先加载文档获取 ID，再用 index_documents 跳过重复加载
-        documents = await asyncio.to_thread(loader.load, tmp_path)
-        # 用原始文件名覆盖临时文件名
-        original_filename = file.filename or "unknown"
-        for d in documents:
-            d.name = original_filename
-            d.source_uri = original_filename
+
+        stats = await asyncio.to_thread(kb_indexer.index_batch, [tmp_path])
+        logger.debug(f"index stats: {stats}")
+        if stats.errors:
+            raise HTTPException(
+                status_code=400, detail="; ".join(stats.errors)
+            )
+
         # TODO 当前的loader只支持单个文件加载，后续补齐文件夹loader时需修改
-        doc_id = documents[0].id if documents else uuid.uuid4().hex
-        sha256 = documents[0].sha256
-        sim_hash_64 = documents[0].sim_hash_64
-        stats = await asyncio.to_thread(kb_indexer.index_documents, documents)
+        documents = stats.documents
+        document = documents[0]
 
         # Save document metadata，使用与 ChromaDB 中相同的 document_id
         doc = await doc_repo.create(
             kb_id=kb_id,
-            name=original_filename,
-            source_uri=original_filename,
+            name=document.name,
+            source_uri=document.source_uri,
             doc_type=doc_type.value,
-            sha256=sha256,
-            sim_hash_64=sim_hash_64,
+            sha256=document.sha256,
+            sim_hash_64=document.sim_hash_64,
             chunk_count=stats.indexed_count,
-            doc_id=doc_id,
+            doc_id=document.id,
         )
 
         return DocumentResponse(
@@ -293,7 +312,8 @@ async def delete_document(doc_id: str, request: Request) -> dict:
             store = store_manager.get_or_create_store(doc.knowledge_base_id)
             store.delete_by_metadata(where={"document_id": doc_id})
         except Exception as exc:
-            logger.warning("Failed to delete vectors for doc %s: %s", doc_id, exc)
+            logger.warning(
+                "Failed to delete vectors for doc %s: %s", doc_id, exc)
 
     deleted = await doc_repo.delete(doc_id)
     if not deleted:
@@ -343,7 +363,8 @@ async def query_knowledge_base(body: QueryRequest, request: Request) -> QueryRes
 
     from thumbelina.rag.retrieval.strategies import SimpleRetriever
 
-    retriever = SimpleRetriever(embedding_model=embedder, vector_store=vector_store)
+    retriever = SimpleRetriever(
+        embedding_model=embedder, vector_store=vector_store)
 
     try:
         chunks = await asyncio.to_thread(retriever.retrieve, body.query, body.top_k)
@@ -361,3 +382,43 @@ async def query_knowledge_base(body: QueryRequest, request: Request) -> QueryRes
             for c in chunks
         ]
     )
+
+
+# ---------- SimHash query endpoint ----------
+
+
+@router.post("/documents/simhash-query", response_model=list[SimHashResultDocument])
+async def query_by_simhash(
+    body: SimHashQueryRequest, request: Request
+) -> list[SimHashResultDocument]:
+    """按 SimHash 汉明距离查询文档。
+
+    - direction="le"：查找相似文档（距离 ≤ 阈值）
+    - direction="ge"：查找差异文档（距离 ≥ 阈值）
+    """
+    doc_repo = _get_doc_repo(request)
+
+    from thumbelina.rag.knowledge_base.simhash import bytes_to_hex, hex_to_simhash_bytes
+
+    try:
+        query_bytes = hex_to_simhash_bytes(body.sim_hash)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"无效的 SimHash: {exc}")
+
+    results = await doc_repo.find_by_simhash(
+        query_sim_hash=query_bytes,
+        threshold=body.threshold,
+        direction=body.direction,
+        kb_id=body.knowledge_base_id,
+        limit=body.limit,
+    )
+
+    return [
+        SimHashResultDocument(
+            id=doc.id,
+            name=doc.name,
+            sim_hash=bytes_to_hex(doc.sim_hash_64),
+            distance=distance,
+        )
+        for doc, distance in results
+    ]

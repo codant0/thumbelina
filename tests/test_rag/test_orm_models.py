@@ -58,6 +58,8 @@ class TestDocumentRecord:
                 name="test.md",
                 source_uri="/tmp/test.md",
                 doc_type=".md",
+                sha256=b"\x00" * 32,
+                sim_hash_64=b"\x00" * 8,
                 chunk_count=5,
             )
             session.add(doc)

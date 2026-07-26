@@ -99,6 +99,8 @@ def _make_document(content: str = "hello world") -> Document:
         source_uri="/tmp/test.md",
         document_type=DocumentType.MARKDOWN,
         content=content,
+        sha256=b"\x00" * 32,
+        sim_hash_64=b"\x00" * 8,
     )
 
 

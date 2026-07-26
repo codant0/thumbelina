@@ -102,7 +102,10 @@ class TestDocumentRepository:
     @pytest.mark.asyncio
     async def test_create_and_get(self, repos):
         _, doc_repo = repos
-        doc = await doc_repo.create("0", "test.md", "/tmp/test.md", ".md", 10)
+        doc = await doc_repo.create(
+            "0", "test.md", "/tmp/test.md", ".md",
+            sha256=b"\x00" * 32, sim_hash_64=b"\x00" * 8, chunk_count=10,
+        )
         fetched = await doc_repo.get(doc.id)
         assert fetched is not None
         assert fetched.name == "test.md"
@@ -113,14 +116,23 @@ class TestDocumentRepository:
     @pytest.mark.asyncio
     async def test_create_default_chunk_count(self, repos):
         _, doc_repo = repos
-        doc = await doc_repo.create("0", "a.txt", "/a.txt", ".txt")
+        doc = await doc_repo.create(
+            "0", "a.txt", "/a.txt", ".txt",
+            sha256=b"\x00" * 32, sim_hash_64=b"\x00" * 8,
+        )
         assert doc.chunk_count == 0
 
     @pytest.mark.asyncio
     async def test_list_by_kb(self, repos):
         _, doc_repo = repos
-        await doc_repo.create("0", "a.md", "/a.md", ".md")
-        await doc_repo.create("0", "b.txt", "/b.txt", ".txt")
+        await doc_repo.create(
+            "0", "a.md", "/a.md", ".md",
+            sha256=b"\x00" * 32, sim_hash_64=b"\x00" * 8,
+        )
+        await doc_repo.create(
+            "0", "b.txt", "/b.txt", ".txt",
+            sha256=b"\x01" * 32, sim_hash_64=b"\x01" * 8,
+        )
         docs = await doc_repo.list_by_kb("0")
         assert len(docs) == 2
 
@@ -133,7 +145,10 @@ class TestDocumentRepository:
     @pytest.mark.asyncio
     async def test_delete(self, repos):
         _, doc_repo = repos
-        doc = await doc_repo.create("0", "a.md", "/a.md", ".md")
+        doc = await doc_repo.create(
+            "0", "a.md", "/a.md", ".md",
+            sha256=b"\x00" * 32, sim_hash_64=b"\x00" * 8,
+        )
         result = await doc_repo.delete(doc.id)
         assert result is True
         assert await doc_repo.get(doc.id) is None
@@ -147,8 +162,14 @@ class TestDocumentRepository:
     @pytest.mark.asyncio
     async def test_delete_by_kb(self, repos):
         _, doc_repo = repos
-        await doc_repo.create("0", "a.md", "/a.md", ".md")
-        await doc_repo.create("0", "b.txt", "/b.txt", ".txt")
+        await doc_repo.create(
+            "0", "a.md", "/a.md", ".md",
+            sha256=b"\x00" * 32, sim_hash_64=b"\x00" * 8,
+        )
+        await doc_repo.create(
+            "0", "b.txt", "/b.txt", ".txt",
+            sha256=b"\x01" * 32, sim_hash_64=b"\x01" * 8,
+        )
         count = await doc_repo.delete_by_kb("0")
         assert count == 2
         assert len(await doc_repo.list_by_kb("0")) == 0
