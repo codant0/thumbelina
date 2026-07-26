@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from thumbelina.rag.ingestion.chunker import RecursiveChunker
 from thumbelina.rag.ingestion.document_dedup import DocumentDeduplicator
-from thumbelina.rag.ingestion.loader import HTMLLoader, TextLoader
+from thumbelina.rag.ingestion.loader import HTMLLoader, Loader, TextLoader
 from thumbelina.rag.knowledge_base.repository import (
     DocumentRepository,
     KnowledgeBaseRepository,
@@ -314,7 +314,9 @@ async def upload_document(kb_id: str, file: UploadFile, request: Request) -> Doc
                 pass
 
 
-def _build_indexer(request: Request, kb_id: str) -> Indexer:
+def _build_indexer(
+    request: Request, kb_id: str, loader: Loader | None = None
+) -> Indexer:
     """从 app.state 构建 Indexer 实例（复用已有组件）。"""
     registry = getattr(request.app.state, "rag_embedding_registry", None)
     if registry is None:
@@ -335,7 +337,7 @@ def _build_indexer(request: Request, kb_id: str) -> Indexer:
     engine = getattr(request.app.state, "engine", None)
 
     return Indexer(
-        loader=TextLoader(),
+        loader=loader or TextLoader(),
         chunker=RecursiveChunker(),
         embedder=embedder,
         vector_store=vector_store,
@@ -360,53 +362,36 @@ async def upload_document_by_url(
     if not url.lower().startswith(("http://", "https://")):
         raise HTTPException(status_code=400, detail="URL 必须以 http:// 或 https:// 开头")
 
-    html_loader = HTMLLoader()
-    try:
-        documents = await asyncio.to_thread(html_loader.load_url, url)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"抓取网页失败: {exc}")
+    # 使用 HTMLLoader，Indexer 会自动识别 URL 走 _load_by_url 路径
+    kb_indexer = _build_indexer(request, kb_id, loader=HTMLLoader())
+    stats = await asyncio.to_thread(kb_indexer.index, url)
+    if stats.errors:
+        raise HTTPException(status_code=400, detail="; ".join(stats.errors))
 
-    if not documents:
+    if not stats.documents:
         raise HTTPException(status_code=400, detail="未能从 URL 提取到内容")
 
-    # 将抓取的内容写入临时文件，走标准索引流水线
-    doc_content = documents[0]
-    tmp_path = Path("/tmp_file") / f"url_{uuid.uuid4().hex}.html"
-    tmp_path.parent.mkdir(exist_ok=True)
-    tmp_path.write_text(doc_content.content, encoding="utf-8")
+    document = stats.documents[0]
+    doc_repo = _get_doc_repo(request)
+    doc = await doc_repo.create(
+        kb_id=kb_id,
+        name=document.name,
+        source_uri=url,
+        doc_type="html",
+        sha256=document.sha256,
+        sim_hash_64=document.sim_hash_64,
+        chunk_count=stats.indexed_count,
+        doc_id=document.id,
+    )
 
-    try:
-        kb_indexer = _build_indexer(request, kb_id)
-        stats = await asyncio.to_thread(kb_indexer.index_batch, [tmp_path])
-        if stats.errors:
-            raise HTTPException(status_code=400, detail="; ".join(stats.errors))
-
-        document = stats.documents[0]
-        doc_repo = _get_doc_repo(request)
-        doc = await doc_repo.create(
-            kb_id=kb_id,
-            name=document.name,
-            source_uri=url,
-            doc_type="html",
-            sha256=document.sha256,
-            sim_hash_64=document.sim_hash_64,
-            chunk_count=stats.indexed_count,
-            doc_id=document.id,
-        )
-
-        return DocumentResponse(
-            id=doc.id,
-            knowledge_base_id=doc.knowledge_base_id,
-            name=doc.name,
-            doc_type=doc.doc_type,
-            chunk_count=doc.chunk_count,
-            created_at=str(doc.created_at),
-        )
-    finally:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
+    return DocumentResponse(
+        id=doc.id,
+        knowledge_base_id=doc.knowledge_base_id,
+        name=doc.name,
+        doc_type=doc.doc_type,
+        chunk_count=doc.chunk_count,
+        created_at=str(doc.created_at),
+    )
 
 
 @router.post(

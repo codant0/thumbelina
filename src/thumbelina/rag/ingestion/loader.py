@@ -114,7 +114,9 @@ class HTMLLoader(Loader):
         resp = requests.get(url=path, timeout=10)
         resp.raise_for_status()
 
-        text = self._clear_html_data(resp.text)
+        # 传原始字节给 BeautifulSoup，由其自动检测编码，
+        # 避免 requests 在缺少 charset 时回退 ISO-8859-1 导致中文乱码
+        text = self._clear_html_data(resp.content)
         return [
             Document(
                 id=uuid.uuid4().hex,
@@ -127,7 +129,7 @@ class HTMLLoader(Loader):
             )
         ]
 
-    def _clear_html_data(self, content: str) -> str:
+    def _clear_html_data(self, content: str | bytes) -> str:
         # 提纯纯文本，移除script/stype，获取body文本
         soup = BeautifulSoup(content, "html.parser")
 
