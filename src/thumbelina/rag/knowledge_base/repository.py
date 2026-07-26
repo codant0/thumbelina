@@ -276,6 +276,18 @@ class DocumentRepository:
         """
         return await asyncio.to_thread(self._delete_sync, doc_id)
 
+    def delete_sync(self, doc_id: str) -> bool:
+        """同步版删除文档元数据。
+
+        供 ``Indexer`` 等同步上下文直接调用，避免 ``asyncio.run()`` 嵌套问题。
+
+        Returns
+        -------
+        bool
+            True 表示成功删除，False 表示不存在。
+        """
+        return self._delete_sync(doc_id)
+
     # ---- delete_by_kb ----
 
     def _delete_by_kb_sync(self, kb_id: str) -> int:
@@ -439,3 +451,36 @@ class DocumentRepository:
         return await asyncio.to_thread(
             self._find_by_simhash_sync, query_sim_hash, threshold, direction, kb_id, limit
         )
+
+    def find_by_simhash_sync(
+        self,
+        query_sim_hash: bytes,
+        threshold: int,
+        direction: str = "le",
+        kb_id: str | None = None,
+        limit: int = 100,
+    ) -> list[tuple[DocumentRecord, int]]:
+        """同步版 SimHash 查询。
+
+        供 ``DocumentDeduplicator`` 等同步上下文使用，直接调用内部实现。
+
+        Parameters
+        ----------
+        query_sim_hash:
+            8 字节 SimHash blob（大端序）。
+        threshold:
+            汉明距离阈值，范围 [0, 64]。
+        direction:
+            "le" = 查找距离 ≤ 阈值的相似文档；
+            "ge" = 查找距离 ≥ 阈值的差异文档。
+        kb_id:
+            可选，限定在某个知识库内查询。
+        limit:
+            最大返回数量。
+
+        Returns
+        -------
+        list[tuple[DocumentRecord, int]]
+            (文档, 距离) 列表。
+        """
+        return self._find_by_simhash_sync(query_sim_hash, threshold, direction, kb_id, limit)

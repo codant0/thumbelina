@@ -9,6 +9,7 @@ from pathlib import Path
 import tempfile
 import uuid
 from thumbelina.rag.ingestion.chunker import RecursiveChunker
+from thumbelina.rag.ingestion.document_dedup import DocumentDeduplicator
 from thumbelina.rag.ingestion.loader import TextLoader
 from thumbelina.rag.pipeline.indexer import Indexer
 from fastapi import APIRouter, HTTPException, Request, UploadFile
@@ -250,12 +251,16 @@ async def upload_document(kb_id: str, file: UploadFile, request: Request) -> Doc
         # 使用共享的 loader 实例，确保 document_id 与 ChromaDB 中存储的一致
         loader = TextLoader()
         doc_repo = _get_doc_repo(request)
+        doc_deduplicator = (
+            DocumentDeduplicator(doc_repo=doc_repo) if doc_repo else None
+        )
         kb_indexer = Indexer(
             loader=loader,
             chunker=RecursiveChunker(),
             embedder=embedder,
             vector_store=vector_store,
             doc_repo=doc_repo,
+            doc_deduplicator=doc_deduplicator,
         )
 
         stats = await asyncio.to_thread(kb_indexer.index_batch, [tmp_path])
