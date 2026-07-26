@@ -32,6 +32,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 
@@ -111,14 +112,38 @@ class Indexer:
 
         # 2. 去重 -> 分块 → 3. 向量化 → 4. 写入
         for document in documents:
-            # 去重
+            # 去重 - step1：根据sha256精确去重
             if self.doc_repo and document.sha256:
                 same_document = self.doc_repo._get_by_sha256(document.sha256)
                 if same_document:
-                    msg = f"存在相同文件 [{same_document.name}], 跳过"
+                    msg = f"存在相同文件 [{same_document.name}], 请勿重复上传"
                     logger.info(msg)
                     stats.errors.append(msg)
                     return stats
+
+            # 去重 - step2：根据SimHash进行粗筛
+            """
+            当前simHash编码为64位，根据汉明距离不同，分为如下策略：
+                0 => 完全相同，忽略新文档
+                1~3 => 高度近似，删除旧文档，后续新文档直接覆盖
+                其余文档不做处理
+            """
+            doc_distance_tuples = asyncio.run(self.doc_repo.find_by_simhash(
+                query_sim_hash=document.sim_hash_64,
+                threshold=3))
+            if doc_distance_tuples:
+                for doc_distance_tuple in doc_distance_tuples:
+                    doc_record, distance = doc_distance_tuple
+                    # 完全相同，返回异常
+                    if distance == 0:
+                        msg = f"存在相同文件 [{same_document.name}], 请勿重复上传"
+                        logger.info(msg)
+                        stats.errors.append(msg)
+                        return stats
+                    # 高度近似，删除旧文档
+                    else:
+                        logger.info(f"存在与文件{doc_record.name}高度近似的文档，删除原始文档重新上传")
+                        self.doc_repo.delete(doc_record.id)
 
             chunks = self._chunk(document, stats)
             if not chunks:
@@ -245,7 +270,8 @@ if __name__ == "__main__":
 
     # 向量召回
     query = "哆啦A梦使用的3个秘密道具是什么？"
-    retriever = SimpleRetriever(embedding_model=embedder, vector_store=vector_store)
+    retriever = SimpleRetriever(
+        embedding_model=embedder, vector_store=vector_store)
     results = retriever.retrieve(query)
     for i, result in enumerate(results):
         print(f"result {i + 1}: {result}")

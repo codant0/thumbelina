@@ -20,8 +20,16 @@ _DEFAULT_KB_NAME = "通用知识库"
 _DEFAULT_KB_DESC = "通用知识库，默认使用该知识库"
 
 
-def _load_sqlite_vec(dbapi_conn: object, connection_record: object) -> None:
-    """在每个 SQLite 连接创建时自动加载 sqlite-vec 扩展。"""
+def _load_sqlite_vec(
+    dbapi_conn: object, connection_record: object, connection_proxy: object = None
+) -> None:
+    """在每个 SQLite 连接从连接池中取出时自动加载 sqlite-vec 扩展。
+
+    使用 ``checkout`` 事件而非 ``connect``，确保从池中复用的旧连接也会被加载。
+    通过 ``connection_record.info`` 标记避免重复加载。
+    """
+    if connection_record.info.get("sqlite_vec_loaded"):
+        return
     try:
         import sqlite3
 
@@ -32,6 +40,7 @@ def _load_sqlite_vec(dbapi_conn: object, connection_record: object) -> None:
             conn.enable_load_extension(True)
             sqlite_vec.load(conn)
             conn.enable_load_extension(False)
+            connection_record.info["sqlite_vec_loaded"] = True
     except ImportError:
         logger.warning("sqlite-vec 未安装，SimHash 距离查询功能不可用")
     except Exception as exc:
@@ -53,8 +62,9 @@ def init_rag_db(engine: Engine) -> sessionmaker[Session]:
     sessionmaker[Session]
         绑定到该引擎的会话工厂。
     """
-    # 注册 sqlite-vec 加载事件（在每个新连接创建时触发）
-    event.listen(engine, "connect", _load_sqlite_vec)
+    # 使用 checkout 事件而非 connect，确保从连接池复用的旧连接也会加载扩展。
+    # connect 事件仅在创建新 DBAPI 连接时触发，已存在池中的连接不会被处理。
+    event.listen(engine, "checkout", _load_sqlite_vec)
 
     RagBase.metadata.create_all(engine)
     _migrate_sha256_simhash_to_blob(engine)
