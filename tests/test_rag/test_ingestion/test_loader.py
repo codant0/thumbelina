@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from thumbelina.rag.ingestion.loader import TextLoader
+from thumbelina.rag.ingestion.loader import HTMLLoader, LoaderRegistry, TextLoader
 from thumbelina.rag.knowledge_base.models import DocumentType
 
 
@@ -95,3 +95,55 @@ class TestTextLoader:
         docs = text_loader.load(str(f))
 
         assert docs[0].content == content
+
+
+class TestLoaderRegistry:
+    """Tests for LoaderRegistry auto-matching."""
+
+    def test_registered_loaders(self):
+        """TextLoader 和 HTMLLoader 应自动注册。"""
+        names = LoaderRegistry.list_registered()
+        assert "TextLoader" in names
+        assert "HTMLLoader" in names
+
+    def test_supported_extensions(self):
+        """已注册 Loader 的扩展名应全部可查。"""
+        exts = LoaderRegistry.list_supported_extensions()
+        assert ".txt" in exts
+        assert ".md" in exts
+        assert ".html" in exts
+        assert ".htm" in exts
+
+    def test_find_txt_returns_text_loader(self):
+        loader = LoaderRegistry.find("/some/path/doc.txt")
+        assert isinstance(loader, TextLoader)
+
+    def test_find_md_returns_text_loader(self):
+        loader = LoaderRegistry.find("/some/path/doc.md")
+        assert isinstance(loader, TextLoader)
+
+    def test_find_html_returns_html_loader(self):
+        loader = LoaderRegistry.find("/some/path/page.html")
+        assert isinstance(loader, HTMLLoader)
+
+    def test_find_htm_returns_html_loader(self):
+        loader = LoaderRegistry.find("/some/path/page.htm")
+        assert isinstance(loader, HTMLLoader)
+
+    def test_find_url_returns_html_loader(self):
+        loader = LoaderRegistry.find("https://example.com/article")
+        assert isinstance(loader, HTMLLoader)
+
+    def test_find_http_url_returns_html_loader(self):
+        loader = LoaderRegistry.find("http://example.com")
+        assert isinstance(loader, HTMLLoader)
+
+    def test_find_unsupported_extension_raises(self):
+        with pytest.raises(ValueError, match="不支持的文件类型"):
+            LoaderRegistry.find("/some/path/doc.pdf")
+
+    def test_find_returns_new_instance_each_time(self):
+        """每次调用 find() 应返回新实例。"""
+        l1 = LoaderRegistry.find("/a.md")
+        l2 = LoaderRegistry.find("/b.md")
+        assert l1 is not l2

@@ -13,6 +13,7 @@ import hashlib
 import uuid
 from abc import ABC, abstractmethod
 from pathlib import Path
+from typing import ClassVar
 
 import requests
 from bs4 import BeautifulSoup
@@ -21,11 +22,86 @@ from simhash import Simhash
 from thumbelina.rag.knowledge_base.models import Document, DocumentType
 
 
+class LoaderRegistry:
+    """Loader 注册中心 —— 根据文件扩展名 / URL 协议自动匹配具体 Loader。
+
+    所有 Loader 子类在定义时自动注册，无需手动干预。
+    调用方只需传入路径，注册中心自动匹配合适的 Loader 并实例化。
+
+    用法::
+
+        loader = LoaderRegistry.find("/path/to/doc.md")   # → TextLoader
+        loader = LoaderRegistry.find("https://...")        # → HTMLLoader
+        loader = LoaderRegistry.find("/path/to/doc.pdf")   # → PDFLoader
+    """
+
+    _loaders: ClassVar[list[type["Loader"]]] = []
+
+    @classmethod
+    def register(cls, loader_cls: type["Loader"]) -> type["Loader"]:
+        """注册一个 Loader 类。Loader 子类在定义时自动调用，无需手动触发。"""
+        cls._loaders.append(loader_cls)
+        return loader_cls
+
+    @classmethod
+    def find(cls, path: str) -> "Loader":
+        """根据路径自动选择并实例化合适的 Loader。
+
+        匹配优先级：
+        1. URL 协议（http/https）→ 匹配 supports_urls=True 的 Loader
+        2. 文件扩展名 → 匹配 extensions 中包含该后缀的 Loader
+        3. 未匹配时抛出 ValueError
+
+        Raises
+        ------
+        ValueError
+            当路径无法匹配任何已注册的 Loader 时抛出。
+        """
+        # 1. URL 检测
+        if path.lower().startswith(("http://", "https://")):
+            for loader_cls in cls._loaders:
+                if getattr(loader_cls, "supports_urls", False):
+                    return loader_cls()
+            raise ValueError(f"没有支持 URL 抓取的 Loader，路径: {path}")
+
+        # 2. 文件扩展名检测
+        ext = Path(path).suffix.lower()
+        for loader_cls in cls._loaders:
+            if ext in loader_cls.extensions:
+                return loader_cls()
+
+        supported = cls.list_supported_extensions()
+        raise ValueError(
+            f"不支持的文件类型 '{ext}'，路径: {path}。"
+            f"已支持的类型: {sorted(supported)}"
+        )
+
+    @classmethod
+    def list_supported_extensions(cls) -> set[str]:
+        """返回所有已注册 Loader 支持的文件扩展名集合。"""
+        result: set[str] = set()
+        for loader_cls in cls._loaders:
+            result.update(loader_cls.extensions)
+        return result
+
+    @classmethod
+    def list_registered(cls) -> list[str]:
+        """返回所有已注册 Loader 的类名列表（调试用）。"""
+        return [loader_cls.__name__ for loader_cls in cls._loaders]
+
+
 class Loader(ABC):
-    """文档加载器接口"""
+    """文档加载器接口 —— 子类自动注册到 LoaderRegistry。"""
 
     # 文档加载器支持的文件后缀类型
-    extensions: list[str] = []
+    extensions: ClassVar[list[str]] = []
+    # 是否支持从 URL 抓取内容
+    supports_urls: ClassVar[bool] = False
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        """子类定义时自动注册到 LoaderRegistry。"""
+        super().__init_subclass__(**kwargs)
+        LoaderRegistry.register(cls)
 
     @abstractmethod
     def load(self, path: str) -> list[Document]:
@@ -42,12 +118,15 @@ class Loader(ABC):
 class TextLoader(Loader):
     """纯文本文档加载器"""
 
-    extensions: list[str] = [DocumentType.TXT.value, DocumentType.MARKDOWN.value]
+    # TODO 还需要优化下MARKDOWN的Loader，单独抽取出来，针对表格数据进行处理
+    extensions: ClassVar[list[str]] = [
+        DocumentType.TXT.value, DocumentType.MARKDOWN.value]
 
     def load(self, path: str) -> list[Document]:
         path_obj = Path(path)
         if not (
-            path_obj.exists() and path_obj.is_file() and path_obj.suffix.lower() in self.extensions
+            path_obj.exists() and path_obj.is_file(
+            ) and path_obj.suffix.lower() in self.extensions
         ):
             raise TypeError(f"Invalid file: {path}")
 
@@ -65,7 +144,25 @@ class TextLoader(Loader):
             )
         ]
 
-    # TODO 新增方法，根据文件后缀动态选择loader
+
+class PdfLoader(Loader):
+    """PDF文档加载器"""
+
+    extensions: ClassVar[list[str]] = [DocumentType.PDF.value]
+
+    def load(self, path: str) -> list[Document]:
+        path_obj = Path(path)
+        if not (
+            path_obj.exists() and path_obj.is_file(
+            ) and path_obj.suffix.lower() in self.extensions
+        ):
+            raise TypeError(f"Invalid file: {path}")
+
+        """TODO 
+        PDF 文档需要处理的问题:
+            1. 可能包含如下三类PDF文件：纯文本、纯扫描件、文本+扫描件
+            2. 可能包含表格，表格可能翻页
+        """
 
 
 class HTMLLoader(Loader):
@@ -76,7 +173,9 @@ class HTMLLoader(Loader):
         这里选择BeautifulSoup作为清洗方案，实际可以考虑用再用小模型进行一次数据清洗，保证文档质量
     """
 
-    extensions: list[str] = [DocumentType.HTML.value, DocumentType.HTM.value]
+    extensions: ClassVar[list[str]] = [
+        DocumentType.HTML.value, DocumentType.HTM.value]
+    supports_urls: ClassVar[bool] = True  # 支持从 URL 抓取网页内容
 
     def load(self, path: str) -> list[Document]:
         if path.lower().startswith(("http://", "https://")):
@@ -86,7 +185,8 @@ class HTMLLoader(Loader):
     def _load_file(self, path: str) -> list[Document]:
         path_obj = Path(path)
         if not (
-            path_obj.exists() and path_obj.is_file() and path_obj.suffix.lower() in self.extensions
+            path_obj.exists() and path_obj.is_file(
+            ) and path_obj.suffix.lower() in self.extensions
         ):
             raise TypeError(f"Invalid file: {path}")
         content = path_obj.read_text(encoding="utf-8")
@@ -142,8 +242,14 @@ class HTMLLoader(Loader):
 
 if __name__ == "__main__":
     BASE_DIR = Path(__file__).parent
+
+    # 注册器自动匹配：根据文件扩展名选择合适的 Loader
+    print(f"已注册 Loader: {LoaderRegistry.list_registered()}")
+    print(f"支持的扩展名: {sorted(LoaderRegistry.list_supported_extensions())}")
+
     TEST_FILE = str(BASE_DIR / ".." / "demo" / "data" / "doc.md")
-    loader = TextLoader()
+    loader = LoaderRegistry.find(TEST_FILE)
+    print(f"\n{TEST_FILE} → {type(loader).__name__}")
     docs = loader.load(TEST_FILE)
     for i, document in enumerate(docs):
         print(f"[{i}]: {document}\n")

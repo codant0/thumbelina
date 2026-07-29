@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from thumbelina.rag.ingestion.chunker import RecursiveChunker
 from thumbelina.rag.ingestion.document_dedup import DocumentDeduplicator
-from thumbelina.rag.ingestion.loader import HTMLLoader, Loader, TextLoader
+from thumbelina.rag.ingestion.loader import Loader, LoaderRegistry, TextLoader
 from thumbelina.rag.knowledge_base.repository import (
     DocumentRepository,
     KnowledgeBaseRepository,
@@ -274,7 +274,7 @@ async def upload_document(kb_id: str, file: UploadFile, request: Request) -> Doc
     await file.close()
 
     try:
-        kb_indexer = _build_indexer(request, kb_id)
+        kb_indexer = _build_indexer(request, kb_id, path=str(tmp_path))
         stats = await asyncio.to_thread(kb_indexer.index_batch, [tmp_path])
         logger.debug(f"index stats: {stats}")
         if stats.errors:
@@ -315,9 +315,19 @@ async def upload_document(kb_id: str, file: UploadFile, request: Request) -> Doc
 
 
 def _build_indexer(
-    request: Request, kb_id: str, loader: Loader | None = None
+    request: Request,
+    kb_id: str,
+    *,
+    path: str | None = None,
+    loader: Loader | None = None,
 ) -> Indexer:
-    """从 app.state 构建 Indexer 实例（复用已有组件）。"""
+    """从 app.state 构建 Indexer 实例（复用已有组件）。
+
+    loader 选择策略（优先级从高到低）：
+    1. 显式传入 loader 参数 → 直接使用
+    2. 传入 path 参数 → 由 LoaderRegistry 根据路径自动匹配
+    3. 均未传入 → 回退到 TextLoader
+    """
     registry = getattr(request.app.state, "rag_embedding_registry", None)
     if registry is None:
         raise HTTPException(
@@ -335,6 +345,13 @@ def _build_indexer(
         DocumentDeduplicator(doc_repo=doc_repo) if doc_repo else None
     )
     engine = getattr(request.app.state, "engine", None)
+
+    # Loader 选择：显式 > 自动匹配 > 默认
+    if loader is None and path is not None:
+        try:
+            loader = LoaderRegistry.find(path)
+        except ValueError:
+            loader = TextLoader()
 
     return Indexer(
         loader=loader or TextLoader(),
@@ -362,8 +379,8 @@ async def upload_document_by_url(
     if not url.lower().startswith(("http://", "https://")):
         raise HTTPException(status_code=400, detail="URL 必须以 http:// 或 https:// 开头")
 
-    # 使用 HTMLLoader，Indexer 会自动识别 URL 走 _load_by_url 路径
-    kb_indexer = _build_indexer(request, kb_id, loader=HTMLLoader())
+    # 使用 LoaderRegistry 自动匹配：URL → HTMLLoader
+    kb_indexer = _build_indexer(request, kb_id, path=url)
     stats = await asyncio.to_thread(kb_indexer.index, url)
     if stats.errors:
         raise HTTPException(status_code=400, detail="; ".join(stats.errors))
@@ -430,7 +447,7 @@ async def upload_documents_batch(
                     f.write(chunk)
             await file.close()
 
-            kb_indexer = _build_indexer(request, kb_id)
+            kb_indexer = _build_indexer(request, kb_id, path=str(tmp_path))
             stats = await asyncio.to_thread(kb_indexer.index_batch, [tmp_path])
 
             if stats.errors:

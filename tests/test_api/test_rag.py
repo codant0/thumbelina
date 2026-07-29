@@ -174,8 +174,6 @@ def _install_mock_module(module_path: str, attrs: dict | None = None) -> None:
 @pytest.fixture(autouse=False)
 def mock_rag_pipeline():
     """Patch Indexer/Loaders in the rag route module to avoid importing torch."""
-    import uuid
-
     mock_indexer_cls = MagicMock()
     mock_stats = MagicMock()
     mock_stats.indexed_count = 0
@@ -186,14 +184,12 @@ def mock_rag_pipeline():
     mock_indexer_cls.return_value.index_batch.return_value = mock_stats
 
     mock_text_loader_cls = MagicMock()
-    mock_html_loader_cls = MagicMock()
     mock_chunker_cls = MagicMock()
     mock_dedup_cls = MagicMock()
 
     with (
         patch("thumbelina.api.routes.rag.Indexer", mock_indexer_cls),
         patch("thumbelina.api.routes.rag.TextLoader", mock_text_loader_cls),
-        patch("thumbelina.api.routes.rag.HTMLLoader", mock_html_loader_cls),
         patch("thumbelina.api.routes.rag.RecursiveChunker", mock_chunker_cls),
         patch("thumbelina.api.routes.rag.DocumentDeduplicator", mock_dedup_cls),
     ):
