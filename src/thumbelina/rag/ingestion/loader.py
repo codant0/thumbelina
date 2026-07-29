@@ -14,12 +14,12 @@ import uuid
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import ClassVar
-
 import requests
 from bs4 import BeautifulSoup
 from simhash import Simhash
-
 from thumbelina.rag.knowledge_base.models import Document, DocumentType
+import pymupdf
+from paddleocr import PaddleOCR
 
 
 class LoaderRegistry:
@@ -158,11 +158,44 @@ class PdfLoader(Loader):
         ):
             raise TypeError(f"Invalid file: {path}")
 
-        """TODO 
+        """
         PDF 文档需要处理的问题:
             1. 可能包含如下三类PDF文件：纯文本、纯扫描件、文本+扫描件
             2. 可能包含表格，表格可能翻页
         """
+
+        # 使用pymupdf尝试提取文字
+        doc = pymupdf.open(path)
+        # TODO 简易实现，还需要优化
+        try:
+            # 逐页提取文本，用换行分隔
+            pages_text: list[str] = []
+            for index, page in doc:
+                # TODO 页码的记录方式需要优化，或移除？
+                pages_text.append(f"page: {index + 1}")
+                page_text = page.get_text("text")
+                # TODO 判定是否扫描件方式需要优化
+                if not page_text:
+                    # 可能是扫描件
+                    # TODO 后续补充使用PaddleOCR扫描
+                    pass
+                pages_text.append(page_text)
+            content = "\n".join(pages_text).strip()
+
+            # TODO 表格未进行优化
+            return [
+                Document(
+                    id=uuid.uuid4().hex,
+                    name=path_obj.name,
+                    source_uri=str(path_obj.resolve()),
+                    document_type=DocumentType.PDF,
+                    content=content,
+                    sha256=self._get_sha256(content),
+                    sim_hash_64=self._get_sim_hash_64(content),
+                )
+            ]
+        finally:
+            doc.close()
 
 
 class HTMLLoader(Loader):
