@@ -294,8 +294,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         from thumbelina.rag.embedding.registry import EmbeddingRegistry
         from thumbelina.rag.embedding.store_manager import ChromaStoreManager
-        from thumbelina.rag.knowledge_base.db import init_rag_db
-        from thumbelina.rag.knowledge_base.repository import (
+        from thumbelina.rag.common.db import init_rag_db
+        from thumbelina.rag.common.repository import (
             DocumentRepository,
             KnowledgeBaseRepository,
         )

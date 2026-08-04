@@ -9,7 +9,7 @@ import chromadb
 import pytest
 
 from thumbelina.rag.embedding.vector_chroma import ChromaVectorStore
-from thumbelina.rag.knowledge_base.models import Chunk
+from thumbelina.rag.common.models import Chunk
 
 
 @pytest.fixture

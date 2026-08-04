@@ -17,7 +17,7 @@ from typing import ClassVar
 import requests
 from bs4 import BeautifulSoup
 from simhash import Simhash
-from thumbelina.rag.knowledge_base.models import Document, DocumentType
+from thumbelina.rag.common.models import Document, DocumentType, PdfPageType
 import pymupdf
 from paddleocr import PaddleOCR
 
@@ -149,6 +149,7 @@ class PdfLoader(Loader):
     """PDF文档加载器"""
 
     extensions: ClassVar[list[str]] = [DocumentType.PDF.value]
+    _ocr_engine: PaddleOCR = None
 
     def load(self, path: str) -> list[Document]:
         path_obj = Path(path)
@@ -166,21 +167,24 @@ class PdfLoader(Loader):
 
         # 使用pymupdf尝试提取文字
         doc = pymupdf.open(path)
-        # TODO 简易实现，还需要优化
         try:
             # 逐页提取文本，用换行分隔
             pages_text: list[str] = []
-            for index, page in doc:
-                # TODO 页码的记录方式需要优化，或移除？
-                pages_text.append(f"page: {index + 1}")
+            for page in doc:
+                pdfType = self._classify_page(page)
+                # 若包含扫描件，先进行PaddleOCR扫描
+                ocr = PdfPageType.SCANNED == pdfType or PdfPageType.MIXED == pdfType
+                if (ocr):
+                    engine = self._get_ocr_engine()
+                    engine.predict(page)
+
                 page_text = page.get_text("text")
-                # TODO 判定是否扫描件方式需要优化
                 if not page_text:
                     # 可能是扫描件
                     # TODO 后续补充使用PaddleOCR扫描
                     pass
                 pages_text.append(page_text)
-            content = "\n".join(pages_text).strip()
+            content = "".join(pages_text).strip()
 
             # TODO 表格未进行优化
             return [
@@ -190,12 +194,44 @@ class PdfLoader(Loader):
                     source_uri=str(path_obj.resolve()),
                     document_type=DocumentType.PDF,
                     content=content,
+                    page_content=page_text,
+                    page_count=len(page_text),
                     sha256=self._get_sha256(content),
                     sim_hash_64=self._get_sim_hash_64(content),
                 )
             ]
         finally:
             doc.close()
+
+    def _classify_page(page: pymupdf.Page) -> PdfPageType:
+        # 1. 判断字符密度，小于20个字符认为“可能”是扫描件
+        text = page.get_text("text").stripe()
+        sparse_text = len(text) < 20
+
+        # 2. 判断图片覆盖面积，认为覆盖超过60%则包含扫描件
+        page_area = page.rect.width * page.rect.height
+        image_area = sum(
+            (img["bbox"][2] - img["bbox"][0]) * (img["bbox"][3] - img["bbox"][1])
+            for img in page.get_image_info()
+        )
+        image_dominant = image_area > 0.6 * page_area
+
+        # 文字少，图片覆盖大 -> 扫描件
+        if sparse_text and image_dominant:
+            return PdfPageType.SCANNED
+        # 文字多，图片覆盖大 -> 混合
+        if image_dominant and not sparse_text:
+            return PdfPageType.MIXED
+        return PdfPageType.TEXT
+
+    def _get_ocr_engine(self) -> PaddleOCR:
+        if self._ocr_engine is None:
+            try:
+                from paddleocr import PaddleOCR
+            except ImportError:
+                raise RuntimeError("扫描件处理需安装 paddleocr: pip install -e '.[rag-ocr]'")
+            self._ocr_engine = PaddleOCR(use_doc_orientation_classify=False, use_doc_unwarping=False)
+        return self._ocr_engine
 
 
 class HTMLLoader(Loader):
@@ -271,18 +307,3 @@ class HTMLLoader(Loader):
             tag.decompose()
 
         return soup.get_text(separator="\n", strip=True)
-
-
-if __name__ == "__main__":
-    BASE_DIR = Path(__file__).parent
-
-    # 注册器自动匹配：根据文件扩展名选择合适的 Loader
-    print(f"已注册 Loader: {LoaderRegistry.list_registered()}")
-    print(f"支持的扩展名: {sorted(LoaderRegistry.list_supported_extensions())}")
-
-    TEST_FILE = str(BASE_DIR / ".." / "demo" / "data" / "doc.md")
-    loader = LoaderRegistry.find(TEST_FILE)
-    print(f"\n{TEST_FILE} → {type(loader).__name__}")
-    docs = loader.load(TEST_FILE)
-    for i, document in enumerate(docs):
-        print(f"[{i}]: {document}\n")

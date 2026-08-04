@@ -6,7 +6,7 @@
 - Chunk：文档片段（文本内容、向量 ID、元数据、所属文档）
 """
 
-from enum import Enum
+from enum import Enum, auto, unique
 
 from pydantic import BaseModel
 
@@ -45,6 +45,10 @@ class Document(BaseModel):
     source_uri: str
     document_type: DocumentType
     content: str
+    # 分页数据，仅需要页码信息的文本有值
+    page_text: list[str] = []
+    page_count: int = 0
+
     sha256: bytes
     sim_hash_64: bytes
     knowledge_base_id: str = "0"
@@ -59,3 +63,12 @@ class Chunk(BaseModel):
     # TODO 暂时直接使用json类型的metadata，待后续结构稳定后再明确
     metadata: str
     knowledge_base_id: str
+
+@unique
+class PdfPageType(Enum):
+    """PDF页类型"""
+
+    TEXT = auto()
+    SCANNED = auto()
+    MIXED = auto()
+

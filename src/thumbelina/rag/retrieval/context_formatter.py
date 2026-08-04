@@ -30,7 +30,7 @@ import unicodedata
 from typing import Any, Callable, Sequence, Union
 
 from thumbelina.rag.embedding.base import ScoredChunk
-from thumbelina.rag.knowledge_base.models import Chunk
+from thumbelina.rag.common.models import Chunk
 
 logger = logging.getLogger(__name__)
 

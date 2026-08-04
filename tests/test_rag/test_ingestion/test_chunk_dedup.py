@@ -13,7 +13,7 @@ from thumbelina.rag.ingestion.chunk_dedup import (
     ChunkDeduplicator,
     ChunkDedupStats,
 )
-from thumbelina.rag.knowledge_base.models import Chunk
+from thumbelina.rag.common.models import Chunk
 
 # ---------------------------------------------------------------------------
 # Fixtures

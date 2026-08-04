@@ -6,8 +6,8 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 
-from thumbelina.rag.knowledge_base.db import init_rag_db
-from thumbelina.rag.knowledge_base.repository import (
+from thumbelina.rag.common.db import init_rag_db
+from thumbelina.rag.common.repository import (
     DocumentRepository,
     KnowledgeBaseRepository,
 )

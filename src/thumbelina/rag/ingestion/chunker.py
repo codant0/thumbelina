@@ -13,7 +13,7 @@ from pathlib import Path
 import uuid
 
 from thumbelina.rag.ingestion.loader import TextLoader
-from thumbelina.rag.knowledge_base.models import Chunk, Document
+from thumbelina.rag.common.models import Chunk, Document
 
 
 class Chunker(ABC):

@@ -9,8 +9,8 @@ from thumbelina.rag.ingestion.document_dedup import (
     DedupResult,
     DocumentDeduplicator,
 )
-from thumbelina.rag.knowledge_base.models import Document, DocumentType
-from thumbelina.rag.knowledge_base.orm_models import DocumentRecord
+from thumbelina.rag.common.models import Document, DocumentType
+from thumbelina.rag.common.orm_models import DocumentRecord
 
 # ---------------------------------------------------------------------------
 # Helpers

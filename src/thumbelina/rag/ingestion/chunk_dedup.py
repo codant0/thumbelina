@@ -30,7 +30,7 @@ from datasketch import MinHash
 from sqlalchemy import Engine, text
 
 from thumbelina.rag.embedding.base import EmbeddingModel
-from thumbelina.rag.knowledge_base.models import Chunk
+from thumbelina.rag.common.models import Chunk
 
 logger = logging.getLogger(__name__)
 

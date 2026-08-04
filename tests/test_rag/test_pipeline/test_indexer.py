@@ -19,7 +19,7 @@ if "torch" not in sys.modules:
 from thumbelina.rag.embedding.base import EmbeddingModel, ScoredChunk, VectorStore
 from thumbelina.rag.ingestion.chunker import Chunker
 from thumbelina.rag.ingestion.loader import Loader
-from thumbelina.rag.knowledge_base.models import Chunk, Document, DocumentType
+from thumbelina.rag.common.models import Chunk, Document, DocumentType
 from thumbelina.rag.pipeline.indexer import Indexer, IndexStats
 
 # ---------------------------------------------------------------------------

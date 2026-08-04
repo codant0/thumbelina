@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from thumbelina.rag.knowledge_base.models import Chunk
+from thumbelina.rag.common.models import Chunk
 
 
 class EmbeddingModel(ABC):

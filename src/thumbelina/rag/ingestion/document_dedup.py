@@ -19,8 +19,8 @@ import logging
 from dataclasses import dataclass
 from enum import Enum
 
-from thumbelina.rag.knowledge_base.models import Document
-from thumbelina.rag.knowledge_base.repository import DocumentRepository
+from thumbelina.rag.common.models import Document
+from thumbelina.rag.common.repository import DocumentRepository
 
 logger = logging.getLogger(__name__)
 

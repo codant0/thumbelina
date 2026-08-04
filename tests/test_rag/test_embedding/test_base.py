@@ -7,7 +7,7 @@ import uuid
 import pytest
 
 from thumbelina.rag.embedding.base import EmbeddingModel, ScoredChunk, VectorStore
-from thumbelina.rag.knowledge_base.models import Chunk
+from thumbelina.rag.common.models import Chunk
 
 
 class TestScoredChunk:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import Session
 
-from thumbelina.rag.knowledge_base.orm_models import (
+from thumbelina.rag.common.orm_models import (
     DocumentRecord,
     KnowledgeBaseRecord,
     RagBase,

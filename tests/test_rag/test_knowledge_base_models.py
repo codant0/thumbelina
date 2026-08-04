@@ -8,7 +8,7 @@ import uuid
 import pytest
 from pydantic import ValidationError
 
-from thumbelina.rag.knowledge_base.models import (
+from thumbelina.rag.common.models import (
     Chunk,
     Document,
     DocumentType,

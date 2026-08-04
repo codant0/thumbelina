@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from thumbelina.rag.ingestion.loader import HTMLLoader, LoaderRegistry, TextLoader
-from thumbelina.rag.knowledge_base.models import DocumentType
+from thumbelina.rag.common.models import DocumentType
 
 
 @pytest.fixture

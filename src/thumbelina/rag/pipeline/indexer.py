@@ -42,8 +42,8 @@ from thumbelina.rag.ingestion.chunk_dedup import ChunkDeduplicator
 from thumbelina.rag.ingestion.chunker import Chunker
 from thumbelina.rag.ingestion.document_dedup import DedupAction, DocumentDeduplicator
 from thumbelina.rag.ingestion.loader import Loader
-from thumbelina.rag.knowledge_base.models import Chunk, Document
-from thumbelina.rag.knowledge_base.repository import DocumentRepository
+from thumbelina.rag.common.models import Chunk, Document
+from thumbelina.rag.common.repository import DocumentRepository
 
 logger = logging.getLogger(__name__)
 

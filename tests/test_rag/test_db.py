@@ -5,8 +5,8 @@ from __future__ import annotations
 from sqlalchemy import create_engine, inspect, select
 from sqlalchemy.orm import Session
 
-from thumbelina.rag.knowledge_base.db import init_rag_db
-from thumbelina.rag.knowledge_base.orm_models import KnowledgeBaseRecord
+from thumbelina.rag.common.db import init_rag_db
+from thumbelina.rag.common.orm_models import KnowledgeBaseRecord
 
 
 class TestRagDb:

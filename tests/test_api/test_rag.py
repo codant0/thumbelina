@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from thumbelina.rag.knowledge_base.orm_models import (
+from thumbelina.rag.common.orm_models import (
     DocumentRecord,
     KnowledgeBaseRecord,
 )

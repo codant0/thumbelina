@@ -6,19 +6,19 @@
 - db: 数据库初始化（init_rag_db）
 """
 
-from thumbelina.rag.knowledge_base.db import init_rag_db
-from thumbelina.rag.knowledge_base.models import (
+from thumbelina.rag.common.db import init_rag_db
+from thumbelina.rag.common.models import (
     Chunk,
     Document,
     DocumentType,
     KnowledgeBase,
 )
-from thumbelina.rag.knowledge_base.orm_models import (
+from thumbelina.rag.common.orm_models import (
     DocumentRecord,
     KnowledgeBaseRecord,
     RagBase,
 )
-from thumbelina.rag.knowledge_base.repository import (
+from thumbelina.rag.common.repository import (
     DocumentRepository,
     KnowledgeBaseRepository,
 )

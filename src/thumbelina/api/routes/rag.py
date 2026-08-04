@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from thumbelina.rag.ingestion.chunker import RecursiveChunker
 from thumbelina.rag.ingestion.document_dedup import DocumentDeduplicator
 from thumbelina.rag.ingestion.loader import Loader, LoaderRegistry, TextLoader
-from thumbelina.rag.knowledge_base.repository import (
+from thumbelina.rag.common.repository import (
     DocumentRepository,
     KnowledgeBaseRepository,
 )
@@ -255,7 +255,7 @@ async def upload_document(kb_id: str, file: UploadFile, request: Request) -> Doc
         raise HTTPException(status_code=404, detail="Knowledge base not found")
 
     # Validate file type
-    from thumbelina.rag.knowledge_base.models import DocumentType
+    from thumbelina.rag.common.models import DocumentType
 
     filename = file.filename or ""
     ext = os.path.splitext(filename)[1]
@@ -424,7 +424,7 @@ async def upload_documents_batch(
     if kb is None:
         raise HTTPException(status_code=404, detail="Knowledge base not found")
 
-    from thumbelina.rag.knowledge_base.models import DocumentType
+    from thumbelina.rag.common.models import DocumentType
 
     uploaded: list[DocumentResponse] = []
     skipped: list[str] = []
@@ -593,7 +593,7 @@ async def query_by_simhash(
     """
     doc_repo = _get_doc_repo(request)
 
-    from thumbelina.rag.knowledge_base.simhash import bytes_to_hex, hex_to_simhash_bytes
+    from thumbelina.rag.common.simhash import bytes_to_hex, hex_to_simhash_bytes
 
     try:
         query_bytes = hex_to_simhash_bytes(body.sim_hash)

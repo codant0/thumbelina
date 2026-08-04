@@ -14,11 +14,11 @@ import uuid
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from thumbelina.rag.knowledge_base.orm_models import (
+from thumbelina.rag.common.orm_models import (
     DocumentRecord,
     KnowledgeBaseRecord,
 )
-from thumbelina.rag.knowledge_base.simhash import (
+from thumbelina.rag.common.simhash import (
     hamming_distance,
     serialize_for_vec,
 )

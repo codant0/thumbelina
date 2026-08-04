@@ -205,7 +205,40 @@ PDF文档可能存在如下类型：
 2. 扫描件PDF（使用OCR引擎提取）
 3. 文本+扫描件PDF（组合方案）
 
-还可能有如下难点：可能存在表格，且可能位于不同页面
+对此可用如下策略判断：
+
+1. 字符密度：单页字符较少，可能为扫描件
+2. 图片覆盖面积比：大图铺满页面，极可能包含扫描件
+
+``` python
+def _classify_page(page) -> PageKind:
+    text = page.get_text("text").strip()
+    # 信号1：字符密度
+    sparse_text = len(text) < 20
+    # 信号2：图片覆盖面积占比（扫描件特征：大图铺满页面）
+    page_area = page.rect.width * page.rect.height
+    img_area = sum(
+      (b["bbox"][2] - b["bbox"][0]) * (b["bbox"][3] - b["bbox"][1])
+      for b in page.get_image_info()
+    )
+    image_dominant = img_area > 0.6 * page_area
+    # 信号3（可选）：文本层质量——字母/数字占比，识别"有文本层的扫描件"的垃圾文本
+    
+    
+    if sparse_text and image_dominant:
+      return PageKind.SCANNED
+    if image_dominant and not sparse_text:
+      return PageKind.MIXED   # 图文混排，文本可用
+    return PageKind.TEXT
+```
+
+
+
+
+
+
+
+可能存在表格，且可能位于不同页面
 
 
 
