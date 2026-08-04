@@ -92,16 +92,16 @@ class LoaderRegistry:
         loader = LoaderRegistry.find("/path/to/doc.pdf")   # → PDFLoader
     """
 
-    _loaders: ClassVar[list[type["Loader"]]] = []
+    _loaders: ClassVar[list[type[Loader]]] = []
 
     @classmethod
-    def register(cls, loader_cls: type["Loader"]) -> type["Loader"]:
+    def register(cls, loader_cls: type[Loader]) -> type[Loader]:
         """注册一个 Loader 类。Loader 子类在定义时自动调用，无需手动触发。"""
         cls._loaders.append(loader_cls)
         return loader_cls
 
     @classmethod
-    def find(cls, path: str) -> "Loader":
+    def find(cls, path: str) -> Loader:
         """根据路径自动选择并实例化合适的 Loader。
 
         匹配优先级：
@@ -129,8 +129,7 @@ class LoaderRegistry:
 
         supported = cls.list_supported_extensions()
         raise ValueError(
-            f"不支持的文件类型 '{ext}'，路径: {path}。"
-            f"已支持的类型: {sorted(supported)}"
+            f"不支持的文件类型 '{ext}'，路径: {path}。已支持的类型: {sorted(supported)}"
         )
 
     @classmethod
@@ -162,7 +161,14 @@ class Loader(ABC):
 
     @abstractmethod
     def load(self, path: str) -> list[Document]:
-        """加载文档"""
+        """加载文档。无法加载（路径无效、扩展名不支持等）时应返回空列表。"""
+
+    def _is_loadable_file(self, path: str) -> bool:
+        """路径是否为本 Loader 可加载的已存在文件。"""
+        path_obj = Path(path)
+        return (
+            path_obj.exists() and path_obj.is_file() and path_obj.suffix.lower() in self.extensions
+        )
 
     def _get_sha256(self, content: str) -> bytes:
         return hashlib.sha256(content.encode()).digest()
@@ -176,16 +182,12 @@ class TextLoader(Loader):
     """纯文本文档加载器"""
 
     # TODO 还需要优化下MARKDOWN的Loader，单独抽取出来，针对表格数据进行处理
-    extensions: ClassVar[list[str]] = [
-        DocumentType.TXT.value, DocumentType.MARKDOWN.value]
+    extensions: ClassVar[list[str]] = [DocumentType.TXT.value, DocumentType.MARKDOWN.value]
 
     def load(self, path: str) -> list[Document]:
+        if not self._is_loadable_file(path):
+            return []
         path_obj = Path(path)
-        if not (
-            path_obj.exists() and path_obj.is_file(
-            ) and path_obj.suffix.lower() in self.extensions
-        ):
-            raise TypeError(f"Invalid file: {path}")
 
         content = str(path_obj.read_text(encoding="utf-8"))
 
@@ -230,19 +232,14 @@ class PdfLoader(Loader):
     OCR_MIN_SCORE: ClassVar[float] = 0.5
 
     def load(self, path: str) -> list[Document]:
+        if not self._is_loadable_file(path):
+            return []
         path_obj = Path(path)
-        if not (
-            path_obj.exists() and path_obj.is_file()
-            and path_obj.suffix.lower() in self.extensions
-        ):
-            raise TypeError(f"Invalid file: {path}")
 
         try:
             import pymupdf
         except ImportError as exc:
-            raise RuntimeError(
-                "PDF 加载需要 pymupdf: pip install -e '.[rag]'"
-            ) from exc
+            raise RuntimeError("PDF 加载需要 pymupdf: pip install -e '.[rag]'") from exc
 
         doc = pymupdf.open(path)
         try:
@@ -256,7 +253,8 @@ class PdfLoader(Loader):
                 if not page_text:
                     logger.warning(
                         "第 %d 页无可提取文本（扫描件需安装 rag-ocr 可选依赖），已跳过: %s",
-                        page_no, path,
+                        page_no,
+                        path,
                     )
                     continue
                 if parts:
@@ -307,8 +305,7 @@ class PdfLoader(Loader):
             return PdfPageType.TEXT
         sparse_text = len(text) < self.SPARSE_TEXT_CHARS
         image_area = sum(
-            max(0.0, img["bbox"][2] - img["bbox"][0])
-            * max(0.0, img["bbox"][3] - img["bbox"][1])
+            max(0.0, img["bbox"][2] - img["bbox"][0]) * max(0.0, img["bbox"][3] - img["bbox"][1])
             for img in page.get_image_info()
         )
         image_dominant = image_area > self.SCANNED_IMAGE_COVER * page_area
@@ -328,9 +325,11 @@ class PdfLoader(Loader):
 
             # alpha=False 输出 RGB 三通道，可直接转 numpy 数组
             pix = page.get_pixmap(dpi=self.OCR_DPI, alpha=False)
-            image = np.frombuffer(pix.samples, dtype=np.uint8).reshape(
-                pix.height, pix.width, pix.n
-            ).copy()  # frombuffer 结果只读，复制一份供预处理写入
+            image = (
+                np.frombuffer(pix.samples, dtype=np.uint8)
+                .reshape(pix.height, pix.width, pix.n)
+                .copy()
+            )  # frombuffer 结果只读，复制一份供预处理写入
             results = engine.predict(image)
         except Exception:
             logger.warning("第 %d 页 OCR 识别失败", page_no, exc_info=True)
@@ -359,9 +358,7 @@ class PdfLoader(Loader):
                     continue
                 xs = [float(pt[0]) for pt in poly]
                 ys = [float(pt[1]) for pt in poly]
-                boxes.append(
-                    ((min(ys) + max(ys)) / 2, min(xs), max(max(ys) - min(ys), 1.0), text)
-                )
+                boxes.append(((min(ys) + max(ys)) / 2, min(xs), max(max(ys) - min(ys), 1.0), text))
         if not boxes:
             return ""
 
@@ -387,8 +384,7 @@ class HTMLLoader(Loader):
         这里选择BeautifulSoup作为清洗方案，实际可以考虑用再用小模型进行一次数据清洗，保证文档质量
     """
 
-    extensions: ClassVar[list[str]] = [
-        DocumentType.HTML.value, DocumentType.HTM.value]
+    extensions: ClassVar[list[str]] = [DocumentType.HTML.value, DocumentType.HTM.value]
     supports_urls: ClassVar[bool] = True  # 支持从 URL 抓取网页内容
 
     def load(self, path: str) -> list[Document]:
@@ -397,12 +393,9 @@ class HTMLLoader(Loader):
         return self._load_file(path=path)
 
     def _load_file(self, path: str) -> list[Document]:
+        if not self._is_loadable_file(path):
+            return []
         path_obj = Path(path)
-        if not (
-            path_obj.exists() and path_obj.is_file(
-            ) and path_obj.suffix.lower() in self.extensions
-        ):
-            raise TypeError(f"Invalid file: {path}")
         content = path_obj.read_text(encoding="utf-8")
         text = self._clear_html_data(content=content)
 

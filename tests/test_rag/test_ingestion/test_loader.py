@@ -8,8 +8,8 @@ from pathlib import Path
 import pymupdf
 import pytest
 
-from thumbelina.rag.ingestion.loader import HTMLLoader, LoaderRegistry, PdfLoader, TextLoader
 from thumbelina.rag.common.models import DocumentType, PdfPageType
+from thumbelina.rag.ingestion.loader import HTMLLoader, LoaderRegistry, PdfLoader, TextLoader
 
 
 @pytest.fixture
@@ -207,7 +207,7 @@ class TestPdfLoader:
         assert doc.page_text == pages
         # 偏移与正文严格一致：按 span 可精确切出每页文本
         for span, text in zip(doc.page_spans, pages):
-            assert doc.content[span.start:span.end] == text
+            assert doc.content[span.start : span.end] == text
 
     def test_blank_page_skipped(self, pdf_loader, tmp_dir):
         f = _make_pdf(tmp_dir / "blank.pdf", ["first page", "", "third page"])
@@ -249,9 +249,8 @@ class TestPdfLoader:
 
         assert pdf_loader.load(str(path)) == []
 
-    def test_load_nonexistent_raises(self, pdf_loader):
-        with pytest.raises(TypeError):
-            pdf_loader.load("/nonexistent/path/file.pdf")
+    def test_load_nonexistent_returns_empty(self, pdf_loader):
+        assert pdf_loader.load("/nonexistent/path/file.pdf") == []
 
 
 class TestOcrResultsToText:

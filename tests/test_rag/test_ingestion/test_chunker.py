@@ -7,8 +7,8 @@ import uuid
 
 import pytest
 
-from thumbelina.rag.ingestion.chunker import FixedSizeChunker, RecursiveChunker
 from thumbelina.rag.common.models import Document, DocumentType, PageSpan
+from thumbelina.rag.ingestion.chunker import FixedSizeChunker, RecursiveChunker
 
 
 def _make_document(content: str, name: str = "test.md") -> Document:
@@ -160,28 +160,30 @@ class TestRecursiveChunker:
         assert len(chunks) == 1
         assert chunks[0].content == "短文本"
 
-    def test_fallback_truncation(self):
-        # 一段没有分隔符的超长文本
+    def test_char_fallback_no_data_loss(self):
+        # 一段没有分隔符的超长文本：字符级兜底切分，不能截断丢内容
         long_text = "A" * 1000
         doc = _make_document(long_text)
         chunker = RecursiveChunker(separators=["\n\n", "\n"], max_size=100)
         chunks = chunker.chunk(doc)
 
-        # 兜底截断到 max_size
-        assert len(chunks) == 1
-        assert len(chunks[0].content) == 100
+        assert len(chunks) > 1
+        covered: set[int] = set()
+        for chunk in chunks:
+            meta = json.loads(chunk.metadata)
+            assert len(chunk.content) <= 100
+            assert long_text[meta["start"] : meta["end"]] == chunk.content
+            covered.update(range(meta["start"], meta["end"]))
+        # 原文每个字符都至少被一个块覆盖
+        assert covered == set(range(len(long_text)))
 
     def test_custom_separators(self):
-        # max_size=3 强制按分隔符切分（每段 3 字符 = max_size）
+        # max_size=4 强制按分隔符切分（每段 4 字符 = max_size，分隔符保留在段尾）
         doc = _make_document("aaa|bbb|ccc")
-        chunker = RecursiveChunker(separators=["|"], max_size=3)
+        chunker = RecursiveChunker(separators=["|"], max_size=4)
         chunks = chunker.chunk(doc)
 
-        assert len(chunks) == 3
-        contents = [c.content for c in chunks]
-        assert "aaa" in contents
-        assert "bbb" in contents
-        assert "ccc" in contents
+        assert [c.content for c in chunks] == ["aaa|", "bbb|", "ccc"]
 
     def test_metadata_contains_source_info(self):
         doc = _make_document("Hello world")
@@ -228,38 +230,70 @@ class TestRecursiveChunker:
         assert len(chunks) == 3
 
 
-class TestRecursiveSplitClassMethod:
-    """Tests for RecursiveChunker.recursive_split classmethod."""
+class TestRecursiveChunkerBoundaries:
+    """分隔符处理：保留、层级选择、误切防护、参数校验。"""
 
-    def test_empty_text(self):
-        doc = _make_document("")
-        result = RecursiveChunker.recursive_split(doc, "", ["\n"], 100)
-        assert result == []
-
-    def test_text_within_limit(self):
-        doc = _make_document("")
-        result = RecursiveChunker.recursive_split(doc, "short", ["\n"], 100)
-        assert len(result) == 1
-        assert result[0].content == "short"
-
-    def test_split_on_first_matching_separator(self):
-        doc = _make_document("")
-        # max_size=1 强制切分
-        result = RecursiveChunker.recursive_split(doc, "a\nb", ["\n", " "], 1)
-        assert len(result) == 2
+    def test_separator_kept_in_content(self):
+        # 分隔符保留在前一段末尾，不丢失标点
+        doc = _make_document("第一段。\n\n第二段。")
+        chunks = RecursiveChunker(max_size=4, overlap=0).chunk(doc)
+        assert [c.content for c in chunks] == ["第一段。", "第二段。"]
 
     def test_falls_through_to_next_separator(self):
-        doc = _make_document("")
-        # 没有 \n，但有空格；max_size=1 强制切分
-        result = RecursiveChunker.recursive_split(doc, "a b c", ["\n", " "], 1)
-        assert len(result) == 3
+        # 没有 \n，落到空格分隔符；max_size=1 强制切分
+        doc = _make_document("a b c")
+        chunks = RecursiveChunker(max_size=1).chunk(doc)
+        assert [c.content for c in chunks] == ["a", "b", "c"]
 
-    def test_truncation_when_no_separator_matches(self):
-        doc = _make_document("")
-        long_text = "A" * 200
-        result = RecursiveChunker.recursive_split(doc, long_text, ["\n"], 50)
-        assert len(result) == 1
-        assert len(result[0].content) == 50
+    def test_decimal_not_split_by_period(self):
+        # 英文句末分隔符必须带空格，"3.14" 不能被裸 "." 误切
+        doc = _make_document("圆周率是3.14，约等于22/7。")
+        chunks = RecursiveChunker(max_size=9, overlap=0).chunk(doc)
+        assert [c.content for c in chunks] == ["圆周率是3.14，", "约等于22/7。"]
+
+    def test_overlap_bridges_adjacent_chunks(self):
+        # 每句 4 字符；相邻块共享尾部句子作为 overlap，且偏移可回溯
+        text = "句子一。句子二。句子三。句子四。"
+        doc = _make_document(text)
+        chunks = RecursiveChunker(max_size=10, overlap=4).chunk(doc)
+
+        assert len(chunks) > 1
+        covered: set[int] = set()
+        for chunk in chunks:
+            meta = json.loads(chunk.metadata)
+            assert len(chunk.content) <= 10
+            assert text[meta["start"] : meta["end"]] == chunk.content
+            covered.update(range(meta["start"], meta["end"]))
+        assert covered == set(range(len(text)))
+        # 第二块以第一块的尾句开头（overlap 生效）
+        assert chunks[1].content.startswith(chunks[0].content[-4:])
+
+    def test_metadata_contains_offsets_and_chunk_index(self):
+        doc = _make_document("段落一\n\n段落二")
+        chunks = RecursiveChunker(max_size=5, overlap=0).chunk(doc)
+
+        assert len(chunks) == 2
+        for i, chunk in enumerate(chunks):
+            meta = json.loads(chunk.metadata)
+            assert meta["chunk_index"] == i
+            assert meta["end"] - meta["start"] == meta["length"]
+
+    def test_invalid_params_raise(self):
+        with pytest.raises(ValueError, match="overlap"):
+            RecursiveChunker(max_size=10, overlap=10)
+        with pytest.raises(ValueError, match="max_size"):
+            RecursiveChunker(max_size=0)
+
+    def test_separators_list_not_shared(self):
+        # 实例不别名调用方列表，也不污染类属性默认值
+        seps = ["|"]
+        chunker = RecursiveChunker(separators=seps)
+        chunker.separators.append("x")
+        assert seps == ["|"]
+
+        before = list(RecursiveChunker.default_separators)
+        RecursiveChunker().separators.append("x")
+        assert RecursiveChunker.default_separators == before
 
 
 def _make_pdf_document(content: str, page_spans: list[PageSpan]) -> Document:
@@ -293,7 +327,9 @@ class TestChunkPageAttribution:
         meta1 = json.loads(chunks[1].metadata)
         assert (meta0["page_start"], meta0["page_end"]) == (1, 1)
         assert (meta1["page_start"], meta1["page_end"]) == (2, 2)
-        assert meta0["start"] == 0 and meta0["end"] == 13
+        # 分隔符 "\n" 保留在第一段末尾，第一块覆盖 [0, 14)
+        assert chunks[0].content == "page one text\n"
+        assert meta0["start"] == 0 and meta0["end"] == 14
         assert meta1["start"] == 14 and meta1["end"] == 27
 
     def test_chunk_spanning_pages_records_range(self):
@@ -324,4 +360,4 @@ class TestChunkPageAttribution:
         assert len(chunks) > 1
         for chunk in chunks:
             meta = json.loads(chunk.metadata)
-            assert text[meta["start"]:meta["end"]] == chunk.content
+            assert text[meta["start"] : meta["end"]] == chunk.content

@@ -91,6 +91,7 @@ class Chunk(BaseModel):
     metadata: str
     knowledge_base_id: str
 
+
 @unique
 class PdfPageType(Enum):
     """PDF页类型"""
@@ -98,4 +99,3 @@ class PdfPageType(Enum):
     TEXT = auto()
     SCANNED = auto()
     MIXED = auto()
-

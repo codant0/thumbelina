@@ -31,8 +31,9 @@ class EmbeddingRegistry:
         return cls._instance
 
     def register(self, model_name: str, model_cls: type[EmbeddingModel]):
-        """注册模型类"""
+        """注册模型类；重复注册同名模型时失效已缓存的实例。"""
         self._model[model_name] = model_cls
+        self._instance_cache.pop(model_name, None)
 
     def create(self, model_name: str | None = None, **kwargs) -> EmbeddingModel:
         """创建模型实例（按 model_name 缓存，避免重复加载）。"""

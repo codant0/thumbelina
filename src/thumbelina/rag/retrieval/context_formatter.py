@@ -27,10 +27,11 @@ from __future__ import annotations
 import json
 import logging
 import unicodedata
-from typing import Any, Callable, Sequence, Union
+from collections.abc import Callable, Sequence
+from typing import Any
 
-from thumbelina.rag.embedding.base import ScoredChunk
 from thumbelina.rag.common.models import Chunk
+from thumbelina.rag.embedding.base import ScoredChunk
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,7 @@ class ContextFormatter:
 
     def format(
         self,
-        chunks: Union[ScoredChunk, Chunk, Sequence[Union[ScoredChunk, Chunk]]],
+        chunks: ScoredChunk | Chunk | Sequence[ScoredChunk | Chunk],
     ) -> str:
         """将召回结果格式化为 LLM 上下文。
 
