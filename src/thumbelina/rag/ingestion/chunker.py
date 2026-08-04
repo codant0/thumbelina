@@ -24,6 +24,19 @@ class Chunker(ABC):
         """分块"""
 
 
+def _page_metadata(document: Document, start: int, end: int) -> dict[str, int]:
+    """根据 chunk 在正文中的偏移区间反查覆盖的页码范围。
+
+    分页信息以 chunk 元数据形式记录（page_start/page_end），
+    而非插入正文，避免页码标记割裂跨页语义、污染向量。
+    无分页信息的文档（如纯文本）返回空 dict。
+    """
+    page_range = document.page_range_for(start, end)
+    if page_range is None:
+        return {}
+    return {"page_start": page_range[0], "page_end": page_range[1]}
+
+
 class FixedSizeChunker(Chunker):
     def __init__(self, chunk_size: int = 512, overlap: int = 50):
         super().__init__()
@@ -57,6 +70,7 @@ class FixedSizeChunker(Chunker):
                         "end": end,
                         "length": len(slice),
                         "chunk_index": index,
+                        **_page_metadata(document, start, end),
                     }
                 ),
                 knowledge_base_id=document.knowledge_base_id,
@@ -82,11 +96,12 @@ class RecursiveChunker(Chunker):
 
     def chunk(self, document: Document) -> list[Chunk]:
         return self.recursive_split(
-            document, document.content, separators=self.separators, max_size=self.max_size
+            document, document.content, self.separators, self.max_size
         )
 
     @classmethod
-    def build_chunk(cls, document: Document, text: str) -> Chunk:
+    def build_chunk(cls, document: Document, text: str, start: int) -> Chunk:
+        end = start + len(text)
         return Chunk(
             id=uuid.uuid4().hex,
             document_id=document.id,
@@ -96,11 +111,11 @@ class RecursiveChunker(Chunker):
                     "source_uri": document.source_uri,
                     "document_type": document.document_type.value,
                     "name": document.name,
+                    "start": start,
+                    "end": end,
                     "length": len(text),
-                    # TODO 丢失了start、end、index信息，后续再考虑补回
-                    # "start": start,
-                    # "end": end,
-                    # "chunk_index": index,
+                    # TODO chunk_index 信息后续再考虑补回
+                    **_page_metadata(document, start, end),
                 }
             ),
             knowledge_base_id=document.knowledge_base_id,
@@ -108,26 +123,38 @@ class RecursiveChunker(Chunker):
 
     @classmethod
     def recursive_split(
-        cls, document: Document, text: str, separators: list[str], max_size: int
+        cls,
+        document: Document,
+        text: str,
+        separators: list[str],
+        max_size: int,
+        base: int = 0,
     ) -> list[Chunk]:
+        """递归切分。``base`` 为 ``text`` 在正文中的起始偏移，用于反查页码。"""
         chunks: list[Chunk] = []
 
         if not text:
             return chunks
 
         if len(text) <= max_size:
-            chunks.append(cls.build_chunk(document, text))
+            chunks.append(cls.build_chunk(document, text, base))
             return chunks
 
-        for separator in separators:
-            texts = text.split(separator)
-            if len(texts) > 1:
-                for slice in texts:
-                    chunks.extend(cls.recursive_split(document, slice, separators[1:], max_size))
+        for idx, separator in enumerate(separators):
+            parts = text.split(separator)
+            if len(parts) > 1:
+                offset = base
+                for part in parts:
+                    chunks.extend(
+                        cls.recursive_split(
+                            document, part, separators[idx + 1:], max_size, base=offset
+                        )
+                    )
+                    offset += len(part) + len(separator)
                 return chunks
 
         # 若无法再切割了，但依旧过长，兜底-截断
-        chunks.append(cls.build_chunk(document, text[:max_size]))
+        chunks.append(cls.build_chunk(document, text[:max_size], base))
         return chunks
 
 

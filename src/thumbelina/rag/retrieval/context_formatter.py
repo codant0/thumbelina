@@ -199,8 +199,15 @@ class ContextFormatter:
             source_parts.append(f"文档ID: {doc_id}")
 
         page = meta.get("page") or meta.get("page_number")
+        page_start = meta.get("page_start")
+        page_end = meta.get("page_end")
         section = meta.get("section") or meta.get("heading")
-        if page is not None:
+        if page_start is not None:
+            if page_end is not None and page_end != page_start:
+                source_parts.append(f"第 {page_start}-{page_end} 页")
+            else:
+                source_parts.append(f"第 {page_start} 页")
+        elif page is not None:
             source_parts.append(f"第 {page} 页")
         if section:
             source_parts.append(f"章节: {section}")

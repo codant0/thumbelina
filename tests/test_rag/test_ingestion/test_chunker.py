@@ -8,7 +8,7 @@ import uuid
 import pytest
 
 from thumbelina.rag.ingestion.chunker import FixedSizeChunker, RecursiveChunker
-from thumbelina.rag.common.models import Document, DocumentType
+from thumbelina.rag.common.models import Document, DocumentType, PageSpan
 
 
 def _make_document(content: str, name: str = "test.md") -> Document:
@@ -260,3 +260,68 @@ class TestRecursiveSplitClassMethod:
         result = RecursiveChunker.recursive_split(doc, long_text, ["\n"], 50)
         assert len(result) == 1
         assert len(result[0].content) == 50
+
+
+def _make_pdf_document(content: str, page_spans: list[PageSpan]) -> Document:
+    return Document(
+        id=uuid.uuid4().hex,
+        name="doc.pdf",
+        source_uri="/tmp/doc.pdf",
+        document_type=DocumentType.PDF,
+        content=content,
+        page_count=max((s.page for s in page_spans), default=0),
+        page_spans=page_spans,
+        sha256=b"\x00" * 32,
+        sim_hash_64=b"\x00" * 8,
+    )
+
+
+class TestChunkPageAttribution:
+    """chunk 页码由偏移反查得到：正文不含页码标记，跨页语义不被割裂。"""
+
+    def test_recursive_chunks_carry_page_metadata(self):
+        # 两页各一句话，用 "\n" 连接；分块按语义边界切，页码由偏移反查
+        content = "page one text\npage two text"
+        doc = _make_pdf_document(
+            content,
+            [PageSpan(page=1, start=0, end=13), PageSpan(page=2, start=14, end=27)],
+        )
+        chunks = RecursiveChunker(max_size=15).chunk(doc)
+
+        assert len(chunks) == 2
+        meta0 = json.loads(chunks[0].metadata)
+        meta1 = json.loads(chunks[1].metadata)
+        assert (meta0["page_start"], meta0["page_end"]) == (1, 1)
+        assert (meta1["page_start"], meta1["page_end"]) == (2, 2)
+        assert meta0["start"] == 0 and meta0["end"] == 13
+        assert meta1["start"] == 14 and meta1["end"] == 27
+
+    def test_chunk_spanning_pages_records_range(self):
+        content = "page one text\npage two text"
+        doc = _make_pdf_document(
+            content,
+            [PageSpan(page=1, start=0, end=13), PageSpan(page=2, start=14, end=27)],
+        )
+        chunks = FixedSizeChunker(chunk_size=20, overlap=0).chunk(doc)
+
+        # 第一个 chunk 覆盖 [0, 20)，横跨两页
+        meta = json.loads(chunks[0].metadata)
+        assert (meta["page_start"], meta["page_end"]) == (1, 2)
+
+    def test_no_page_metadata_for_plain_text(self):
+        doc = _make_document("plain text without pages")
+        chunks = RecursiveChunker(max_size=100).chunk(doc)
+
+        meta = json.loads(chunks[0].metadata)
+        assert "page_start" not in meta
+        assert "page_end" not in meta
+
+    def test_recursive_chunk_offsets_consistent(self):
+        text = ("para one. " * 5 + "\n\n") * 4 + "para end"
+        doc = _make_document(text)
+        chunks = RecursiveChunker(max_size=30).chunk(doc)
+
+        assert len(chunks) > 1
+        for chunk in chunks:
+            meta = json.loads(chunk.metadata)
+            assert text[meta["start"]:meta["end"]] == chunk.content

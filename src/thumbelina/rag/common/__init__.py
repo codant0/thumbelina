@@ -12,6 +12,7 @@ from thumbelina.rag.common.models import (
     Document,
     DocumentType,
     KnowledgeBase,
+    PageSpan,
 )
 from thumbelina.rag.common.orm_models import (
     DocumentRecord,
@@ -32,6 +33,7 @@ __all__ = [
     "KnowledgeBase",
     "KnowledgeBaseRecord",
     "KnowledgeBaseRepository",
+    "PageSpan",
     "RagBase",
     "init_rag_db",
 ]

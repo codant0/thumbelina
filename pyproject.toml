@@ -43,6 +43,15 @@ rag = [
     "llama-index-llms-openai-like>=0.3",
     "sqlite-vec>=0.1",
     "datasketch>=1.6",
+    "pymupdf>=1.24",
+    "simhash>=2.1",
+    "beautifulsoup4>=4.12",
+    "requests>=2.31",
+]
+rag-ocr = [
+    "paddlepaddle>=3.0",
+    "paddleocr>=3.0",
+    "numpy>=1.26",
 ]
 
 [project.scripts]

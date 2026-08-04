@@ -37,6 +37,18 @@ class DocumentType(Enum):
             raise ValueError(f"invalid value: {value}") from e
 
 
+class PageSpan(BaseModel):
+    """某一页文本在 Document.content 中的偏移区间。
+
+    用于分块器根据 chunk 的 [start, end) 偏移反查页码，
+    使页码作为 chunk 元数据记录，而不是插入正文（避免割裂跨页语义、污染向量）。
+    """
+
+    page: int  # 页码，从 1 开始
+    start: int  # 在 content 中的起始偏移（含）
+    end: int  # 在 content 中的结束偏移（不含）
+
+
 class Document(BaseModel):
     """文档，对应硬盘中的物理文件"""
 
@@ -45,13 +57,28 @@ class Document(BaseModel):
     source_uri: str
     document_type: DocumentType
     content: str
-    # 分页数据，仅需要页码信息的文本有值
+    # 分页信息（仅 PDF 等分页文档填充）：
+    # page_count 为物理总页数；page_text 为有内容页面的文本；
+    # page_spans 记录各页文本在 content 中的偏移区间，与 page_text 一一对应
     page_text: list[str] = []
     page_count: int = 0
+    page_spans: list[PageSpan] = []
 
     sha256: bytes
     sim_hash_64: bytes
     knowledge_base_id: str = "0"
+
+    def page_range_for(self, start: int, end: int) -> tuple[int, int] | None:
+        """根据 content 中的偏移区间返回覆盖的 (起始页, 结束页)。
+
+        无分页信息的文档（如纯文本）或未命中任何页时返回 None。
+        """
+        if not self.page_spans:
+            return None
+        pages = [span.page for span in self.page_spans if span.start < end and span.end > start]
+        if not pages:
+            return None
+        return pages[0], pages[-1]
 
 
 class Chunk(BaseModel):
