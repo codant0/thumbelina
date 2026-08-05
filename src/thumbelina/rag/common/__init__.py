@@ -8,8 +8,10 @@
 
 from thumbelina.rag.common.db import init_rag_db
 from thumbelina.rag.common.models import (
+    BlockSpan,
     Chunk,
     Document,
+    DocumentLayout,
     DocumentType,
     KnowledgeBase,
     PageSpan,
@@ -25,8 +27,10 @@ from thumbelina.rag.common.repository import (
 )
 
 __all__ = [
+    "BlockSpan",
     "Chunk",
     "Document",
+    "DocumentLayout",
     "DocumentRepository",
     "DocumentRecord",
     "DocumentType",

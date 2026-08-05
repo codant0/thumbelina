@@ -67,7 +67,6 @@ def test_websocket_wechat_conversation_forwards_only_reply(client):
     question would be indistinguishable from a bot reply)."""
     app = client.app
     wechat_channel = MagicMock()
-    wechat_channel.handle_incoming = AsyncMock(return_value="Reply from agent")
     wechat_channel.send_message = AsyncMock()
     wechat_channel._last_wechat_user_id = "wxid_friend"
     wechat_channel._last_context_token = "tok-123"
@@ -89,10 +88,10 @@ def test_websocket_wechat_conversation_forwards_only_reply(client):
     with client.websocket_connect("/ws/chat") as ws:
         ws.send_json({"message": "Hello from web", "conversation_id": wechat_conv_id})
         messages = _collect_ws_messages(ws)
-        assert any(m.get("response") == "Reply from agent" for m in messages)
+        assert any(m.get("response") == "Agent response" for m in messages)
 
     # Only the reply should be forwarded to WeChat, not the user's question
     sent_texts = [call.args[1] for call in wechat_channel.send_message.call_args_list]
-    assert sent_texts == ["Reply from agent"]
+    assert sent_texts == ["Agent response"]
     assert wechat_channel.send_message.call_count == 1
     assert wechat_channel.send_message.call_args.kwargs.get("context_token") == "tok-123"

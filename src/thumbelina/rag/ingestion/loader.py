@@ -3,6 +3,7 @@
 规划中的加载器
 --------------
 - TextLoader：加载纯文本文件
+- MarkdownLoader：解析 Markdown 文档，识别表格等结构块（基于 markdown-it）
 - PDFLoader：解析 PDF 文档（基于 PyMuPDF，扫描件可选 PaddleOCR 兜底）
 - HTMLLoader：抓取并解析网页内容
 - CodeLoader：加载源代码文件，附带语言类型元数据
@@ -11,6 +12,7 @@
 
 from __future__ import annotations
 
+import collections
 import hashlib
 import logging
 import uuid
@@ -20,14 +22,26 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import requests
 from bs4 import BeautifulSoup
+from markdown_it import MarkdownIt
 from simhash import Simhash
 
-from thumbelina.rag.common.models import Document, DocumentType, PageSpan, PdfPageType
+from thumbelina.rag.common.models import (
+    BlockSpan,
+    Document,
+    DocumentLayout,
+    DocumentType,
+    PageSpan,
+    PdfPageType,
+)
 
 if TYPE_CHECKING:
     from paddleocr import PaddleOCR
 
 logger = logging.getLogger(__name__)
+
+# simhash 库的 tokenizer 无状态（不修改实例），跨 Loader 共享避免重复创建；
+# 用整数 0 构造（只取 tokenizer，不参与构建特征）
+_SIMHASH_TOKENIZER = Simhash(0)
 
 # PaddleOCR 引擎单例：初始化耗时数秒（加载模型），跨 Loader 实例共享
 _OCR_ENGINE: PaddleOCR | None = None
@@ -174,15 +188,19 @@ class Loader(ABC):
         return hashlib.sha256(content.encode()).digest()
 
     def _get_sim_hash_64(self, content: str) -> bytes:
-        # 依赖三方库实现，默认返回是64位
-        return Simhash(content).value.to_bytes(8, "big")
+        # simhash 库对权重 >255 的特征执行 uint8 数组 * w 会溢出
+        # （OverflowError: Python integer out of bounds for uint8），大文档高频词权重可达上千。
+        # 这里沿用库自身的 tokenizer 预分词、统计词频并把权重截断到 255，
+        # 规避溢出；权重原本 <=255 的文档指纹与旧值完全一致，保持历史指纹兼容。
+        features = collections.Counter(_SIMHASH_TOKENIZER._tokenize(content))
+        capped = {token: min(count, 255) for token, count in features.items()}
+        return Simhash(capped).value.to_bytes(8, "big")
 
 
 class TextLoader(Loader):
     """纯文本文档加载器"""
 
-    # TODO 还需要优化下MARKDOWN的Loader，单独抽取出来，针对表格数据进行处理
-    extensions: ClassVar[list[str]] = [DocumentType.TXT.value, DocumentType.MARKDOWN.value]
+    extensions: ClassVar[list[str]] = [DocumentType.TXT.value]
 
     def load(self, path: str) -> list[Document]:
         if not self._is_loadable_file(path):
@@ -204,6 +222,123 @@ class TextLoader(Loader):
         ]
 
 
+class MarkdownLoader(Loader):
+    """Markdown 文档加载器。
+
+    与 TextLoader 的区别：用 markdown-it 把文档解析为带类型的块序列
+    （启用 GFM 管道表格规则），识别其中的表格并在 layout.block_spans 记录偏移区间，
+    供分块器做原子性保护（表格不在中间切断）。
+
+    加载阶段只"识别并保留"：content 保持原文，表格保留原始 ``|...|`` 语法，
+    同时记录标题路径（heading_path）与表头（header_row）。
+    小表整块、长表按行组拆分、宽表行序列化等策略属于切块阶段职责。
+    """
+
+    extensions: ClassVar[list[str]] = [DocumentType.MARKDOWN.value]
+
+    def load(self, path: str) -> list[Document]:
+        if not self._is_loadable_file(path):
+            return []
+        path_obj = Path(path)
+
+        content = str(path_obj.read_text(encoding="utf-8"))
+
+        # commonmark 预设 + table 规则（GFM 管道表格）；
+        # 不用 "gfm-like" 预设——其 linkify 选项额外依赖 linkify-it-py
+        md = MarkdownIt().enable("table")
+        tokens = md.parse(content)
+        block_spans = self._extract_block_spans(tokens, content)
+
+        return [
+            Document(
+                id=uuid.uuid4().hex,
+                name=path_obj.name,
+                source_uri=str(path_obj.resolve()),
+                document_type=DocumentType.MARKDOWN,
+                content=content,
+                layout=DocumentLayout(block_spans=block_spans) if block_spans else None,
+                sha256=self._get_sha256(content),
+                sim_hash_64=self._get_sim_hash_64(content),
+            )
+        ]
+
+    # ------------------------------------------------------------------
+    # 表格识别
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _extract_block_spans(tokens: list[Any], content: str) -> list[BlockSpan]:
+        """遍历顶层 token 流，提取表格块：偏移区间 + 标题路径 + 表头。
+
+        代码块（fence/code）中的 ``|...|`` 不会被解析为 table token，天然免疫误判。
+        注意：markdown-it 把 table 的 thead/tr/th 等子结构平铺在顶层 token 流中
+        （table_open.children 为 None），因此表格内部 token 需按索引向前扫描，
+        且其中的 inline（单元格文本）不得覆盖标题栈。
+        """
+        # 行号 → content 偏移换算表
+        line_starts = [0]
+        for i, ch in enumerate(content):
+            if ch == "\n":
+                line_starts.append(i + 1)
+
+        spans: list[BlockSpan] = []
+        heading_stack: list[tuple[int, str]] = []  # (heading level, 标题文本)
+        in_table = False
+
+        for index, tok in enumerate(tokens):
+            if tok.type == "table_open":
+                in_table = True
+                if tok.map:
+                    start = (
+                        line_starts[tok.map[0]] if tok.map[0] < len(line_starts) else len(content)
+                    )
+                    end = line_starts[tok.map[1]] if tok.map[1] < len(line_starts) else len(content)
+                    block_text = content[start:end].strip()
+                    end = start + len(block_text)  # 收紧区间，排除块尾换行
+                    spans.append(
+                        BlockSpan(
+                            block_type="table",
+                            start=start,
+                            end=end,
+                            heading_path=[title for _, title in heading_stack if title],
+                            header_row=MarkdownLoader._table_header_row(tokens, index),
+                        )
+                    )
+                continue
+            if tok.type == "table_close":
+                in_table = False
+                continue
+            if in_table:
+                continue  # 表格内部 token（含单元格 inline）不影响标题栈
+            if tok.type == "heading_open":
+                level = int(tok.tag[1:])
+                # 新标题关闭同级及更深层级的旧标题（标题作用域到下一同级/更高级标题为止）
+                heading_stack = [(lv, t) for lv, t in heading_stack if lv < level]
+                heading_stack.append((level, ""))
+            elif tok.type == "inline" and heading_stack:
+                heading_stack[-1] = (heading_stack[-1][0], tok.content.strip())
+        return spans
+
+    @staticmethod
+    def _table_header_row(tokens: list[Any], table_open_index: int) -> list[str]:
+        """提取表格第一行表头：thead 内各 th 的单元格文本。
+
+        table 的子结构平铺在顶层 token 流中，需从 table_open 向后扫描到 thead_close。
+        """
+        cells: list[str] = []
+        in_thead = False
+        for tok in tokens[table_open_index + 1 :]:
+            if tok.type in ("table_close", "thead_close"):
+                break
+            if tok.type == "thead_open":
+                in_thead = True
+            elif in_thead and tok.type == "th_open":
+                cells.append("")
+            elif in_thead and tok.type == "inline" and cells:
+                cells[-1] = tok.content.strip()
+        return cells
+
+
 class PdfLoader(Loader):
     """PDF 文档加载器。
 
@@ -213,7 +348,7 @@ class PdfLoader(Loader):
     - 扫描件页面（文字稀疏且图片覆盖大部分页面）回退到 PaddleOCR 识别
       （需安装 rag-ocr 可选依赖，否则跳过并告警）；
     - 页码不写入正文，而是记录每页文本在 content 中的偏移区间
-      （``page_spans``），由分块器按偏移反查 chunk 页码，
+      （``layout.page_spans``），由分块器按偏移反查 chunk 页码，
       避免页码标记割裂跨页语义、污染向量。
 
     TODO 表格未进行优化：后续可用 page.find_tables() 提取表格并整体成块，
@@ -244,7 +379,6 @@ class PdfLoader(Loader):
         doc = pymupdf.open(path)
         try:
             parts: list[str] = []
-            page_texts: list[str] = []
             page_spans: list[PageSpan] = []
             offset = 0
             for index, page in enumerate(doc):
@@ -262,7 +396,6 @@ class PdfLoader(Loader):
                 start = offset
                 parts.append(page_text)
                 offset += len(page_text)
-                page_texts.append(page_text)
                 page_spans.append(PageSpan(page=page_no, start=start, end=offset))
 
             content = "\n".join(parts)
@@ -276,9 +409,10 @@ class PdfLoader(Loader):
                     source_uri=str(path_obj.resolve()),
                     document_type=DocumentType.PDF,
                     content=content,
-                    page_text=page_texts,
-                    page_count=doc.page_count,
-                    page_spans=page_spans,
+                    layout=DocumentLayout(
+                        page_count=doc.page_count,
+                        page_spans=page_spans,
+                    ),
                     sha256=self._get_sha256(content),
                     sim_hash_64=self._get_sim_hash_64(content),
                 )

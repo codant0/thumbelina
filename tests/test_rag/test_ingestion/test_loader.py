@@ -7,9 +7,43 @@ from pathlib import Path
 
 import pymupdf
 import pytest
+from simhash import Simhash
 
 from thumbelina.rag.common.models import DocumentType, PdfPageType
-from thumbelina.rag.ingestion.loader import HTMLLoader, LoaderRegistry, PdfLoader, TextLoader
+from thumbelina.rag.ingestion.loader import (
+    HTMLLoader,
+    LoaderRegistry,
+    MarkdownLoader,
+    PdfLoader,
+    TextLoader,
+)
+
+
+class TestSimHash:
+    """_get_sim_hash_64：高频词权重截断，避免 simhash 库 uint8 溢出。"""
+
+    def test_high_frequency_token_no_overflow(self):
+        # 连续重复字符形成单一 4-gram，词频远超 255，直接 Simhash(content) 必然溢出
+        content = ("词" * 4) * 300
+        value = TextLoader()._get_sim_hash_64(content)
+        assert len(value) == 8
+
+    def test_deterministic(self):
+        content = "稳定的内容" * 10
+        loader = TextLoader()
+        assert loader._get_sim_hash_64(content) == loader._get_sim_hash_64(content)
+
+    def test_differs_for_different_content(self):
+        loader = TextLoader()
+        a = loader._get_sim_hash_64("完全不同的内容一")
+        b = loader._get_sim_hash_64("完全不同的内容二")
+        assert a != b
+
+    def test_backward_compatible_when_weights_small(self):
+        # 权重不超过 255 的文档，指纹与直接 Simhash(content) 完全一致
+        content = "一段普通内容，" * 20
+        loader = TextLoader()
+        assert loader._get_sim_hash_64(content) == Simhash(content).value.to_bytes(8, "big")
 
 
 @pytest.fixture
@@ -31,7 +65,8 @@ class TestTextLoader:
 
     def test_supported_extensions(self, text_loader):
         assert ".txt" in text_loader.extensions
-        assert ".md" in text_loader.extensions
+        # .md 已由独立的 MarkdownLoader 接管，TextLoader 不再处理
+        assert ".md" not in text_loader.extensions
 
     def test_load_txt_file(self, text_loader, tmp_dir):
         f = tmp_dir / "hello.txt"
@@ -46,15 +81,14 @@ class TestTextLoader:
         assert doc.document_type is DocumentType.TXT
         assert doc.id  # 非空
 
-    def test_load_md_file(self, text_loader, tmp_dir):
+    def test_load_md_file_rejected(self, text_loader, tmp_dir):
+        # .md 由独立的 MarkdownLoader 处理，TextLoader 不再加载
         f = tmp_dir / "readme.md"
         f.write_text("# 标题\n\n正文内容", encoding="utf-8")
 
         docs = text_loader.load(str(f))
 
-        assert len(docs) == 1
-        assert docs[0].document_type is DocumentType.MARKDOWN
-        assert "标题" in docs[0].content
+        assert docs == []
 
     def test_load_nonexistent_file_returns_empty(self, text_loader):
         docs = text_loader.load("/nonexistent/path/file.txt")
@@ -90,7 +124,7 @@ class TestTextLoader:
 
     def test_load_unicode_content(self, text_loader, tmp_dir):
         content = "中文内容🎉émojis"
-        f = tmp_dir / "unicode.md"
+        f = tmp_dir / "unicode.txt"
         f.write_text(content, encoding="utf-8")
 
         docs = text_loader.load(str(f))
@@ -102,9 +136,10 @@ class TestLoaderRegistry:
     """Tests for LoaderRegistry auto-matching."""
 
     def test_registered_loaders(self):
-        """TextLoader、HTMLLoader 和 PdfLoader 应自动注册。"""
+        """TextLoader、MarkdownLoader、HTMLLoader 和 PdfLoader 应自动注册。"""
         names = LoaderRegistry.list_registered()
         assert "TextLoader" in names
+        assert "MarkdownLoader" in names
         assert "HTMLLoader" in names
         assert "PdfLoader" in names
 
@@ -121,9 +156,9 @@ class TestLoaderRegistry:
         loader = LoaderRegistry.find("/some/path/doc.txt")
         assert isinstance(loader, TextLoader)
 
-    def test_find_md_returns_text_loader(self):
+    def test_find_md_returns_markdown_loader(self):
         loader = LoaderRegistry.find("/some/path/doc.md")
-        assert isinstance(loader, TextLoader)
+        assert isinstance(loader, MarkdownLoader)
 
     def test_find_html_returns_html_loader(self):
         loader = LoaderRegistry.find("/some/path/page.html")
@@ -154,6 +189,81 @@ class TestLoaderRegistry:
         l1 = LoaderRegistry.find("/a.md")
         l2 = LoaderRegistry.find("/b.md")
         assert l1 is not l2
+
+
+class TestMarkdownLoader:
+    """Tests for MarkdownLoader：表格识别与 BlockSpan 偏移。"""
+
+    @pytest.fixture
+    def md_loader(self):
+        return MarkdownLoader()
+
+    def test_plain_markdown_no_layout(self, md_loader, tmp_dir):
+        f = tmp_dir / "plain.md"
+        f.write_text("# 标题\n\n只有正文，没有表格。", encoding="utf-8")
+
+        docs = md_loader.load(str(f))
+
+        assert len(docs) == 1
+        doc = docs[0]
+        assert doc.document_type is DocumentType.MARKDOWN
+        # 无结构块时不构造 layout
+        assert doc.layout is None
+
+    def test_table_detected_with_exact_span(self, md_loader, tmp_dir):
+        content = "前导段落\n\n| 名称 | 价格 |\n| --- | --- |\n| A | 10 |\n| B | 20 |\n\n结尾段落"
+        f = tmp_dir / "table.md"
+        f.write_text(content, encoding="utf-8")
+
+        doc = md_loader.load(str(f))[0]
+
+        assert doc.content == content  # 原文保留，表格 |...| 语法不丢失
+        assert doc.layout is not None
+        spans = doc.layout.block_spans
+        assert len(spans) == 1
+        span = spans[0]
+        assert span.block_type == "table"
+        # 偏移区间切出的正文恰好是完整表格（不含前后空行）
+        expected = "| 名称 | 价格 |\n| --- | --- |\n| A | 10 |\n| B | 20 |"
+        assert doc.content[span.start : span.end] == expected
+        assert span.header_row == ["名称", "价格"]
+
+    def test_table_heading_path(self, md_loader, tmp_dir):
+        content = "# 产品规格\n\n## 价格表\n\n| 名称 | 价格 |\n| --- | --- |\n| A | 10 |\n"
+        f = tmp_dir / "headed.md"
+        f.write_text(content, encoding="utf-8")
+
+        doc = md_loader.load(str(f))[0]
+
+        assert doc.layout is not None
+        assert doc.layout.block_spans[0].heading_path == ["产品规格", "价格表"]
+
+    def test_heading_scope_closed_by_same_level(self, md_loader, tmp_dir):
+        # 第二个一级标题应关闭前一个标题的作用域，其下表格只带自己的标题路径
+        content = "# 甲\n\n| a |\n| --- |\n| 1 |\n\n# 乙\n\n| b |\n| --- |\n| 2 |\n"
+        f = tmp_dir / "scope.md"
+        f.write_text(content, encoding="utf-8")
+
+        doc = md_loader.load(str(f))[0]
+
+        assert doc.layout is not None
+        spans = doc.layout.block_spans
+        assert len(spans) == 2
+        assert spans[0].heading_path == ["甲"]
+        assert spans[1].heading_path == ["乙"]
+
+    def test_pipe_in_code_fence_not_table(self, md_loader, tmp_dir):
+        content = "```markdown\n| 不是 | 表格 |\n```\n"
+        f = tmp_dir / "fence.md"
+        f.write_text(content, encoding="utf-8")
+
+        doc = md_loader.load(str(f))[0]
+
+        # 代码块中的 |...| 不解析为表格 → 无结构块 → layout 为 None
+        assert doc.layout is None
+
+    def test_load_nonexistent_returns_empty(self, md_loader):
+        assert md_loader.load("/nonexistent/path/doc.md") == []
 
 
 def _make_pdf(path: Path, page_texts: list[str]) -> Path:
@@ -191,10 +301,10 @@ class TestPdfLoader:
         doc = docs[0]
         assert doc.document_type is DocumentType.PDF
         assert doc.content == "Hello page one"
-        assert doc.page_count == 1
-        assert doc.page_text == ["Hello page one"]
-        assert len(doc.page_spans) == 1
-        span = doc.page_spans[0]
+        assert doc.layout is not None
+        assert doc.layout.page_count == 1
+        assert len(doc.layout.page_spans) == 1
+        span = doc.layout.page_spans[0]
         assert (span.page, span.start, span.end) == (1, 0, len("Hello page one"))
 
     def test_load_multi_page_offsets_consistent(self, pdf_loader, tmp_dir):
@@ -202,11 +312,11 @@ class TestPdfLoader:
         f = _make_pdf(tmp_dir / "multi.pdf", pages)
         doc = pdf_loader.load(str(f))[0]
 
-        assert doc.page_count == 3
+        assert doc.layout is not None
+        assert doc.layout.page_count == 3
         assert doc.content == "\n".join(pages)
-        assert doc.page_text == pages
-        # 偏移与正文严格一致：按 span 可精确切出每页文本
-        for span, text in zip(doc.page_spans, pages):
+        # 偏移与正文严格一致：按 span 可精确切出每页文本（page_text 删除后以切片替代）
+        for span, text in zip(doc.layout.page_spans, pages):
             assert doc.content[span.start : span.end] == text
 
     def test_blank_page_skipped(self, pdf_loader, tmp_dir):
@@ -214,8 +324,9 @@ class TestPdfLoader:
         doc = pdf_loader.load(str(f))[0]
 
         # 空白页不进入 content / page_spans，但物理总页数保持不变
-        assert doc.page_count == 3
-        assert [s.page for s in doc.page_spans] == [1, 3]
+        assert doc.layout is not None
+        assert doc.layout.page_count == 3
+        assert [s.page for s in doc.layout.page_spans] == [1, 3]
         assert doc.content == "first page\nthird page"
 
     def test_classify_text_page(self, pdf_loader, tmp_dir):

@@ -269,38 +269,3 @@ class Indexer:
                 )
 
         stats.indexed_count += len(chunks)
-
-
-if __name__ == "__main__":
-    from pathlib import Path
-
-    import chromadb
-
-    from thumbelina.rag.embedding.provider_hf import HuggingFaceEmbedding
-    from thumbelina.rag.embedding.vector_chroma import ChromaVectorStore
-    from thumbelina.rag.ingestion.chunker import RecursiveChunker
-    from thumbelina.rag.ingestion.loader import TextLoader
-    from thumbelina.rag.retrieval.strategies import SimpleRetriever
-
-    loader = TextLoader()
-    recursive_chunker = RecursiveChunker()
-    embedder = HuggingFaceEmbedding()
-    chromadb_client = chromadb.EphemeralClient()
-    chromadb_collection = chromadb_client.get_or_create_collection(
-        name="default", embedding_function=None, metadata={"hnsw:space": "cosine"}
-    )
-    vector_store: VectorStore = ChromaVectorStore(chromadb_collection)
-    indexer = Indexer(
-        loader=loader, chunker=recursive_chunker, embedder=embedder, vector_store=vector_store
-    )
-
-    BASE_DIR = Path(__file__).parent
-    TEST_FILE = str(BASE_DIR / ".." / "test_data" / "doc.md")
-    indexer.index(path=TEST_FILE)
-
-    # 向量召回
-    query = "哆啦A梦使用的3个秘密道具是什么？"
-    retriever = SimpleRetriever(embedding_model=embedder, vector_store=vector_store)
-    results = retriever.retrieve(query)
-    for i, result in enumerate(results):
-        print(f"result {i + 1}: {result}")

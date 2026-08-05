@@ -7,7 +7,7 @@ import uuid
 
 import pytest
 
-from thumbelina.rag.common.models import Document, DocumentType, PageSpan
+from thumbelina.rag.common.models import Document, DocumentLayout, DocumentType, PageSpan
 from thumbelina.rag.ingestion.chunker import FixedSizeChunker, RecursiveChunker
 
 
@@ -303,8 +303,10 @@ def _make_pdf_document(content: str, page_spans: list[PageSpan]) -> Document:
         source_uri="/tmp/doc.pdf",
         document_type=DocumentType.PDF,
         content=content,
-        page_count=max((s.page for s in page_spans), default=0),
-        page_spans=page_spans,
+        layout=DocumentLayout(
+            page_count=max((s.page for s in page_spans), default=0),
+            page_spans=page_spans,
+        ),
         sha256=b"\x00" * 32,
         sim_hash_64=b"\x00" * 8,
     )

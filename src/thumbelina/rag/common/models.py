@@ -42,11 +42,74 @@ class PageSpan(BaseModel):
 
     用于分块器根据 chunk 的 [start, end) 偏移反查页码，
     使页码作为 chunk 元数据记录，而不是插入正文（避免割裂跨页语义、污染向量）。
+
+    坐标系约定（由加载器建立，消费方不得破坏）：
+
+    - ``content = "\\n".join(各页文本)``，每页文本已经 strip 首尾空白，
+      相邻两页之间**有且仅有**一个连接用 ``"\\n"``；
+    - 连接 ``"\\n"`` 恰好落在相邻两个 span 的间隙中（即 ``content[前span.end]``），
+      **不属于任何一页**；跨页 chunk 覆盖到它时页码反查结果仍正确；
+    - span 按页码升序存放、区间互不重叠，页内自带的换行只是普通内容字符；
+    - 无可提取文本的空白页被跳过：**页码可能不连续**（如 [1, 3]），
+      物理总页数以 ``DocumentLayout.page_count`` 为准。
+
+    正确用法（还原某页文本的唯一合法方式——按偏移切片）::
+
+        page_text = document.content[span.start : span.end]
+
+    误用警示：
+
+    - **禁止**用 ``content.split("\\n")`` 或查找 ``"\\n"`` 来划分页面——
+      页内换行与页间连接符无法区分，页边界只存在于本类记录的偏移中；
+    - **禁止**假设 ``content[span.end]`` 是下一页文本的开头——
+      它是连接 ``"\\n"``（下一页文本从 ``span.end + 1`` 开始），且可能不存在下一页；
+    - **禁止**把页码冗余复制进其他结构（如 BlockSpan）——任何区间
+      （chunk/表格等）的页码都应经 ``DocumentLayout.page_range_for`` 由偏移反查。
     """
 
-    page: int  # 页码，从 1 开始
+    page: int  # 页码，从 1 开始；空白页被跳过，可能不连续
+    start: int  # 在 content 中的起始偏移（含）
+    end: int  # 在 content 中的结束偏移（不含）；与下一 span 的间隙为页间连接 "\n"
+
+
+class BlockSpan(BaseModel):
+    """结构化块（表格等）在 Document.content 中的偏移区间。
+
+    供分块器做原子性保护：块内内容不在中间切断。
+    不冗余存储页码——块的页码可由 [start, end) 偏移对 page_spans 反查得到，
+    坚持"content 偏移为唯一坐标系"，避免坐标复制导致的不一致。
+    """
+
+    block_type: str  # 块类型，当前仅 "table"
     start: int  # 在 content 中的起始偏移（含）
     end: int  # 在 content 中的结束偏移（不含）
+    heading_path: list[str] = []  # 块上方的标题路径，如 ["产品规格", "价格表"]
+    header_row: list[str] = []  # 表头单元格，供长表按行组拆分时复用
+
+
+class DocumentLayout(BaseModel):
+    """加载阶段产出的布局结构信息。
+
+    摄入流水线（loader → chunker）的瞬态数据，不随 DocumentRecord 持久化：
+    chunk 生成后，页码等信息已落入 chunk metadata，本结构即可丢弃。
+    无布局信息的文档类型（TXT/HTML 等）对应 Document.layout = None。
+    """
+
+    page_count: int = 0  # 物理总页数（含被跳过的空页，不可由 page_spans 推出）
+    page_spans: list[PageSpan] = []  # 坐标系：偏移区间 → 页码
+    block_spans: list[BlockSpan] = []  # 结构块：表格等，供切块原子性保护
+
+    def page_range_for(self, start: int, end: int) -> tuple[int, int] | None:
+        """根据 content 中的偏移区间返回覆盖的 (起始页, 结束页)。
+
+        无分页信息或未命中任何页时返回 None。
+        """
+        if not self.page_spans:
+            return None
+        pages = [span.page for span in self.page_spans if span.start < end and span.end > start]
+        if not pages:
+            return None
+        return pages[0], pages[-1]
 
 
 class Document(BaseModel):
@@ -57,28 +120,12 @@ class Document(BaseModel):
     source_uri: str
     document_type: DocumentType
     content: str
-    # 分页信息（仅 PDF 等分页文档填充）：
-    # page_count 为物理总页数；page_text 为有内容页面的文本；
-    # page_spans 记录各页文本在 content 中的偏移区间，与 page_text 一一对应
-    page_text: list[str] = []
-    page_count: int = 0
-    page_spans: list[PageSpan] = []
+    # 加载阶段产出的布局结构信息（PDF/Markdown 等填充）；无布局信息时为 None
+    layout: DocumentLayout | None = None
 
     sha256: bytes
     sim_hash_64: bytes
     knowledge_base_id: str = "0"
-
-    def page_range_for(self, start: int, end: int) -> tuple[int, int] | None:
-        """根据 content 中的偏移区间返回覆盖的 (起始页, 结束页)。
-
-        无分页信息的文档（如纯文本）或未命中任何页时返回 None。
-        """
-        if not self.page_spans:
-            return None
-        pages = [span.page for span in self.page_spans if span.start < end and span.end > start]
-        if not pages:
-            return None
-        return pages[0], pages[-1]
 
 
 class Chunk(BaseModel):
@@ -87,7 +134,7 @@ class Chunk(BaseModel):
     id: str
     document_id: str
     content: str
-    # TODO 暂时直接使用json类型的metadata，待后续结构稳定后再明确
+    # 暂时直接使用json类型的metadata，待后续结构稳定后再明确
     metadata: str
     knowledge_base_id: str
 

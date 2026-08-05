@@ -274,7 +274,7 @@ async def upload_document(kb_id: str, file: UploadFile, request: Request) -> Doc
     await file.close()
 
     try:
-        kb_indexer = _build_indexer(request, kb_id, path=str(tmp_path))
+        kb_indexer = await _build_indexer(request, kb_id, path=str(tmp_path))
         stats = await asyncio.to_thread(kb_indexer.index_batch, [tmp_path])
         logger.debug(f"index stats: {stats}")
         if stats.errors:
@@ -314,7 +314,7 @@ async def upload_document(kb_id: str, file: UploadFile, request: Request) -> Doc
                 pass
 
 
-def _build_indexer(
+async def _build_indexer(
     request: Request,
     kb_id: str,
     *,
@@ -332,7 +332,9 @@ def _build_indexer(
     if registry is None:
         raise HTTPException(
             status_code=503, detail="RAG embedding registry not available")
-    embedder = registry.create()
+    # 在工作线程中获取模型实例：若启动后的后台预加载仍在进行，
+    # 这里会等待其完成并复用缓存实例，而不是阻塞事件循环或重复加载
+    embedder = await asyncio.to_thread(registry.create)
 
     store_manager = getattr(request.app.state, "rag_store_manager", None)
     if store_manager is None:
@@ -380,7 +382,7 @@ async def upload_document_by_url(
         raise HTTPException(status_code=400, detail="URL 必须以 http:// 或 https:// 开头")
 
     # 使用 LoaderRegistry 自动匹配：URL → HTMLLoader
-    kb_indexer = _build_indexer(request, kb_id, path=url)
+    kb_indexer = await _build_indexer(request, kb_id, path=url)
     stats = await asyncio.to_thread(kb_indexer.index, url)
     if stats.errors:
         raise HTTPException(status_code=400, detail="; ".join(stats.errors))
@@ -447,7 +449,7 @@ async def upload_documents_batch(
                     f.write(chunk)
             await file.close()
 
-            kb_indexer = _build_indexer(request, kb_id, path=str(tmp_path))
+            kb_indexer = await _build_indexer(request, kb_id, path=str(tmp_path))
             stats = await asyncio.to_thread(kb_indexer.index_batch, [tmp_path])
 
             if stats.errors:
@@ -554,7 +556,8 @@ async def query_knowledge_base(body: QueryRequest, request: Request) -> QueryRes
         raise HTTPException(status_code=503, detail="RAG not initialized")
 
     vector_store = store_manager.get_or_create_store(body.knowledge_base_id)
-    embedder = registry.create()
+    # 在工作线程中获取模型实例，避免阻塞事件循环（预加载未完成时会等待加载）
+    embedder = await asyncio.to_thread(registry.create)
 
     from thumbelina.rag.retrieval.strategies import SimpleRetriever
 

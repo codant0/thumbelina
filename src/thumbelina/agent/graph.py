@@ -361,7 +361,9 @@ class ThumbelinaAgent:
 
         try:
             store = self._rag_store_manager.get_or_create_store(knowledge_base_id)
-            embedder = self._rag_embedding_registry.create()
+            # 在工作线程中获取模型实例，避免阻塞事件循环
+            # （若启动后的后台预加载仍在进行，会等待其完成并复用缓存实例）
+            embedder = await asyncio.to_thread(self._rag_embedding_registry.create)
 
             from thumbelina.rag.retrieval.context_formatter import ContextFormatter
             from thumbelina.rag.retrieval.strategies import SimpleRetriever
@@ -512,12 +514,14 @@ class ThumbelinaAgent:
 
             message_chunk = event[0]
 
-            # Check if this is an AIMessageChunk with content
+            # Accept both streaming chunks (AIMessageChunk) and complete
+            # responses (AIMessage). The latter occurs with non-streaming
+            # LLM providers, where astream(stream_mode="messages") emits a
+            # single AIMessage instead of per-token chunks.
             if (
                 hasattr(message_chunk, "content")
                 and message_chunk.content
-                and hasattr(message_chunk, "type")
-                and message_chunk.type == "AIMessageChunk"
+                and isinstance(message_chunk, AIMessage)
                 and not getattr(message_chunk, "tool_calls", None)
             ):
                 content = str(message_chunk.content)

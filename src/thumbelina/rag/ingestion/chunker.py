@@ -30,9 +30,11 @@ def _page_metadata(document: Document, start: int, end: int) -> dict[str, int]:
 
     分页信息以 chunk 元数据形式记录（page_start/page_end），
     而非插入正文，避免页码标记割裂跨页语义、污染向量。
-    无分页信息的文档（如纯文本）返回空 dict。
+    无布局信息的文档（如纯文本）返回空 dict。
     """
-    page_range = document.page_range_for(start, end)
+    if document.layout is None:
+        return {}
+    page_range = document.layout.page_range_for(start, end)
     if page_range is None:
         return {}
     return {"page_start": page_range[0], "page_end": page_range[1]}
@@ -274,20 +276,3 @@ class RecursiveChunker(Chunker):
             ),
             knowledge_base_id=document.knowledge_base_id,
         )
-
-
-if __name__ == "__main__":
-    BASE_DIR = Path(__file__).parent
-    TEST_FILE = str(BASE_DIR / ".." / "demo" / "data" / "doc.md")
-    loader = TextLoader()
-    documents = loader.load(TEST_FILE)
-    for i, document in enumerate(documents):
-        # 递归按分隔符切块
-        recursive_chunker = RecursiveChunker()
-        for i, c in enumerate(recursive_chunker.chunk(document)):
-            print(f"chunk index: {i}, content: {c}")
-
-        # 固定长度切块
-        # fix_size_chunker = FixedSizeChunker()
-        # for i, c in enumerate(fix_size_chunker.chunk(document)):
-        #     print(f"chunk index: {i}, content: {c}")

@@ -11,6 +11,7 @@ try:
 except OSError:
     pass
 
+import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -283,6 +284,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     rag_doc_repo = None
     rag_store_manager = None
     rag_embedding_registry = None
+    rag_preload_task: asyncio.Task[None] | None = None
     try:
         # Pre-import torch to avoid DLL loading conflicts on Windows.
         # When torch is imported later (via sentence_transformers → transformers),
@@ -334,6 +336,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         app.state.rag_embedding_registry = rag_embedding_registry
 
         logger.info("RAG components initialized")
+
+        # 后台预加载 Embedding 模型：不阻塞启动流程，启动完成后立即在
+        # 工作线程中加载本地模型，避免首次上传文件时等待加载。
+        async def _preload_embedding_model(registry: EmbeddingRegistry) -> None:
+            try:
+                await asyncio.to_thread(registry.preload)
+                logger.info("Embedding model preloaded in background")
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.warning(
+                    "Embedding model preload failed; will load on first use",
+                    exc_info=True,
+                )
+
+        rag_preload_task = asyncio.create_task(_preload_embedding_model(rag_embedding_registry))
     except Exception:
         logger.debug("RAG not initialized (missing dependencies)", exc_info=True)
 
@@ -586,6 +604,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.debug("QQ channel not initialized", exc_info=True)
 
     yield
+
+    # 取消尚未完成的 Embedding 预加载任务（底层工作线程会继续完成加载，
+    # 但不再阻塞关闭流程之后的清理逻辑）
+    if rag_preload_task is not None and not rag_preload_task.done():
+        rag_preload_task.cancel()
 
     if qq_channel:
         await qq_channel.stop()

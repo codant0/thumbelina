@@ -47,6 +47,7 @@ rag = [
     "simhash>=2.1",
     "beautifulsoup4>=4.12",
     "requests>=2.31",
+    "markdown-it-py>=3.0",
 ]
 rag-ocr = [
     "paddlepaddle>=3.0",
