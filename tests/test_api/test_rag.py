@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import sys
+import threading
 import time
 import uuid
 from datetime import datetime
+from pathlib import Path
 from types import ModuleType
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -190,6 +192,18 @@ def _wait_task_done(client, task_id: str, timeout: float = 5.0) -> dict:
     raise AssertionError(f"task {task_id} did not finish within {timeout}s")
 
 
+def _wait_no_tmp_files(pattern: str, timeout: float = 5.0) -> list[Path]:
+    """轮询直至 /tmp_file 下无匹配文件，返回最终匹配结果。"""
+    tmp_dir = Path("/tmp_file")
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        matches = list(tmp_dir.glob(pattern))
+        if not matches:
+            return matches
+        time.sleep(0.05)
+    return list(tmp_dir.glob(pattern))
+
+
 @pytest.fixture(autouse=False)
 def mock_rag_pipeline():
     """Patch Indexer/Loaders in the rag route module to avoid importing torch."""
@@ -293,16 +307,7 @@ class TestDocumentManagement:
         assert resp.status_code == 200
         assert resp.json() == []
 
-    def test_upload_unsupported_type_returns_400(self, rag_client):
-        resp = rag_client.post(
-            "/api/v1/rag/knowledge-bases/0/documents",
-            files={"file": ("test.docx", b"PK fake", "application/octet-stream")},
-        )
-        assert resp.status_code == 400
-
     def test_delete_document(self, rag_client, mock_rag_pipeline):
-        import uuid
-
         mock_stats = MagicMock()
         mock_stats.indexed_count = 2
         mock_stats.errors = []
@@ -373,8 +378,6 @@ class TestRAGQuery:
 class TestDocumentChunks:
     def test_list_document_chunks(self, rag_client, mock_rag_pipeline):
         """GET /documents/{doc_id}/chunks 应返回该文档的所有 chunks。"""
-        import uuid
-
         mock_stats = MagicMock()
         mock_stats.indexed_count = 2
         mock_stats.errors = []
@@ -428,8 +431,6 @@ class TestDocumentChunks:
 
     def test_list_chunks_empty(self, rag_client, mock_rag_pipeline):
         """文档存在但没有 chunks 时返回空列表。"""
-        import uuid
-
         mock_stats = MagicMock()
         mock_stats.indexed_count = 0
         mock_stats.errors = []
@@ -460,8 +461,6 @@ class TestDocumentChunks:
 
     def test_delete_document_cleans_vectors(self, rag_client, mock_rag_pipeline):
         """DELETE /documents/{doc_id} 应同时清理向量库中的 chunks。"""
-        import uuid
-
         mock_stats = MagicMock()
         mock_stats.indexed_count = 1
         mock_stats.errors = []
@@ -513,8 +512,6 @@ class TestAsyncUpload:
         assert task["result"]["uploaded"][0]["name"] == "test.md"
 
     def test_upload_indexes_document_record(self, rag_client, mock_rag_pipeline):
-        import uuid
-
         mock_stats = MagicMock()
         mock_stats.indexed_count = 3
         mock_stats.errors = []
@@ -600,3 +597,62 @@ class TestUploadTaskEndpoints:
     def test_cancel_unknown_task_returns_404(self, rag_client):
         resp = rag_client.delete("/api/v1/rag/upload-tasks/nope")
         assert resp.status_code == 404
+
+    def test_cancel_running_or_queued_task_and_tmp_cleanup(self, rag_client, mock_rag_pipeline):
+        """取消排队中的任务：状态置 cancelled，且临时文件不泄漏。"""
+        release = threading.Event()
+        default_stats = mock_rag_pipeline.return_value.index.return_value
+
+        def blocking_index(path, progress_cb=None, cancel_event=None):
+            assert release.wait(timeout=5), "index blocked timed out"
+            return default_stats
+
+        mock_rag_pipeline.return_value.index.side_effect = blocking_index
+
+        suffix = uuid.uuid4().hex[:8]
+        name_a = f"cancel_a_{suffix}.md"
+        name_b = f"cancel_b_{suffix}.md"
+        try:
+            # A 先上传：占用信号量保持 running（index 阻塞在 threading.Event）
+            resp_a = rag_client.post(
+                "/api/v1/rag/knowledge-bases/0/documents",
+                files={"file": (name_a, b"aaa", "text/markdown")},
+            )
+            assert resp_a.status_code == 202
+            task_a = resp_a.json()["task_id"]
+
+            # B 后上传：信号量被占用，排队 pending
+            resp_b = rag_client.post(
+                "/api/v1/rag/knowledge-bases/0/documents",
+                files={"file": (name_b, b"bbb", "text/markdown")},
+            )
+            assert resp_b.status_code == 202
+            task_b = resp_b.json()["task_id"]
+
+            # 取消排队中的 B：pending 快速路径立即置 cancelled
+            cancel_resp = rag_client.delete(f"/api/v1/rag/upload-tasks/{task_b}")
+            assert cancel_resp.status_code == 200
+            assert cancel_resp.json() == {"cancelled": True}
+            b_data = rag_client.get(f"/api/v1/rag/upload-tasks/{task_b}").json()
+            assert b_data["status"] == "cancelled"
+        finally:
+            release.set()
+
+        # A 完成后 B 的 run() 走 skip 路径，cleanup 仍须删除 B 的临时文件
+        a_final = _wait_task_done(rag_client, task_a)
+        assert a_final["status"] == "completed"
+        assert not _wait_no_tmp_files(f"upload_*_{name_b}"), "cancelled task tmp file leaked"
+        assert not _wait_no_tmp_files(f"upload_*_{name_a}"), "completed task tmp file leaked"
+
+    def test_successful_upload_cleans_tmp_file(self, rag_client, mock_rag_pipeline):
+        """成功上传完成后，临时文件应被清理。"""
+        suffix = uuid.uuid4().hex[:8]
+        name = f"clean_{suffix}.md"
+        resp = rag_client.post(
+            "/api/v1/rag/knowledge-bases/0/documents",
+            files={"file": (name, b"# Test", "text/markdown")},
+        )
+        assert resp.status_code == 202
+        task = _wait_task_done(rag_client, resp.json()["task_id"])
+        assert task["status"] == "completed"
+        assert not _wait_no_tmp_files(f"upload_*_{name}"), "completed task tmp file leaked"

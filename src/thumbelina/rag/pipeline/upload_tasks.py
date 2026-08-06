@@ -162,28 +162,42 @@ class UploadTaskManager:
 
     # -- 生命周期 --------------------------------------------------
 
-    async def run(self, task_id: str, work: Callable[[], Awaitable[None]]) -> None:
-        """排队并执行任务工作协程，负责状态收尾。"""
-        task = self.get(task_id)
-        if task is None or task.status != "pending":
-            logger.debug("run(): task %s unknown or not pending, skip", task_id)
-            return
-        async with self._semaphore:
-            if not self._try_start(task_id):
-                logger.debug("run(): task %s cancelled or already started, skip", task_id)
+    async def run(
+        self,
+        task_id: str,
+        work: Callable[[], Awaitable[None]],
+        *,
+        cleanup: Callable[[], None] | None = None,
+    ) -> None:
+        """排队并执行任务工作协程，负责状态收尾。
+
+        cleanup: 可选清理回调，在 run() 返回前必定执行（覆盖跳过/成功/失败/
+        取消所有路径），用于删除临时文件等资源。
+        """
+        try:
+            task = self.get(task_id)
+            if task is None or task.status != "pending":
+                logger.debug("run(): task %s unknown or not pending, skip", task_id)
                 return
-            try:
-                await work()
-            except IndexCancelledError:
-                self._finalize(task_id, "cancelled")
-            except asyncio.CancelledError:
-                self._finalize(task_id, "cancelled")
-                raise
-            except Exception as exc:
-                logger.exception("Upload task %s failed", task_id)
-                self._finalize(task_id, "failed", str(exc))
-            else:
-                self._finalize(task_id, "completed")
+            async with self._semaphore:
+                if not self._try_start(task_id):
+                    logger.debug("run(): task %s cancelled or already started, skip", task_id)
+                    return
+                try:
+                    await work()
+                except IndexCancelledError:
+                    self._finalize(task_id, "cancelled")
+                except asyncio.CancelledError:
+                    self._finalize(task_id, "cancelled")
+                    raise
+                except Exception as exc:
+                    logger.exception("Upload task %s failed", task_id)
+                    self._finalize(task_id, "failed", str(exc))
+                else:
+                    self._finalize(task_id, "completed")
+        finally:
+            if cleanup is not None:
+                cleanup()
 
     # -- 内部 ------------------------------------------------------
 

@@ -29,6 +29,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/rag", tags=["rag"])
 
+# 后台上传任务的强引用：事件循环仅弱引用跟踪 Task，丢弃引用可能导致
+# 任务在执行中被 GC（状态卡在 running、临时文件泄漏）。
+_background_tasks: set[asyncio.Task[None]] = set()
+
 
 # ---------- Pydantic schemas ----------
 
@@ -167,10 +171,26 @@ async def _save_upload_file(file: UploadFile, filename: str) -> Path:
     tmp_dir = Path("/tmp_file")
     tmp_dir.mkdir(exist_ok=True)
     tmp_path = tmp_dir / f"upload_{uuid.uuid4().hex}_{Path(filename).name}"
-    with open(tmp_path, "wb") as f:
-        while chunk := await file.read(1024 * 1024):
-            f.write(chunk)
+    try:
+        with open(tmp_path, "wb") as f:
+            while chunk := await file.read(1024 * 1024):
+                f.write(chunk)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
     return tmp_path
+
+
+def _unlink_tmp_files(paths: list[Path]) -> None:
+    """删除上传临时文件（逐个忽略失败），供任务 cleanup 回调使用。"""
+    for path in paths:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
 
 
 def _delete_chunk_fingerprints(
@@ -318,13 +338,15 @@ async def upload_document(
     except ValueError:
         raise HTTPException(status_code=400, detail="Unsupported file type")
 
-    tmp_path = await _save_upload_file(file, filename)
-    await file.close()
-
     manager = _get_task_manager(request)
+    try:
+        tmp_path = await _save_upload_file(file, filename)
+    finally:
+        await file.close()
+
     task = manager.create(kb_id, "file", filename, total_files=1)
     state = request.app.state
-    asyncio.create_task(
+    bg = asyncio.create_task(
         manager.run(
             task.id,
             lambda: _run_file_upload(
@@ -334,8 +356,11 @@ async def upload_document(
                 files=[(filename, tmp_path, doc_type.value)],
                 state=state,
             ),
+            cleanup=lambda: _unlink_tmp_files([tmp_path]),
         )
     )
+    _background_tasks.add(bg)
+    bg.add_done_callback(_background_tasks.discard)
     return CreateUploadTaskResponse(task_id=task.id)
 
 
@@ -350,6 +375,7 @@ async def _run_file_upload(
     """索引已落盘的上传文件并写入文档元数据。
 
     files: (显示名, 临时路径, doc_type) 列表。
+    临时文件清理由调用方通过 manager.run() 的 cleanup 回调负责。
     """
     doc_repo = _doc_repo_from_state(state)
     uploaded: list[dict[str, Any]] = []
@@ -359,50 +385,43 @@ async def _run_file_upload(
     def _progress(ev: ProgressEvent) -> None:
         manager.update_progress(task_id, ev)
 
-    try:
-        for idx, (display_name, tmp_path, doc_type) in enumerate(files):
-            manager.start_file(task_id, idx, display_name)
-            try:
-                indexer = await _build_indexer(state, kb_id, path=str(tmp_path))
-                stats = await asyncio.to_thread(
-                    indexer.index,
-                    str(tmp_path),
-                    progress_cb=_progress,
-                    cancel_event=manager.get_cancel_event(task_id),
-                )
-            except IndexCancelledError:
-                raise
-            except Exception as exc:
-                errors.append({"filename": display_name, "error": str(exc)})
-                continue
-            if stats.errors:
-                errors.append({"filename": display_name, "error": "; ".join(stats.errors)})
-                continue
-            if not stats.documents:
-                skipped.append(display_name)
-                continue
-            document = stats.documents[0]
-            doc = await doc_repo.create(
-                kb_id=kb_id,
-                name=document.name,
-                source_uri=document.source_uri,
-                doc_type=doc_type,
-                sha256=document.sha256,
-                sim_hash_64=document.sim_hash_64,
-                chunk_count=stats.indexed_count,
-                doc_id=document.id,
+    for idx, (display_name, tmp_path, doc_type) in enumerate(files):
+        manager.start_file(task_id, idx, display_name)
+        try:
+            indexer = await _build_indexer(state, kb_id, path=str(tmp_path))
+            stats = await asyncio.to_thread(
+                indexer.index,
+                str(tmp_path),
+                progress_cb=_progress,
+                cancel_event=manager.get_cancel_event(task_id),
             )
-            uploaded.append({"id": doc.id, "name": doc.name, "chunk_count": doc.chunk_count})
-            manager.mark_file_done(task_id)
-        if not uploaded and errors:
-            raise RuntimeError("; ".join(e["error"] for e in errors))
-        manager.set_result(task_id, {"uploaded": uploaded, "skipped": skipped, "errors": errors})
-    finally:
-        for _, tmp_path, _ in files:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
+        except IndexCancelledError:
+            raise
+        except Exception as exc:
+            errors.append({"filename": display_name, "error": str(exc)})
+            continue
+        if stats.errors:
+            errors.append({"filename": display_name, "error": "; ".join(stats.errors)})
+            continue
+        if not stats.documents:
+            skipped.append(display_name)
+            continue
+        document = stats.documents[0]
+        doc = await doc_repo.create(
+            kb_id=kb_id,
+            name=document.name,
+            source_uri=document.source_uri,
+            doc_type=doc_type,
+            sha256=document.sha256,
+            sim_hash_64=document.sim_hash_64,
+            chunk_count=stats.indexed_count,
+            doc_id=document.id,
+        )
+        uploaded.append({"id": doc.id, "name": doc.name, "chunk_count": doc.chunk_count})
+        manager.mark_file_done(task_id)
+    if not uploaded and errors:
+        raise RuntimeError("; ".join(e["error"] for e in errors))
+    manager.set_result(task_id, {"uploaded": uploaded, "skipped": skipped, "errors": errors})
 
 
 async def _build_indexer(
