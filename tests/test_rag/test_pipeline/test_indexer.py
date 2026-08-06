@@ -8,19 +8,28 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 import types
 import uuid
+
+import pytest
 
 # 在导入 indexer 之前 mock torch，避免 DLL 加载崩溃
 if "torch" not in sys.modules:
     sys.modules["torch"] = types.ModuleType("torch")
 
 
+from thumbelina.rag.common.models import Chunk, Document, DocumentType
 from thumbelina.rag.embedding.base import EmbeddingModel, ScoredChunk, VectorStore
 from thumbelina.rag.ingestion.chunker import Chunker
 from thumbelina.rag.ingestion.loader import Loader
-from thumbelina.rag.common.models import Chunk, Document, DocumentType
-from thumbelina.rag.pipeline.indexer import Indexer, IndexStats
+from thumbelina.rag.pipeline.indexer import (
+    EMBED_BATCH_SIZE,
+    IndexCancelledError,
+    Indexer,
+    IndexStats,
+    ProgressEvent,
+)
 
 # ---------------------------------------------------------------------------
 # Fakes
@@ -287,3 +296,80 @@ class TestIndexerBatch:
 
         assert stats.document_count == 0
         assert stats.errors == []
+
+
+def _make_chunks(n: int) -> list[Chunk]:
+    return [_make_chunk(f"chunk {i}") for i in range(n)]
+
+
+class TestProgressCallback:
+    """progress_cb / cancel_event 支持。"""
+
+    def test_progress_event_stages_and_chunk_counts(self):
+        events: list[ProgressEvent] = []
+        chunks = _make_chunks(70)
+        indexer = Indexer(
+            loader=FakeLoader([_make_document()]),
+            chunker=FakeChunker(chunks),
+            embedder=FakeEmbedding(),
+            vector_store=FakeVectorStore(),
+        )
+        stats = indexer.index(
+            "/tmp/a.md",
+            progress_cb=lambda ev: events.append(ev),
+        )
+        assert stats.indexed_count == 70
+        stages = [ev.stage for ev in events]
+        assert "loading" in stages
+        assert "chunking" in stages
+        assert "embedding" in stages
+        assert "storing" in stages
+        embedding_events = [ev for ev in events if ev.stage == "embedding"]
+        # 70 chunks / 每批 32 → 3 批：32, 64, 70
+        assert [ev.chunk_done for ev in embedding_events] == [32, 64, 70]
+        assert all(ev.chunk_total == 70 for ev in embedding_events)
+        assert all(ev.filename == "test.md" for ev in embedding_events)
+
+    def test_no_callback_behavior_unchanged(self):
+        indexer = Indexer(
+            loader=FakeLoader([_make_document()]),
+            chunker=FakeChunker(_make_chunks(3)),
+            embedder=FakeEmbedding(),
+            vector_store=FakeVectorStore(),
+        )
+        stats = indexer.index("/tmp/a.md")
+        assert stats.indexed_count == 3
+        assert not stats.errors
+
+    def test_cancel_event_raises(self):
+        cancel = threading.Event()
+
+        class CancellingEmbedding(FakeEmbedding):
+            def embed_batch(self, texts: list[str]) -> list[list[float]]:
+                cancel.set()  # 第一批完成后取消
+                return super().embed_batch(texts)
+
+        indexer = Indexer(
+            loader=FakeLoader([_make_document()]),
+            chunker=FakeChunker(_make_chunks(EMBED_BATCH_SIZE * 2)),
+            embedder=CancellingEmbedding(),
+            vector_store=FakeVectorStore(),
+        )
+        with pytest.raises(IndexCancelledError):
+            indexer.index("/tmp/a.md", cancel_event=cancel)
+
+    def test_index_batch_reports_file_progress(self):
+        events: list[ProgressEvent] = []
+        indexer = Indexer(
+            loader=FakeLoader([_make_document()]),
+            chunker=FakeChunker(_make_chunks(2)),
+            embedder=FakeEmbedding(),
+            vector_store=FakeVectorStore(),
+        )
+        indexer.index_batch(
+            ["/tmp/a.md", "/tmp/b.md"],
+            progress_cb=lambda ev: events.append(ev),
+        )
+        loading_events = [ev for ev in events if ev.stage == "loading"]
+        assert [ev.file_index for ev in loading_events] == [0, 1]
+        assert all(ev.total_files == 2 for ev in loading_events)

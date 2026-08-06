@@ -33,19 +33,73 @@
 from __future__ import annotations
 
 import logging
+import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from sqlalchemy import Engine
 
+from thumbelina.rag.common.models import Chunk, Document
+from thumbelina.rag.common.repository import DocumentRepository
 from thumbelina.rag.embedding.base import EmbeddingModel, VectorStore
 from thumbelina.rag.ingestion.chunk_dedup import ChunkDeduplicator
 from thumbelina.rag.ingestion.chunker import Chunker
 from thumbelina.rag.ingestion.document_dedup import DedupAction, DocumentDeduplicator
 from thumbelina.rag.ingestion.loader import Loader
-from thumbelina.rag.common.models import Chunk, Document
-from thumbelina.rag.common.repository import DocumentRepository
 
 logger = logging.getLogger(__name__)
+
+#: 向量化分批大小。分批执行使长文档可以向客户端报告细粒度进度，
+#: 并支持批间协作式取消。
+EMBED_BATCH_SIZE = 32
+
+
+class IndexCancelledError(Exception):
+    """索引任务被外部取消时抛出。"""
+
+
+@dataclass
+class ProgressEvent:
+    """索引流水线进度事件。
+
+    stage 取值: "loading" | "chunking" | "embedding" | "storing"。
+    """
+
+    stage: str
+    file_index: int = 0
+    total_files: int = 1
+    chunk_done: int = 0
+    chunk_total: int = 0
+    filename: str = ""
+
+
+ProgressCallback = Callable[[ProgressEvent], None]
+
+
+def _check_cancel(cancel_event: threading.Event | None) -> None:
+    if cancel_event is not None and cancel_event.is_set():
+        raise IndexCancelledError()
+
+
+class _FileProgressWrapper:
+    """将 index() 的进度事件重映射为批量上下文中的文件序号。"""
+
+    def __init__(self, cb: ProgressCallback, file_index: int, total_files: int) -> None:
+        self._cb = cb
+        self._file_index = file_index
+        self._total_files = total_files
+
+    def emit(self, event: ProgressEvent) -> None:
+        self._cb(
+            ProgressEvent(
+                stage=event.stage,
+                file_index=self._file_index,
+                total_files=self._total_files,
+                chunk_done=event.chunk_done,
+                chunk_total=event.chunk_total,
+                filename=event.filename,
+            )
+        )
 
 
 @dataclass
@@ -100,13 +154,23 @@ class Indexer:
         if engine and chunk_dedup_enabled:
             self.chunk_dedup = ChunkDeduplicator(engine)
 
-    def index(self, path: str) -> IndexStats:
+    def index(
+        self,
+        path: str,
+        *,
+        progress_cb: ProgressCallback | None = None,
+        cancel_event: threading.Event | None = None,
+    ) -> IndexStats:
         """对单个文件执行完整的索引流程。
 
         Parameters
         ----------
         path:
             文件路径，具体支持的格式取决于当前注入的 loader。
+        progress_cb:
+            进度回调，各阶段触发 ``ProgressEvent``；为 None 时不发射事件。
+        cancel_event:
+            协作式取消事件，置位后将在下一个检查点抛出 ``IndexCancelledError``。
 
         Returns
         -------
@@ -116,7 +180,31 @@ class Indexer:
         stats = IndexStats()
         logger.info(f"index path: {path}")
 
+        _check_cancel(cancel_event)
+
+        def _emit(
+            stage: str,
+            file_index: int = 0,
+            total_files: int = 1,
+            chunk_done: int = 0,
+            chunk_total: int = 0,
+            filename: str = "",
+        ) -> None:
+            if progress_cb is None:
+                return
+            progress_cb(
+                ProgressEvent(
+                    stage=stage,
+                    file_index=file_index,
+                    total_files=total_files,
+                    chunk_done=chunk_done,
+                    chunk_total=chunk_total,
+                    filename=filename or path,
+                )
+            )
+
         # 1. 加载
+        _emit("loading")
         documents = self._load(path, stats)
         if not documents:
             return stats
@@ -150,21 +238,39 @@ class Indexer:
                     if self.chunk_dedup:
                         self.chunk_dedup.remove_fingerprints_by_doc(old_doc_id)
 
+            _emit("chunking", filename=document.name)
             chunks = self._chunk(document, stats)
             if not chunks:
                 continue
-            self._embed_and_store(chunks, stats)
+            self._embed_and_store(
+                chunks,
+                stats,
+                progress_cb=progress_cb,
+                cancel_event=cancel_event,
+                emit=_emit,
+                filename=document.name,
+            )
 
         logger.info(f"file index result: {stats}")
         return stats
 
-    def index_batch(self, paths: list[str]) -> IndexStats:
+    def index_batch(
+        self,
+        paths: list[str],
+        *,
+        progress_cb: ProgressCallback | None = None,
+        cancel_event: threading.Event | None = None,
+    ) -> IndexStats:
         """批量索引多个文件。
 
         Parameters
         ----------
         paths:
             文件路径列表。
+        progress_cb:
+            进度回调，事件中的 ``file_index`` / ``total_files`` 反映批量上下文。
+        cancel_event:
+            协作式取消事件，透传给每个文件的索引流程。
 
         Returns
         -------
@@ -172,8 +278,13 @@ class Indexer:
             所有文件的累计索引统计。
         """
         total = IndexStats()
-        for path in paths:
-            result = self.index(path)
+        total_files = len(paths)
+        for file_index, path in enumerate(paths):
+            if progress_cb is not None:
+                wrapped = _FileProgressWrapper(progress_cb, file_index, total_files)
+                result = self.index(path, progress_cb=wrapped.emit, cancel_event=cancel_event)
+            else:
+                result = self.index(path, cancel_event=cancel_event)
             total.documents.extend(result.documents)
             total.document_count += result.document_count
             total.chunk_count += result.chunk_count
@@ -223,12 +334,23 @@ class Indexer:
         stats.chunk_count += len(chunks)
         return chunks
 
-    def _embed_and_store(self, chunks: list[Chunk], stats: IndexStats) -> None:
-        """步骤 3 + 4：向量化并写入向量库。"""
+    def _embed_and_store(
+        self,
+        chunks: list[Chunk],
+        stats: IndexStats,
+        *,
+        progress_cb: ProgressCallback | None = None,
+        cancel_event: threading.Event | None = None,
+        emit: Callable[..., None] | None = None,
+        filename: str = "",
+    ) -> None:
+        """步骤 3 + 4：分批向量化并写入向量库，支持进度回调与取消。"""
 
         # 分块级去重（替换策略：删除旧的，全量写入新的）
         if self.chunk_dedup and chunks:
-            chunks, dedup_stats = self.chunk_dedup.deduplicate(chunks, chunks[0].knowledge_base_id)
+            chunks, dedup_stats = self.chunk_dedup.deduplicate(
+                chunks, chunks[0].knowledge_base_id
+            )
             if dedup_stats.removed_old_ids:
                 self.vector_store.delete(list(dedup_stats.removed_old_ids))
                 logger.info(
@@ -240,23 +362,45 @@ class Indexer:
         if not chunks:
             return
 
-        texts = [c.content for c in chunks]
+        chunk_total = len(chunks)
+        chunk_done = 0
+        added_ids: list[str] = []
 
-        try:
-            embeddings = self.embedder.embed_batch(texts)
-        except Exception as exc:
-            msg = f"向量化失败: {exc}"
-            logger.error(msg)
-            stats.errors.append(msg)
-            return
+        for start in range(0, chunk_total, EMBED_BATCH_SIZE):
+            _check_cancel(cancel_event)
+            batch_chunks = chunks[start : start + EMBED_BATCH_SIZE]
+            batch_texts = [c.content for c in batch_chunks]
 
-        try:
-            self.vector_store.add(chunks, embeddings)
-        except Exception as exc:
-            msg = f"写入向量库失败: {exc}"
-            logger.error(msg)
-            stats.errors.append(msg)
-            return
+            try:
+                embeddings = self.embedder.embed_batch(batch_texts)
+            except Exception as exc:
+                self._rollback_added(added_ids)
+                msg = f"向量化失败: {exc}"
+                logger.error(msg)
+                stats.errors.append(msg)
+                return
+
+            try:
+                self.vector_store.add(batch_chunks, embeddings)
+            except Exception as exc:
+                self._rollback_added(added_ids)
+                msg = f"写入向量库失败: {exc}"
+                logger.error(msg)
+                stats.errors.append(msg)
+                return
+
+            added_ids.extend(c.id for c in batch_chunks)
+            chunk_done += len(batch_chunks)
+            if emit is not None:
+                emit(
+                    "embedding",
+                    chunk_done=chunk_done,
+                    chunk_total=chunk_total,
+                    filename=filename,
+                )
+
+        if emit is not None:
+            emit("storing", chunk_done=chunk_done, chunk_total=chunk_total, filename=filename)
 
         # 注册已入库 chunk 的指纹
         if self.chunk_dedup:
@@ -269,3 +413,12 @@ class Indexer:
                 )
 
         stats.indexed_count += len(chunks)
+
+    def _rollback_added(self, added_ids: list[str]) -> None:
+        """批处理中途失败时回滚已写入的分块，保持单文件全有或全无。"""
+        if not added_ids:
+            return
+        try:
+            self.vector_store.delete(added_ids)
+        except Exception:
+            logger.warning("回滚已写入分块失败: %s", added_ids, exc_info=True)
