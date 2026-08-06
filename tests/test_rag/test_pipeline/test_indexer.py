@@ -72,13 +72,19 @@ class FakeEmbedding(EmbeddingModel):
 
 
 class FakeVectorStore(VectorStore):
-    def __init__(self, raise_exc: bool = False):
+    def __init__(self, raise_exc: bool = False, fail_after_n_adds: int | None = None):
         self.added_chunks: list[Chunk] = []
         self.added_embeddings: list[list[float]] = []
+        self.deleted_ids: list[str] = []
         self._raise = raise_exc
+        self._fail_after_n_adds = fail_after_n_adds
+        self._add_calls = 0
 
     def add(self, chunks: list[Chunk], embeddings: list[list[float]]) -> None:
+        self._add_calls += 1
         if self._raise:
+            raise RuntimeError("store failed")
+        if self._fail_after_n_adds is not None and self._add_calls > self._fail_after_n_adds:
             raise RuntimeError("store failed")
         self.added_chunks.extend(chunks)
         self.added_embeddings.extend(embeddings)
@@ -87,7 +93,7 @@ class FakeVectorStore(VectorStore):
         return []
 
     def delete(self, ids: list[str]) -> None:
-        pass
+        self.deleted_ids.extend(ids)
 
     def query_by_metadata(self, where: dict[str, str], limit: int = 100) -> list[Chunk]:
         return []
@@ -373,3 +379,70 @@ class TestProgressCallback:
         loading_events = [ev for ev in events if ev.stage == "loading"]
         assert [ev.file_index for ev in loading_events] == [0, 1]
         assert all(ev.total_files == 2 for ev in loading_events)
+
+
+class TestRollbackAndCancel:
+    """失败/取消时的回滚语义（单文件全有或全无）。"""
+
+    def test_store_failure_rolls_back_previous_batches(self):
+        """向量库第 2 批写入失败 → 第 1 批已写入的 chunk 被删除。"""
+        chunks = _make_chunks(EMBED_BATCH_SIZE * 2)
+        store = FakeVectorStore(fail_after_n_adds=1)
+        indexer = Indexer(
+            loader=FakeLoader([_make_document()]),
+            chunker=FakeChunker(chunks),
+            embedder=FakeEmbedding(),
+            vector_store=store,
+        )
+
+        stats = indexer.index("/tmp/a.md")
+
+        first_batch_ids = [c.id for c in chunks[:EMBED_BATCH_SIZE]]
+        assert set(first_batch_ids) <= set(store.deleted_ids)
+        # 失败批的 id 也在回滚列表中（从未写入，删除无副作用）
+        assert store.deleted_ids == [c.id for c in chunks]
+        assert stats.indexed_count == 0
+        assert stats.errors
+        assert "写入向量库失败" in stats.errors[0]
+
+    def test_cancel_rolls_back_stored_batches(self):
+        """第一批处理期间置位取消 → 抛 IndexCancelledError，已写入批次被回滚。"""
+        cancel = threading.Event()
+
+        class CancelAfterFirstBatch(FakeEmbedding):
+            def embed_batch(self, texts: list[str]) -> list[list[float]]:
+                result = super().embed_batch(texts)
+                cancel.set()  # 第一批完成后取消，下一批边界生效
+                return result
+
+        chunks = _make_chunks(EMBED_BATCH_SIZE * 2)
+        store = FakeVectorStore()
+        indexer = Indexer(
+            loader=FakeLoader([_make_document()]),
+            chunker=FakeChunker(chunks),
+            embedder=CancelAfterFirstBatch(),
+            vector_store=store,
+        )
+
+        stats = IndexStats()
+        with pytest.raises(IndexCancelledError):
+            indexer._embed_and_store(chunks, stats, cancel_event=cancel)
+
+        assert store.deleted_ids == [c.id for c in chunks[:EMBED_BATCH_SIZE]]
+        assert stats.indexed_count == 0
+
+    def test_pre_cancelled_raises_before_load(self):
+        """index() 前置位取消 → 加载前即抛出 IndexCancelledError。"""
+        cancel = threading.Event()
+        cancel.set()
+        # 若 cancel 检查晚于加载，loader 会抛 FileNotFoundError
+        loader = FakeLoader(documents=[_make_document()], raise_on="/tmp/a.md")
+        indexer = Indexer(
+            loader=loader,
+            chunker=FakeChunker(),
+            embedder=FakeEmbedding(),
+            vector_store=FakeVectorStore(),
+        )
+
+        with pytest.raises(IndexCancelledError):
+            indexer.index("/tmp/a.md", cancel_event=cancel)

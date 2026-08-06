@@ -172,6 +172,11 @@ class Indexer:
         cancel_event:
             协作式取消事件，置位后将在下一个检查点抛出 ``IndexCancelledError``。
 
+        Notes
+        -----
+        - ``progress_cb`` 在执行 ``index()`` 的同一线程上被同步调用。
+        - 取消在下一个批/文件边界生效（已开始的批次会先完成）。
+
         Returns
         -------
         IndexStats
@@ -245,7 +250,6 @@ class Indexer:
             self._embed_and_store(
                 chunks,
                 stats,
-                progress_cb=progress_cb,
                 cancel_event=cancel_event,
                 emit=_emit,
                 filename=document.name,
@@ -280,11 +284,16 @@ class Indexer:
         total = IndexStats()
         total_files = len(paths)
         for file_index, path in enumerate(paths):
-            if progress_cb is not None:
-                wrapped = _FileProgressWrapper(progress_cb, file_index, total_files)
-                result = self.index(path, progress_cb=wrapped.emit, cancel_event=cancel_event)
-            else:
-                result = self.index(path, cancel_event=cancel_event)
+            wrapped = (
+                _FileProgressWrapper(progress_cb, file_index, total_files)
+                if progress_cb is not None
+                else None
+            )
+            result = self.index(
+                path,
+                progress_cb=wrapped.emit if wrapped else None,
+                cancel_event=cancel_event,
+            )
             total.documents.extend(result.documents)
             total.document_count += result.document_count
             total.chunk_count += result.chunk_count
@@ -339,7 +348,6 @@ class Indexer:
         chunks: list[Chunk],
         stats: IndexStats,
         *,
-        progress_cb: ProgressCallback | None = None,
         cancel_event: threading.Event | None = None,
         emit: Callable[..., None] | None = None,
         filename: str = "",
@@ -366,38 +374,45 @@ class Indexer:
         chunk_done = 0
         added_ids: list[str] = []
 
-        for start in range(0, chunk_total, EMBED_BATCH_SIZE):
-            _check_cancel(cancel_event)
-            batch_chunks = chunks[start : start + EMBED_BATCH_SIZE]
-            batch_texts = [c.content for c in batch_chunks]
+        try:
+            for start in range(0, chunk_total, EMBED_BATCH_SIZE):
+                _check_cancel(cancel_event)
+                batch_chunks = chunks[start : start + EMBED_BATCH_SIZE]
+                batch_texts = [c.content for c in batch_chunks]
 
-            try:
-                embeddings = self.embedder.embed_batch(batch_texts)
-            except Exception as exc:
-                self._rollback_added(added_ids)
-                msg = f"向量化失败: {exc}"
-                logger.error(msg)
-                stats.errors.append(msg)
-                return
+                try:
+                    embeddings = self.embedder.embed_batch(batch_texts)
+                except Exception as exc:
+                    self._rollback_added(added_ids)
+                    msg = f"向量化失败: {exc}"
+                    logger.error(msg)
+                    stats.errors.append(msg)
+                    return
 
-            try:
-                self.vector_store.add(batch_chunks, embeddings)
-            except Exception as exc:
-                self._rollback_added(added_ids)
-                msg = f"写入向量库失败: {exc}"
-                logger.error(msg)
-                stats.errors.append(msg)
-                return
+                # 先登记本批 chunk id：即使写入半途失败也能一并回滚
+                # （删除从未写入的 id 无副作用）
+                added_ids.extend(c.id for c in batch_chunks)
+                try:
+                    self.vector_store.add(batch_chunks, embeddings)
+                except Exception as exc:
+                    self._rollback_added(added_ids)
+                    msg = f"写入向量库失败: {exc}"
+                    logger.error(msg)
+                    stats.errors.append(msg)
+                    return
 
-            added_ids.extend(c.id for c in batch_chunks)
-            chunk_done += len(batch_chunks)
-            if emit is not None:
-                emit(
-                    "embedding",
-                    chunk_done=chunk_done,
-                    chunk_total=chunk_total,
-                    filename=filename,
-                )
+                chunk_done += len(batch_chunks)
+                if emit is not None:
+                    emit(
+                        "embedding",
+                        chunk_done=chunk_done,
+                        chunk_total=chunk_total,
+                        filename=filename,
+                    )
+        except IndexCancelledError:
+            # 取消同样遵循全有或全无：回滚已写入的批次后再向上抛出
+            self._rollback_added(added_ids)
+            raise
 
         if emit is not None:
             emit("storing", chunk_done=chunk_done, chunk_total=chunk_total, filename=filename)
