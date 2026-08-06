@@ -97,8 +97,13 @@ class UploadTaskManager:
         return sorted(tasks, key=lambda t: t.created_at, reverse=True)
 
     def remove(self, task_id: str) -> bool:
+        """移除任务并置位取消标志，使排队/运行中的工作协程协作终止。"""
         with self._lock:
-            return self._tasks.pop(task_id, None) is not None
+            task = self._tasks.pop(task_id, None)
+            if task is None:
+                return False
+            task.cancel_event.set()
+            return True
 
     def get_cancel_event(self, task_id: str) -> threading.Event | None:
         task = self.get(task_id)
@@ -149,6 +154,7 @@ class UploadTaskManager:
                 task.total_files = event.total_files
 
     def set_result(self, task_id: str, result: dict[str, Any]) -> None:
+        """设置任务结果：任意时刻均可调用，由工作协程在状态收尾前写入。"""
         with self._lock:
             task = self._tasks.get(task_id)
             if task is not None:
@@ -160,12 +166,12 @@ class UploadTaskManager:
         """排队并执行任务工作协程，负责状态收尾。"""
         task = self.get(task_id)
         if task is None or task.status != "pending":
+            logger.debug("run(): task %s unknown or not pending, skip", task_id)
             return
         async with self._semaphore:
-            if task.cancel_event.is_set():
-                self._finalize(task_id, "cancelled")
+            if not self._try_start(task_id):
+                logger.debug("run(): task %s cancelled or already started, skip", task_id)
                 return
-            self._set_status(task_id, "running")
             try:
                 await work()
             except IndexCancelledError:
@@ -175,36 +181,31 @@ class UploadTaskManager:
                 raise
             except Exception as exc:
                 logger.exception("Upload task %s failed", task_id)
-                self._fail(task_id, str(exc))
+                self._finalize(task_id, "failed", str(exc))
             else:
                 self._finalize(task_id, "completed")
 
     # -- 内部 ------------------------------------------------------
 
-    def _set_status(self, task_id: str, status: str) -> None:
+    def _try_start(self, task_id: str) -> bool:
+        """锁内原子完成 pending→running，不可启动则返回 False。"""
         with self._lock:
             task = self._tasks.get(task_id)
-            if task is not None:
-                task.status = status
+            if task is None or task.status != "pending" or task.cancel_event.is_set():
+                return False
+            task.status = "running"
+            return True
 
-    def _finalize(self, task_id: str, status: str) -> None:
+    def _finalize(self, task_id: str, status: str, error: str | None = None) -> None:
         with self._lock:
             task = self._tasks.get(task_id)
             if task is None or task.status in TERMINAL_STATUSES:
                 return
             task.status = status
             task.stage = "done"
+            task.error = error
             if status == "completed":
                 task.done_files = task.total_files
-
-    def _fail(self, task_id: str, error: str) -> None:
-        with self._lock:
-            task = self._tasks.get(task_id)
-            if task is None or task.status in TERMINAL_STATUSES:
-                return
-            task.status = "failed"
-            task.stage = "done"
-            task.error = error
 
     def _evict_finished(self) -> None:
         finished = [t for t in self._tasks.values() if t.status in TERMINAL_STATUSES]
