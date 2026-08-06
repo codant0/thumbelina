@@ -656,3 +656,103 @@ class TestUploadTaskEndpoints:
         task = _wait_task_done(rag_client, resp.json()["task_id"])
         assert task["status"] == "completed"
         assert not _wait_no_tmp_files(f"upload_*_{name}"), "completed task tmp file leaked"
+
+
+# ---------- Async Batch / URL Upload Tests ----------
+
+
+class TestAsyncBatchAndUrlUpload:
+    def test_batch_upload_returns_202_and_completes(self, rag_client, mock_rag_pipeline):
+        mock_stats = MagicMock()
+        mock_stats.indexed_count = 1
+        mock_stats.errors = []
+        fake_doc = MagicMock()
+        fake_doc.id = uuid.uuid4().hex
+        fake_doc.name = "a.md"
+        fake_doc.source_uri = "/tmp/a.md"
+        fake_doc.sha256 = b"\x00" * 32
+        fake_doc.sim_hash_64 = b"\x00" * 8
+        mock_stats.documents = [fake_doc]
+        mock_rag_pipeline.return_value.index.return_value = mock_stats
+
+        resp = rag_client.post(
+            "/api/v1/rag/knowledge-bases/0/documents/batch",
+            files=[
+                ("files", ("a.md", b"aaa", "text/markdown")),
+                ("files", ("b.md", b"bbb", "text/markdown")),
+            ],
+        )
+        assert resp.status_code == 202
+        task = _wait_task_done(rag_client, resp.json()["task_id"])
+        assert task["status"] == "completed"
+        assert task["kind"] == "batch"
+        assert task["total_files"] == 2
+        assert len(task["result"]["uploaded"]) == 2
+
+    def test_batch_unsupported_files_recorded_as_skipped(self, rag_client, mock_rag_pipeline):
+        mock_stats = MagicMock()
+        mock_stats.indexed_count = 1
+        mock_stats.errors = []
+        fake_doc = MagicMock()
+        fake_doc.id = uuid.uuid4().hex
+        fake_doc.name = "a.md"
+        fake_doc.source_uri = "/tmp/a.md"
+        fake_doc.sha256 = b"\x00" * 32
+        fake_doc.sim_hash_64 = b"\x00" * 8
+        mock_stats.documents = [fake_doc]
+        mock_rag_pipeline.return_value.index.return_value = mock_stats
+
+        resp = rag_client.post(
+            "/api/v1/rag/knowledge-bases/0/documents/batch",
+            files=[
+                ("files", ("a.md", b"aaa", "text/markdown")),
+                ("files", ("c.docx", b"PK", "application/octet-stream")),
+            ],
+        )
+        task = _wait_task_done(rag_client, resp.json()["task_id"])
+        assert task["status"] == "completed"
+        assert task["result"]["skipped"] == ["c.docx"]
+
+    def test_url_upload_returns_202_and_completes(self, rag_client, mock_rag_pipeline):
+        mock_stats = MagicMock()
+        mock_stats.indexed_count = 4
+        mock_stats.errors = []
+        fake_doc = MagicMock()
+        fake_doc.id = uuid.uuid4().hex
+        fake_doc.name = "example.com"
+        fake_doc.source_uri = "https://example.com/a"
+        fake_doc.sha256 = b"\x00" * 32
+        fake_doc.sim_hash_64 = b"\x00" * 8
+        mock_stats.documents = [fake_doc]
+        mock_rag_pipeline.return_value.index.return_value = mock_stats
+
+        resp = rag_client.post(
+            "/api/v1/rag/knowledge-bases/0/documents/url",
+            json={"url": "https://example.com/a"},
+        )
+        assert resp.status_code == 202
+        task = _wait_task_done(rag_client, resp.json()["task_id"])
+        assert task["status"] == "completed"
+        assert task["kind"] == "url"
+        assert task["label"] == "https://example.com/a"
+
+    def test_url_upload_invalid_scheme_returns_400(self, rag_client):
+        resp = rag_client.post(
+            "/api/v1/rag/knowledge-bases/0/documents/url",
+            json={"url": "ftp://example.com"},
+        )
+        assert resp.status_code == 400
+
+    def test_url_upload_no_content_marks_failed(self, rag_client, mock_rag_pipeline):
+        mock_stats = MagicMock()
+        mock_stats.indexed_count = 0
+        mock_stats.errors = []
+        mock_stats.documents = []
+        mock_rag_pipeline.return_value.index.return_value = mock_stats
+
+        resp = rag_client.post(
+            "/api/v1/rag/knowledge-bases/0/documents/url",
+            json={"url": "https://example.com/empty"},
+        )
+        task = _wait_task_done(rag_client, resp.json()["task_id"])
+        assert task["status"] == "failed"

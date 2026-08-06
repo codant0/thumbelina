@@ -91,12 +91,6 @@ class UrlUploadRequest(BaseModel):
     url: str = Field(..., min_length=1, description="要抓取的网页 URL")
 
 
-class BatchUploadResponse(BaseModel):
-    uploaded: list[DocumentResponse]
-    skipped: list[str]
-    errors: list[dict[str, str]]
-
-
 class CreateUploadTaskResponse(BaseModel):
     task_id: str
 
@@ -371,15 +365,22 @@ async def _run_file_upload(
     kb_id: str,
     files: list[tuple[str, Path, str]],
     state: Any,
+    pre_skipped: list[str] | None = None,
 ) -> None:
     """索引已落盘的上传文件并写入文档元数据。
 
     files: (显示名, 临时路径, doc_type) 列表。
+    pre_skipped: 端点层已判定跳过（如不支持的类型）的文件名，随最终结果一并记录；
+    任务在启动前被取消时，端点预置的结果即保留这些 skipped 信息。
     临时文件清理由调用方通过 manager.run() 的 cleanup 回调负责。
     """
+    if not files:
+        if not pre_skipped:
+            raise RuntimeError("没有可上传的文件")
+        return  # 结果已在端点中预置 skipped，直接 completed
     doc_repo = _doc_repo_from_state(state)
     uploaded: list[dict[str, Any]] = []
-    skipped: list[str] = []
+    skipped: list[str] = list(pre_skipped or [])
     errors: list[dict[str, str]] = []
 
     def _progress(ev: ProgressEvent) -> None:
@@ -422,6 +423,54 @@ async def _run_file_upload(
     if not uploaded and errors:
         raise RuntimeError("; ".join(e["error"] for e in errors))
     manager.set_result(task_id, {"uploaded": uploaded, "skipped": skipped, "errors": errors})
+
+
+async def _run_url_upload(
+    *,
+    manager: UploadTaskManager,
+    task_id: str,
+    kb_id: str,
+    url: str,
+    state: Any,
+) -> None:
+    """抓取 URL 内容并索引为文档。无临时文件，不需要 cleanup 回调。"""
+    doc_repo = _doc_repo_from_state(state)
+
+    def _progress(ev: ProgressEvent) -> None:
+        manager.update_progress(task_id, ev)
+
+    manager.start_file(task_id, 0, url)
+    indexer = await _build_indexer(state, kb_id, path=url)
+    stats = await asyncio.to_thread(
+        indexer.index,
+        url,
+        progress_cb=_progress,
+        cancel_event=manager.get_cancel_event(task_id),
+    )
+    if stats.errors:
+        raise RuntimeError("; ".join(stats.errors))
+    if not stats.documents:
+        raise RuntimeError("未能从 URL 提取到内容")
+    document = stats.documents[0]
+    doc = await doc_repo.create(
+        kb_id=kb_id,
+        name=document.name,
+        source_uri=url,
+        doc_type="html",
+        sha256=document.sha256,
+        sim_hash_64=document.sim_hash_64,
+        chunk_count=stats.indexed_count,
+        doc_id=document.id,
+    )
+    manager.mark_file_done(task_id)
+    manager.set_result(
+        task_id,
+        {
+            "uploaded": [{"id": doc.id, "name": doc.name, "chunk_count": doc.chunk_count}],
+            "skipped": [],
+            "errors": [],
+        },
+    )
 
 
 async def _build_indexer(
@@ -475,130 +524,95 @@ async def _build_indexer(
     )
 
 
-@router.post("/knowledge-bases/{kb_id}/documents/url", response_model=DocumentResponse)
+@router.post(
+    "/knowledge-bases/{kb_id}/documents/url",
+    status_code=202,
+    response_model=CreateUploadTaskResponse,
+)
 async def upload_document_by_url(
     kb_id: str, body: UrlUploadRequest, request: Request
-) -> DocumentResponse:
-    """通过 URL 抓取网页内容并索引为文档。"""
+) -> CreateUploadTaskResponse:
+    """通过 URL 抓取网页内容并索引为文档（后台任务）。"""
     kb_repo = _get_kb_repo(request)
-    kb = await kb_repo.get(kb_id)
-    if kb is None:
+    if await kb_repo.get(kb_id) is None:
         raise HTTPException(status_code=404, detail="Knowledge base not found")
 
     url = body.url.strip()
     if not url.lower().startswith(("http://", "https://")):
         raise HTTPException(status_code=400, detail="URL 必须以 http:// 或 https:// 开头")
 
-    # 使用 LoaderRegistry 自动匹配：URL → HTMLLoader
-    kb_indexer = await _build_indexer(request.app.state, kb_id, path=url)
-    stats = await asyncio.to_thread(kb_indexer.index, url)
-    if stats.errors:
-        raise HTTPException(status_code=400, detail="; ".join(stats.errors))
-
-    if not stats.documents:
-        raise HTTPException(status_code=400, detail="未能从 URL 提取到内容")
-
-    document = stats.documents[0]
-    doc_repo = _get_doc_repo(request)
-    doc = await doc_repo.create(
-        kb_id=kb_id,
-        name=document.name,
-        source_uri=url,
-        doc_type="html",
-        sha256=document.sha256,
-        sim_hash_64=document.sim_hash_64,
-        chunk_count=stats.indexed_count,
-        doc_id=document.id,
+    manager = _get_task_manager(request)
+    task = manager.create(kb_id, "url", url, total_files=1)
+    state = request.app.state
+    bg = asyncio.create_task(
+        manager.run(
+            task.id,
+            lambda: _run_url_upload(
+                manager=manager, task_id=task.id, kb_id=kb_id, url=url, state=state
+            ),
+        )
     )
-
-    return DocumentResponse(
-        id=doc.id,
-        knowledge_base_id=doc.knowledge_base_id,
-        name=doc.name,
-        doc_type=doc.doc_type,
-        chunk_count=doc.chunk_count,
-        created_at=str(doc.created_at),
-    )
+    _background_tasks.add(bg)
+    bg.add_done_callback(_background_tasks.discard)
+    return CreateUploadTaskResponse(task_id=task.id)
 
 
 @router.post(
     "/knowledge-bases/{kb_id}/documents/batch",
-    response_model=BatchUploadResponse,
+    status_code=202,
+    response_model=CreateUploadTaskResponse,
 )
 async def upload_documents_batch(
     kb_id: str, files: list[UploadFile], request: Request
-) -> BatchUploadResponse:
-    """批量上传多个文件，过滤不支持的类型并跳过已存在的文档。"""
+) -> CreateUploadTaskResponse:
+    """批量上传多个文件（后台任务）。不支持的类型记入任务结果 skipped。"""
     kb_repo = _get_kb_repo(request)
-    kb = await kb_repo.get(kb_id)
-    if kb is None:
+    if await kb_repo.get(kb_id) is None:
         raise HTTPException(status_code=404, detail="Knowledge base not found")
 
     from thumbelina.rag.common.models import DocumentType
 
-    uploaded: list[DocumentResponse] = []
-    skipped: list[str] = []
-    errors: list[dict[str, str]] = []
-
+    manager = _get_task_manager(request)
+    accepted: list[tuple[str, Path, str]] = []
+    skipped_names: list[str] = []
     for file in files:
         filename = file.filename or ""
         ext = os.path.splitext(filename)[1]
         try:
             doc_type = DocumentType.from_value(ext)
         except ValueError:
-            skipped.append(filename)
-            continue
-
-        tmp_path = Path("/tmp_file") / f"batch_{uuid.uuid4().hex}_{Path(filename).name}"
-        tmp_path.parent.mkdir(exist_ok=True)
-        try:
-            with open(tmp_path, "wb") as f:
-                while chunk := await file.read(1024 * 1024):
-                    f.write(chunk)
+            skipped_names.append(filename)
             await file.close()
-
-            kb_indexer = await _build_indexer(request.app.state, kb_id, path=str(tmp_path))
-            stats = await asyncio.to_thread(kb_indexer.index_batch, [tmp_path])
-
-            if stats.errors:
-                errors.append({"filename": filename, "error": "; ".join(stats.errors)})
-                continue
-
-            if not stats.documents:
-                skipped.append(filename)
-                continue
-
-            document = stats.documents[0]
-            doc_repo = _get_doc_repo(request)
-            doc = await doc_repo.create(
-                kb_id=kb_id,
-                name=document.name,
-                source_uri=str(tmp_path),
-                doc_type=doc_type.value,
-                sha256=document.sha256,
-                sim_hash_64=document.sim_hash_64,
-                chunk_count=stats.indexed_count,
-                doc_id=document.id,
-            )
-            uploaded.append(
-                DocumentResponse(
-                    id=doc.id,
-                    knowledge_base_id=doc.knowledge_base_id,
-                    name=doc.name,
-                    doc_type=doc.doc_type,
-                    chunk_count=doc.chunk_count,
-                    created_at=str(doc.created_at),
-                )
-            )
-        except Exception as exc:
-            errors.append({"filename": filename, "error": str(exc)})
+            continue
+        try:
+            tmp_path = await _save_upload_file(file, filename)
         finally:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
+            await file.close()
+        accepted.append((filename, tmp_path, doc_type.value))
 
-    return BatchUploadResponse(uploaded=uploaded, skipped=skipped, errors=errors)
+    label = accepted[0][0] if accepted else (skipped_names[0] if skipped_names else "")
+    task = manager.create(kb_id, "batch", label, total_files=len(accepted))
+    if skipped_names:
+        manager.set_result(task.id, {"uploaded": [], "skipped": skipped_names, "errors": []})
+    state = request.app.state
+    tmp_paths = [tmp_path for _, tmp_path, _ in accepted]
+    bg = asyncio.create_task(
+        manager.run(
+            task.id,
+            lambda: _run_file_upload(
+                manager=manager,
+                task_id=task.id,
+                kb_id=kb_id,
+                files=accepted,
+                state=state,
+                pre_skipped=skipped_names,
+            ),
+            cleanup=lambda: _unlink_tmp_files(tmp_paths),
+        )
+    )
+    _background_tasks.add(bg)
+    bg.add_done_callback(_background_tasks.discard)
+    return CreateUploadTaskResponse(task_id=task.id)
 
 
 @router.delete("/documents/{doc_id}")
