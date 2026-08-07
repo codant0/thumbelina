@@ -84,8 +84,13 @@ export function useUploadTasks(kbId: string | null, onSettled?: () => void) {
 
   const dismiss = useCallback((taskId: string) => {
     dismissedRef.current.add(taskId)
-    prevActiveRef.current.delete(taskId)
-    setTasks(prev => prev.filter(t => t.id !== taskId))
+    setTasks(prev => {
+      // 活跃任务被 dismiss 后仍保留在 prevActiveRef，待其落定时触发 onSettled
+      if (!prev.some(t => t.id === taskId && isActive(t))) {
+        prevActiveRef.current.delete(taskId)
+      }
+      return prev.filter(t => t.id !== taskId)
+    })
   }, [])
 
   return { tasks, hasActive, submitFiles, submitUrl, cancel, dismiss, refresh }

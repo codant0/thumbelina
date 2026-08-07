@@ -138,12 +138,16 @@ def rag_client(client):
             del doc_store[did]
         return len(to_delete)
 
+    async def _doc_count_by_kb(kb_id: str) -> int:
+        return sum(1 for d in doc_store.values() if d.knowledge_base_id == kb_id)
+
     doc_repo = MagicMock()
     doc_repo.create = AsyncMock(side_effect=_doc_create)
     doc_repo.get = AsyncMock(side_effect=_doc_get)
     doc_repo.list_by_kb = AsyncMock(side_effect=_doc_list_by_kb)
     doc_repo.delete = AsyncMock(side_effect=_doc_delete)
     doc_repo.delete_by_kb = AsyncMock(side_effect=_doc_delete_by_kb)
+    doc_repo.count_by_kb = AsyncMock(side_effect=_doc_count_by_kb)
 
     # --- Store manager mock ---
     store_manager = MagicMock()
@@ -270,6 +274,7 @@ class TestKnowledgeBaseCRUD:
         data = resp.json()
         assert isinstance(data, list)
         assert any(kb["id"] == "0" for kb in data)
+        assert all("document_count" in kb for kb in data)
 
     def test_create_knowledge_base(self, rag_client):
         resp = rag_client.post(
@@ -311,6 +316,44 @@ class TestKnowledgeBaseCRUD:
     def test_update_nonexistent_kb_returns_404(self, rag_client):
         resp = rag_client.put("/api/v1/rag/knowledge-bases/no-such", json={"name": "X"})
         assert resp.status_code == 404
+
+    def test_delete_kb_cancels_active_upload_tasks(self, rag_client, mock_rag_pipeline):
+        """删除知识库时，其运行中/排队中的上传任务均应被取消。"""
+        from thumbelina.rag.pipeline.indexer import IndexCancelledError
+
+        release = threading.Event()
+        default_stats = mock_rag_pipeline.return_value.index.return_value
+
+        def blocking_index(path, progress_cb=None, cancel_event=None):
+            release.wait(timeout=5)
+            if cancel_event is not None and cancel_event.is_set():
+                raise IndexCancelledError()
+            return default_stats
+
+        mock_rag_pipeline.return_value.index.side_effect = blocking_index
+
+        kb_id = rag_client.post("/api/v1/rag/knowledge-bases", json={"name": "T"}).json()["id"]
+        resp_a = rag_client.post(
+            f"/api/v1/rag/knowledge-bases/{kb_id}/documents",
+            files={"file": ("a.md", b"aaa", "text/markdown")},
+        )
+        resp_b = rag_client.post(
+            f"/api/v1/rag/knowledge-bases/{kb_id}/documents",
+            files={"file": ("b.md", b"bbb", "text/markdown")},
+        )
+        task_a = resp_a.json()["task_id"]
+        task_b = resp_b.json()["task_id"]
+        try:
+            del_resp = rag_client.delete(f"/api/v1/rag/knowledge-bases/{kb_id}")
+            assert del_resp.status_code == 200
+            # 排队中的任务立即置为 cancelled
+            b_data = rag_client.get(f"/api/v1/rag/upload-tasks/{task_b}").json()
+            assert b_data["status"] == "cancelled"
+        finally:
+            release.set()
+        # 运行中的任务经协作式取消后以 cancelled 收尾
+        a_final = _wait_task_done(rag_client, task_a)
+        assert a_final["status"] == "cancelled"
 
 
 # ---------- Document Management Tests ----------
@@ -606,6 +649,35 @@ class TestAsyncUpload:
             files={"file": ("a.md", b"x", "text/markdown")},
         )
         assert resp.status_code == 404
+
+    def test_upload_over_size_limit_returns_413(self, rag_client, monkeypatch):
+        """超过大小上限返回 413，且不泄漏临时文件。"""
+        monkeypatch.setattr(rag_routes, "MAX_UPLOAD_SIZE_BYTES", 10)
+        name = f"big_{uuid.uuid4().hex[:8]}.md"
+        resp = rag_client.post(
+            "/api/v1/rag/knowledge-bases/0/documents",
+            files={"file": (name, b"x" * 100, "text/markdown")},
+        )
+        assert resp.status_code == 413
+        assert "大小限制" in resp.json()["detail"]
+        assert not _wait_no_tmp_files(f"upload_*_{name}"), "超限文件临时文件泄漏"
+
+    def test_duplicate_document_recorded_as_skipped(self, rag_client, mock_rag_pipeline):
+        """去重命中（无 documents 且无 errors）时任务完成且记为 skipped。"""
+        mock_stats = MagicMock()
+        mock_stats.indexed_count = 0
+        mock_stats.errors = []
+        mock_stats.documents = []
+        mock_rag_pipeline.return_value.index.return_value = mock_stats
+
+        resp = rag_client.post(
+            "/api/v1/rag/knowledge-bases/0/documents",
+            files={"file": ("dup.md", b"x", "text/markdown")},
+        )
+        task = _wait_task_done(rag_client, resp.json()["task_id"])
+        assert task["status"] == "completed"
+        assert task["result"]["skipped"] == ["dup.md"]
+        assert task["result"]["errors"] == []
 
 
 # ---------- Upload Task Endpoint Tests ----------
