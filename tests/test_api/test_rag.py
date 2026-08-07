@@ -12,7 +12,9 @@ from types import ModuleType
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi.testclient import TestClient
 
+from thumbelina.api.routes import rag as rag_routes
 from thumbelina.rag.common.orm_models import (
     DocumentRecord,
     KnowledgeBaseRecord,
@@ -202,6 +204,18 @@ def _wait_no_tmp_files(pattern: str, timeout: float = 5.0) -> list[Path]:
             return matches
         time.sleep(0.05)
     return list(tmp_dir.glob(pattern))
+
+
+def _remove_tmp_files(pattern: str) -> None:
+    """立即删除 /tmp_file 下匹配的历史残留文件（测试前置清理）。"""
+    tmp_dir = Path("/tmp_file")
+    if not tmp_dir.exists():
+        return
+    for path in tmp_dir.glob(pattern):
+        try:
+            path.unlink()
+        except OSError:
+            pass
 
 
 @pytest.fixture(autouse=False)
@@ -675,6 +689,9 @@ class TestAsyncBatchAndUrlUpload:
         mock_stats.documents = [fake_doc]
         mock_rag_pipeline.return_value.index.return_value = mock_stats
 
+        # 清理历史残留，避免 /tmp_file 遗留文件造成误判
+        _remove_tmp_files("upload_*_a.md")
+        _remove_tmp_files("upload_*_b.md")
         resp = rag_client.post(
             "/api/v1/rag/knowledge-bases/0/documents/batch",
             files=[
@@ -688,6 +705,8 @@ class TestAsyncBatchAndUrlUpload:
         assert task["kind"] == "batch"
         assert task["total_files"] == 2
         assert len(task["result"]["uploaded"]) == 2
+        assert not _wait_no_tmp_files("upload_*_a.md"), "batch tmp file a.md leaked"
+        assert not _wait_no_tmp_files("upload_*_b.md"), "batch tmp file b.md leaked"
 
     def test_batch_unsupported_files_recorded_as_skipped(self, rag_client, mock_rag_pipeline):
         mock_stats = MagicMock()
@@ -709,6 +728,7 @@ class TestAsyncBatchAndUrlUpload:
                 ("files", ("c.docx", b"PK", "application/octet-stream")),
             ],
         )
+        assert resp.status_code == 202
         task = _wait_task_done(rag_client, resp.json()["task_id"])
         assert task["status"] == "completed"
         assert task["result"]["skipped"] == ["c.docx"]
@@ -756,3 +776,35 @@ class TestAsyncBatchAndUrlUpload:
         )
         task = _wait_task_done(rag_client, resp.json()["task_id"])
         assert task["status"] == "failed"
+
+    def test_batch_empty_files_returns_400(self, rag_client):
+        """空文件列表应被端点守卫拒绝（400，而非创建空任务）。"""
+        resp = rag_client.post(
+            "/api/v1/rag/knowledge-bases/0/documents/batch",
+            files=[],
+        )
+        assert resp.status_code == 400
+        assert resp.json()["detail"] == "没有上传文件"
+
+    def test_batch_save_failure_cleans_already_saved_tmp_files(self, rag_client, mock_rag_pipeline):
+        """批量上传中后续文件落盘失败：返回 500，且已保存文件的临时文件被清理。"""
+        real_save = rag_routes._save_upload_file
+
+        async def save_fails_on_second(file, filename):
+            if filename == "b.md":
+                raise OSError("模拟落盘失败")
+            return await real_save(file, filename)
+
+        error_client = TestClient(rag_client.app, raise_server_exceptions=False)
+        # 清理历史残留（如修复前的失败运行泄漏的文件），避免误判
+        _remove_tmp_files("upload_*_a.md")
+        with patch("thumbelina.api.routes.rag._save_upload_file", new=save_fails_on_second):
+            resp = error_client.post(
+                "/api/v1/rag/knowledge-bases/0/documents/batch",
+                files=[
+                    ("files", ("a.md", b"aaa", "text/markdown")),
+                    ("files", ("b.md", b"bbb", "text/markdown")),
+                ],
+            )
+        assert resp.status_code == 500
+        assert not _wait_no_tmp_files("upload_*_a.md"), "已保存文件的临时文件泄漏"

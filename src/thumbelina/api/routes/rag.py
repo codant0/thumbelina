@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import uuid
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,7 @@ from thumbelina.rag.ingestion.loader import Loader, LoaderRegistry, TextLoader
 from thumbelina.rag.pipeline.indexer import IndexCancelledError, Indexer, ProgressEvent
 from thumbelina.rag.pipeline.upload_tasks import (
     TERMINAL_STATUSES,
+    UploadTask,
     UploadTaskManager,
 )
 
@@ -187,6 +189,19 @@ def _unlink_tmp_files(paths: list[Path]) -> None:
             pass
 
 
+def _spawn_upload_task(
+    manager: UploadTaskManager,
+    task: UploadTask,
+    work: Callable[[], Awaitable[None]],
+    cleanup: Callable[[], None] | None = None,
+) -> CreateUploadTaskResponse:
+    """启动后台上传任务并保持强引用，返回 202 响应体。"""
+    bg = asyncio.create_task(manager.run(task.id, work, cleanup=cleanup))
+    _background_tasks.add(bg)
+    bg.add_done_callback(_background_tasks.discard)
+    return CreateUploadTaskResponse(task_id=task.id)
+
+
 def _delete_chunk_fingerprints(
     request: Request, *, doc_id: str | None = None, kb_id: str | None = None
 ) -> None:
@@ -340,22 +355,18 @@ async def upload_document(
 
     task = manager.create(kb_id, "file", filename, total_files=1)
     state = request.app.state
-    bg = asyncio.create_task(
-        manager.run(
-            task.id,
-            lambda: _run_file_upload(
-                manager=manager,
-                task_id=task.id,
-                kb_id=kb_id,
-                files=[(filename, tmp_path, doc_type.value)],
-                state=state,
-            ),
-            cleanup=lambda: _unlink_tmp_files([tmp_path]),
-        )
+    return _spawn_upload_task(
+        manager,
+        task,
+        lambda: _run_file_upload(
+            manager=manager,
+            task_id=task.id,
+            kb_id=kb_id,
+            files=[(filename, tmp_path, doc_type.value)],
+            state=state,
+        ),
+        cleanup=lambda: _unlink_tmp_files([tmp_path]),
     )
-    _background_tasks.add(bg)
-    bg.add_done_callback(_background_tasks.discard)
-    return CreateUploadTaskResponse(task_id=task.id)
 
 
 async def _run_file_upload(
@@ -544,17 +555,13 @@ async def upload_document_by_url(
     manager = _get_task_manager(request)
     task = manager.create(kb_id, "url", url, total_files=1)
     state = request.app.state
-    bg = asyncio.create_task(
-        manager.run(
-            task.id,
-            lambda: _run_url_upload(
-                manager=manager, task_id=task.id, kb_id=kb_id, url=url, state=state
-            ),
-        )
+    return _spawn_upload_task(
+        manager,
+        task,
+        lambda: _run_url_upload(
+            manager=manager, task_id=task.id, kb_id=kb_id, url=url, state=state
+        ),
     )
-    _background_tasks.add(bg)
-    bg.add_done_callback(_background_tasks.discard)
-    return CreateUploadTaskResponse(task_id=task.id)
 
 
 @router.post(
@@ -563,9 +570,11 @@ async def upload_document_by_url(
     response_model=CreateUploadTaskResponse,
 )
 async def upload_documents_batch(
-    kb_id: str, files: list[UploadFile], request: Request
+    kb_id: str, request: Request, files: list[UploadFile] = []
 ) -> CreateUploadTaskResponse:
     """批量上传多个文件（后台任务）。不支持的类型记入任务结果 skipped。"""
+    if not files:
+        raise HTTPException(status_code=400, detail="没有上传文件")
     kb_repo = _get_kb_repo(request)
     if await kb_repo.get(kb_id) is None:
         raise HTTPException(status_code=404, detail="Knowledge base not found")
@@ -575,20 +584,25 @@ async def upload_documents_batch(
     manager = _get_task_manager(request)
     accepted: list[tuple[str, Path, str]] = []
     skipped_names: list[str] = []
-    for file in files:
-        filename = file.filename or ""
-        ext = os.path.splitext(filename)[1]
-        try:
-            doc_type = DocumentType.from_value(ext)
-        except ValueError:
-            skipped_names.append(filename)
-            await file.close()
-            continue
-        try:
-            tmp_path = await _save_upload_file(file, filename)
-        finally:
-            await file.close()
-        accepted.append((filename, tmp_path, doc_type.value))
+    try:
+        for file in files:
+            filename = file.filename or ""
+            ext = os.path.splitext(filename)[1]
+            try:
+                doc_type = DocumentType.from_value(ext)
+            except ValueError:
+                skipped_names.append(filename)
+                await file.close()
+                continue
+            try:
+                tmp_path = await _save_upload_file(file, filename)
+            finally:
+                await file.close()
+            accepted.append((filename, tmp_path, doc_type.value))
+    except Exception:
+        # 落盘中途失败：清理已保存文件的临时文件，避免泄漏后再抛出
+        _unlink_tmp_files([p for _, p, _ in accepted])
+        raise
 
     label = accepted[0][0] if accepted else (skipped_names[0] if skipped_names else "")
     task = manager.create(kb_id, "batch", label, total_files=len(accepted))
@@ -596,23 +610,19 @@ async def upload_documents_batch(
         manager.set_result(task.id, {"uploaded": [], "skipped": skipped_names, "errors": []})
     state = request.app.state
     tmp_paths = [tmp_path for _, tmp_path, _ in accepted]
-    bg = asyncio.create_task(
-        manager.run(
-            task.id,
-            lambda: _run_file_upload(
-                manager=manager,
-                task_id=task.id,
-                kb_id=kb_id,
-                files=accepted,
-                state=state,
-                pre_skipped=skipped_names,
-            ),
-            cleanup=lambda: _unlink_tmp_files(tmp_paths),
-        )
+    return _spawn_upload_task(
+        manager,
+        task,
+        lambda: _run_file_upload(
+            manager=manager,
+            task_id=task.id,
+            kb_id=kb_id,
+            files=accepted,
+            state=state,
+            pre_skipped=skipped_names,
+        ),
+        cleanup=lambda: _unlink_tmp_files(tmp_paths),
     )
-    _background_tasks.add(bg)
-    bg.add_done_callback(_background_tasks.discard)
-    return CreateUploadTaskResponse(task_id=task.id)
 
 
 @router.delete("/documents/{doc_id}")
