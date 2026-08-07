@@ -294,13 +294,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except OSError:
             logger.warning("torch pre-import failed, embedding may not work", exc_info=True)
 
-        from thumbelina.rag.embedding.registry import EmbeddingRegistry
-        from thumbelina.rag.embedding.store_manager import ChromaStoreManager
         from thumbelina.rag.common.db import init_rag_db
         from thumbelina.rag.common.repository import (
             DocumentRepository,
             KnowledgeBaseRepository,
         )
+        from thumbelina.rag.embedding.registry import EmbeddingRegistry
+        from thumbelina.rag.embedding.store_manager import ChromaStoreManager
+        from thumbelina.rag.pipeline.upload_tasks import UploadTaskManager
 
         # 复用主数据库引擎初始化 RAG 表
         rag_session_factory = init_rag_db(memory.repository.engine)
@@ -334,6 +335,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         app.state.rag_doc_repo = rag_doc_repo
         app.state.rag_store_manager = rag_store_manager
         app.state.rag_embedding_registry = rag_embedding_registry
+        app.state.rag_upload_tasks = UploadTaskManager()
 
         logger.info("RAG components initialized")
 

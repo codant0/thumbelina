@@ -100,16 +100,29 @@ thumb
 ### Docker
 
 ```bash
-# Set required environment variable
+# Set the LLM API key (or write api_key directly into thumbelina.yaml)
 export THUMBELINA_LLM__API_KEY="sk-..."
 
-# Start containers
-docker-compose up -d
+# Build and start (first run)
+docker compose up -d --build
 # Backend:  http://localhost:8000
 # Frontend: http://localhost:3000
 ```
 
-The compose file mounts `thumbelina.yaml` as read-only into the backend container and uses a named volume (`thumbelina-data`) for persistent data.
+The frontend container (nginx) proxies `/api` and `/ws` to the backend, so the
+web UI works entirely through port 3000. `thumbelina.yaml` is mounted
+read-only into the backend container; the SQLite database
+(`sqlite:////app/data/thumbelina.db`) and ChromaDB data (`/app/data/chroma`)
+live in the named volume `thumbelina-data` and survive rebuilds.
+
+After code changes, rebuild and restart only the affected service:
+
+```bash
+docker compose up -d --build backend   # or: frontend
+```
+
+Dependency layers are cached, so rebuilds only reinstall what changed.
+For the full deployment guide (updates, backups, data migration, FAQ, production tips), see [docs/docker-deployment.md](docs/docker-deployment.md).
 
 ## Architecture
 
@@ -281,7 +294,12 @@ thumbelina/
 | PUT | `/api/v1/rag/knowledge-bases/{id}` | Update a knowledge base |
 | DELETE | `/api/v1/rag/knowledge-bases/{id}` | Delete a knowledge base (cascading) |
 | GET | `/api/v1/rag/knowledge-bases/{id}/documents` | List documents in a knowledge base |
-| POST | `/api/v1/rag/knowledge-bases/{id}/documents` | Upload and index a document |
+| POST | `/api/v1/rag/knowledge-bases/{id}/documents` | Upload a document (async, returns a task id) |
+| POST | `/api/v1/rag/knowledge-bases/{id}/documents/url` | Upload a webpage by URL (async) |
+| POST | `/api/v1/rag/knowledge-bases/{id}/documents/batch` | Batch upload documents (async) |
+| GET | `/api/v1/rag/upload-tasks/{task_id}` | Get upload task status and progress |
+| GET | `/api/v1/rag/knowledge-bases/{id}/upload-tasks` | List upload tasks of a knowledge base |
+| DELETE | `/api/v1/rag/upload-tasks/{task_id}` | Cancel or dismiss an upload task |
 | DELETE | `/api/v1/rag/documents/{id}` | Delete a document |
 | POST | `/api/v1/rag/query` | Retrieve top-k chunks for a query |
 | WS | `/ws/chat` | Real-time streaming chat via WebSocket |

@@ -70,7 +70,7 @@ class HuggingFaceEmbedding(EmbeddingModel):
 
         try:
             from huggingface_hub import try_to_load_from_cache
-            from sentence_transformers import SentenceTransformer as _ST
+            from sentence_transformers import SentenceTransformer
         except ImportError as exc:
             raise ImportError(
                 "HuggingFace embedding requires sentence-transformers. "
@@ -83,10 +83,12 @@ class HuggingFaceEmbedding(EmbeddingModel):
             # 缓存存在，拿到快照目录（config.json 所在目录的父级）
             snapshot_dir = str(Path(cached).parent)
             print(f"使用本地缓存模型: {snapshot_dir}")
-            self.model: SentenceTransformer = _ST(snapshot_dir, local_files_only=True)
+            self.model: SentenceTransformer = SentenceTransformer(
+                snapshot_dir, local_files_only=True
+            )
         else:
             print(f"本地未找到缓存，从 HuggingFace Hub 下载: {model_name}")
-            self.model = _ST(model_name)
+            self.model = SentenceTransformer(model_name)
 
     def embed(self, text: str) -> list[float]:
         """单文本向量化"""

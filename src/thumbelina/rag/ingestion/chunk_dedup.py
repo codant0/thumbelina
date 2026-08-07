@@ -29,8 +29,8 @@ import numpy as np
 from datasketch import MinHash
 from sqlalchemy import Engine, text
 
-from thumbelina.rag.embedding.base import EmbeddingModel
 from thumbelina.rag.common.models import Chunk
+from thumbelina.rag.embedding.base import EmbeddingModel
 
 logger = logging.getLogger(__name__)
 
@@ -236,9 +236,7 @@ class ChunkDeduplicator:
                 found.update(row[0] for row in rows)
         return found
 
-    def _query_hash_and_ids(
-        self, kb_id: str, hashes: list[bytes]
-    ) -> list[tuple[str, bytes]]:
+    def _query_hash_and_ids(self, kb_id: str, hashes: list[bytes]) -> list[tuple[str, bytes]]:
         """批量查询匹配哈希的旧 chunk ID 和 content_hash。
 
         Returns
@@ -275,10 +273,7 @@ class ChunkDeduplicator:
                 placeholders = ", ".join(f":id{j}" for j in range(len(batch)))
                 params: dict[str, object] = {f"id{j}": cid for j, cid in enumerate(batch)}
                 conn.execute(
-                    text(
-                        f"DELETE FROM rag_chunk_fingerprints "
-                        f"WHERE id IN ({placeholders})"
-                    ),
+                    text(f"DELETE FROM rag_chunk_fingerprints WHERE id IN ({placeholders})"),
                     params,
                 )
 

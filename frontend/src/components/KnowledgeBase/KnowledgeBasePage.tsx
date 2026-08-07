@@ -5,6 +5,8 @@ import {
 } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import { Toast } from '../Settings/Toast'
+import { useUploadTasks } from '../../hooks/useUploadTasks'
+import { UploadTaskList } from './UploadTaskList'
 import type { KnowledgeBase, RagDocument, QueryResult, ChunkItem } from '../../types/rag'
 import * as ragApi from '../../api/rag'
 
@@ -23,7 +25,6 @@ export function KnowledgeBasePage() {
   const [saving, setSaving] = useState(false)
   const [toastMsg, setToastMsg] = useState('')
   const [toastError, setToastError] = useState(false)
-  const [uploading, setUploading] = useState(false)
   const [queryText, setQueryText] = useState('')
   const [queryResults, setQueryResults] = useState<QueryResult[]>([])
   const [querying, setQuerying] = useState(false)
@@ -42,11 +43,7 @@ export function KnowledgeBasePage() {
   const [urlError, setUrlError] = useState('')
   const [folderFiles, setFolderFiles] = useState<File[]>([])
   const [folderFiltered, setFolderFiltered] = useState(0)
-  const [batchUploading, setBatchUploading] = useState(false)
-  const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null)
-  const [batchSummary, setBatchSummary] = useState<{
-    uploaded: number; skipped: number; errors: number
-  } | null>(null)
+  const [submitting, setSubmitting] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
   const dropzoneRef = useRef<HTMLDivElement>(null)
@@ -80,16 +77,31 @@ export function KnowledgeBasePage() {
   }, [])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadKbs()
   }, [loadKbs])
 
   useEffect(() => {
     if (selectedKb) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       void loadDocuments(selectedKb.id)
     } else {
       setDocuments([])
     }
   }, [selectedKb, loadDocuments])
+
+  const handleUploadSettled = useCallback(() => {
+    if (selectedKb) {
+      void loadDocuments(selectedKb.id)
+      void loadKbs()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedKb?.id])
+
+  const {
+    tasks: uploadTasks, submitFiles, submitUrl,
+    cancel: cancelUpload, dismiss: dismissUpload,
+  } = useUploadTasks(selectedKb?.id ?? null, handleUploadSettled)
 
   // ── CRUD Handlers ──────────────────────────────────────
 
@@ -147,27 +159,18 @@ export function KnowledgeBasePage() {
 
   const handleUpload = useCallback(async (files: FileList | null) => {
     if (!files || files.length === 0 || !selectedKb) return
-    setUploading(true)
+    setSubmitting(true)
     try {
-      for (const file of Array.from(files)) {
-        try {
-          await ragApi.uploadDocument(selectedKb.id, file)
-        } catch (err) {
-          const detail = err instanceof Error ? err.message : t('knowledgeBase.uploadFailed')
-          showToast(detail, true)
-          return
-        }
-      }
-      showToast(t('knowledgeBase.uploadSuccess'))
-      await loadDocuments(selectedKb.id)
-      await loadKbs()
-    } catch {
-      showToast(t('knowledgeBase.uploadFailed'), true)
+      await submitFiles(Array.from(files))
+      showToast(t('uploadTask.submitSuccess'))
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : t('knowledgeBase.uploadFailed')
+      showToast(detail, true)
     } finally {
-      setUploading(false)
+      setSubmitting(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
     }
-  }, [selectedKb, showToast, t, loadDocuments, loadKbs])
+  }, [selectedKb, showToast, t, submitFiles])
 
   const handleUrlUpload = useCallback(async () => {
     if (!selectedKb || !urlInput.trim()) return
@@ -179,18 +182,16 @@ export function KnowledgeBasePage() {
     setUrlError('')
     setUrlUploading(true)
     try {
-      await ragApi.uploadDocumentByUrl(selectedKb.id, url)
-      showToast(t('knowledgeBase.uploadSuccess'))
+      await submitUrl(url)
+      showToast(t('uploadTask.submitSuccess'))
       setUrlInput('')
-      await loadDocuments(selectedKb.id)
-      await loadKbs()
     } catch (err) {
       const detail = err instanceof Error ? err.message : t('knowledgeBase.uploadFailed')
       showToast(detail, true)
     } finally {
       setUrlUploading(false)
     }
-  }, [selectedKb, urlInput, showToast, t, loadDocuments, loadKbs])
+  }, [selectedKb, urlInput, showToast, t, submitUrl])
 
   const handleFolderSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
@@ -207,31 +208,23 @@ export function KnowledgeBasePage() {
     })
     setFolderFiles(valid)
     setFolderFiltered(allFiles.length - valid.length)
-    setBatchSummary(null)
   }, [])
 
   const handleFolderUpload = useCallback(async () => {
     if (!selectedKb || folderFiles.length === 0) return
-    setBatchUploading(true)
-    setBatchSummary(null)
-    setBatchProgress({ done: 0, total: folderFiles.length })
+    setSubmitting(true)
     try {
-      const result = await ragApi.uploadDocumentsBatch(selectedKb.id, folderFiles)
-      setBatchSummary({
-        uploaded: result.uploaded.length,
-        skipped: result.skipped.length,
-        errors: result.errors.length,
-      })
-      setBatchProgress({ done: folderFiles.length, total: folderFiles.length })
-      await loadDocuments(selectedKb.id)
-      await loadKbs()
+      await submitFiles(folderFiles)
+      showToast(t('uploadTask.submitSuccess'))
+      setFolderFiles([])
+      setFolderFiltered(0)
     } catch (err) {
       const detail = err instanceof Error ? err.message : t('knowledgeBase.uploadFailed')
       showToast(detail, true)
     } finally {
-      setBatchUploading(false)
+      setSubmitting(false)
     }
-  }, [selectedKb, folderFiles, showToast, t, loadDocuments, loadKbs])
+  }, [selectedKb, folderFiles, showToast, t, submitFiles])
 
   const handleDeleteDocument = async (docId: string) => {
     try {
@@ -338,8 +331,6 @@ export function KnowledgeBasePage() {
     setUrlError('')
     setFolderFiles([])
     setFolderFiltered(0)
-    setBatchSummary(null)
-    setBatchProgress(null)
   }
 
   // ── Copy to clipboard helper ───────────────────────────
@@ -687,12 +678,12 @@ export function KnowledgeBasePage() {
                     <button
                       className="btn btn-primary btn-sm"
                       onClick={() => fileInputRef.current?.click()}
-                      disabled={uploading}
+                      disabled={submitting}
                       data-testid="kb-upload-button"
                       style={{ marginBottom: 'var(--sp-2)' }}
                     >
                       <Upload size={14} />
-                      {uploading ? t('common.saving') : t('knowledgeBase.uploadDocument')}
+                      {submitting ? t('common.saving') : t('knowledgeBase.uploadDocument')}
                     </button>
                     <input
                       ref={fileInputRef}
@@ -765,7 +756,7 @@ export function KnowledgeBasePage() {
                     <button
                       className="btn btn-ghost btn-sm"
                       onClick={() => folderInputRef.current?.click()}
-                      disabled={batchUploading}
+                      disabled={submitting}
                     >
                       <FolderOpen size={14} />{t('knowledgeBase.selectFolder')}
                     </button>
@@ -779,7 +770,7 @@ export function KnowledgeBasePage() {
                         )}
                       </p>
                     )}
-                    {folderFiles.length > 0 && !batchUploading && !batchSummary && (
+                    {folderFiles.length > 0 && !submitting && (
                       <button
                         className="btn btn-primary btn-sm"
                         onClick={() => void handleFolderUpload()}
@@ -791,37 +782,12 @@ export function KnowledgeBasePage() {
                   </div>
                 )}
 
-                {/* Batch Progress */}
-                {batchUploading && batchProgress && (
-                  <div className="kb-batch-progress">
-                    <div className="kb-batch-progress__bar">
-                      <div
-                        className="kb-batch-progress__fill"
-                        style={{ width: `${(batchProgress.done / batchProgress.total) * 100}%` }}
-                      />
-                    </div>
-                    <span>
-                      {t('knowledgeBase.batchUploading', {
-                        done: String(batchProgress.done),
-                        total: String(batchProgress.total),
-                      })}
-                    </span>
-                  </div>
-                )}
-
-                {/* Batch Summary */}
-                {batchSummary && (
-                  <div className="kb-batch-summary kb-batch-summary--success">
-                    <span className="kb-batch-summary__item">
-                      <Check size={14} />
-                      {t('knowledgeBase.batchComplete', {
-                        uploaded: String(batchSummary.uploaded),
-                        skipped: String(batchSummary.skipped),
-                        errors: String(batchSummary.errors),
-                      })}
-                    </span>
-                  </div>
-                )}
+                {/* Upload Tasks */}
+                <UploadTaskList
+                  tasks={uploadTasks}
+                  onCancel={id => void cancelUpload(id)}
+                  onDismiss={dismissUpload}
+                />
 
                 {documents.length === 0 ? (
                   <div className="kb-empty-state">

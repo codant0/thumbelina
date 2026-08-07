@@ -11,10 +11,8 @@ import json
 import uuid
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from pathlib import Path
 
 from thumbelina.rag.common.models import Chunk, Document
-from thumbelina.rag.ingestion.loader import TextLoader
 
 
 class Chunker(ABC):

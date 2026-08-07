@@ -100,16 +100,24 @@ thumb
 ### Docker 部署
 
 ```bash
-# 设置必要的环境变量
+# 设置 LLM API Key（或直接写入 thumbelina.yaml 的 api_key）
 export THUMBELINA_LLM__API_KEY="sk-..."
 
-# 启动容器
-docker-compose up -d
+# 首次构建并启动
+docker compose up -d --build
 # 后端：http://localhost:8000
 # 前端：http://localhost:3000
 ```
 
-docker-compose 配置将 `thumbelina.yaml` 以只读方式挂载到后端容器，并使用命名卷（`thumbelina-data`）持久化数据。
+前端容器（nginx）会将 `/api` 与 `/ws` 反向代理到后端，Web 界面通过 3000 端口即可完整使用。`thumbelina.yaml` 以只读方式挂载到后端容器；SQLite 数据库（`sqlite:////app/data/thumbelina.db`）和 ChromaDB 数据（`/app/data/chroma`）存放在命名卷 `thumbelina-data` 中，重建容器不会丢失。
+
+修改代码后，只需重建并重启受影响的服务：
+
+```bash
+docker compose up -d --build backend   # 或 frontend
+```
+
+依赖层已缓存，重建时只会重新安装发生变化的部分。完整部署指南（更新流程、备份恢复、数据迁移、FAQ、生产部署建议）见 [docs/docker-deployment.md](docs/docker-deployment.md)。
 
 ## 架构概览
 
@@ -274,6 +282,19 @@ thumbelina/
 | POST | `/api/v1/wechat/qrcode` | 获取微信登录二维码 |
 | GET | `/api/v1/wechat/qrcode/status` | 轮询二维码扫描状态 |
 | POST | `/api/v1/wechat/qrcode/confirm` | 确认登录并启用频道 |
+| GET | `/api/v1/rag/knowledge-bases` | 列出所有 RAG 知识库 |
+| POST | `/api/v1/rag/knowledge-bases` | 创建知识库 |
+| PUT | `/api/v1/rag/knowledge-bases/{id}` | 更新知识库 |
+| DELETE | `/api/v1/rag/knowledge-bases/{id}` | 删除知识库（级联） |
+| GET | `/api/v1/rag/knowledge-bases/{id}/documents` | 列出知识库中的文档 |
+| POST | `/api/v1/rag/knowledge-bases/{id}/documents` | 上传文档（异步，返回任务 id） |
+| POST | `/api/v1/rag/knowledge-bases/{id}/documents/url` | 按 URL 上传网页（异步） |
+| POST | `/api/v1/rag/knowledge-bases/{id}/documents/batch` | 批量上传文档（异步） |
+| GET | `/api/v1/rag/upload-tasks/{task_id}` | 获取上传任务状态与进度 |
+| GET | `/api/v1/rag/knowledge-bases/{id}/upload-tasks` | 列出知识库的上传任务 |
+| DELETE | `/api/v1/rag/upload-tasks/{task_id}` | 取消或关闭上传任务 |
+| DELETE | `/api/v1/rag/documents/{id}` | 删除文档 |
+| POST | `/api/v1/rag/query` | 检索 top-k 相关分块 |
 | WS | `/ws/chat` | WebSocket 流式实时聊天 |
 
 ## QQ Bot 接入

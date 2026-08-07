@@ -10,8 +10,8 @@
 
 from abc import ABC, abstractmethod
 
-from thumbelina.rag.embedding.base import EmbeddingModel, ScoredChunk, VectorStore
 from thumbelina.rag.common.models import Chunk
+from thumbelina.rag.embedding.base import EmbeddingModel, ScoredChunk, VectorStore
 
 
 class Retriever(ABC):

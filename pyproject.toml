@@ -9,6 +9,7 @@ description = "AI-powered application built with FastAPI and LangGraph"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",
+    "python-multipart>=0.0.9",
     "uvicorn[standard]>=0.30",
     "langgraph>=0.2",
     "langchain-core>=0.3",

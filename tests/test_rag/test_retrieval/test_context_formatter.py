@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 import uuid
 
-from thumbelina.rag.embedding.base import ScoredChunk
 from thumbelina.rag.common.models import Chunk
+from thumbelina.rag.embedding.base import ScoredChunk
 from thumbelina.rag.retrieval.context_formatter import (
     ContextFormatter,
     _default_token_counter,

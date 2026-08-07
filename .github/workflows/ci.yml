@@ -17,7 +17,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[dev,rag]"
+      # 使用 uv.lock 锁定的 ruff 版本，避免最新版 ruff 的格式规则漂移导致 CI 误报
+      - run: pip install "ruff==0.15.20"
       - run: ruff check src/ tests/
       - run: ruff format --check src/ tests/
       - run: pytest --tb=short -q

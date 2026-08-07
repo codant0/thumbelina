@@ -8,12 +8,12 @@ import uuid
 import pytest
 from sqlalchemy import Engine, create_engine, text
 
+from thumbelina.rag.common.models import Chunk
 from thumbelina.rag.embedding.base import EmbeddingModel
 from thumbelina.rag.ingestion.chunk_dedup import (
     ChunkDeduplicator,
     ChunkDedupStats,
 )
-from thumbelina.rag.common.models import Chunk
 
 # ---------------------------------------------------------------------------
 # Fixtures
