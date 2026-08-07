@@ -34,3 +34,27 @@ export interface BatchUploadResponse {
   skipped: string[]
   errors: Array<{ filename: string; error: string }>
 }
+
+export type UploadTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+export type UploadTaskKind = 'file' | 'url' | 'batch'
+
+export interface UploadTask {
+  id: string
+  kb_id: string
+  kind: UploadTaskKind
+  label: string
+  status: UploadTaskStatus
+  stage: string
+  total_files: number
+  done_files: number
+  current_file: string
+  chunk_done: number
+  chunk_total: number
+  error?: string | null
+  result?: {
+    uploaded: Array<{ id: string; name: string; chunk_count: number }>
+    skipped: string[]
+    errors: Array<{ filename: string; error: string }>
+  } | null
+  created_at: string
+}
