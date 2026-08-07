@@ -123,6 +123,7 @@ export async function uploadDocumentsBatch(
 // ── Upload Tasks (async) ────────────────────────────
 
 export async function uploadFilesAsync(kbId: string, files: File[]): Promise<string> {
+  if (files.length === 0) throw new Error('No files to upload')
   const formData = new FormData()
   let path: string
   if (files.length === 1) {
@@ -137,8 +138,8 @@ export async function uploadFilesAsync(kbId: string, files: File[]): Promise<str
     const data = await res.json().catch(() => ({}))
     throw new Error(data.detail || `HTTP ${res.status}`)
   }
-  const data = await res.json()
-  return data.task_id as string
+  const data = (await res.json()) as { task_id: string }
+  return data.task_id
 }
 
 export async function uploadUrlAsync(kbId: string, url: string): Promise<string> {
@@ -151,8 +152,8 @@ export async function uploadUrlAsync(kbId: string, url: string): Promise<string>
     const data = await res.json().catch(() => ({}))
     throw new Error(data.detail || `HTTP ${res.status}`)
   }
-  const data = await res.json()
-  return data.task_id as string
+  const data = (await res.json()) as { task_id: string }
+  return data.task_id
 }
 
 export async function listUploadTasks(kbId: string): Promise<UploadTask[]> {
