@@ -333,6 +333,26 @@
     "copiedToClipboard": "Copied to clipboard",
     "chunkMeta": "Metadata"
   },
+  "uploadTask": {
+    "title": "Upload Tasks",
+    "statusPending": "Queued",
+    "statusRunning": "Processing",
+    "statusCompleted": "Completed",
+    "statusFailed": "Failed",
+    "statusCancelled": "Cancelled",
+    "stageQueued": "Waiting",
+    "stageLoading": "Parsing",
+    "stageChunking": "Chunking",
+    "stageEmbedding": "Embedding",
+    "stageStoring": "Storing",
+    "fileProgress": "{done}/{total} files",
+    "chunkProgress": "{done}/{total} chunks",
+    "batchFileLabel": "{name} and {count} files",
+    "submitSuccess": "Upload task submitted",
+    "cancelTask": "Cancel task",
+    "dismissTask": "Dismiss",
+    "taskResult": "{uploaded} uploaded, {skipped} skipped, {errors} failed"
+  },
   "theme": {
     "dark": "Dark",
     "light": "Light",
