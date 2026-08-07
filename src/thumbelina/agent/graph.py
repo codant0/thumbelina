@@ -503,8 +503,8 @@ class ThumbelinaAgent:
         full_response = ""
         pending = ""
         # Batch tokens before yielding: send when buffer reaches size OR timeout
-        BATCH_SIZE = 30  # characters per batch
-        FLUSH_INTERVAL = 0.05  # seconds (50ms) - flush even if batch size not reached
+        batch_size = 30  # characters per batch
+        flush_interval = 0.05  # seconds (50ms) - flush even if batch size not reached
         last_flush = asyncio.get_event_loop().time()
 
         async for event in self.graph.astream(initial_state, stream_mode="messages"):
@@ -530,7 +530,7 @@ class ThumbelinaAgent:
 
                 # Yield when buffer reaches batch size or time interval
                 now = asyncio.get_event_loop().time()
-                if len(pending) >= BATCH_SIZE or (now - last_flush) >= FLUSH_INTERVAL:
+                if len(pending) >= batch_size or (now - last_flush) >= flush_interval:
                     yield pending
                     pending = ""
                     last_flush = now
