@@ -550,6 +550,34 @@ class TestAsyncUpload:
         assert len(docs) == 1
         assert docs[0]["chunk_count"] == 3
 
+    def test_upload_document_keeps_original_filename(self, rag_client, mock_rag_pipeline):
+        """loader 从临时路径派生的名称不应覆盖用户上传的原始文件名。"""
+        mock_stats = MagicMock()
+        mock_stats.indexed_count = 1
+        mock_stats.errors = []
+        fake_doc = MagicMock()
+        fake_doc.id = uuid.uuid4().hex
+        # 模拟 loader 用带 uuid 前缀的临时路径派生 name
+        fake_doc.name = f"upload_{uuid.uuid4().hex}_AI-Agents-in-Depth-zh-CN.pdf"
+        fake_doc.source_uri = f"/tmp/upload_{uuid.uuid4().hex}_AI-Agents-in-Depth-zh-CN.pdf"
+        fake_doc.sha256 = b"\x00" * 32
+        fake_doc.sim_hash_64 = b"\x00" * 8
+        mock_stats.documents = [fake_doc]
+        mock_rag_pipeline.return_value.index.return_value = mock_stats
+
+        resp = rag_client.post(
+            "/api/v1/rag/knowledge-bases/0/documents",
+            files={
+                "file": ("AI-Agents-in-Depth-zh-CN.pdf", b"pdf-bytes", "application/pdf"),
+            },
+        )
+        task = _wait_task_done(rag_client, resp.json()["task_id"])
+        assert task["status"] == "completed"
+
+        docs = rag_client.get("/api/v1/rag/knowledge-bases/0/documents").json()
+        assert len(docs) == 1
+        assert docs[0]["name"] == "AI-Agents-in-Depth-zh-CN.pdf"
+
     def test_upload_unsupported_type_returns_400(self, rag_client):
         resp = rag_client.post(
             "/api/v1/rag/knowledge-bases/0/documents",

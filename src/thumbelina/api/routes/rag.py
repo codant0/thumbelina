@@ -422,7 +422,7 @@ async def _run_file_upload(
         document = stats.documents[0]
         doc = await doc_repo.create(
             kb_id=kb_id,
-            name=document.name,
+            name=display_name,
             source_uri=document.source_uri,
             doc_type=doc_type,
             sha256=document.sha256,
