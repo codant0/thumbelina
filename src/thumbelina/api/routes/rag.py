@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import tempfile
 import uuid
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -163,8 +164,8 @@ def _doc_repo_from_state(state: Any) -> DocumentRepository:
 
 
 async def _save_upload_file(file: UploadFile, filename: str) -> Path:
-    """流式保存上传文件到临时目录（uuid 前缀避免同名冲突）。"""
-    tmp_dir = Path("/tmp_file")
+    """流式保存上传文件到系统临时目录（uuid 前缀避免同名冲突）。"""
+    tmp_dir = Path(tempfile.gettempdir())
     tmp_dir.mkdir(exist_ok=True)
     tmp_path = tmp_dir / f"upload_{uuid.uuid4().hex}_{Path(filename).name}"
     try:

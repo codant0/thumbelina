@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -195,8 +196,8 @@ def _wait_task_done(client, task_id: str, timeout: float = 5.0) -> dict:
 
 
 def _wait_no_tmp_files(pattern: str, timeout: float = 5.0) -> list[Path]:
-    """轮询直至 /tmp_file 下无匹配文件，返回最终匹配结果。"""
-    tmp_dir = Path("/tmp_file")
+    """轮询直至系统临时目录下无匹配文件，返回最终匹配结果。"""
+    tmp_dir = Path(tempfile.gettempdir())
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         matches = list(tmp_dir.glob(pattern))
@@ -207,8 +208,8 @@ def _wait_no_tmp_files(pattern: str, timeout: float = 5.0) -> list[Path]:
 
 
 def _remove_tmp_files(pattern: str) -> None:
-    """立即删除 /tmp_file 下匹配的历史残留文件（测试前置清理）。"""
-    tmp_dir = Path("/tmp_file")
+    """立即删除系统临时目录下匹配的历史残留文件（测试前置清理）。"""
+    tmp_dir = Path(tempfile.gettempdir())
     if not tmp_dir.exists():
         return
     for path in tmp_dir.glob(pattern):
@@ -689,7 +690,7 @@ class TestAsyncBatchAndUrlUpload:
         mock_stats.documents = [fake_doc]
         mock_rag_pipeline.return_value.index.return_value = mock_stats
 
-        # 清理历史残留，避免 /tmp_file 遗留文件造成误判
+        # 清理历史残留，避免系统临时目录遗留文件造成误判
         _remove_tmp_files("upload_*_a.md")
         _remove_tmp_files("upload_*_b.md")
         resp = rag_client.post(
