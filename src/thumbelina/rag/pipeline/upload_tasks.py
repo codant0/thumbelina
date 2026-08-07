@@ -123,6 +123,16 @@ class UploadTaskManager:
                 self._evict_finished()
             return True
 
+    def cancel_by_kb(self, kb_id: str) -> int:
+        """取消指定知识库下所有活跃任务（删除知识库前的清理），返回取消数量。"""
+        with self._lock:
+            ids = [
+                t.id
+                for t in self._tasks.values()
+                if t.kb_id == kb_id and t.status not in TERMINAL_STATUSES
+            ]
+        return sum(1 for task_id in ids if self.cancel(task_id))
+
     def start_file(self, task_id: str, index: int, filename: str) -> None:
         with self._lock:
             task = self._tasks.get(task_id)

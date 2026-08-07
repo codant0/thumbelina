@@ -58,6 +58,25 @@ class TestCancel:
         m.cancel(task.id)
         assert m.cancel(task.id) is False
 
+    def test_cancel_by_kb_cancels_only_active_tasks_of_that_kb(self) -> None:
+        m = UploadTaskManager()
+        t1 = m.create("kb1", "file", "a.md")
+        t2 = m.create("kb1", "url", "http://x")
+        other_kb = m.create("kb2", "file", "c.md")
+        finished = m.create("kb1", "file", "old.md")
+        m.cancel(finished.id)  # 已终态
+
+        assert m.cancel_by_kb("kb1") == 2
+        assert m.get(t1.id).status == "cancelled"  # type: ignore[union-attr]
+        assert m.get(t2.id).status == "cancelled"  # type: ignore[union-attr]
+        assert t1.cancel_event.is_set()
+        assert m.get(other_kb.id).status == "pending"  # type: ignore[union-attr]
+
+    def test_cancel_by_kb_no_tasks_returns_zero(self) -> None:
+        m = UploadTaskManager()
+        m.create("kb1", "file", "a.md")
+        assert m.cancel_by_kb("no-such-kb") == 0
+
 
 class TestProgress:
     def test_update_progress_fields(self) -> None:

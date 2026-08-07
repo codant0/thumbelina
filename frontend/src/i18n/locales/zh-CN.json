@@ -329,7 +329,9 @@
     "chunkTotalChars": "总字符数",
     "copyContent": "复制内容",
     "copiedToClipboard": "已复制到剪贴板",
-    "chunkMeta": "元数据"
+    "chunkMeta": "元数据",
+    "yesterday": "昨天",
+    "daysAgo": "{count}天前"
   },
   "uploadTask": {
     "title": "上传任务",

@@ -216,7 +216,7 @@ class Indexer:
         stats.documents = documents
 
         # 2. 去重 -> 分块 → 3. 向量化 → 4. 写入
-        for document in documents:
+        for document in list(documents):
             # 文档级去重（委托给 DocumentDeduplicator）
             if self.doc_deduplicator:
                 dedup_result = self.doc_deduplicator.check(document)
@@ -224,8 +224,10 @@ class Indexer:
                     DedupAction.EXACT_DUPLICATE,
                     DedupAction.IDENTICAL_SIMHASH,
                 ):
-                    stats.errors.append(dedup_result.message)
-                    return stats
+                    logger.info(dedup_result.message)
+                    stats.documents.remove(document)
+                    stats.skipped_count += 1
+                    continue
                 if (
                     dedup_result.action == DedupAction.NEAR_DUPLICATE
                     and dedup_result.existing_doc_id

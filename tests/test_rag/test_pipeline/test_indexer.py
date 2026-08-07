@@ -261,6 +261,42 @@ class TestIndexer:
         assert stats.indexed_count == 0
 
 
+class TestDocumentDedup:
+    """文档级去重命中时应记为 skipped 而非 error。"""
+
+    def _make_indexer_with_dedup(self, action, store: FakeVectorStore) -> Indexer:
+        from thumbelina.rag.ingestion.document_dedup import DedupResult
+
+        class FixedDedup:
+            def check(self, document):
+                return DedupResult(action=action, message="存在相同文件 [test.md]")
+
+        return Indexer(
+            loader=FakeLoader([_make_document()]),
+            chunker=FakeChunker([_make_chunk()]),
+            embedder=FakeEmbedding(),
+            vector_store=store,
+            doc_deduplicator=FixedDedup(),
+        )
+
+    @pytest.mark.parametrize(
+        "action_name",
+        ["EXACT_DUPLICATE", "IDENTICAL_SIMHASH"],
+    )
+    def test_duplicate_document_skipped_not_indexed(self, action_name):
+        from thumbelina.rag.ingestion.document_dedup import DedupAction
+
+        store = FakeVectorStore()
+        indexer = self._make_indexer_with_dedup(getattr(DedupAction, action_name), store)
+        stats = indexer.index("/tmp/test.md")
+
+        assert stats.documents == []
+        assert stats.skipped_count == 1
+        assert stats.errors == []
+        assert stats.indexed_count == 0
+        assert store.added_chunks == []
+
+
 class TestIndexerBatch:
     """Tests for Indexer.index_batch."""
 

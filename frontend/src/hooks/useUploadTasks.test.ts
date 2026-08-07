@@ -171,6 +171,22 @@ describe('useUploadTasks', () => {
     expect(result.current.tasks.map(t => t.id)).toEqual(['t2'])
   })
 
+  it('dismissed active task still fires onSettled when it settles', async () => {
+    respond([{ id: 't1', status: 'running' }])
+    const onSettled = vi.fn()
+    const { result } = renderHook(() => useUploadTasks('kb1', onSettled))
+    await waitFor(() => expect(result.current.tasks).toHaveLength(1))
+
+    act(() => result.current.dismiss('t1'))
+    expect(result.current.tasks).toHaveLength(0)
+    expect(onSettled).not.toHaveBeenCalled()
+
+    respond([{ id: 't1', status: 'completed' }])
+    await act(async () => { await result.current.refresh() })
+    expect(result.current.tasks).toHaveLength(0) // 保持隐藏
+    expect(onSettled).toHaveBeenCalledTimes(1) // 文档列表仍会刷新
+  })
+
   it('resets when kbId changes', async () => {
     respond([{ id: 't1', status: 'completed' }])
     const { result, rerender } = renderHook(

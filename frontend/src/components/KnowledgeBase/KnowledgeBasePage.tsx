@@ -385,8 +385,8 @@ export function KnowledgeBasePage() {
     const diffMs = now.getTime() - d.getTime()
     const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
     if (diffDays === 0) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    if (diffDays === 1) return '昨天'
-    if (diffDays < 30) return `${diffDays}天前`
+    if (diffDays === 1) return t('knowledgeBase.yesterday')
+    if (diffDays < 30) return t('knowledgeBase.daysAgo', { count: String(diffDays) })
     return d.toLocaleDateString()
   }
 

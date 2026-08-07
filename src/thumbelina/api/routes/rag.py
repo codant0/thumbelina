@@ -11,7 +11,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 
 from thumbelina.rag.common.repository import (
@@ -29,6 +29,9 @@ from thumbelina.rag.pipeline.upload_tasks import (
 )
 
 logger = logging.getLogger(__name__)
+
+#: 单个上传文件的大小上限，超限返回 413。
+MAX_UPLOAD_SIZE_BYTES = 100 * 1024 * 1024
 
 router = APIRouter(prefix="/rag", tags=["rag"])
 
@@ -54,6 +57,7 @@ class KnowledgeBaseResponse(BaseModel):
     id: str
     name: str
     description: str | None = None
+    document_count: int = 0
     created_at: str
     updated_at: str
 
@@ -168,9 +172,16 @@ async def _save_upload_file(file: UploadFile, filename: str) -> Path:
     tmp_dir = Path(tempfile.gettempdir())
     tmp_dir.mkdir(exist_ok=True)
     tmp_path = tmp_dir / f"upload_{uuid.uuid4().hex}_{Path(filename).name}"
+    size = 0
     try:
         with open(tmp_path, "wb") as f:
             while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > MAX_UPLOAD_SIZE_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"文件超过大小限制（{MAX_UPLOAD_SIZE_BYTES // (1024 * 1024)} MB）",
+                    )
                 f.write(chunk)
     except Exception:
         try:
@@ -234,12 +245,14 @@ def _delete_chunk_fingerprints(
 @router.get("/knowledge-bases", response_model=list[KnowledgeBaseResponse])
 async def list_knowledge_bases(request: Request) -> list[KnowledgeBaseResponse]:
     repo = _get_kb_repo(request)
+    doc_repo = _get_doc_repo(request)
     kbs = await repo.list_all()
     return [
         KnowledgeBaseResponse(
             id=kb.id,
             name=kb.name,
             description=kb.description,
+            document_count=await doc_repo.count_by_kb(kb.id),
             created_at=str(kb.created_at),
             updated_at=str(kb.updated_at),
         )
@@ -288,7 +301,9 @@ async def update_knowledge_base(
 async def delete_knowledge_base(kb_id: str, request: Request) -> dict:
     repo = _get_kb_repo(request)
     doc_repo = _get_doc_repo(request)
-    # 1. 先清理 ChromaDB 向量库
+    # 0. 先取消该知识库的活跃上传任务，防止运行中的任务重建向量库/写入孤儿数据
+    _get_task_manager(request).cancel_by_kb(kb_id)
+    # 1. 清理 ChromaDB 向量库
     store_manager = getattr(request.app.state, "rag_store_manager", None)
     if store_manager:
         store_manager.delete_store(kb_id)
@@ -571,7 +586,7 @@ async def upload_document_by_url(
     response_model=CreateUploadTaskResponse,
 )
 async def upload_documents_batch(
-    kb_id: str, request: Request, files: list[UploadFile] = []
+    kb_id: str, request: Request, files: list[UploadFile] = File(default_factory=list)
 ) -> CreateUploadTaskResponse:
     """批量上传多个文件（后台任务）。不支持的类型记入任务结果 skipped。"""
     if not files:

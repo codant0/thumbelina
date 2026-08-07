@@ -329,7 +329,9 @@
     "chunkTotalChars": "Total chars",
     "copyContent": "Copy content",
     "copiedToClipboard": "Copied to clipboard",
-    "chunkMeta": "Metadata"
+    "chunkMeta": "Metadata",
+    "yesterday": "Yesterday",
+    "daysAgo": "{count} days ago"
   },
   "uploadTask": {
     "title": "Upload Tasks",
