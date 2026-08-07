@@ -286,8 +286,6 @@
     "selectFolder": "选择文件夹",
     "filesSelected": "已选择 {count} 个文件",
     "filesFiltered": "{count} 个不支持的文件已跳过",
-    "batchUploading": "上传中 {done}/{total}…",
-    "batchComplete": "上传完成：{uploaded} 成功，{skipped} 跳过，{errors} 失败",
     "documentName": "文件名",
     "documentType": "类型",
     "chunkCount": "分块数",

@@ -29,12 +29,6 @@ export interface ChunkItem {
   metadata?: string
 }
 
-export interface BatchUploadResponse {
-  uploaded: RagDocument[]
-  skipped: string[]
-  errors: Array<{ filename: string; error: string }>
-}
-
 export type UploadTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 export type UploadTaskKind = 'file' | 'url' | 'batch'
 

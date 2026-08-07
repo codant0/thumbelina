@@ -286,8 +286,6 @@
     "selectFolder": "Select Folder",
     "filesSelected": "{count} files selected",
     "filesFiltered": "{count} unsupported files skipped",
-    "batchUploading": "Uploading {done}/{total}…",
-    "batchComplete": "Upload complete: {uploaded} succeeded, {skipped} skipped, {errors} failed",
     "documentName": "Filename",
     "documentType": "Type",
     "chunkCount": "Chunks",

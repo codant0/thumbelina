@@ -3,7 +3,6 @@ import type {
   RagDocument,
   QueryResult,
   ChunkItem,
-  BatchUploadResponse,
   UploadTask,
 } from '../types/rag'
 
@@ -69,55 +68,6 @@ export async function listDocuments(kbId: string): Promise<RagDocument[]> {
     throw new Error(data.detail || `HTTP ${res.status}`)
   }
   return res.json() as Promise<RagDocument[]>
-}
-
-// TODO(task-9): remove after page migration
-export async function uploadDocument(kbId: string, file: File): Promise<RagDocument> {
-  const formData = new FormData()
-  formData.append('file', file)
-  const res = await fetch(`${API_BASE}/knowledge-bases/${kbId}/documents`, {
-    method: 'POST',
-    body: formData,
-  })
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}))
-    throw new Error(data.detail || `HTTP ${res.status}`)
-  }
-  return res.json() as Promise<RagDocument>
-}
-
-// TODO(task-9): remove after page migration
-export async function uploadDocumentByUrl(kbId: string, url: string): Promise<RagDocument> {
-  const res = await fetch(`${API_BASE}/knowledge-bases/${kbId}/documents/url`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url }),
-  })
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}))
-    throw new Error(data.detail || `HTTP ${res.status}`)
-  }
-  return res.json() as Promise<RagDocument>
-}
-
-// TODO(task-9): remove after page migration
-export async function uploadDocumentsBatch(
-  kbId: string,
-  files: File[],
-): Promise<BatchUploadResponse> {
-  const formData = new FormData()
-  for (const file of files) {
-    formData.append('files', file)
-  }
-  const res = await fetch(`${API_BASE}/knowledge-bases/${kbId}/documents/batch`, {
-    method: 'POST',
-    body: formData,
-  })
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}))
-    throw new Error(data.detail || `HTTP ${res.status}`)
-  }
-  return res.json() as Promise<BatchUploadResponse>
 }
 
 // ── Upload Tasks (async) ────────────────────────────
