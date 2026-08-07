@@ -10,6 +10,19 @@ function respond(tasks: unknown[]) {
   )
 }
 
+function jsonResponse(data: unknown) {
+  return new Response(JSON.stringify(data), { status: 200 })
+}
+
+/** 手动控制 resolve 时机的 promise，用于精确编排异步响应的到达顺序 */
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(r => {
+    resolve = r
+  })
+  return { promise, resolve }
+}
+
 describe('useUploadTasks', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -59,6 +72,84 @@ describe('useUploadTasks', () => {
     respond([])
     await act(async () => { await result.current.cancel('t1') })
     expect(fetchMock.mock.calls[1][1]?.method).toBe('DELETE')
+    await waitFor(() => expect(result.current.tasks).toHaveLength(0))
+  })
+
+  it('stale response from previous kb does not overwrite current kb', async () => {
+    const d1 = deferred<Response>()
+    fetchMock.mockImplementationOnce(() => d1.promise)
+    const { result, rerender } = renderHook(
+      ({ kb }: { kb: string | null }) => useUploadTasks(kb),
+      { initialProps: { kb: 'kb1' as string | null } },
+    )
+    // kb1 的列表请求挂起中
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    respond([{ id: 'taskX', status: 'running' }])
+    rerender({ kb: 'kb2' })
+    await waitFor(() =>
+      expect(result.current.tasks.map(t => t.id)).toEqual(['taskX']),
+    )
+
+    // 迟到的 kb1 响应到达，不应覆盖 kb2 的状态
+    await act(async () => {
+      d1.resolve(jsonResponse([{ id: 'taskY', status: 'running' }]))
+    })
+    expect(result.current.tasks.map(t => t.id)).toEqual(['taskX'])
+  })
+
+  it('switching kb1 -> kb2 does not fire spurious onSettled', async () => {
+    respond([{ id: 't1', status: 'running' }])
+    const onSettled = vi.fn()
+    const { result, rerender } = renderHook(
+      ({ kb }: { kb: string | null }) => useUploadTasks(kb, onSettled),
+      { initialProps: { kb: 'kb1' as string | null } },
+    )
+    await waitFor(() => expect(result.current.tasks).toHaveLength(1))
+
+    respond([{ id: 't2', status: 'running' }])
+    rerender({ kb: 'kb2' })
+    await waitFor(() =>
+      expect(result.current.tasks.map(t => t.id)).toEqual(['t2']),
+    )
+    expect(onSettled).not.toHaveBeenCalled()
+  })
+
+  it('submitFiles posts and refreshes', async () => {
+    respond([])
+    const { result } = renderHook(() => useUploadTasks('kb1'))
+    await waitFor(() => expect(result.current.tasks).toHaveLength(0))
+
+    fetchMock.mockResolvedValueOnce(new Response('{"task_id": "t-new"}', { status: 202 }))
+    respond([{ id: 't-new', status: 'pending' }])
+    await act(async () => {
+      await result.current.submitFiles([new File(['x'], 'a.md')])
+    })
+    expect(String(fetchMock.mock.calls[1][0])).toContain('/documents')
+    expect(fetchMock.mock.calls[1][1]?.method).toBe('POST')
+    await waitFor(() => expect(result.current.tasks).toHaveLength(1))
+  })
+
+  it('submitFiles with null kbId is a no-op', async () => {
+    const { result } = renderHook(() => useUploadTasks(null))
+    await act(async () => {
+      await result.current.submitFiles([new File(['x'], 'a.md')])
+    })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('submitUrl posts and refreshes', async () => {
+    respond([])
+    const { result } = renderHook(() => useUploadTasks('kb1'))
+    await waitFor(() => expect(result.current.tasks).toHaveLength(0))
+
+    fetchMock.mockResolvedValueOnce(new Response('{"task_id": "t-u"}', { status: 202 }))
+    respond([{ id: 't-u', status: 'pending' }])
+    await act(async () => {
+      await result.current.submitUrl('https://example.com')
+    })
+    expect(String(fetchMock.mock.calls[1][0])).toContain('/documents/url')
+    await waitFor(() => expect(result.current.tasks).toHaveLength(1))
   })
 
   it('dismissed terminal tasks stay hidden after refresh', async () => {

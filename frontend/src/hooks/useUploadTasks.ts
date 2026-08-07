@@ -13,15 +13,21 @@ export function useUploadTasks(kbId: string | null, onSettled?: () => void) {
   const prevActiveRef = useRef<Set<string>>(new Set())
   const dismissedRef = useRef<Set<string>>(new Set())
   const onSettledRef = useRef(onSettled)
+  const kbIdRef = useRef(kbId)
 
   useEffect(() => {
     onSettledRef.current = onSettled
   }, [onSettled])
 
+  useEffect(() => {
+    kbIdRef.current = kbId
+  }, [kbId])
+
   const refresh = useCallback(async () => {
     if (!kbId) return
     try {
       const list = await ragApi.listUploadTasks(kbId)
+      if (kbIdRef.current !== kbId) return
       const visible = list.filter(t => !dismissedRef.current.has(t.id))
       const activeIds = new Set(visible.filter(isActive).map(t => t.id))
       const settledNow = [...prevActiveRef.current].filter(id => !activeIds.has(id))
@@ -34,13 +40,11 @@ export function useUploadTasks(kbId: string | null, onSettled?: () => void) {
   }, [kbId])
 
   useEffect(() => {
-    if (!kbId) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setTasks([])
-      prevActiveRef.current = new Set()
-      dismissedRef.current = new Set()
-      return
-    }
+    prevActiveRef.current = new Set()
+    dismissedRef.current = new Set()
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setTasks([])
+    if (!kbId) return
     void refresh()
   }, [kbId, refresh])
 
@@ -80,6 +84,7 @@ export function useUploadTasks(kbId: string | null, onSettled?: () => void) {
 
   const dismiss = useCallback((taskId: string) => {
     dismissedRef.current.add(taskId)
+    prevActiveRef.current.delete(taskId)
     setTasks(prev => prev.filter(t => t.id !== taskId))
   }, [])
 
