@@ -236,9 +236,7 @@ class Indexer:
                     if self.doc_repo:
                         self.doc_repo.delete_sync(old_doc_id)
                     # 清理向量库中属于旧文档的 chunks
-                    self.vector_store.delete_by_metadata(
-                        where={"document_id": old_doc_id}
-                    )
+                    self.vector_store.delete_by_metadata(where={"document_id": old_doc_id})
                     # 清理旧文档的 chunk 指纹
                     if self.chunk_dedup:
                         self.chunk_dedup.remove_fingerprints_by_doc(old_doc_id)
@@ -356,9 +354,7 @@ class Indexer:
 
         # 分块级去重（替换策略：删除旧的，全量写入新的）
         if self.chunk_dedup and chunks:
-            chunks, dedup_stats = self.chunk_dedup.deduplicate(
-                chunks, chunks[0].knowledge_base_id
-            )
+            chunks, dedup_stats = self.chunk_dedup.deduplicate(chunks, chunks[0].knowledge_base_id)
             if dedup_stats.removed_old_ids:
                 self.vector_store.delete(list(dedup_stats.removed_old_ids))
                 logger.info(
