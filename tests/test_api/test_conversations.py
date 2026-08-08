@@ -199,3 +199,23 @@ def test_set_knowledge_base_nonexistent_conversation(client):
         json={"knowledge_base_id": "kb-123"},
     )
     assert response.status_code == 404
+
+
+def test_clear_conversation_messages(client, conversation_id):
+    """DELETE /conversations/{id}/messages should empty the history."""
+    detail = client.get(f"/api/v1/conversations/{conversation_id}").json()
+    assert len(detail["messages"]) >= 1
+
+    response = client.delete(f"/api/v1/conversations/{conversation_id}/messages")
+    assert response.status_code == 200
+    assert response.json() == {"cleared": True}
+
+    detail = client.get(f"/api/v1/conversations/{conversation_id}").json()
+    assert detail["id"] == conversation_id
+    assert detail["messages"] == []
+
+
+def test_clear_messages_nonexistent_conversation(client):
+    """DELETE /conversations/{id}/messages should 404 for unknown IDs."""
+    response = client.delete("/api/v1/conversations/nonexistent-id/messages")
+    assert response.status_code == 404

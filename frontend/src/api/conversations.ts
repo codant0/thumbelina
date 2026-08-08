@@ -47,3 +47,13 @@ export async function setConversationKnowledgeBase(
   }
   return res.json() as Promise<Conversation>
 }
+
+export async function clearConversationMessages(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/conversations/${id}/messages`, {
+    method: 'DELETE',
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.detail || `HTTP ${res.status}`)
+  }
+}

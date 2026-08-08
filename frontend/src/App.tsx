@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Header, type Page } from './components/Layout/Header'
-import { Sidebar } from './components/Layout/Sidebar'
+import { Sidebar, WECHAT_CONVERSATION_NAME } from './components/Layout/Sidebar'
 import { ChatWindow } from './components/Chat/ChatWindow'
 import { TaskManager } from './components/Tasks/TaskManager'
 import { MemoryViewer } from './components/Memory/MemoryViewer'
@@ -50,6 +50,15 @@ function App() {
     window.addEventListener('conversations-updated', handler)
     return () => window.removeEventListener('conversations-updated', handler)
   }, [fetchConversations])
+
+  // Default to the WeChat conversation when entering the chat page with no selection
+  useEffect(() => {
+    if (selectedId === undefined && conversations.length > 0) {
+      const wechat = conversations.find(c => c.name === WECHAT_CONVERSATION_NAME)
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (wechat) setSelectedId(wechat.id)
+    }
+  }, [conversations, selectedId])
 
   const handleSelect = useCallback((id: string) => {
     setSelectedId(id)

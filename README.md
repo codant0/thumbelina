@@ -18,7 +18,6 @@ An AI-powered personal assistant built with [FastAPI](https://fastapi.tiangolo.c
 - **Skill Extraction & Integration** — Automatically extracts reusable skills from conversations and applies them in the agent loop
 - **Skill Composition** — Chain multiple skills into workflows, with LLM-assisted suggestion
 - **User Profiler** — Analyzes conversation patterns to build user preference profiles for personalized responses
-- **User Feedback** — Rate skill responses (1-5 stars), scores automatically adjust skill matching priority
 - **Sub-Agent System** — Parallel task execution with monitor/worker agents, inter-agent messaging and shared state
 - **Task Scheduler** — Natural language time parsing (Chinese & English) with conditional triggers and notification broadcast
 - **Plugin System** — Register and manage tools, skills, channels, and providers with sandbox validation and dependency resolution
