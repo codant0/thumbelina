@@ -1,13 +1,14 @@
-import { useState, useRef, type FormEvent, type KeyboardEvent } from 'react'
+import { useState, useRef, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import { Send } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 
 interface InputBoxProps {
   onSend: (message: string) => void
   disabled?: boolean
+  toolbar?: ReactNode
 }
 
-export function InputBox({ onSend, disabled }: InputBoxProps) {
+export function InputBox({ onSend, disabled, toolbar }: InputBoxProps) {
   const [text, setText] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const { t } = useTranslation()
@@ -44,6 +45,7 @@ export function InputBox({ onSend, disabled }: InputBoxProps) {
 
   return (
     <div className="input-box">
+      {toolbar && <div className="input-toolbar">{toolbar}</div>}
       <form onSubmit={handleSubmit}>
         <textarea
           ref={textareaRef}

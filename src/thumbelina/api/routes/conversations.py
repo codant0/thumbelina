@@ -208,6 +208,23 @@ async def set_conversation_knowledge_base(
     return ConversationSchema(**conv)
 
 
+@router.delete("/conversations/{conversation_id}/messages")
+async def clear_conversation_messages(
+    conversation_id: str,
+    memory: MemoryManager = Depends(get_memory_manager),
+) -> dict[str, bool]:
+    """Clear all messages of a conversation, keeping the conversation itself.
+
+    Used by the frontend "clear context" action.
+    """
+    cleared = await memory.clear_messages(conversation_id)
+
+    if not cleared:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    return {"cleared": True}
+
+
 @router.delete("/conversations/{conversation_id}")
 async def delete_conversation(
     conversation_id: str,
