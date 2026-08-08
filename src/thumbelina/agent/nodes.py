@@ -73,8 +73,24 @@ async def tool_node(state: AgentState, tools: list[BaseTool]) -> dict[str, list[
         tool_args = tool_call["args"]
         tool_call_id = tool_call["id"]
 
-        if tool_name in tool_map:
+        if tool_name not in tool_map:
+            tool_messages.append(
+                ToolMessage(
+                    content=f"Error: Unknown tool '{tool_name}'",
+                    tool_call_id=tool_call_id,
+                )
+            )
+            continue
+
+        try:
             result = await tool_map[tool_name].ainvoke(tool_args)
             tool_messages.append(ToolMessage(content=str(result), tool_call_id=tool_call_id))
+        except Exception as exc:
+            tool_messages.append(
+                ToolMessage(
+                    content=f"Error executing tool '{tool_name}': {exc}",
+                    tool_call_id=tool_call_id,
+                )
+            )
 
     return {"messages": tool_messages}

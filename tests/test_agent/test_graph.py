@@ -365,3 +365,114 @@ class TestAgentRAGIntegration:
 
         assert cloned._rag_store_manager is mock_store_manager
         assert cloned._rag_embedding_registry is mock_embedding_registry
+
+    def test_clone_does_not_duplicate_tool_names(self):
+        """clone() must not re-add generated tools (LLM rejects dup names)."""
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        mock_provider = _create_mock_provider()
+        mock_tool = MagicMock()
+        mock_tool.name = "search"
+
+        agent = ThumbelinaAgent(
+            llm_provider=mock_provider,
+            tools=[mock_tool],
+            subagent_manager=MagicMock(),
+            scheduler=MagicMock(),
+            composition_engine=MagicMock(),
+        )
+
+        cloned = agent.clone()
+
+        original_names = [t.name for t in agent.tools]
+        cloned_names = [t.name for t in cloned.tools]
+        assert len(cloned_names) == len(set(cloned_names)), (
+            f"clone() produced duplicate tool names: {cloned_names}"
+        )
+        assert sorted(cloned_names) == sorted(original_names)
+
+
+class TestToolBinding:
+    """Tests that tools are bound to the LLM and executed in the loop."""
+
+    @staticmethod
+    def _make_echo_tool():
+        from langchain_core.tools import tool
+
+        @tool
+        async def echo(text: str) -> str:
+            """Echo the input text."""
+            return text
+
+        return echo
+
+    @pytest.mark.asyncio
+    async def test_model_is_bound_with_tools(self):
+        """The chat model should receive the tool schemas via bind_tools."""
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        echo = self._make_echo_tool()
+
+        bound_model = AsyncMock()
+        bound_model.ainvoke.return_value = AIMessage(content="ok")
+        mock_provider = MagicMock()
+        mock_provider.chat_model = MagicMock()
+        mock_provider.chat_model.bind_tools.return_value = bound_model
+
+        agent = ThumbelinaAgent(llm_provider=mock_provider, tools=[echo])
+        result = await agent.run("hi")
+
+        mock_provider.chat_model.bind_tools.assert_called_once()
+        assert mock_provider.chat_model.bind_tools.call_args[0][0] == [echo]
+        assert result == "ok"
+
+    @pytest.mark.asyncio
+    async def test_tool_call_loop_executes_tool(self):
+        """A tool call from the model should be executed and fed back."""
+        from langchain_core.tools import tool
+
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        @tool
+        async def read_file(path: str) -> str:
+            """Read a file."""
+            return "file-content"
+
+        bound_model = AsyncMock()
+        bound_model.ainvoke.side_effect = [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {"id": "call_1", "name": "read_file", "args": {"path": "a.txt"}}
+                ],
+            ),
+            AIMessage(content="The file contains: file-content"),
+        ]
+        mock_provider = MagicMock()
+        mock_provider.chat_model = MagicMock()
+        mock_provider.chat_model.bind_tools.return_value = bound_model
+
+        agent = ThumbelinaAgent(llm_provider=mock_provider, tools=[read_file])
+        result = await agent.run("read a.txt")
+
+        assert result == "The file contains: file-content"
+        assert bound_model.ainvoke.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_bind_tools_not_supported_falls_back(self):
+        """Models without tool support should fall back to plain chat."""
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        echo = self._make_echo_tool()
+
+        mock_provider = MagicMock()
+        mock_provider.chat_model = MagicMock()
+        mock_provider.chat_model.bind_tools.side_effect = NotImplementedError
+        mock_provider.chat_model.ainvoke = AsyncMock(
+            return_value=AIMessage(content="plain")
+        )
+
+        agent = ThumbelinaAgent(llm_provider=mock_provider, tools=[echo])
+        result = await agent.run("hi")
+
+        assert result == "plain"
