@@ -44,11 +44,13 @@ class OpenAIProvider(LLMProvider):
         api_key: str = "",
         model: str = "gpt-4o",
         base_url: str | None = None,
+        reasoning_effort: str | None = None,
         **kwargs: Any,
     ) -> None:
         self._model_name = model
         self._api_key = api_key
         self._base_url = base_url
+        self.reasoning_effort = reasoning_effort
         self._chat_model_kwargs = kwargs
         self._chat_model: BaseChatModel | None = None
 
@@ -61,10 +63,12 @@ class OpenAIProvider(LLMProvider):
         if self._chat_model is None:
             from langchain_openai import ChatOpenAI
 
+            # 思考模式&思考强度
             self._chat_model = ChatOpenAI(
                 api_key=self._api_key or None,
                 model=self._model_name,
                 base_url=self._base_url,
+                reasoning_effort=self.reasoning_effort,
                 **self._chat_model_kwargs,
             )
         return self._chat_model
