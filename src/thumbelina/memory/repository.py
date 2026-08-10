@@ -84,6 +84,7 @@ class ConversationRepository:
         conversation_id: str,
         role: str,
         content: str,
+        reasoning_content: str | None = None,
     ) -> None:
         """Synchronous implementation of add_message."""
         if role not in VALID_ROLES:
@@ -99,6 +100,7 @@ class ConversationRepository:
                 conversation_id=conversation_id,
                 role=role,
                 content=content,
+                reasoning_content=reasoning_content,
             )
             session.add(message)
             session.commit()
@@ -108,6 +110,7 @@ class ConversationRepository:
         conversation_id: str,
         role: str,
         content: str,
+        reasoning_content: str | None = None,
     ) -> None:
         """Add a message to a conversation.
 
@@ -119,13 +122,17 @@ class ConversationRepository:
             Role of the message sender (user, assistant, system).
         content:
             Content of the message.
+        reasoning_content:
+            Optional captured thinking/reasoning text for assistant messages.
 
         Raises
         ------
         ValueError
             If the conversation does not exist or role is invalid.
         """
-        return await asyncio.to_thread(self._add_message_sync, conversation_id, role, content)
+        return await asyncio.to_thread(
+            self._add_message_sync, conversation_id, role, content, reasoning_content
+        )
 
     def _get_messages_sync(self, conversation_id: str) -> list[dict[str, Any]]:
         """Synchronous implementation of get_messages."""
@@ -150,6 +157,7 @@ class ConversationRepository:
                     "conversation_id": msg.conversation_id,
                     "role": msg.role,
                     "content": msg.content,
+                    "reasoning_content": msg.reasoning_content,
                     "created_at": msg.created_at.isoformat(),
                 }
                 for msg in messages
@@ -193,6 +201,8 @@ class ConversationRepository:
                     "endpoint_id": conv.endpoint_id,
                     "model": conv.model,
                     "knowledge_base_id": conv.knowledge_base_id,
+                    "thinking_enabled": conv.thinking_enabled or False,
+                    "thinking_effort": conv.thinking_effort or "medium",
                     "created_at": conv.created_at.isoformat(),
                     "updated_at": conv.updated_at.isoformat(),
                     "summary": conv.summary,
@@ -229,6 +239,8 @@ class ConversationRepository:
                     "endpoint_id": conv.endpoint_id,
                     "model": conv.model,
                     "knowledge_base_id": conv.knowledge_base_id,
+                    "thinking_enabled": conv.thinking_enabled or False,
+                    "thinking_effort": conv.thinking_effort or "medium",
                     "created_at": conv.created_at.isoformat(),
                     "updated_at": conv.updated_at.isoformat(),
                     "summary": conv.summary,
@@ -238,6 +250,7 @@ class ConversationRepository:
                             "conversation_id": msg.conversation_id,
                             "role": msg.role,
                             "content": msg.content,
+                            "reasoning_content": msg.reasoning_content,
                             "created_at": msg.created_at.isoformat(),
                         }
                         for msg in conv.messages
@@ -265,6 +278,8 @@ class ConversationRepository:
                 "endpoint_id": conversation.endpoint_id,
                 "model": conversation.model,
                 "knowledge_base_id": conversation.knowledge_base_id,
+                "thinking_enabled": conversation.thinking_enabled or False,
+                "thinking_effort": conversation.thinking_effort or "medium",
                 "created_at": conversation.created_at.isoformat(),
                 "updated_at": conversation.updated_at.isoformat(),
                 "summary": conversation.summary,
@@ -484,6 +499,42 @@ class ConversationRepository:
         """
         return await asyncio.to_thread(
             self._set_knowledge_base_sync, conversation_id, knowledge_base_id
+        )
+
+    def _set_thinking_sync(
+        self, conversation_id: str, enabled: bool, effort: str
+    ) -> bool:
+        """Synchronous implementation of set_conversation_thinking."""
+        with self._get_session() as session:
+            conversation = session.get(Conversation, conversation_id)
+            if conversation is None:
+                return False
+            conversation.thinking_enabled = enabled
+            conversation.thinking_effort = effort
+            session.commit()
+            return True
+
+    async def set_conversation_thinking(
+        self, conversation_id: str, enabled: bool, effort: str
+    ) -> bool:
+        """Set thinking-mode settings for a conversation.
+
+        Parameters
+        ----------
+        conversation_id:
+            ID of the conversation to update.
+        enabled:
+            Whether thinking mode is enabled.
+        effort:
+            Thinking intensity: ``low``, ``medium``, or ``high``.
+
+        Returns
+        -------
+        bool
+            True if set successfully, False if conversation not found.
+        """
+        return await asyncio.to_thread(
+            self._set_thinking_sync, conversation_id, enabled, effort
         )
 
     def _search_messages_sync(self, query: str, limit: int = 20) -> list[dict[str, Any]]:

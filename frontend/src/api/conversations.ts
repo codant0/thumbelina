@@ -1,4 +1,4 @@
-import type { Conversation } from '../types/chat'
+import type { Conversation, ThinkingEffort } from '../types/chat'
 
 const API_BASE = '/api/v1'
 
@@ -40,6 +40,23 @@ export async function setConversationKnowledgeBase(
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ knowledge_base_id: knowledgeBaseId }),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.detail || `HTTP ${res.status}`)
+  }
+  return res.json() as Promise<Conversation>
+}
+
+export async function setConversationThinking(
+  id: string,
+  enabled: boolean,
+  effort: ThinkingEffort,
+): Promise<Conversation> {
+  const res = await fetch(`${API_BASE}/conversations/${id}/thinking`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled, effort }),
   })
   if (!res.ok) {
     const data = await res.json().catch(() => ({}))

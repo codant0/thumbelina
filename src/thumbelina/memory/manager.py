@@ -58,6 +58,7 @@ class MemoryManager:
         conversation_id: str,
         role: str,
         content: str,
+        reasoning_content: str | None = None,
     ) -> None:
         """Add a message to a conversation.
 
@@ -69,6 +70,8 @@ class MemoryManager:
             Role of the message sender (user, assistant, system).
         content:
             Content of the message.
+        reasoning_content:
+            Optional captured thinking/reasoning text for assistant messages.
 
         Raises
         ------
@@ -85,6 +88,7 @@ class MemoryManager:
             conversation_id=conversation_id,
             role=role,
             content=content,
+            reasoning_content=reasoning_content,
         )
 
     async def get_messages(self, conversation_id: str) -> list[dict[str, Any]]:
@@ -256,6 +260,29 @@ class MemoryManager:
         """
         return await self.repository.set_conversation_knowledge_base(
             conversation_id, knowledge_base_id
+        )
+
+    async def set_conversation_thinking(
+        self, conversation_id: str, enabled: bool, effort: str
+    ) -> bool:
+        """Set thinking-mode settings for a conversation.
+
+        Parameters
+        ----------
+        conversation_id:
+            ID of the conversation to update.
+        enabled:
+            Whether thinking mode is enabled.
+        effort:
+            Thinking intensity: ``low``, ``medium``, or ``high``.
+
+        Returns
+        -------
+        bool
+            True if set successfully, False if conversation not found.
+        """
+        return await self.repository.set_conversation_thinking(
+            conversation_id, enabled, effort
         )
 
     async def search(

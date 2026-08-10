@@ -29,6 +29,46 @@ from thumbelina.subagents.manager import SubagentManager
 logger = logging.getLogger(__name__)
 
 
+def _extract_chunk_parts(message_chunk: Any) -> tuple[str, str]:
+    """Split an AI message chunk into (visible_text, reasoning_text).
+
+    Reasoning may arrive as structured content blocks (Anthropic thinking),
+    ``additional_kwargs["reasoning_content"]`` (DeepSeek / OpenAI-compatible
+    endpoints), or a ``reasoning`` attribute (newer langchain-openai).
+    """
+    text = ""
+    reasoning = ""
+
+    content = getattr(message_chunk, "content", None)
+    if isinstance(content, list):
+        for part in content:
+            if isinstance(part, dict):
+                part_type = part.get("type")
+                if part_type in ("thinking", "reasoning"):
+                    reasoning += str(part.get("thinking") or part.get("text") or "")
+                elif part_type == "text":
+                    text += str(part.get("text", ""))
+                elif part.get("text"):
+                    text += str(part.get("text"))
+            else:
+                text += str(part)
+    elif content:
+        text = str(content)
+
+    additional = getattr(message_chunk, "additional_kwargs", None) or {}
+    extra = additional.get("reasoning_content") or additional.get("reasoning")
+    if isinstance(extra, str):
+        reasoning += extra
+
+    attr = getattr(message_chunk, "reasoning", None)
+    if isinstance(attr, str):
+        reasoning += attr
+    elif isinstance(attr, dict):
+        reasoning += str(attr.get("text") or "")
+
+    return text, reasoning
+
+
 def _make_subagent_tools(manager: SubagentManager) -> list[BaseTool]:
     """Create LangChain tools that wrap SubagentManager operations.
 
@@ -334,7 +374,9 @@ class ThumbelinaAgent:
                     exc_info=True,
                 )
 
-    async def _persist_message(self, role: str, content: str) -> None:
+    async def _persist_message(
+        self, role: str, content: str, reasoning_content: str | None = None
+    ) -> None:
         """Persist a message to memory if enabled."""
         if self.memory_manager and self.current_conversation_id:
             try:
@@ -342,6 +384,7 @@ class ThumbelinaAgent:
                     conversation_id=self.current_conversation_id,
                     role=role,
                     content=content,
+                    reasoning_content=reasoning_content,
                 )
             except Exception:
                 logger.warning("Failed to persist message to memory", exc_info=True)
@@ -484,8 +527,13 @@ class ThumbelinaAgent:
 
         return response
 
-    async def stream(self, user_input: str) -> AsyncGenerator[str, None]:
-        """Stream the agent's response."""
+    async def stream(self, user_input: str) -> AsyncGenerator[dict[str, str], None]:
+        """Stream the agent's response as typed events.
+
+        Yields dicts of the form ``{"type": "content" | "reasoning",
+        "text": str}`` so callers can render the model's thinking process
+        separately from the visible answer.
+        """
         await self._ensure_conversation()
         await self._persist_message("user", user_input)
 
@@ -516,7 +564,9 @@ class ThumbelinaAgent:
 
         initial_state: AgentState = {"messages": initial_messages}
         full_response = ""
-        pending = ""
+        full_reasoning = ""
+        pending_content = ""
+        pending_reasoning = ""
         # Batch tokens before yielding: send when buffer reaches size OR timeout
         batch_size = 30  # characters per batch
         flush_interval = 0.05  # seconds (50ms) - flush even if batch size not reached
@@ -533,28 +583,42 @@ class ThumbelinaAgent:
             # responses (AIMessage). The latter occurs with non-streaming
             # LLM providers, where astream(stream_mode="messages") emits a
             # single AIMessage instead of per-token chunks.
-            if (
-                hasattr(message_chunk, "content")
-                and message_chunk.content
-                and isinstance(message_chunk, AIMessage)
-                and not getattr(message_chunk, "tool_calls", None)
+            if not isinstance(message_chunk, AIMessage) or getattr(
+                message_chunk, "tool_calls", None
             ):
-                content = str(message_chunk.content)
-                full_response += content
-                pending += content
+                continue
 
-                # Yield when buffer reaches batch size or time interval
-                now = asyncio.get_event_loop().time()
-                if len(pending) >= batch_size or (now - last_flush) >= flush_interval:
-                    yield pending
-                    pending = ""
-                    last_flush = now
+            content, reasoning = _extract_chunk_parts(message_chunk)
+            if content:
+                full_response += content
+                pending_content += content
+            if reasoning:
+                full_reasoning += reasoning
+                pending_reasoning += reasoning
+            if not content and not reasoning:
+                continue
+
+            # Yield when buffer reaches batch size or time interval
+            now = asyncio.get_event_loop().time()
+            due = (now - last_flush) >= flush_interval
+            if pending_reasoning and (len(pending_reasoning) >= batch_size or due):
+                yield {"type": "reasoning", "text": pending_reasoning}
+                pending_reasoning = ""
+                last_flush = now
+            if pending_content and (len(pending_content) >= batch_size or due):
+                yield {"type": "content", "text": pending_content}
+                pending_content = ""
+                last_flush = now
 
         # Yield any remaining content
-        if pending:
-            yield pending
+        if pending_reasoning:
+            yield {"type": "reasoning", "text": pending_reasoning}
+        if pending_content:
+            yield {"type": "content", "text": pending_content}
 
         if full_response:
-            await self._persist_message("assistant", full_response)
+            await self._persist_message(
+                "assistant", full_response, reasoning_content=full_reasoning or None
+            )
             # Auto-name the conversation in the background so streaming is not delayed.
             asyncio.create_task(self._maybe_auto_name())

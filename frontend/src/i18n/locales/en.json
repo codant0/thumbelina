@@ -203,7 +203,16 @@
     "clearContextConfirm": "Clear all messages in this conversation? This cannot be undone.",
     "noConversationsYet": "No conversations yet. Send a message to start.",
     "streamOnTitle": "Streaming on — typewriter effect",
-    "streamOffTitle": "Streaming off — instant reply"
+    "streamOffTitle": "Streaming off — instant reply",
+    "thinkingMode": "Thinking",
+    "thinkingModeHint": "When on, the model reasons before answering and shows its thinking",
+    "thinkingOn": "On",
+    "thinkingOff": "Off",
+    "thinkingEffort": "Intensity",
+    "thinkingEffortLow": "Low",
+    "thinkingEffortMedium": "Medium",
+    "thinkingEffortHigh": "High",
+    "thinkingProcess": "Thinking process"
   },
   "taskManager": {
     "title": "Task Manager",

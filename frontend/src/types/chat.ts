@@ -4,12 +4,15 @@ export interface ToolCall {
   result?: string
 }
 
+export type ThinkingEffort = 'low' | 'medium' | 'high'
+
 export interface Message {
   id: string
   role: 'user' | 'assistant' | 'system'
   content: string
   timestamp: string
   toolCalls?: ToolCall[]
+  thinking?: string
 }
 
 export interface Conversation {
@@ -19,6 +22,8 @@ export interface Conversation {
   endpoint_id?: string | null
   model?: string | null
   knowledge_base_id?: string | null
+  thinking_enabled?: boolean
+  thinking_effort?: ThinkingEffort
   created_at: string
   updated_at: string
   summary?: string | null

@@ -9,8 +9,8 @@ import { SettingsPanel } from './components/Settings/SettingsPanel'
 import { PluginsPage } from './components/Plugins/PluginsPage'
 import { ChannelsPage } from './components/Channels/ChannelsPage'
 import { KnowledgeBasePage } from './components/KnowledgeBase/KnowledgeBasePage'
-import { renameConversation, setConversationEndpoint, setConversationKnowledgeBase } from './api/conversations'
-import type { Conversation } from './types/chat'
+import { renameConversation, setConversationEndpoint, setConversationKnowledgeBase, setConversationThinking } from './api/conversations'
+import type { Conversation, ThinkingEffort } from './types/chat'
 import './App.css'
 
 function App() {
@@ -125,6 +125,13 @@ function App() {
     } catch { /* ignore */ }
   }, [updateConversationInState])
 
+  const handleSetThinking = useCallback(async (id: string, enabled: boolean, effort: ThinkingEffort) => {
+    try {
+      const updated = await setConversationThinking(id, enabled, effort)
+      updateConversationInState(updated)
+    } catch { /* ignore */ }
+  }, [updateConversationInState])
+
   const renderPage = () => {
     switch (activePage) {
       case 'tasks':
@@ -160,6 +167,7 @@ function App() {
               onDefaultConversation={handleDefaultConversation}
               onSetEndpoint={handleSetEndpoint}
               onSetKnowledgeBase={handleSetKnowledgeBase}
+              onSetThinking={handleSetThinking}
             />
           </>
         )

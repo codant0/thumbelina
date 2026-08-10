@@ -203,7 +203,16 @@
     "clearContextConfirm": "确定清空当前对话的全部消息吗？此操作不可恢复。",
     "noConversationsYet": "暂无对话。发送消息开始吧。",
     "streamOnTitle": "流式已开启 — 打字机效果",
-    "streamOffTitle": "流式已关闭 — 立即回复"
+    "streamOffTitle": "流式已关闭 — 立即回复",
+    "thinkingMode": "思考模式",
+    "thinkingModeHint": "开启后模型会先推理再回答，并展示思考过程",
+    "thinkingOn": "已开启",
+    "thinkingOff": "已关闭",
+    "thinkingEffort": "思考强度",
+    "thinkingEffortLow": "低",
+    "thinkingEffortMedium": "中",
+    "thinkingEffortHigh": "高",
+    "thinkingProcess": "思考过程"
   },
   "taskManager": {
     "title": "任务管理器",
