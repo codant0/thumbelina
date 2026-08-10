@@ -501,3 +501,56 @@ class TestToolBinding:
         result = await agent.run("hi")
 
         assert result == "plain"
+
+
+class TestThinkingLanguageHint:
+    """Thinking mode should inject a follow-conversation-language hint."""
+
+    @staticmethod
+    def _agent_with_conversation(thinking_enabled: bool):
+        from thumbelina.agent.graph import ThumbelinaAgent
+        from thumbelina.memory.manager import MemoryManager
+
+        mock_provider = _create_mock_provider()
+        mock_memory = AsyncMock(spec=MemoryManager)
+        mock_memory.create_conversation.return_value = "conv-1"
+        mock_memory.get_conversation = AsyncMock(
+            return_value={"id": "conv-1", "thinking_enabled": thinking_enabled}
+        )
+        return ThumbelinaAgent(llm_provider=mock_provider, memory_manager=mock_memory), mock_provider
+
+    @pytest.mark.asyncio
+    async def test_run_injects_language_hint_when_thinking_enabled(self):
+        from langchain_core.messages import SystemMessage
+        from thumbelina.agent.graph import _THINKING_LANGUAGE_HINT
+
+        agent, provider = self._agent_with_conversation(thinking_enabled=True)
+        await agent.run("Hi")
+
+        messages = provider.chat_model.ainvoke.call_args[0][0]
+        hints = [m for m in messages if isinstance(m, SystemMessage) and m.content == _THINKING_LANGUAGE_HINT]
+        assert len(hints) == 1
+
+    @pytest.mark.asyncio
+    async def test_run_skips_language_hint_when_thinking_disabled(self):
+        from langchain_core.messages import SystemMessage
+        from thumbelina.agent.graph import _THINKING_LANGUAGE_HINT
+
+        agent, provider = self._agent_with_conversation(thinking_enabled=False)
+        await agent.run("Hi")
+
+        messages = provider.chat_model.ainvoke.call_args[0][0]
+        assert not any(isinstance(m, SystemMessage) and m.content == _THINKING_LANGUAGE_HINT for m in messages)
+
+    @pytest.mark.asyncio
+    async def test_stream_injects_language_hint_when_thinking_enabled(self):
+        from langchain_core.messages import SystemMessage
+        from thumbelina.agent.graph import _THINKING_LANGUAGE_HINT
+
+        agent, provider = self._agent_with_conversation(thinking_enabled=True)
+        async for _ in agent.stream("Hi"):
+            pass
+
+        messages = provider.chat_model.ainvoke.call_args[0][0]
+        hints = [m for m in messages if isinstance(m, SystemMessage) and m.content == _THINKING_LANGUAGE_HINT]
+        assert len(hints) == 1

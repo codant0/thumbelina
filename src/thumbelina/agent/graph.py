@@ -28,6 +28,14 @@ from thumbelina.subagents.manager import SubagentManager
 
 logger = logging.getLogger(__name__)
 
+# Injected when a conversation has thinking mode enabled: no provider API
+# controls the reasoning language, so we nudge the model to think in the
+# same language the user is conversing in.
+_THINKING_LANGUAGE_HINT = (
+    "请使用与用户对话相同的语言进行思考和推理。"
+    "Think and reason in the same language the user is using in this conversation."
+)
+
 
 def _extract_chunk_parts(message_chunk: Any) -> tuple[str, str]:
     """Split an AI message chunk into (visible_text, reasoning_text).
@@ -498,6 +506,7 @@ class ThumbelinaAgent:
 
         # Inject RAG context if a knowledge base is bound to the conversation
         rag_context = None
+        thinking_enabled = False
         if self.current_conversation_id and self.memory_manager:
             try:
                 conv = await self.memory_manager.get_conversation(self.current_conversation_id)
@@ -505,6 +514,7 @@ class ThumbelinaAgent:
                     kb_id = conv.get("knowledge_base_id")
                     if kb_id:
                         rag_context = await self._get_rag_context(user_input, kb_id)
+                    thinking_enabled = bool(conv.get("thinking_enabled"))
             except Exception:
                 logger.warning("Failed to get RAG context", exc_info=True)
         if rag_context:
@@ -513,6 +523,8 @@ class ThumbelinaAgent:
         skill_context = await self._get_skill_context(user_input)
         if skill_context:
             initial_messages.append(SystemMessage(content=skill_context))
+        if thinking_enabled:
+            initial_messages.append(SystemMessage(content=_THINKING_LANGUAGE_HINT))
         initial_messages.append(HumanMessage(content=user_input))
 
         initial_state: AgentState = {"messages": initial_messages}
@@ -545,6 +557,7 @@ class ThumbelinaAgent:
 
         # Inject RAG context if a knowledge base is bound to the conversation
         rag_context = None
+        thinking_enabled = False
         if self.current_conversation_id and self.memory_manager:
             try:
                 conv = await self.memory_manager.get_conversation(self.current_conversation_id)
@@ -552,6 +565,7 @@ class ThumbelinaAgent:
                     kb_id = conv.get("knowledge_base_id")
                     if kb_id:
                         rag_context = await self._get_rag_context(user_input, kb_id)
+                    thinking_enabled = bool(conv.get("thinking_enabled"))
             except Exception:
                 logger.warning("Failed to get RAG context", exc_info=True)
         if rag_context:
@@ -560,6 +574,8 @@ class ThumbelinaAgent:
         skill_context = await self._get_skill_context(user_input)
         if skill_context:
             initial_messages.append(SystemMessage(content=skill_context))
+        if thinking_enabled:
+            initial_messages.append(SystemMessage(content=_THINKING_LANGUAGE_HINT))
         initial_messages.append(HumanMessage(content=user_input))
 
         initial_state: AgentState = {"messages": initial_messages}
