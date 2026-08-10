@@ -1,8 +1,10 @@
 services:
-  backend:
+  thumbelina:
     build:
       context: .
       dockerfile: Dockerfile
+    # 私有 registry 部署时用 THUMBELINA_IMAGE 指定镜像，NAS 端只 pull 不构建
+    image: ${THUMBELINA_IMAGE:-thumbelina:latest}
     ports:
       - "8000:8000"
     volumes:
@@ -13,6 +15,11 @@ services:
       # Put the SQLite database inside the persistent volume so data
       # survives container rebuilds (env vars override thumbelina.yaml)
       - THUMBELINA_MEMORY__DATABASE_URL=sqlite:////app/data/thumbelina.db
+      # Embedding model download via hf-mirror (huggingface.co unreachable
+      # from CN); override with host HF_ENDPOINT if needed
+      - HF_ENDPOINT=${HF_ENDPOINT:-https://hf-mirror.com}
+      # Keep the model cache in the persistent volume to avoid re-downloads
+      - HF_HOME=/app/data/huggingface
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
@@ -20,16 +27,6 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
-
-  frontend:
-    build:
-      context: .
-      dockerfile: Dockerfile.frontend
-    ports:
-      - "3000:80"
-    depends_on:
-      - backend
-    restart: unless-stopped
 
 volumes:
   thumbelina-data:

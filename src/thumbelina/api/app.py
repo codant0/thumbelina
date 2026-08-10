@@ -6,9 +6,10 @@ from __future__ import annotations
 # on Windows. When torch is imported later via sentence_transformers →
 # transformers, other C extension modules already loaded interfere with
 # DLL resolution, causing WinError 127 on shm.dll.
+# ImportError covers deployments without the rag extra (torch absent).
 try:
     import torch  # noqa: F401, I001
-except OSError:
+except (OSError, ImportError):
     pass
 
 import asyncio

@@ -104,16 +104,15 @@ export THUMBELINA_LLM__API_KEY="sk-..."
 
 # 首次构建并启动
 docker compose up -d --build
-# 后端：http://localhost:8000
-# 前端：http://localhost:3000
+# Web 界面 + API：http://localhost:8000
 ```
 
-前端容器（nginx）会将 `/api` 与 `/ws` 反向代理到后端，Web 界面通过 3000 端口即可完整使用。`thumbelina.yaml` 以只读方式挂载到后端容器；SQLite 数据库（`sqlite:////app/data/thumbelina.db`）和 ChromaDB 数据（`/app/data/chroma`）存放在命名卷 `thumbelina-data` 中，重建容器不会丢失。
+单个容器同时运行 FastAPI 后端与构建后的 React 前端（uvicorn 直接托管静态文件，无需 nginx）。前端使用相对路径（`/api/v1/*`、`/ws/chat`），因此通过 8000 端口即可完整访问。`thumbelina.yaml` 以只读方式挂载进容器；SQLite 数据库（`sqlite:////app/data/thumbelina.db`）和 ChromaDB 数据（`/app/data/chroma`）存放在命名卷 `thumbelina-data` 中，重建容器不会丢失。
 
-修改代码后，只需重建并重启受影响的服务：
+修改代码后，重建并重启：
 
 ```bash
-docker compose up -d --build backend   # 或 frontend
+docker compose up -d --build
 ```
 
 依赖层已缓存，重建时只会重新安装发生变化的部分。完整部署指南（更新流程、备份恢复、数据迁移、FAQ、生产部署建议）见 [docs/docker-deployment.md](docs/docker-deployment.md)。
@@ -217,9 +216,8 @@ thumbelina/
 │       ├── test/            # 测试配置
 │       └── types/           # TypeScript 接口定义
 ├── docs/plans/              # 设计文档
-├── Dockerfile               # 后端容器
-├── Dockerfile.frontend      # 前端容器（nginx）
-├── docker-compose.yml       # 多容器部署
+├── Dockerfile               # 多阶段镜像：构建前端，后端一并托管
+├── docker-compose.yml       # 单容器部署
 ├── thumbelina.yaml.example  # 示例配置文件
 └── pyproject.toml           # 项目元数据、依赖、工具配置
 ```

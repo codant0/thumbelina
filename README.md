@@ -104,20 +104,21 @@ export THUMBELINA_LLM__API_KEY="sk-..."
 
 # Build and start (first run)
 docker compose up -d --build
-# Backend:  http://localhost:8000
-# Frontend: http://localhost:3000
+# Web UI + API:  http://localhost:8000
 ```
 
-The frontend container (nginx) proxies `/api` and `/ws` to the backend, so the
-web UI works entirely through port 3000. `thumbelina.yaml` is mounted
-read-only into the backend container; the SQLite database
-(`sqlite:////app/data/thumbelina.db`) and ChromaDB data (`/app/data/chroma`)
-live in the named volume `thumbelina-data` and survive rebuilds.
+A single container runs both the FastAPI backend and the built React frontend
+(uvicorn serves the static files directly — no nginx). The frontend uses
+relative paths (`/api/v1/*`, `/ws/chat`), so everything is reachable through
+port 8000. `thumbelina.yaml` is mounted read-only into the container; the
+SQLite database (`sqlite:////app/data/thumbelina.db`) and ChromaDB data
+(`/app/data/chroma`) live in the named volume `thumbelina-data` and survive
+rebuilds.
 
-After code changes, rebuild and restart only the affected service:
+After code changes, rebuild and restart:
 
 ```bash
-docker compose up -d --build backend   # or: frontend
+docker compose up -d --build
 ```
 
 Dependency layers are cached, so rebuilds only reinstall what changed.
@@ -223,9 +224,8 @@ thumbelina/
 │       ├── test/            # Test setup
 │       └── types/           # TypeScript interfaces
 ├── docs/plans/              # Design documents (Chinese)
-├── Dockerfile               # Backend container
-├── Dockerfile.frontend      # Frontend container (nginx)
-├── docker-compose.yml       # Multi-container deployment
+├── Dockerfile               # Multi-stage image: builds frontend, backend serves it
+├── docker-compose.yml       # Single-container deployment
 ├── thumbelina.yaml.example  # Example configuration
 └── pyproject.toml           # Project metadata, dependencies, tool configs
 ```

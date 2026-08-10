@@ -2,7 +2,9 @@
 
 本文档描述如何使用 Docker 部署 Thumbelina（后端 FastAPI + 前端 React），以及代码修改后如何快速更新服务。
 
-> 适用版本：仓库当前主干。相关文件：`Dockerfile`、`Dockerfile.frontend`、`frontend/nginx.conf`、`docker-compose.yml`、`.dockerignore`。
+> 适用版本：仓库当前主干。相关文件：`Dockerfile`、`docker-compose.yml`、`.dockerignore`、`deploy/online/*.sh`、`deploy/offline/*.sh`。
+>
+> 自 v0.2 起部署改为**单容器**：前端构建产物由后端 uvicorn 直接托管（FastAPI `StaticFiles`），不再使用 nginx。
 
 ---
 
@@ -11,14 +13,11 @@
 ```
                         ┌─────────────────────────────────────────┐
  浏览器                  │  docker compose 网络                     │
- ────────►  :3000 ────► │  frontend (nginx:alpine)                 │
-                        │   ├─ 静态文件 /usr/share/nginx/html       │
-                        │   ├─ /api/*  ──反向代理──► backend:8000   │
-                        │   └─ /ws/*   ──WebSocket 代理──►          │
-                        │                                          │
-                        │  backend (python:3.11-slim)              │
-                        │   ├─ uvicorn 0.0.0.0:8000                │
-  直接调 API ─► :8000 ──►│   ├─ /app/thumbelina.yaml（只读挂载）     │
+ ────────►  :8000 ────► │  thumbelina (python:3.11-slim)          │
+                        │   ├─ uvicorn 0.0.0.0:8000               │
+                        │   │    ├─ /api/v1/*、/ws/chat   (FastAPI)│
+                        │   │    └─ / (静态文件，前端 dist)         │
+                        │   ├─ /app/thumbelina.yaml（只读挂载）     │
                         │   └─ /app/data ◄── 命名卷                 │
                         │        ├─ thumbelina.db   (SQLite)       │
                         │        └─ chroma/         (向量库)        │
@@ -27,28 +26,24 @@
 
 | 容器 | 镜像 | 宿主机端口 | 说明 |
 |---|---|---|---|
-| `backend` | `python:3.11-slim` 自建 | `8000 → 8000` | FastAPI + LangGraph，uvicorn 启动 |
-| `frontend` | `node:22-alpine` 构建 + `nginx:alpine` | `3000 → 80` | 静态页面 + 反代 `/api`、`/ws` |
+| `thumbelina` | `node:22-alpine` 构建前端 + `python:3.11-slim` 自建 | `8000 → 8000` | FastAPI + LangGraph，同时托管前端静态文件 |
 
-- 浏览器只需访问 **3000 端口**；前端代码统一使用相对路径（`/api/v1/*`、`/ws/chat`），由 nginx 代理到后端。
-- 8000 端口保留，供直接调用 REST API / 健康检查。
+- 浏览器只需访问 **8000 端口**；前端代码统一使用相对路径（`/api/v1/*`、`/ws/chat`），由同一进程内的 uvicorn 处理，无需反向代理。
 - 所有运行期数据都在命名卷 `thumbelina-data` 中，重建容器不丢失。
 
 ## 2. 文件清单
 
 | 文件 | 作用 |
 |---|---|
-| `Dockerfile` | 后端镜像：装系统依赖 → 缓存依赖层 → 拷源码安装 → uvicorn 启动 |
-| `Dockerfile.frontend` | 前端镜像：node:22 构建 → nginx 托管产物 |
-| `frontend/nginx.conf` | nginx 站点配置：SPA fallback + `/api`、`/ws` 反代 |
-| `docker-compose.yml` | 编排两个服务、端口、卷、环境变量、健康检查 |
+| `Dockerfile` | 多阶段镜像：node 阶段 `vite build` 前端 → python 阶段装后端依赖、拷贝 `dist` 到 `/app/static` |
+| `docker-compose.yml` | 编排单服务、端口、卷、环境变量、健康检查 |
 | `.dockerignore` | 排除 `node_modules`、`.git`、`*.db`、日志等，加速构建 |
-| `thumbelina.yaml` | 应用配置，运行时以只读方式挂载进后端容器 |
+| `thumbelina.yaml` | 应用配置，运行时以只读方式挂载进容器 |
 
 ## 3. 前置条件
 
 1. **Docker**：Docker Engine 20.10+（Linux 服务器）或 Docker Desktop（Windows/macOS），Compose v2（`docker compose version` 可用）。
-2. **端口**：宿主机 `3000`、`8000` 未被占用（占用时见 [FAQ Q2](#q2-端口被占用怎么办)）。
+2. **端口**：宿主机 `8000` 未被占用（占用时见 [FAQ Q2](#q2-端口被占用怎么办)）。
 3. **LLM API Key**：OpenAI / Anthropic / Ollama 等任一可用提供方的密钥。
 4. 仓库克隆到部署机，且 `thumbelina.yaml` 已按 [第 4 节](#4配置说明) 准备好。
 
@@ -98,6 +93,8 @@ yaml 中支持 `${VAR}` 环境变量占位，例如 `api_key: ${OPENAI_API_KEY}`
 |---|---|---|
 | `THUMBELINA_LLM__API_KEY` | 取自宿主机同名变量 | LLM 密钥，避免写死在 yaml 里 |
 | `THUMBELINA_MEMORY__DATABASE_URL` | `sqlite:////app/data/thumbelina.db` | **把 SQLite 放进持久卷**（注意是 4 个斜杠，表示绝对路径）；环境变量优先级高于 yaml，无需改 yaml |
+| `HF_ENDPOINT` | 默认 `https://hf-mirror.com` | RAG 嵌入模型下载走国内镜像（huggingface.co 不可达）；海外环境可 `export HF_ENDPOINT=https://huggingface.co` 覆盖 |
+| `HF_HOME` | `/app/data/huggingface` | 模型缓存放进持久卷，重建容器无需重新下载 |
 
 命名规则：`THUMBELINA_` 前缀 + 双下划线 `__` 表示嵌套，如 `THUMBELINA_LLM__PROVIDER` 对应 `llm.provider`。
 
@@ -113,15 +110,15 @@ export THUMBELINA_LLM__API_KEY="sk-..."
 docker compose up -d --build
 
 # 3) 验证
-docker compose ps                  # backend 应为 running → healthy，frontend 为 running
+docker compose ps                  # thumbelina 应为 running → healthy
 curl -s http://localhost:8000/health
 # 期望输出：{"status":"ok"}（或类似 JSON）
 
 # 4) 打开前端
-# http://localhost:3000
+# http://localhost:8000
 ```
 
-首次构建约 5～15 分钟（取决于网络；后端需安装 langgraph / chromadb / llama-index 等较重的依赖）。
+首次构建约 5～15 分钟（取决于网络；需安装 langgraph / chromadb / llama-index 等较重的后端依赖，并完成一次前端 `vite build`）。
 
 ## 6. 数据持久化与迁移
 
@@ -140,8 +137,8 @@ curl -s http://localhost:8000/health
 容器内是全新数据库。如需把本地开发机的 `thumbelina.db` 带进容器：
 
 ```bash
-docker compose cp thumbelina.db backend:/app/data/thumbelina.db
-docker compose restart backend
+docker compose cp thumbelina.db thumbelina:/app/data/thumbelina.db
+docker compose restart thumbelina
 ```
 
 ### 6.3 备份与恢复
@@ -169,21 +166,21 @@ docker run --rm \
 
 | 改动内容 | 命令 | 耗时参考 |
 |---|---|---|
-| 仅后端 Python 代码 | `docker compose up -d --build backend` | 1～2 分钟（依赖层命中缓存，仅重装本项目） |
-| 仅前端 React 代码 | `docker compose up -d --build frontend` | 1～3 分钟（npm 层命中缓存，仅重新 `vite build`） |
+| 仅后端 Python 代码 | `docker compose up -d --build` | 1～2 分钟（依赖层命中缓存，仅重装本项目） |
+| 仅前端 React 代码 | `docker compose up -d --build` | 1～3 分钟（npm 层命中缓存，仅重新 `vite build` + 拷贝 dist） |
 | 前后端都改了 | `docker compose up -d --build` | 两者之和 |
-| 仅改 `thumbelina.yaml` | `docker compose restart backend` | 秒级，**无需构建** |
-| 改了 `pyproject.toml` 依赖 | `docker compose up -d --build backend` | 较慢（依赖层重建） |
-| 改了 `frontend/package*.json` | `docker compose up -d --build frontend` | 较慢（npm 层重建） |
+| 仅改 `thumbelina.yaml` | `docker compose restart thumbelina` | 秒级，**无需构建** |
+| 改了 `pyproject.toml` 依赖 | `docker compose up -d --build` | 较慢（依赖层重建） |
+| 改了 `frontend/package*.json` | `docker compose up -d --build` | 较慢（npm 层重建） |
 
-原理：后端 Dockerfile 先用占位包安装依赖并固化为缓存层，再拷贝源码 `--no-deps` 重装；前端先 `npm ci` 固化缓存层再构建。只要依赖清单不变，重建只处理业务代码。
+原理：后端 Dockerfile 先用占位包安装依赖并固化为缓存层，再拷贝源码 `--no-deps` 重装；前端阶段先 `npm ci` 固化缓存层再构建，`COPY --from=frontend` 只在前端产物变化时重建。只要依赖清单不变，重建只处理业务代码。
 
-**只改了配置/数据库结构、不想重建镜像** 时，优先用 `docker compose restart backend`。
+**只改了配置/数据库结构、不想重建镜像** 时，优先用 `docker compose restart thumbelina`。
 
 怀疑缓存有问题时强制全量重建：
 
 ```bash
-docker compose build --no-cache backend    # 或 frontend
+docker compose build --no-cache
 docker compose up -d
 ```
 
@@ -204,7 +201,7 @@ git add . && git commit -m "update" && git push
 # ② 服务器：拉取并重建（可保存为 ~/deploy-thumbelina.sh 一键执行）
 cd /path/to/thumbelina
 git pull --ff-only
-docker compose up -d --build     # 只改了一端时可用 backend / frontend 单独重建
+docker compose up -d --build
 docker image prune -f
 ```
 
@@ -213,21 +210,85 @@ docker image prune -f
 - `git pull` 前确认服务器上没有本地未提交改动（`--ff-only` 会拒绝合并冲突，避免误覆盖）。
 - `thumbelina.yaml` 若在服务器上单独维护（含密钥），不要纳入 git 跟踪，或改用 `thumbelina.yaml.example` + 服务器本地副本的方式，避免 `git pull` 冲突。
 - 重建期间服务会有秒级中断：旧容器停止、新容器启动，浏览器刷新页面即可（数据卷不受影响）。
-- 服务器配置较低（内存不足以构建）时，可在本地或 CI 构建镜像并推送到镜像仓库，服务器端将 compose 的 `build:` 换成 `image:`，然后 `docker compose pull && docker compose up -d`。
+- 服务器配置较低（内存不足以构建）时，使用第 7.3 节的私有 registry 方案，或构建镜像推送后 NAS 端 `docker compose pull && docker compose up -d`。
+
+### 7.3 私有 registry 部署（PC 构建镜像，NAS 拉取）
+
+NAS（尤其 ARM 的绿联 DH 系列）现场构建后端依赖较重；推荐在 PC/CI 上构建**多架构镜像**推送到私有 registry，NAS 端直接拉取，只执行 `pull`、不构建。
+
+**1) 准备 registry（可选，已有公网仓库可跳过）**
+
+```bash
+docker run -d --name registry --restart=unless-stopped -p 5000:5000 registry:2
+```
+
+> 内网 HTTP registry 需要给 **PC 和 NAS** 的 Docker 守护进程配置 `insecure-registries`（`/etc/docker/daemon.json`，或绿联 Docker 设置中的镜像源）。公网服务（阿里云 ACR / 腾讯云 TCR / GHCR 等）走 HTTPS，无需该配置。
+
+**2) PC 端构建并推送**
+
+```bash
+docker login <REGISTRY>          # 一次即可
+REGISTRY=192.168.1.100:5000 ./deploy/online/build-and-push.sh   # tag 默认取 git 短 commit
+# REGISTRY=... TAG=v1.2 ./deploy/online/build-and-push.sh       # 手动指定 tag
+```
+
+脚本用 `buildx` 同时构建 `linux/amd64` 和 `linux/arm64` 镜像并推送，NAS 拉取时自动匹配自身架构。首次在 x86 上构建 arm64 需先启用 QEMU：
+
+```bash
+docker run --privileged --rm tonistiigi/binfmt --install all
+```
+
+**3) NAS 端拉取并启动**
+
+```bash
+docker login <REGISTRY>
+cd /path/to/thumbelina
+REGISTRY=192.168.1.100:5000 TAG=<上一步的 tag> ./deploy/online/pull-and-run.sh
+```
+
+`pull-and-run.sh` 会设置 `THUMBELINA_IMAGE` 并执行 `docker compose pull thumbelina`（只拉镜像、不构建）后 `up -d`。之后更新版本：PC 重新构建推送新 tag，NAS 换 tag 再执行一遍即可。
+
+> 说明：`docker-compose.yml` 同时声明了 `build` 和 `image`。本地 `docker compose up -d --build` 走构建流程不受影响；NAS 端不构建，依赖 `pull` 拉取的镜像运行。
+
+### 7.4 离线传输（导出镜像文件，NAS 上导入）
+
+NAS 无法直连 registry 或不想搭私有仓库时，把镜像导出为 tar 文件拷贝过去。
+
+**1) PC 端构建并导出**
+
+```bash
+./deploy/offline/export-image.sh                 # 默认 amd64，tag=latest
+# ARCH=arm64 ./deploy/offline/export-image.sh    # 绿联 DH 系列（ARM）
+# ARCH=arm64 TAG=v1.2 ./deploy/offline/export-image.sh
+```
+
+生成 `thumbelina-<arch>-<tag>.tar`。首次在 x86 上构建 arm64 需先启用 QEMU（同 7.3）。
+
+**2) 拷贝到 NAS**
+
+U 盘 / SMB 共享 / SCP 均可，无需联网。
+
+**3) NAS 上导入并启动**
+
+```bash
+cd /path/to/thumbelina
+./deploy/offline/load-and-run.sh thumbelina-arm64-latest.tar
+```
+
+> 先确认 NAS 架构：绿联 DXP 系列是 x86（amd64），DH 系列是 ARM（arm64）。导出的架构必须与 NAS 一致（多平台镜像无法离线 `docker save`）。
 
 ## 8. 日常运维命令
 
 ```bash
 docker compose ps                       # 查看状态（含健康检查）
-docker compose logs -f backend          # 跟踪后端日志
-docker compose logs -f frontend         # nginx / 前端日志
-docker compose logs --tail=200 backend  # 最近 200 行
-docker compose restart backend          # 重启（改配置后）
+docker compose logs -f thumbelina       # 跟踪后端日志
+docker compose logs --tail=200 thumbelina  # 最近 200 行
+docker compose restart thumbelina       # 重启（改配置后）
 docker compose stop                     # 停止（保留容器）
 docker compose start                    # 再次启动
 docker compose down                     # 删除容器（数据卷保留）
 docker compose down -v                  # ⚠️ 连数据一起删除
-docker compose exec backend python -m thumbelina.cli.main --help   # 进入后端执行命令
+docker compose exec thumbelina python -m thumbelina.cli.main --help   # 进入容器执行命令
 docker compose top                      # 查看进程
 ```
 
@@ -235,11 +296,11 @@ docker compose top                      # 查看进程
 
 ### Q1. 前端页面能打开，但聊天没响应 / 请求 404？
 
-确认是通过 **http://localhost:3000** 访问（nginx 会代理 `/api`、`/ws`）。检查代理是否生效：
+确认是通过 **http://localhost:8000** 访问。前端和 API/WebSocket 在同一进程内，无需代理。检查后端是否正常：
 
 ```bash
-docker compose logs frontend | grep -E "api|ws"
-docker compose exec frontend wget -qO- http://backend:8000/health
+docker compose logs -f thumbelina
+curl -s http://localhost:8000/health
 ```
 
 ### Q2. 端口被占用怎么办？
@@ -248,40 +309,39 @@ docker compose exec frontend wget -qO- http://backend:8000/health
 
 ```yaml
 ports:
-  - "9000:8000"   # 后端改到 9000
-  - "9001:80"     # 前端改到 9001
+  - "9000:8000"   # 宿主机改用 9000
 ```
 
-注意：若改了**前端**端口，浏览器访问新端口即可，无需改任何代码（前端用相对路径）。若绕过 nginx 直连后端 8000，则前端仍需经 nginx 访问。
+注意：改了宿主机端口后，浏览器访问新端口即可，无需改任何代码（前端用相对路径）。
 
 ### Q3. 构建很慢 / 拉取依赖超时？
 
-两个 Dockerfile 已默认使用国内镜像源（清华 PyPI / npmmirror），一般无需处理。海外环境或需要官方源时，构建时覆盖：
+Dockerfile 已默认使用国内镜像源（清华 PyPI / npmmirror），一般无需处理。海外环境或需要官方源时，构建时覆盖：
 
 ```bash
 docker compose build \
   --build-arg PIP_INDEX_URL=https://pypi.org/simple \
-  --build-arg PIP_TRUSTED_HOST=pypi.org backend
-docker compose build --build-arg NPM_REGISTRY=https://registry.npmjs.org frontend
+  --build-arg PIP_TRUSTED_HOST=pypi.org
+docker compose build --build-arg NPM_REGISTRY=https://registry.npmjs.org
 ```
 
-注意：基础镜像（`python:3.11-slim`、`node:22-alpine`、`nginx:alpine`）仍需从 Docker 仓库拉取，镜像源/代理问题见 Q9。
+注意：基础镜像（`python:3.11-slim`、`node:22-alpine`）仍需从 Docker 仓库拉取，镜像源/代理问题见 Q9。
 
 ### Q4. 容器重启后历史对话没了？
 
 确认 `docker-compose.yml` 中 `THUMBELINA_MEMORY__DATABASE_URL=sqlite:////app/data/thumbelina.db` 仍然存在（4 个斜杠）。若曾被删掉，数据库会落在容器内 `/app`，重建即丢。
 
-### Q5. backend 一直 unhealthy？
+### Q5. 容器一直 unhealthy？
 
 ```bash
-docker compose logs backend
+docker compose logs thumbelina
 ```
 
 常见原因：LLM 配置缺失（服务仍可启动，聊天时会提示配置 provider）、`thumbelina.yaml` 语法错误（YAML 解析报错会直接退出）。本地验证配置：`python -c "import yaml; yaml.safe_load(open('thumbelina.yaml'))"`。
 
 ### Q6. 微信 / QQ 频道能在容器里用吗？
 
-可以。微信（weixin-bot）是**出站长轮询**，不需要入站端口：在 `thumbelina.yaml` 中设 `channels.wechat.enabled: true`，然后 `docker compose restart backend` 并跟踪日志 `docker compose logs -f backend` 获取二维码/登录状态。QQ 频道同理，填好 `app_id` / `app_secret` 即可。
+可以。微信（weixin-bot）是**出站长轮询**，不需要入站端口：在 `thumbelina.yaml` 中设 `channels.wechat.enabled: true`，然后 `docker compose restart thumbelina` 并跟踪日志 `docker compose logs -f thumbelina` 获取二维码/登录状态。QQ 频道同理，填好 `app_id` / `app_secret` 即可。
 
 ### Q7. 本地开发是 Python 3.13，镜像是 3.11，会有问题吗？
 
@@ -293,7 +353,7 @@ docker compose logs backend
 
 ### Q9. 构建时报 `load metadata ... no route to host` 或代理错误？
 
-典型报错：`failed to resolve source metadata for docker.io/library/nginx:alpine: ... proxyconnect tcp: dial tcp 192.168.x.x:7890: connect: no route to host`。
+典型报错：`failed to resolve source metadata for docker.io/library/python:3.11-slim: ... proxyconnect tcp: dial tcp 192.168.x.x:7890: connect: no route to host`。
 
 含义：Docker 守护进程配置了一个**连不通的 HTTP 代理**（常见为 Clash 的 7890 端口），或配置的 registry 加速器不可用。注意：**该代理同样会作用于 Dockerfile 内的 pip/npm 安装**，必须先处理：
 
@@ -301,13 +361,13 @@ docker compose logs backend
    `curl -x http://<代理IP>:7890 -sI https://registry-1.docker.io/v2/ | head -1`
 2. **不用代理**：SSH 登录移除守护进程代理配置（通常在 `/etc/systemd/system/docker.service.d/*.conf` 或 `/etc/default/docker`），然后：
    `systemctl daemon-reload && systemctl restart docker`
-3. **基础镜像拉不下来（网络受限）**：在任意可联网机器上 `docker pull` 三个基础镜像后 `docker save -o base-images.tar ...`，传到部署机 `docker load -i base-images.tar`，再执行 compose 构建（BuildKit 会优先使用本地已有镜像）。
+3. **基础镜像拉不下来（网络受限）**：在任意可联网机器上 `docker pull` 基础镜像后 `docker save -o base-images.tar ...`，传到部署机 `docker load -i base-images.tar`，再执行 compose 构建（BuildKit 会优先使用本地已有镜像）。
 4. 查看当前代理 / 镜像加速器配置：`docker info | grep -iE "proxy|mirror" -A2`。不可用的加速器（部分已停止代理 Docker Hub）建议从 `/etc/docker/daemon.json` 的 `registry-mirrors` 中移除。
 
 ## 10. 生产部署建议
 
 1. **开启鉴权**：`auth.secret_key` 设为 ≥32 字节随机串（如 `openssl rand -hex 32`），并按需配置 `required_roles`；同时建议开启 `rate_limit`。
-2. **HTTPS**：在宿主机再加一层反向代理（nginx / Caddy / Traefik）终结 TLS，并把 WebSocket 一并代理：
+2. **HTTPS**：在宿主机再加一层反向代理（nginx / Caddy / Traefik / NAS 自带反代）终结 TLS，并把 WebSocket 一并代理：
 
    ```nginx
    server {
@@ -316,11 +376,11 @@ docker compose logs backend
        # ssl_certificate ...;
 
        location / {
-           proxy_pass http://127.0.0.1:3000;
+           proxy_pass http://127.0.0.1:8000;
            proxy_set_header Host $host;
        }
        location /ws/ {
-           proxy_pass http://127.0.0.1:3000;
+           proxy_pass http://127.0.0.1:8000;
            proxy_http_version 1.1;
            proxy_set_header Upgrade $http_upgrade;
            proxy_set_header Connection "upgrade";
@@ -330,7 +390,7 @@ docker compose logs backend
    ```
 
    前端代码已根据页面协议自动切换 `ws://` / `wss://`，无需改动。
-3. **收敛暴露端口**：仅对外暴露 443，把 compose 中的端口映射改为 `"127.0.0.1:8000:8000"`、`"127.0.0.1:3000:80"`，避免绕过反代直连。
+3. **收敛暴露端口**：仅对外暴露 443，把 compose 中的端口映射改为 `"127.0.0.1:8000:8000"`，避免绕过反代直连。
 4. **定期备份**：按 [6.3](#63-备份与恢复) 设置 cron 定时打包数据卷；也可使用应用内置的 `/api/v1/data/export` 接口导出对话数据。
 5. **日志**：后端日志输出到 stdout，由 `docker compose logs` 收集；如需落盘，可为 compose 增加 `logging` 驱动配置（如 `json-file` 限制大小，或 `fluentd`/`loki`）。
 6. **Ollama 场景**：若 LLM 使用宿主机 Ollama，`base_url` 填 `http://host.docker.internal:11434/v1`（Windows/macOS）或 `http://<宿主机内网 IP>:11434/v1`（Linux）。

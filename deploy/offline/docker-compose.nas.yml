@@ -1,0 +1,36 @@
+# NAS 端离线部署专用 compose 配置。
+# 配合 deploy/offline/load-and-run.sh 使用：镜像已由 docker load 导入，
+# NAS 只拉起容器，不做构建。
+#
+# 用法（在 NAS 上本文件所在目录执行）：
+#   export THUMBELINA_LLM__API_KEY="sk-..."   # 若未写进 thumbelina.yaml
+#   docker compose -f docker-compose.nas.yml up -d
+#
+# 需要与本文件同目录准备 thumbelina.yaml（应用配置）。
+services:
+  thumbelina:
+    # 与 export-image.sh 的 IMAGE_NAME:TAG 保持一致
+    image: ${THUMBELINA_IMAGE:-thumbelina:latest}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./thumbelina.yaml:/app/thumbelina.yaml:ro
+      - thumbelina-data:/app/data
+    environment:
+      - THUMBELINA_LLM__API_KEY=${THUMBELINA_LLM__API_KEY:-}
+      # SQLite 放进持久卷，重建容器不丢数据（4 个斜杠 = 容器内绝对路径）
+      - THUMBELINA_MEMORY__DATABASE_URL=sqlite:////app/data/thumbelina.db
+      # 嵌入模型下载走 hf-mirror（huggingface.co 国内不可达），可被宿主机同名变量覆盖
+      - HF_ENDPOINT=${HF_ENDPOINT:-https://hf-mirror.com}
+      # 模型缓存放进持久卷，重建容器无需重新下载
+      - HF_HOME=/app/data/huggingface
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  thumbelina-data:
