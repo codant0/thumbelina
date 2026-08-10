@@ -3,7 +3,7 @@ import type {
   RagDocument,
   QueryResult,
   ChunkItem,
-  BatchUploadResponse,
+  UploadTask,
 } from '../types/rag'
 
 const API_BASE = '/api/v1/rag'
@@ -70,21 +70,29 @@ export async function listDocuments(kbId: string): Promise<RagDocument[]> {
   return res.json() as Promise<RagDocument[]>
 }
 
-export async function uploadDocument(kbId: string, file: File): Promise<RagDocument> {
+// ── Upload Tasks (async) ────────────────────────────
+
+export async function uploadFilesAsync(kbId: string, files: File[]): Promise<string> {
+  if (files.length === 0) throw new Error('No files to upload')
   const formData = new FormData()
-  formData.append('file', file)
-  const res = await fetch(`${API_BASE}/knowledge-bases/${kbId}/documents`, {
-    method: 'POST',
-    body: formData,
-  })
+  let path: string
+  if (files.length === 1) {
+    formData.append('file', files[0])
+    path = `${API_BASE}/knowledge-bases/${kbId}/documents`
+  } else {
+    for (const file of files) formData.append('files', file)
+    path = `${API_BASE}/knowledge-bases/${kbId}/documents/batch`
+  }
+  const res = await fetch(path, { method: 'POST', body: formData })
   if (!res.ok) {
     const data = await res.json().catch(() => ({}))
     throw new Error(data.detail || `HTTP ${res.status}`)
   }
-  return res.json() as Promise<RagDocument>
+  const data = (await res.json()) as { task_id: string }
+  return data.task_id
 }
 
-export async function uploadDocumentByUrl(kbId: string, url: string): Promise<RagDocument> {
+export async function uploadUrlAsync(kbId: string, url: string): Promise<string> {
   const res = await fetch(`${API_BASE}/knowledge-bases/${kbId}/documents/url`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -94,26 +102,25 @@ export async function uploadDocumentByUrl(kbId: string, url: string): Promise<Ra
     const data = await res.json().catch(() => ({}))
     throw new Error(data.detail || `HTTP ${res.status}`)
   }
-  return res.json() as Promise<RagDocument>
+  const data = (await res.json()) as { task_id: string }
+  return data.task_id
 }
 
-export async function uploadDocumentsBatch(
-  kbId: string,
-  files: File[],
-): Promise<BatchUploadResponse> {
-  const formData = new FormData()
-  for (const file of files) {
-    formData.append('files', file)
-  }
-  const res = await fetch(`${API_BASE}/knowledge-bases/${kbId}/documents/batch`, {
-    method: 'POST',
-    body: formData,
-  })
+export async function listUploadTasks(kbId: string): Promise<UploadTask[]> {
+  const res = await fetch(`${API_BASE}/knowledge-bases/${kbId}/upload-tasks`)
   if (!res.ok) {
     const data = await res.json().catch(() => ({}))
     throw new Error(data.detail || `HTTP ${res.status}`)
   }
-  return res.json() as Promise<BatchUploadResponse>
+  return res.json() as Promise<UploadTask[]>
+}
+
+export async function cancelUploadTask(taskId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/upload-tasks/${taskId}`, { method: 'DELETE' })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.detail || `HTTP ${res.status}`)
+  }
 }
 
 export async function deleteDocument(docId: string): Promise<void> {

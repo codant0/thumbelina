@@ -101,3 +101,51 @@ class TestToolNode:
 
         assert "messages" in result
         assert result["messages"] == []
+
+    @pytest.mark.asyncio
+    async def test_tool_node_returns_error_for_unknown_tool(self):
+        """Unknown tool names should yield an error ToolMessage, not be skipped."""
+        from langchain_core.messages import ToolMessage
+
+        from thumbelina.agent.nodes import tool_node
+        from thumbelina.agent.state import AgentState
+
+        ai_msg = AIMessage(
+            content="",
+            tool_calls=[{"id": "call_1", "name": "missing", "args": {}}],
+        )
+
+        state: AgentState = {"messages": [ai_msg]}
+        result = await tool_node(state, [])
+
+        assert len(result["messages"]) == 1
+        msg = result["messages"][0]
+        assert isinstance(msg, ToolMessage)
+        assert msg.tool_call_id == "call_1"
+        assert "Unknown tool" in msg.content
+
+    @pytest.mark.asyncio
+    async def test_tool_node_returns_error_when_tool_raises(self):
+        """Tool execution errors should be returned as a ToolMessage."""
+        from langchain_core.messages import ToolMessage
+
+        from thumbelina.agent.nodes import tool_node
+        from thumbelina.agent.state import AgentState
+
+        mock_tool = MagicMock()
+        mock_tool.name = "search"
+        mock_tool.ainvoke = AsyncMock(side_effect=ValueError("boom"))
+
+        ai_msg = AIMessage(
+            content="",
+            tool_calls=[{"id": "call_1", "name": "search", "args": {"query": "x"}}],
+        )
+
+        state: AgentState = {"messages": [ai_msg]}
+        result = await tool_node(state, [mock_tool])
+
+        assert len(result["messages"]) == 1
+        msg = result["messages"][0]
+        assert isinstance(msg, ToolMessage)
+        assert msg.tool_call_id == "call_1"
+        assert "boom" in msg.content

@@ -203,6 +203,29 @@ class TestConversationRepository:
         assert result is False
 
     @pytest.mark.asyncio
+    async def test_clear_messages(self, repo: ConversationRepository):
+        """Should remove all messages but keep the conversation."""
+        conversation_id = await repo.create_conversation()
+        await repo.add_message(conversation_id=conversation_id, role="user", content="a")
+        await repo.add_message(conversation_id=conversation_id, role="assistant", content="b")
+        await repo.set_summary(conversation_id, "stale summary")
+
+        result = await repo.clear_messages(conversation_id)
+
+        assert result is True
+        assert await repo.get_messages(conversation_id) == []
+        conversation = await repo.get_conversation(conversation_id)
+        assert conversation is not None
+        assert conversation["summary"] is None
+
+    @pytest.mark.asyncio
+    async def test_clear_messages_nonexistent_conversation(self, repo: ConversationRepository):
+        """Should return False when clearing messages of a non-existent conversation."""
+        result = await repo.clear_messages("nonexistent-id")
+
+        assert result is False
+
+    @pytest.mark.asyncio
     async def test_message_order(self, repo: ConversationRepository):
         """Messages should be returned in creation order."""
         conversation_id = await repo.create_conversation()

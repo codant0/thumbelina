@@ -247,6 +247,15 @@ class ThumbelinaAgent:
             self.tools.extend(_make_scheduler_tools(self.scheduler))
         if self.composition_engine is not None:
             self.tools.extend(_make_composition_tools(self.composition_engine))
+        # clone() re-passes the combined list, so the extends above re-add
+        # generated tools; dedupe or the LLM API rejects duplicate names.
+        seen: set[str] = set()
+        unique_tools: list[BaseTool] = []
+        for item in self.tools:
+            if item.name not in seen:
+                seen.add(item.name)
+                unique_tools.append(item)
+        self.tools = unique_tools
 
         self.graph = self._build_graph()
 
@@ -301,7 +310,13 @@ class ThumbelinaAgent:
 
     async def _call_model_node(self, state: AgentState) -> dict[str, list[AIMessage]]:
         """Node wrapper for calling the LLM."""
-        return await call_model(state, self.llm, timeout=self.request_timeout)
+        model = self.llm
+        if self.tools:
+            try:
+                model = model.bind_tools(self.tools)
+            except NotImplementedError:
+                logger.debug("Model does not support tool binding; tools disabled")
+        return await call_model(state, model, timeout=self.request_timeout)
 
     async def _tool_node_node(self, state: AgentState) -> dict[str, list[Any]]:
         """Node wrapper for executing tools."""
@@ -503,8 +518,8 @@ class ThumbelinaAgent:
         full_response = ""
         pending = ""
         # Batch tokens before yielding: send when buffer reaches size OR timeout
-        BATCH_SIZE = 30  # characters per batch
-        FLUSH_INTERVAL = 0.05  # seconds (50ms) - flush even if batch size not reached
+        batch_size = 30  # characters per batch
+        flush_interval = 0.05  # seconds (50ms) - flush even if batch size not reached
         last_flush = asyncio.get_event_loop().time()
 
         async for event in self.graph.astream(initial_state, stream_mode="messages"):
@@ -530,7 +545,7 @@ class ThumbelinaAgent:
 
                 # Yield when buffer reaches batch size or time interval
                 now = asyncio.get_event_loop().time()
-                if len(pending) >= BATCH_SIZE or (now - last_flush) >= FLUSH_INTERVAL:
+                if len(pending) >= batch_size or (now - last_flush) >= flush_interval:
                     yield pending
                     pending = ""
                     last_flush = now

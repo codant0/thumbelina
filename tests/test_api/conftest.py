@@ -85,12 +85,20 @@ def mock_memory():
             return True
         return False
 
+    async def clear_messages(conv_id: str) -> bool:
+        if conv_id in conversations:
+            messages.clear()
+            conversations[conv_id]["summary"] = None
+            return True
+        return False
+
     memory = MagicMock()
     memory.create_conversation = AsyncMock(return_value="test-conv-id")
     memory.get_conversation = AsyncMock(side_effect=get_conversation)
     memory.get_conversations = AsyncMock(return_value=[conv])
     memory.get_messages = AsyncMock(side_effect=get_messages)
     memory.delete_conversation = AsyncMock(side_effect=delete_conversation)
+    memory.clear_messages = AsyncMock(side_effect=clear_messages)
     memory.add_message = AsyncMock()
     memory.close = MagicMock()
 

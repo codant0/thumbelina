@@ -8,8 +8,8 @@ import uuid
 import chromadb
 import pytest
 
-from thumbelina.rag.embedding.vector_chroma import ChromaVectorStore
 from thumbelina.rag.common.models import Chunk
+from thumbelina.rag.embedding.vector_chroma import ChromaVectorStore
 
 
 @pytest.fixture

@@ -151,6 +151,21 @@ class MemoryManager:
         """
         return await self.repository.delete_conversation(conversation_id)
 
+    async def clear_messages(self, conversation_id: str) -> bool:
+        """Clear all messages of a conversation while keeping the conversation.
+
+        Parameters
+        ----------
+        conversation_id:
+            ID of the conversation whose messages should be cleared.
+
+        Returns
+        -------
+        bool
+            True if messages were cleared, False if the conversation was not found.
+        """
+        return await self.repository.clear_messages(conversation_id)
+
     async def set_summary(self, conversation_id: str, summary: str) -> bool:
         """Set the summary for a conversation.
 

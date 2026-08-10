@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import uuid
 
+from thumbelina.rag.common.models import Document, DocumentType
+from thumbelina.rag.common.orm_models import DocumentRecord
 from thumbelina.rag.ingestion.document_dedup import (
     DedupAction,
     DedupResult,
     DocumentDeduplicator,
 )
-from thumbelina.rag.common.models import Document, DocumentType
-from thumbelina.rag.common.orm_models import DocumentRecord
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -18,8 +18,8 @@ from thumbelina.rag.common.orm_models import DocumentRecord
 
 
 def _make_document(
-    sha256: bytes = b"\xAA" * 32,
-    sim_hash_64: bytes = b"\xBB" * 8,
+    sha256: bytes = b"\xaa" * 32,
+    sim_hash_64: bytes = b"\xbb" * 8,
     name: str = "test.md",
 ) -> Document:
     return Document(
@@ -36,8 +36,8 @@ def _make_document(
 def _make_doc_record(
     doc_id: str = "existing-1",
     name: str = "old.md",
-    sha256: bytes = b"\xAA" * 32,
-    sim_hash_64: bytes = b"\xBB" * 8,
+    sha256: bytes = b"\xaa" * 32,
+    sim_hash_64: bytes = b"\xbb" * 8,
 ) -> DocumentRecord:
     record = DocumentRecord(
         id=doc_id,
@@ -125,7 +125,7 @@ class TestDocumentDeduplicator:
         existing = _make_doc_record()
         repo = FakeDocRepo(sha256_result=existing)
         dedup = DocumentDeduplicator(doc_repo=repo)  # type: ignore[arg-type]
-        doc = _make_document(sha256=b"\xAA" * 32)
+        doc = _make_document(sha256=b"\xaa" * 32)
 
         result = dedup.check(doc)
 
@@ -222,7 +222,7 @@ class TestDocumentDeduplicator:
             simhash_results=[(_make_doc_record(doc_id="other", name="other.md"), 1)],
         )
         dedup = DocumentDeduplicator(doc_repo=repo)  # type: ignore[arg-type]
-        doc = _make_document(sha256=b"\xAA" * 32)
+        doc = _make_document(sha256=b"\xaa" * 32)
 
         result = dedup.check(doc)
 

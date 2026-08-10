@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import sys
+import tempfile
+import threading
+import time
+import uuid
 from datetime import datetime
+from pathlib import Path
 from types import ModuleType
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi.testclient import TestClient
 
+from thumbelina.api.routes import rag as rag_routes
 from thumbelina.rag.common.orm_models import (
     DocumentRecord,
     KnowledgeBaseRecord,
@@ -131,12 +138,16 @@ def rag_client(client):
             del doc_store[did]
         return len(to_delete)
 
+    async def _doc_count_by_kb(kb_id: str) -> int:
+        return sum(1 for d in doc_store.values() if d.knowledge_base_id == kb_id)
+
     doc_repo = MagicMock()
     doc_repo.create = AsyncMock(side_effect=_doc_create)
     doc_repo.get = AsyncMock(side_effect=_doc_get)
     doc_repo.list_by_kb = AsyncMock(side_effect=_doc_list_by_kb)
     doc_repo.delete = AsyncMock(side_effect=_doc_delete)
     doc_repo.delete_by_kb = AsyncMock(side_effect=_doc_delete_by_kb)
+    doc_repo.count_by_kb = AsyncMock(side_effect=_doc_count_by_kb)
 
     # --- Store manager mock ---
     store_manager = MagicMock()
@@ -155,6 +166,10 @@ def rag_client(client):
     app.state.rag_embedding_registry = embedding_registry
     app.state.engine = MagicMock()
 
+    from thumbelina.rag.pipeline.upload_tasks import UploadTaskManager
+
+    app.state.rag_upload_tasks = UploadTaskManager()
+
     return client
 
 
@@ -171,6 +186,43 @@ def _install_mock_module(module_path: str, attrs: dict | None = None) -> None:
         sys.modules[module_path] = mod
 
 
+def _wait_task_done(client, task_id: str, timeout: float = 5.0) -> dict:
+    """轮询任务状态直至终态。"""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        resp = client.get(f"/api/v1/rag/upload-tasks/{task_id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        if data["status"] in ("completed", "failed", "cancelled"):
+            return data
+        time.sleep(0.05)
+    raise AssertionError(f"task {task_id} did not finish within {timeout}s")
+
+
+def _wait_no_tmp_files(pattern: str, timeout: float = 5.0) -> list[Path]:
+    """轮询直至系统临时目录下无匹配文件，返回最终匹配结果。"""
+    tmp_dir = Path(tempfile.gettempdir())
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        matches = list(tmp_dir.glob(pattern))
+        if not matches:
+            return matches
+        time.sleep(0.05)
+    return list(tmp_dir.glob(pattern))
+
+
+def _remove_tmp_files(pattern: str) -> None:
+    """立即删除系统临时目录下匹配的历史残留文件（测试前置清理）。"""
+    tmp_dir = Path(tempfile.gettempdir())
+    if not tmp_dir.exists():
+        return
+    for path in tmp_dir.glob(pattern):
+        try:
+            path.unlink()
+        except OSError:
+            pass
+
+
 @pytest.fixture(autouse=False)
 def mock_rag_pipeline():
     """Patch Indexer/Loaders in the rag route module to avoid importing torch."""
@@ -178,7 +230,13 @@ def mock_rag_pipeline():
     mock_stats = MagicMock()
     mock_stats.indexed_count = 0
     mock_stats.errors = []
-    mock_stats.documents = []
+    default_doc = MagicMock()
+    default_doc.id = uuid.uuid4().hex
+    default_doc.name = "test.md"
+    default_doc.source_uri = "/tmp/test.md"
+    default_doc.sha256 = b"\x00" * 32
+    default_doc.sim_hash_64 = b"\x00" * 8
+    mock_stats.documents = [default_doc]
     mock_indexer_cls.return_value.index.return_value = mock_stats
     mock_indexer_cls.return_value.index_documents.return_value = mock_stats
     mock_indexer_cls.return_value.index_batch.return_value = mock_stats
@@ -216,6 +274,7 @@ class TestKnowledgeBaseCRUD:
         data = resp.json()
         assert isinstance(data, list)
         assert any(kb["id"] == "0" for kb in data)
+        assert all("document_count" in kb for kb in data)
 
     def test_create_knowledge_base(self, rag_client):
         resp = rag_client.post(
@@ -258,6 +317,44 @@ class TestKnowledgeBaseCRUD:
         resp = rag_client.put("/api/v1/rag/knowledge-bases/no-such", json={"name": "X"})
         assert resp.status_code == 404
 
+    def test_delete_kb_cancels_active_upload_tasks(self, rag_client, mock_rag_pipeline):
+        """删除知识库时，其运行中/排队中的上传任务均应被取消。"""
+        from thumbelina.rag.pipeline.indexer import IndexCancelledError
+
+        release = threading.Event()
+        default_stats = mock_rag_pipeline.return_value.index.return_value
+
+        def blocking_index(path, progress_cb=None, cancel_event=None):
+            release.wait(timeout=5)
+            if cancel_event is not None and cancel_event.is_set():
+                raise IndexCancelledError()
+            return default_stats
+
+        mock_rag_pipeline.return_value.index.side_effect = blocking_index
+
+        kb_id = rag_client.post("/api/v1/rag/knowledge-bases", json={"name": "T"}).json()["id"]
+        resp_a = rag_client.post(
+            f"/api/v1/rag/knowledge-bases/{kb_id}/documents",
+            files={"file": ("a.md", b"aaa", "text/markdown")},
+        )
+        resp_b = rag_client.post(
+            f"/api/v1/rag/knowledge-bases/{kb_id}/documents",
+            files={"file": ("b.md", b"bbb", "text/markdown")},
+        )
+        task_a = resp_a.json()["task_id"]
+        task_b = resp_b.json()["task_id"]
+        try:
+            del_resp = rag_client.delete(f"/api/v1/rag/knowledge-bases/{kb_id}")
+            assert del_resp.status_code == 200
+            # 排队中的任务立即置为 cancelled
+            b_data = rag_client.get(f"/api/v1/rag/upload-tasks/{task_b}").json()
+            assert b_data["status"] == "cancelled"
+        finally:
+            release.set()
+        # 运行中的任务经协作式取消后以 cancelled 收尾
+        a_final = _wait_task_done(rag_client, task_a)
+        assert a_final["status"] == "cancelled"
+
 
 # ---------- Document Management Tests ----------
 
@@ -268,41 +365,7 @@ class TestDocumentManagement:
         assert resp.status_code == 200
         assert resp.json() == []
 
-    def test_upload_document(self, rag_client, mock_rag_pipeline):
-        import uuid
-
-        mock_stats = MagicMock()
-        mock_stats.indexed_count = 3
-        mock_stats.errors = []
-        fake_doc = MagicMock()
-        fake_doc.id = uuid.uuid4().hex
-        fake_doc.name = "test.md"
-        fake_doc.source_uri = "/tmp/test.md"
-        fake_doc.sha256 = b"\x00" * 32
-        fake_doc.sim_hash_64 = b"\x00" * 8
-        mock_stats.documents = [fake_doc]
-        mock_rag_pipeline.return_value.index_batch.return_value = mock_stats
-
-        resp = rag_client.post(
-            "/api/v1/rag/knowledge-bases/0/documents",
-            files={"file": ("test.md", b"# Test\nHello", "text/markdown")},
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["name"] == "test.md"
-        assert data["knowledge_base_id"] == "0"
-        assert data["chunk_count"] == 3
-
-    def test_upload_unsupported_type_returns_400(self, rag_client):
-        resp = rag_client.post(
-            "/api/v1/rag/knowledge-bases/0/documents",
-            files={"file": ("test.docx", b"PK fake", "application/octet-stream")},
-        )
-        assert resp.status_code == 400
-
     def test_delete_document(self, rag_client, mock_rag_pipeline):
-        import uuid
-
         mock_stats = MagicMock()
         mock_stats.indexed_count = 2
         mock_stats.errors = []
@@ -313,13 +376,14 @@ class TestDocumentManagement:
         fake_doc.sha256 = b"\x00" * 32
         fake_doc.sim_hash_64 = b"\x00" * 8
         mock_stats.documents = [fake_doc]
-        mock_rag_pipeline.return_value.index_batch.return_value = mock_stats
+        mock_rag_pipeline.return_value.index.return_value = mock_stats
 
         upload_resp = rag_client.post(
             "/api/v1/rag/knowledge-bases/0/documents",
             files={"file": ("a.md", b"content", "text/markdown")},
         )
-        doc_id = upload_resp.json()["id"]
+        task = _wait_task_done(rag_client, upload_resp.json()["task_id"])
+        doc_id = task["result"]["uploaded"][0]["id"]
         resp = rag_client.delete(f"/api/v1/rag/documents/{doc_id}")
         assert resp.status_code == 200
         assert resp.json()["deleted"] is True
@@ -372,8 +436,6 @@ class TestRAGQuery:
 class TestDocumentChunks:
     def test_list_document_chunks(self, rag_client, mock_rag_pipeline):
         """GET /documents/{doc_id}/chunks 应返回该文档的所有 chunks。"""
-        import uuid
-
         mock_stats = MagicMock()
         mock_stats.indexed_count = 2
         mock_stats.errors = []
@@ -384,13 +446,14 @@ class TestDocumentChunks:
         fake_doc.sha256 = b"\x00" * 32
         fake_doc.sim_hash_64 = b"\x00" * 8
         mock_stats.documents = [fake_doc]
-        mock_rag_pipeline.return_value.index_batch.return_value = mock_stats
+        mock_rag_pipeline.return_value.index.return_value = mock_stats
 
         upload_resp = rag_client.post(
             "/api/v1/rag/knowledge-bases/0/documents",
             files={"file": ("test.md", b"# Test\nHello", "text/markdown")},
         )
-        doc_id = upload_resp.json()["id"]
+        task = _wait_task_done(rag_client, upload_resp.json()["task_id"])
+        doc_id = task["result"]["uploaded"][0]["id"]
 
         # Mock the vector store's query_by_metadata
         mock_store = MagicMock()
@@ -426,8 +489,6 @@ class TestDocumentChunks:
 
     def test_list_chunks_empty(self, rag_client, mock_rag_pipeline):
         """文档存在但没有 chunks 时返回空列表。"""
-        import uuid
-
         mock_stats = MagicMock()
         mock_stats.indexed_count = 0
         mock_stats.errors = []
@@ -438,13 +499,14 @@ class TestDocumentChunks:
         fake_doc.sha256 = b"\x00" * 32
         fake_doc.sim_hash_64 = b"\x00" * 8
         mock_stats.documents = [fake_doc]
-        mock_rag_pipeline.return_value.index_batch.return_value = mock_stats
+        mock_rag_pipeline.return_value.index.return_value = mock_stats
 
         upload_resp = rag_client.post(
             "/api/v1/rag/knowledge-bases/0/documents",
             files={"file": ("empty.md", b"", "text/markdown")},
         )
-        doc_id = upload_resp.json()["id"]
+        task = _wait_task_done(rag_client, upload_resp.json()["task_id"])
+        doc_id = task["result"]["uploaded"][0]["id"]
 
         mock_store = MagicMock()
         mock_store.query_by_metadata.return_value = []
@@ -457,8 +519,6 @@ class TestDocumentChunks:
 
     def test_delete_document_cleans_vectors(self, rag_client, mock_rag_pipeline):
         """DELETE /documents/{doc_id} 应同时清理向量库中的 chunks。"""
-        import uuid
-
         mock_stats = MagicMock()
         mock_stats.indexed_count = 1
         mock_stats.errors = []
@@ -469,13 +529,14 @@ class TestDocumentChunks:
         fake_doc.sha256 = b"\x00" * 32
         fake_doc.sim_hash_64 = b"\x00" * 8
         mock_stats.documents = [fake_doc]
-        mock_rag_pipeline.return_value.index_batch.return_value = mock_stats
+        mock_rag_pipeline.return_value.index.return_value = mock_stats
 
         upload_resp = rag_client.post(
             "/api/v1/rag/knowledge-bases/0/documents",
             files={"file": ("del.md", b"content", "text/markdown")},
         )
-        doc_id = upload_resp.json()["id"]
+        task = _wait_task_done(rag_client, upload_resp.json()["task_id"])
+        doc_id = task["result"]["uploaded"][0]["id"]
 
         mock_store = MagicMock()
         store_manager = rag_client.app.state.rag_store_manager
@@ -487,3 +548,364 @@ class TestDocumentChunks:
 
         # Verify vector cleanup was called
         mock_store.delete_by_metadata.assert_called_once_with(where={"document_id": doc_id})
+
+
+# ---------- Async Upload Tests ----------
+
+
+class TestAsyncUpload:
+    def test_upload_returns_202_and_task_id(self, rag_client, mock_rag_pipeline):
+        resp = rag_client.post(
+            "/api/v1/rag/knowledge-bases/0/documents",
+            files={"file": ("test.md", b"# Test\nHello", "text/markdown")},
+        )
+        assert resp.status_code == 202
+        data = resp.json()
+        assert "task_id" in data
+
+        task = _wait_task_done(rag_client, data["task_id"])
+        assert task["status"] == "completed"
+        assert task["kind"] == "file"
+        assert task["label"] == "test.md"
+        assert task["result"]["uploaded"][0]["name"] == "test.md"
+
+    def test_upload_indexes_document_record(self, rag_client, mock_rag_pipeline):
+        mock_stats = MagicMock()
+        mock_stats.indexed_count = 3
+        mock_stats.errors = []
+        fake_doc = MagicMock()
+        fake_doc.id = uuid.uuid4().hex
+        fake_doc.name = "test.md"
+        fake_doc.source_uri = "/tmp/test.md"
+        fake_doc.sha256 = b"\x00" * 32
+        fake_doc.sim_hash_64 = b"\x00" * 8
+        mock_stats.documents = [fake_doc]
+        mock_rag_pipeline.return_value.index.return_value = mock_stats
+
+        resp = rag_client.post(
+            "/api/v1/rag/knowledge-bases/0/documents",
+            files={"file": ("test.md", b"# Test", "text/markdown")},
+        )
+        task = _wait_task_done(rag_client, resp.json()["task_id"])
+        assert task["status"] == "completed"
+
+        docs = rag_client.get("/api/v1/rag/knowledge-bases/0/documents").json()
+        assert len(docs) == 1
+        assert docs[0]["chunk_count"] == 3
+
+    def test_upload_document_keeps_original_filename(self, rag_client, mock_rag_pipeline):
+        """loader 从临时路径派生的名称不应覆盖用户上传的原始文件名。"""
+        mock_stats = MagicMock()
+        mock_stats.indexed_count = 1
+        mock_stats.errors = []
+        fake_doc = MagicMock()
+        fake_doc.id = uuid.uuid4().hex
+        # 模拟 loader 用带 uuid 前缀的临时路径派生 name
+        fake_doc.name = f"upload_{uuid.uuid4().hex}_AI-Agents-in-Depth-zh-CN.pdf"
+        fake_doc.source_uri = f"/tmp/upload_{uuid.uuid4().hex}_AI-Agents-in-Depth-zh-CN.pdf"
+        fake_doc.sha256 = b"\x00" * 32
+        fake_doc.sim_hash_64 = b"\x00" * 8
+        mock_stats.documents = [fake_doc]
+        mock_rag_pipeline.return_value.index.return_value = mock_stats
+
+        resp = rag_client.post(
+            "/api/v1/rag/knowledge-bases/0/documents",
+            files={
+                "file": ("AI-Agents-in-Depth-zh-CN.pdf", b"pdf-bytes", "application/pdf"),
+            },
+        )
+        task = _wait_task_done(rag_client, resp.json()["task_id"])
+        assert task["status"] == "completed"
+
+        docs = rag_client.get("/api/v1/rag/knowledge-bases/0/documents").json()
+        assert len(docs) == 1
+        assert docs[0]["name"] == "AI-Agents-in-Depth-zh-CN.pdf"
+
+    def test_upload_unsupported_type_returns_400(self, rag_client):
+        resp = rag_client.post(
+            "/api/v1/rag/knowledge-bases/0/documents",
+            files={"file": ("test.docx", b"PK fake", "application/octet-stream")},
+        )
+        assert resp.status_code == 400
+
+    def test_upload_failure_marks_task_failed(self, rag_client, mock_rag_pipeline):
+        mock_stats = MagicMock()
+        mock_stats.indexed_count = 0
+        mock_stats.errors = ["加载失败: 文件损坏"]
+        mock_stats.documents = []
+        mock_rag_pipeline.return_value.index.return_value = mock_stats
+
+        resp = rag_client.post(
+            "/api/v1/rag/knowledge-bases/0/documents",
+            files={"file": ("bad.md", b"x", "text/markdown")},
+        )
+        task = _wait_task_done(rag_client, resp.json()["task_id"])
+        assert task["status"] == "failed"
+        assert "加载失败" in task["error"]
+
+    def test_upload_to_missing_kb_returns_404(self, rag_client):
+        resp = rag_client.post(
+            "/api/v1/rag/knowledge-bases/no-such/documents",
+            files={"file": ("a.md", b"x", "text/markdown")},
+        )
+        assert resp.status_code == 404
+
+    def test_upload_over_size_limit_returns_413(self, rag_client, monkeypatch):
+        """超过大小上限返回 413，且不泄漏临时文件。"""
+        monkeypatch.setattr(rag_routes, "MAX_UPLOAD_SIZE_BYTES", 10)
+        name = f"big_{uuid.uuid4().hex[:8]}.md"
+        resp = rag_client.post(
+            "/api/v1/rag/knowledge-bases/0/documents",
+            files={"file": (name, b"x" * 100, "text/markdown")},
+        )
+        assert resp.status_code == 413
+        assert "大小限制" in resp.json()["detail"]
+        assert not _wait_no_tmp_files(f"upload_*_{name}"), "超限文件临时文件泄漏"
+
+    def test_duplicate_document_recorded_as_skipped(self, rag_client, mock_rag_pipeline):
+        """去重命中（无 documents 且无 errors）时任务完成且记为 skipped。"""
+        mock_stats = MagicMock()
+        mock_stats.indexed_count = 0
+        mock_stats.errors = []
+        mock_stats.documents = []
+        mock_rag_pipeline.return_value.index.return_value = mock_stats
+
+        resp = rag_client.post(
+            "/api/v1/rag/knowledge-bases/0/documents",
+            files={"file": ("dup.md", b"x", "text/markdown")},
+        )
+        task = _wait_task_done(rag_client, resp.json()["task_id"])
+        assert task["status"] == "completed"
+        assert task["result"]["skipped"] == ["dup.md"]
+        assert task["result"]["errors"] == []
+
+
+# ---------- Upload Task Endpoint Tests ----------
+
+
+class TestUploadTaskEndpoints:
+    def test_get_unknown_task_returns_404(self, rag_client):
+        resp = rag_client.get("/api/v1/rag/upload-tasks/nope")
+        assert resp.status_code == 404
+
+    def test_list_tasks_by_kb(self, rag_client, mock_rag_pipeline):
+        resp = rag_client.post(
+            "/api/v1/rag/knowledge-bases/0/documents",
+            files={"file": ("a.md", b"x", "text/markdown")},
+        )
+        task_id = resp.json()["task_id"]
+        _wait_task_done(rag_client, task_id)
+        listing = rag_client.get("/api/v1/rag/knowledge-bases/0/upload-tasks").json()
+        assert any(t["id"] == task_id for t in listing)
+
+    def test_cancel_terminal_task_removes_it(self, rag_client, mock_rag_pipeline):
+        resp = rag_client.post(
+            "/api/v1/rag/knowledge-bases/0/documents",
+            files={"file": ("a.md", b"x", "text/markdown")},
+        )
+        task_id = resp.json()["task_id"]
+        _wait_task_done(rag_client, task_id)
+        del_resp = rag_client.delete(f"/api/v1/rag/upload-tasks/{task_id}")
+        assert del_resp.status_code == 200
+        assert rag_client.get(f"/api/v1/rag/upload-tasks/{task_id}").status_code == 404
+
+    def test_cancel_unknown_task_returns_404(self, rag_client):
+        resp = rag_client.delete("/api/v1/rag/upload-tasks/nope")
+        assert resp.status_code == 404
+
+    def test_cancel_running_or_queued_task_and_tmp_cleanup(self, rag_client, mock_rag_pipeline):
+        """取消排队中的任务：状态置 cancelled，且临时文件不泄漏。"""
+        release = threading.Event()
+        default_stats = mock_rag_pipeline.return_value.index.return_value
+
+        def blocking_index(path, progress_cb=None, cancel_event=None):
+            assert release.wait(timeout=5), "index blocked timed out"
+            return default_stats
+
+        mock_rag_pipeline.return_value.index.side_effect = blocking_index
+
+        suffix = uuid.uuid4().hex[:8]
+        name_a = f"cancel_a_{suffix}.md"
+        name_b = f"cancel_b_{suffix}.md"
+        try:
+            # A 先上传：占用信号量保持 running（index 阻塞在 threading.Event）
+            resp_a = rag_client.post(
+                "/api/v1/rag/knowledge-bases/0/documents",
+                files={"file": (name_a, b"aaa", "text/markdown")},
+            )
+            assert resp_a.status_code == 202
+            task_a = resp_a.json()["task_id"]
+
+            # B 后上传：信号量被占用，排队 pending
+            resp_b = rag_client.post(
+                "/api/v1/rag/knowledge-bases/0/documents",
+                files={"file": (name_b, b"bbb", "text/markdown")},
+            )
+            assert resp_b.status_code == 202
+            task_b = resp_b.json()["task_id"]
+
+            # 取消排队中的 B：pending 快速路径立即置 cancelled
+            cancel_resp = rag_client.delete(f"/api/v1/rag/upload-tasks/{task_b}")
+            assert cancel_resp.status_code == 200
+            assert cancel_resp.json() == {"cancelled": True}
+            b_data = rag_client.get(f"/api/v1/rag/upload-tasks/{task_b}").json()
+            assert b_data["status"] == "cancelled"
+        finally:
+            release.set()
+
+        # A 完成后 B 的 run() 走 skip 路径，cleanup 仍须删除 B 的临时文件
+        a_final = _wait_task_done(rag_client, task_a)
+        assert a_final["status"] == "completed"
+        assert not _wait_no_tmp_files(f"upload_*_{name_b}"), "cancelled task tmp file leaked"
+        assert not _wait_no_tmp_files(f"upload_*_{name_a}"), "completed task tmp file leaked"
+
+    def test_successful_upload_cleans_tmp_file(self, rag_client, mock_rag_pipeline):
+        """成功上传完成后，临时文件应被清理。"""
+        suffix = uuid.uuid4().hex[:8]
+        name = f"clean_{suffix}.md"
+        resp = rag_client.post(
+            "/api/v1/rag/knowledge-bases/0/documents",
+            files={"file": (name, b"# Test", "text/markdown")},
+        )
+        assert resp.status_code == 202
+        task = _wait_task_done(rag_client, resp.json()["task_id"])
+        assert task["status"] == "completed"
+        assert not _wait_no_tmp_files(f"upload_*_{name}"), "completed task tmp file leaked"
+
+
+# ---------- Async Batch / URL Upload Tests ----------
+
+
+class TestAsyncBatchAndUrlUpload:
+    def test_batch_upload_returns_202_and_completes(self, rag_client, mock_rag_pipeline):
+        mock_stats = MagicMock()
+        mock_stats.indexed_count = 1
+        mock_stats.errors = []
+        fake_doc = MagicMock()
+        fake_doc.id = uuid.uuid4().hex
+        fake_doc.name = "a.md"
+        fake_doc.source_uri = "/tmp/a.md"
+        fake_doc.sha256 = b"\x00" * 32
+        fake_doc.sim_hash_64 = b"\x00" * 8
+        mock_stats.documents = [fake_doc]
+        mock_rag_pipeline.return_value.index.return_value = mock_stats
+
+        # 清理历史残留，避免系统临时目录遗留文件造成误判
+        _remove_tmp_files("upload_*_a.md")
+        _remove_tmp_files("upload_*_b.md")
+        resp = rag_client.post(
+            "/api/v1/rag/knowledge-bases/0/documents/batch",
+            files=[
+                ("files", ("a.md", b"aaa", "text/markdown")),
+                ("files", ("b.md", b"bbb", "text/markdown")),
+            ],
+        )
+        assert resp.status_code == 202
+        task = _wait_task_done(rag_client, resp.json()["task_id"])
+        assert task["status"] == "completed"
+        assert task["kind"] == "batch"
+        assert task["total_files"] == 2
+        assert len(task["result"]["uploaded"]) == 2
+        assert not _wait_no_tmp_files("upload_*_a.md"), "batch tmp file a.md leaked"
+        assert not _wait_no_tmp_files("upload_*_b.md"), "batch tmp file b.md leaked"
+
+    def test_batch_unsupported_files_recorded_as_skipped(self, rag_client, mock_rag_pipeline):
+        mock_stats = MagicMock()
+        mock_stats.indexed_count = 1
+        mock_stats.errors = []
+        fake_doc = MagicMock()
+        fake_doc.id = uuid.uuid4().hex
+        fake_doc.name = "a.md"
+        fake_doc.source_uri = "/tmp/a.md"
+        fake_doc.sha256 = b"\x00" * 32
+        fake_doc.sim_hash_64 = b"\x00" * 8
+        mock_stats.documents = [fake_doc]
+        mock_rag_pipeline.return_value.index.return_value = mock_stats
+
+        resp = rag_client.post(
+            "/api/v1/rag/knowledge-bases/0/documents/batch",
+            files=[
+                ("files", ("a.md", b"aaa", "text/markdown")),
+                ("files", ("c.docx", b"PK", "application/octet-stream")),
+            ],
+        )
+        assert resp.status_code == 202
+        task = _wait_task_done(rag_client, resp.json()["task_id"])
+        assert task["status"] == "completed"
+        assert task["result"]["skipped"] == ["c.docx"]
+
+    def test_url_upload_returns_202_and_completes(self, rag_client, mock_rag_pipeline):
+        mock_stats = MagicMock()
+        mock_stats.indexed_count = 4
+        mock_stats.errors = []
+        fake_doc = MagicMock()
+        fake_doc.id = uuid.uuid4().hex
+        fake_doc.name = "example.com"
+        fake_doc.source_uri = "https://example.com/a"
+        fake_doc.sha256 = b"\x00" * 32
+        fake_doc.sim_hash_64 = b"\x00" * 8
+        mock_stats.documents = [fake_doc]
+        mock_rag_pipeline.return_value.index.return_value = mock_stats
+
+        resp = rag_client.post(
+            "/api/v1/rag/knowledge-bases/0/documents/url",
+            json={"url": "https://example.com/a"},
+        )
+        assert resp.status_code == 202
+        task = _wait_task_done(rag_client, resp.json()["task_id"])
+        assert task["status"] == "completed"
+        assert task["kind"] == "url"
+        assert task["label"] == "https://example.com/a"
+
+    def test_url_upload_invalid_scheme_returns_400(self, rag_client):
+        resp = rag_client.post(
+            "/api/v1/rag/knowledge-bases/0/documents/url",
+            json={"url": "ftp://example.com"},
+        )
+        assert resp.status_code == 400
+
+    def test_url_upload_no_content_marks_failed(self, rag_client, mock_rag_pipeline):
+        mock_stats = MagicMock()
+        mock_stats.indexed_count = 0
+        mock_stats.errors = []
+        mock_stats.documents = []
+        mock_rag_pipeline.return_value.index.return_value = mock_stats
+
+        resp = rag_client.post(
+            "/api/v1/rag/knowledge-bases/0/documents/url",
+            json={"url": "https://example.com/empty"},
+        )
+        task = _wait_task_done(rag_client, resp.json()["task_id"])
+        assert task["status"] == "failed"
+
+    def test_batch_empty_files_returns_400(self, rag_client):
+        """空文件列表应被端点守卫拒绝（400，而非创建空任务）。"""
+        resp = rag_client.post(
+            "/api/v1/rag/knowledge-bases/0/documents/batch",
+            files=[],
+        )
+        assert resp.status_code == 400
+        assert resp.json()["detail"] == "没有上传文件"
+
+    def test_batch_save_failure_cleans_already_saved_tmp_files(self, rag_client, mock_rag_pipeline):
+        """批量上传中后续文件落盘失败：返回 500，且已保存文件的临时文件被清理。"""
+        real_save = rag_routes._save_upload_file
+
+        async def save_fails_on_second(file, filename):
+            if filename == "b.md":
+                raise OSError("模拟落盘失败")
+            return await real_save(file, filename)
+
+        error_client = TestClient(rag_client.app, raise_server_exceptions=False)
+        # 清理历史残留（如修复前的失败运行泄漏的文件），避免误判
+        _remove_tmp_files("upload_*_a.md")
+        with patch("thumbelina.api.routes.rag._save_upload_file", new=save_fails_on_second):
+            resp = error_client.post(
+                "/api/v1/rag/knowledge-bases/0/documents/batch",
+                files=[
+                    ("files", ("a.md", b"aaa", "text/markdown")),
+                    ("files", ("b.md", b"bbb", "text/markdown")),
+                ],
+            )
+        assert resp.status_code == 500
+        assert not _wait_no_tmp_files("upload_*_a.md"), "已保存文件的临时文件泄漏"

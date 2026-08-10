@@ -1,4 +1,3 @@
-version: "3.8"
 services:
   backend:
     build:
@@ -10,7 +9,17 @@ services:
       - ./thumbelina.yaml:/app/thumbelina.yaml:ro
       - thumbelina-data:/app/data
     environment:
-      - THUMBELINA_LLM__API_KEY=${THUMBELINA_LLM__API_KEY}
+      - THUMBELINA_LLM__API_KEY=${THUMBELINA_LLM__API_KEY:-}
+      # Put the SQLite database inside the persistent volume so data
+      # survives container rebuilds (env vars override thumbelina.yaml)
+      - THUMBELINA_MEMORY__DATABASE_URL=sqlite:////app/data/thumbelina.db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   frontend:
     build:
@@ -20,6 +29,7 @@ services:
       - "3000:80"
     depends_on:
       - backend
+    restart: unless-stopped
 
 volumes:
   thumbelina-data:

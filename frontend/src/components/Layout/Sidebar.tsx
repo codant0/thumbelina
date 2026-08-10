@@ -4,7 +4,7 @@ import { Plus, X, Pencil, Check } from 'lucide-react'
 import { WeChatIcon } from '../icons/WeChatIcon'
 import { useTranslation } from '../../i18n'
 
-const WECHAT_CONVERSATION_NAME = '微信Clawbot'
+export const WECHAT_CONVERSATION_NAME = '微信Clawbot'
 
 interface SidebarProps {
   conversations: Conversation[]

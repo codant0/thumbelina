@@ -120,13 +120,16 @@ def _migrate_sha256_simhash_to_blob(engine: Engine) -> None:
             if sha256_col is None:
                 # 列不存在，直接添加（旧表无此列）
                 logger.info("rag_documents 缺少 sha256/sim_hash_64 列，正在添加...")
-                conn.execute(text(
-                    "ALTER TABLE rag_documents ADD COLUMN sha256 BLOB NOT NULL DEFAULT x''"
-                ))
+                conn.execute(
+                    text("ALTER TABLE rag_documents ADD COLUMN sha256 BLOB NOT NULL DEFAULT x''")
+                )
                 if "sim_hash_64" not in col_names:
-                    conn.execute(text(
-                        "ALTER TABLE rag_documents ADD COLUMN sim_hash_64 BLOB NOT NULL DEFAULT x''"
-                    ))
+                    conn.execute(
+                        text(
+                            "ALTER TABLE rag_documents ADD COLUMN sim_hash_64 "
+                            "BLOB NOT NULL DEFAULT x''"
+                        )
+                    )
                 conn.commit()
                 logger.info("rag_documents 新列添加完成")
                 return
@@ -216,7 +219,8 @@ def _create_chunk_fingerprints_table(engine: Engine) -> None:
     """
     try:
         with engine.begin() as conn:
-            conn.execute(text("""
+            conn.execute(
+                text("""
                 CREATE TABLE IF NOT EXISTS rag_chunk_fingerprints (
                     id            TEXT PRIMARY KEY,
                     document_id   TEXT NOT NULL,
@@ -226,19 +230,26 @@ def _create_chunk_fingerprints_table(engine: Engine) -> None:
                     created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (document_id) REFERENCES rag_documents(id) ON DELETE CASCADE
                 )
-            """))
-            conn.execute(text(
-                "CREATE INDEX IF NOT EXISTS idx_chunk_fingerprint_hash "
-                "ON rag_chunk_fingerprints(content_hash)"
-            ))
-            conn.execute(text(
-                "CREATE INDEX IF NOT EXISTS idx_chunk_fingerprint_kb "
-                "ON rag_chunk_fingerprints(kb_id)"
-            ))
-            conn.execute(text(
-                "CREATE INDEX IF NOT EXISTS idx_chunk_fingerprint_doc "
-                "ON rag_chunk_fingerprints(document_id)"
-            ))
+            """)
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_chunk_fingerprint_hash "
+                    "ON rag_chunk_fingerprints(content_hash)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_chunk_fingerprint_kb "
+                    "ON rag_chunk_fingerprints(kb_id)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_chunk_fingerprint_doc "
+                    "ON rag_chunk_fingerprints(document_id)"
+                )
+            )
         logger.info("rag_chunk_fingerprints 表就绪")
     except Exception as exc:
         logger.warning("创建 rag_chunk_fingerprints 表失败: %s", exc)

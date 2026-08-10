@@ -11,7 +11,7 @@ import asyncio
 import logging
 import uuid
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from thumbelina.rag.common.orm_models import (
@@ -252,6 +252,17 @@ class DocumentRepository:
     async def list_by_kb(self, kb_id: str) -> list[DocumentRecord]:
         """列出指定知识库的所有文档。"""
         return await asyncio.to_thread(self._list_by_kb_sync, kb_id)
+
+    def _count_by_kb_sync(self, kb_id: str) -> int:
+        with self._get_session() as session:
+            stmt = select(func.count(DocumentRecord.id)).where(
+                DocumentRecord.knowledge_base_id == kb_id
+            )
+            return session.execute(stmt).scalar() or 0
+
+    async def count_by_kb(self, kb_id: str) -> int:
+        """统计指定知识库的文档数量。"""
+        return await asyncio.to_thread(self._count_by_kb_sync, kb_id)
 
     # ---- delete ----
 

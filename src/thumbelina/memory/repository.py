@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import delete, select, text
 from sqlalchemy.orm import Session, joinedload
 
 from thumbelina.memory.models import Conversation, Message
@@ -311,6 +311,38 @@ class ConversationRepository:
             True if the conversation was deleted, False if not found.
         """
         return await asyncio.to_thread(self._delete_conversation_sync, conversation_id)
+
+    def _clear_messages_sync(self, conversation_id: str) -> bool:
+        """Synchronous implementation of clear_messages."""
+        with self._get_session() as session:
+            conversation = session.get(Conversation, conversation_id)
+
+            if conversation is None:
+                return False
+
+            session.execute(
+                delete(Message).where(Message.conversation_id == conversation_id)
+            )
+            conversation.summary = None
+            session.commit()
+            return True
+
+    async def clear_messages(self, conversation_id: str) -> bool:
+        """Delete all messages of a conversation while keeping the conversation.
+
+        Also clears the cached summary so stale context is not reused.
+
+        Parameters
+        ----------
+        conversation_id:
+            ID of the conversation whose messages should be cleared.
+
+        Returns
+        -------
+        bool
+            True if messages were cleared, False if the conversation was not found.
+        """
+        return await asyncio.to_thread(self._clear_messages_sync, conversation_id)
 
     def _set_summary_sync(self, conversation_id: str, summary: str) -> bool:
         """Synchronous implementation of set_summary."""

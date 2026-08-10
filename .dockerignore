@@ -1,0 +1,46 @@
+# Version control / IDE / tooling
+.git/
+.github/
+.idea/
+.vscode/
+.claude/
+.codegraph/
+.reasonix/
+
+# Python caches and artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+uv.lock
+
+# Local data, databases and logs
+# (runtime state lives in the thumbelina-data volume, not in the image)
+*.db
+*.db.bak
+*.db-journal
+data/
+logs/
+*.log
+
+# Frontend deps and build output (npm ci / vite build run inside the image)
+frontend/node_modules/
+frontend/dist/
+
+# Local config with secrets (bind-mounted at runtime instead)
+thumbelina.yaml
+
+# Docs, tests and local scripts not needed in the image
+tests/
+docs/
+local_docs/
+local_plan/
+TODO/
+start.sh
+start_dev.py
+diagnose_wechat.py
+reset_wechat.py
