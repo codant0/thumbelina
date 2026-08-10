@@ -17,7 +17,7 @@ def mock_agent():
     agent.run = AsyncMock(return_value="Agent response")
 
     async def _stream(*args, **kwargs):
-        yield "Agent response"
+        yield {"type": "content", "text": "Agent response"}
 
     agent.stream = _stream
     agent.current_conversation_id = None
@@ -85,6 +85,13 @@ def mock_memory():
             return True
         return False
 
+    async def set_conversation_thinking(conv_id: str, enabled: bool, effort: str) -> bool:
+        if conv_id in conversations:
+            conversations[conv_id]["thinking_enabled"] = enabled
+            conversations[conv_id]["thinking_effort"] = effort
+            return True
+        return False
+
     async def clear_messages(conv_id: str) -> bool:
         if conv_id in conversations:
             messages.clear()
@@ -107,6 +114,7 @@ def mock_memory():
     memory.set_conversation_endpoint = AsyncMock(side_effect=set_conversation_endpoint)
     memory.set_conversation_model = AsyncMock(side_effect=set_conversation_model)
     memory.set_conversation_knowledge_base = AsyncMock(side_effect=set_conversation_knowledge_base)
+    memory.set_conversation_thinking = AsyncMock(side_effect=set_conversation_thinking)
 
     # Mock repository with ping method
     memory.repository = MagicMock()

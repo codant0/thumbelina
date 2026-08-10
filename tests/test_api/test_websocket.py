@@ -61,6 +61,26 @@ def test_websocket_json_response_structure(client):
         assert len(done) == 1
 
 
+def test_websocket_streams_reasoning_chunks(client):
+    """Reasoning events should be forwarded with chunk_type='reasoning'."""
+
+    async def _stream(*args, **kwargs):
+        yield {"type": "reasoning", "text": "Let me think..."}
+        yield {"type": "content", "text": "Final answer"}
+
+    client.app.state.agent.stream = _stream
+
+    with client.websocket_connect("/ws/chat") as ws:
+        ws.send_json({"message": "Hello"})
+        messages = _collect_ws_messages(ws)
+
+        reasoning = [m for m in messages if m.get("chunk_type") == "reasoning"]
+        content = [m for m in messages if "chunk" in m and m.get("chunk_type") != "reasoning"]
+        assert [m["chunk"] for m in reasoning] == ["Let me think..."]
+        assert [m["chunk"] for m in content] == ["Final answer"]
+        assert any(m.get("done") for m in messages)
+
+
 def test_websocket_wechat_conversation_forwards_only_reply(client):
     """When chatting in the WeChat conversation, only the agent's reply is
     forwarded to WeChat (iLink bot sends as the bot, so the user's web-side

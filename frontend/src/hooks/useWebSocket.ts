@@ -3,6 +3,7 @@ import type { Message } from '../types/chat'
 
 interface WsIncoming {
   chunk?: string
+  chunk_type?: 'reasoning' | string
   response?: string
   done?: boolean
   conversation_id?: string
@@ -39,6 +40,7 @@ export function useWebSocket(url: string, activeConversationId?: string) {
   const knownConversationsRef = useRef<Set<string>>(new Set())
   const activeConversationRef = useRef<string | undefined>(activeConversationId)
   const bufferRef = useRef('')
+  const reasoningBufferRef = useRef('')
   const displayedRef = useRef(0)
   const msgIdRef = useRef(0)
   const twMsgIdRef = useRef<string | null>(null)
@@ -210,7 +212,12 @@ export function useWebSocket(url: string, activeConversationId?: string) {
         }
         setIsStreaming(true)
         streamDoneRef.current = false
-        bufferRef.current += data.chunk
+        const isReasoning = data.chunk_type === 'reasoning'
+        if (isReasoning) {
+          reasoningBufferRef.current += data.chunk
+        } else {
+          bufferRef.current += data.chunk
+        }
 
         if (!twMsgIdRef.current) {
           const msgId = `stream-${msgIdRef.current}`
@@ -222,6 +229,7 @@ export function useWebSocket(url: string, activeConversationId?: string) {
               id: msgId,
               role: 'assistant',
               content: '',
+              thinking: isReasoning ? reasoningBufferRef.current : undefined,
               timestamp: new Date().toISOString(),
             },
           ])
@@ -246,6 +254,15 @@ export function useWebSocket(url: string, activeConversationId?: string) {
               return updated
             })
           }, TICK_INTERVAL)
+        } else if (isReasoning) {
+          const thinking = reasoningBufferRef.current
+          setMessages(prev => {
+            const idx = prev.findIndex(m => m.id === twMsgIdRef.current)
+            if (idx === -1) return prev
+            const updated = [...prev]
+            updated[idx] = { ...updated[idx], thinking }
+            return updated
+          })
         }
         return
       }
@@ -336,6 +353,7 @@ export function useWebSocket(url: string, activeConversationId?: string) {
         },
       ])
       bufferRef.current = ''
+      reasoningBufferRef.current = ''
       displayedRef.current = 0
       setWaitingForReply(true)
       startReplyTimer()
@@ -373,10 +391,11 @@ export function useWebSocket(url: string, activeConversationId?: string) {
       if (!res.ok) return
       const data = await res.json()
       if (Array.isArray(data.messages)) {
-        const history: Message[] = data.messages.map((m: { id: string; role: string; content: string; created_at: string }) => ({
+        const history: Message[] = data.messages.map((m: { id: string; role: string; content: string; reasoning_content?: string | null; created_at: string }) => ({
           id: m.id,
           role: m.role as Message['role'],
           content: m.content,
+          thinking: m.reasoning_content ?? undefined,
           timestamp: m.created_at,
         }))
         setMessages(history)
@@ -390,6 +409,7 @@ export function useWebSocket(url: string, activeConversationId?: string) {
     stopTypewriter()
     setMessages([])
     bufferRef.current = ''
+    reasoningBufferRef.current = ''
     displayedRef.current = 0
     msgIdRef.current = 0
     setWaitingForReply(false)

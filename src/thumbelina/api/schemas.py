@@ -28,6 +28,7 @@ class MessageSchema(BaseModel):
     conversation_id: str
     role: str
     content: str
+    reasoning_content: str | None = None
     created_at: str
 
 
@@ -40,6 +41,8 @@ class ConversationSchema(BaseModel):
     endpoint_id: str | None = None
     model: str | None = None
     knowledge_base_id: str | None = None
+    thinking_enabled: bool = False
+    thinking_effort: str = "medium"
     created_at: str
     updated_at: str
     summary: str | None = None
@@ -54,6 +57,8 @@ class ConversationDetailSchema(BaseModel):
     endpoint_id: str | None = None
     model: str | None = None
     knowledge_base_id: str | None = None
+    thinking_enabled: bool = False
+    thinking_effort: str = "medium"
     created_at: str
     updated_at: str
     summary: str | None = None

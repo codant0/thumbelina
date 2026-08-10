@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -51,6 +52,16 @@ class SetConversationKnowledgeBaseRequest(BaseModel):
     knowledge_base_id: str | None = Field(
         default=None,
         description="ID of the RAG knowledge base, or null to unbind",
+    )
+
+
+class SetConversationThinkingRequest(BaseModel):
+    """Request body for per-conversation thinking-mode settings."""
+
+    enabled: bool = Field(default=False, description="Whether thinking mode is enabled")
+    effort: Literal["low", "medium", "high"] = Field(
+        default="medium",
+        description="Thinking intensity level",
     )
 
 
@@ -117,6 +128,8 @@ async def get_conversation(
         endpoint_id=conversation.get("endpoint_id"),
         model=conversation.get("model"),
         knowledge_base_id=conversation.get("knowledge_base_id"),
+        thinking_enabled=conversation.get("thinking_enabled", False),
+        thinking_effort=conversation.get("thinking_effort", "medium"),
         created_at=conversation["created_at"],
         updated_at=conversation["updated_at"],
         summary=conversation.get("summary"),
@@ -200,6 +213,25 @@ async def set_conversation_knowledge_base(
     ``null`` to unbind the conversation from any knowledge base.
     """
     ok = await memory.set_conversation_knowledge_base(conversation_id, body.knowledge_base_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    conv = await memory.get_conversation(conversation_id)
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return ConversationSchema(**conv)
+
+
+@router.put(
+    "/conversations/{conversation_id}/thinking",
+    response_model=ConversationSchema,
+)
+async def set_conversation_thinking(
+    conversation_id: str,
+    body: SetConversationThinkingRequest,
+    memory: MemoryManager = Depends(get_memory_manager),
+) -> ConversationSchema:
+    """Set thinking-mode (on/off + intensity) for a conversation."""
+    ok = await memory.set_conversation_thinking(conversation_id, body.enabled, body.effort)
     if not ok:
         raise HTTPException(status_code=404, detail="Conversation not found")
     conv = await memory.get_conversation(conversation_id)

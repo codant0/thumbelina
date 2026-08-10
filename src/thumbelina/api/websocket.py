@@ -141,9 +141,19 @@ async def websocket_chat(websocket: WebSocket) -> None:
                 full_response = ""
                 if streaming:
                     try:
-                        async for chunk in agent.stream(parsed.message):
-                            full_response += chunk
-                            await websocket.send_json({"chunk": chunk, "conversation_id": cid})
+                        async for event in agent.stream(parsed.message):
+                            text = event["text"]
+                            if event["type"] == "reasoning":
+                                await websocket.send_json(
+                                    {
+                                        "chunk": text,
+                                        "chunk_type": "reasoning",
+                                        "conversation_id": cid,
+                                    }
+                                )
+                            else:
+                                full_response += text
+                                await websocket.send_json({"chunk": text, "conversation_id": cid})
                     except Exception:
                         # Fallback to non-streaming if streaming fails
                         full_response = await agent.run(parsed.message)

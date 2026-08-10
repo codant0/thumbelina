@@ -152,6 +152,15 @@ class Conversation(Base):
         default=None,
         comment="ID of the RAG knowledge base bound to this conversation",
     )
+    thinking_enabled: Mapped[bool] = mapped_column(
+        default=False,
+        comment="Whether thinking/reasoning mode is enabled for this conversation",
+    )
+    thinking_effort: Mapped[str] = mapped_column(
+        String(10),
+        default="medium",
+        comment="Thinking intensity: low, medium, or high",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         server_default=func.now(),
@@ -213,6 +222,12 @@ class Message(Base):
     )
     content: Mapped[str] = mapped_column(
         Text,
+    )
+    reasoning_content: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        default=None,
+        comment="Model thinking/reasoning content captured before the final answer",
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime,

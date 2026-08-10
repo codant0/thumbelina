@@ -46,4 +46,31 @@ describe('MessageList', () => {
     expect(screen.getByText('You')).toBeInTheDocument()
     expect(screen.getByText('Assistant')).toBeInTheDocument()
   })
+
+  it('should render assistant markdown (bold, lists, code)', () => {
+    const messages: Message[] = [
+      {
+        id: '1',
+        role: 'assistant',
+        content: '**bold** answer\n\n- item one\n- item two\n\n`inline code`',
+        timestamp: '2024-01-01T00:00:00Z',
+      },
+    ]
+    const { container } = render(<MessageList messages={messages} />)
+    const strong = container.querySelector('.md-body strong')
+    expect(strong?.textContent).toBe('bold')
+    const items = container.querySelectorAll('.md-body li')
+    expect(items).toHaveLength(2)
+    const code = container.querySelector('.md-body code')
+    expect(code?.textContent).toBe('inline code')
+  })
+
+  it('should keep user messages as plain text', () => {
+    const messages: Message[] = [
+      { id: '1', role: 'user', content: '**not rendered**', timestamp: '2024-01-01T00:00:00Z' },
+    ]
+    const { container } = render(<MessageList messages={messages} />)
+    expect(container.querySelector('.message.user .md-body')).toBeNull()
+    expect(screen.getByText('**not rendered**')).toBeInTheDocument()
+  })
 })

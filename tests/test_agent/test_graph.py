@@ -98,7 +98,7 @@ class TestThumbelinaAgent:
 
     @pytest.mark.asyncio
     async def test_agent_stream_yields_chunks(self):
-        """stream() should yield string chunks."""
+        """stream() should yield typed content events."""
         from thumbelina.agent.graph import ThumbelinaAgent
 
         mock_provider = _create_mock_provider()
@@ -111,8 +111,30 @@ class TestThumbelinaAgent:
 
         # Should have received at least one chunk
         assert len(chunks) >= 1
-        # The content should be the response
-        assert "".join(chunks) == "Hello World"
+        # All events are typed dicts; content events carry the response
+        assert all(c["type"] == "content" for c in chunks)
+        assert "".join(c["text"] for c in chunks) == "Hello World"
+
+    @pytest.mark.asyncio
+    async def test_agent_stream_yields_reasoning_events(self):
+        """stream() should surface reasoning_content as reasoning events."""
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        mock_provider = _create_mock_provider()
+        mock_provider.chat_model.ainvoke.return_value = AIMessage(
+            content="The answer is 4.",
+            additional_kwargs={"reasoning_content": "Let me think: 2+2..."},
+        )
+
+        agent = ThumbelinaAgent(llm_provider=mock_provider)
+        events = []
+        async for event in agent.stream("What is 2+2?"):
+            events.append(event)
+
+        reasoning = "".join(e["text"] for e in events if e["type"] == "reasoning")
+        content = "".join(e["text"] for e in events if e["type"] == "content")
+        assert reasoning == "Let me think: 2+2..."
+        assert content == "The answer is 4."
 
 
 class TestGraphStructure:
@@ -205,6 +227,7 @@ class TestAgentMemoryIntegration:
             conversation_id="test-conversation-id",
             role="user",
             content="Hi",
+            reasoning_content=None,
         )
 
     @pytest.mark.asyncio
@@ -228,6 +251,7 @@ class TestAgentMemoryIntegration:
             conversation_id="test-conversation-id",
             role="assistant",
             content="Hello!",
+            reasoning_content=None,
         )
 
     @pytest.mark.asyncio
@@ -287,6 +311,7 @@ class TestAgentMemoryIntegration:
             conversation_id="test-conversation-id",
             role="user",
             content="Hi",
+            reasoning_content=None,
         )
 
     @pytest.mark.asyncio
@@ -442,9 +467,7 @@ class TestToolBinding:
         bound_model.ainvoke.side_effect = [
             AIMessage(
                 content="",
-                tool_calls=[
-                    {"id": "call_1", "name": "read_file", "args": {"path": "a.txt"}}
-                ],
+                tool_calls=[{"id": "call_1", "name": "read_file", "args": {"path": "a.txt"}}],
             ),
             AIMessage(content="The file contains: file-content"),
         ]
@@ -468,9 +491,7 @@ class TestToolBinding:
         mock_provider = MagicMock()
         mock_provider.chat_model = MagicMock()
         mock_provider.chat_model.bind_tools.side_effect = NotImplementedError
-        mock_provider.chat_model.ainvoke = AsyncMock(
-            return_value=AIMessage(content="plain")
-        )
+        mock_provider.chat_model.ainvoke = AsyncMock(return_value=AIMessage(content="plain"))
 
         agent = ThumbelinaAgent(llm_provider=mock_provider, tools=[echo])
         result = await agent.run("hi")

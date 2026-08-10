@@ -22,6 +22,53 @@ from thumbelina.llm.base import (
 
 logger = logging.getLogger(__name__)
 
+_REASONING_CHAT_OPENAI_CLS: type | None = None
+
+
+def _get_reasoning_chat_openai_cls() -> type:
+    """Return a ChatOpenAI subclass that preserves reasoning deltas.
+
+    OpenAI-compatible endpoints (DeepSeek etc.) stream reasoning text in a
+    non-standard ``delta.reasoning_content`` field, which langchain-openai's
+    chunk conversion silently drops. This subclass copies it into
+    ``additional_kwargs["reasoning_content"]`` so the agent can surface the
+    thinking process.
+    """
+    global _REASONING_CHAT_OPENAI_CLS
+    if _REASONING_CHAT_OPENAI_CLS is None:
+        from langchain_core.messages import AIMessageChunk
+        from langchain_openai import ChatOpenAI
+
+        class ReasoningAwareChatOpenAI(ChatOpenAI):
+            def _convert_chunk_to_generation_chunk(
+                self,
+                chunk: dict,
+                default_chunk_class: type,
+                base_generation_info: dict | None,
+            ):
+                generation_chunk = super()._convert_chunk_to_generation_chunk(
+                    chunk, default_chunk_class, base_generation_info
+                )
+                if generation_chunk is not None and isinstance(
+                    generation_chunk.message, AIMessageChunk
+                ):
+                    try:
+                        choices = (
+                            chunk.get("choices") or chunk.get("chunk", {}).get("choices") or []
+                        )
+                        delta = (choices[0].get("delta") or {}) if choices else {}
+                        reasoning = delta.get("reasoning_content") or delta.get("reasoning")
+                        if reasoning:
+                            generation_chunk.message.additional_kwargs["reasoning_content"] = (
+                                reasoning
+                            )
+                    except Exception:  # noqa: BLE001
+                        logger.debug("Failed to extract reasoning_content", exc_info=True)
+                return generation_chunk
+
+        _REASONING_CHAT_OPENAI_CLS = ReasoningAwareChatOpenAI
+    return _REASONING_CHAT_OPENAI_CLS
+
 
 class OpenAIProvider(LLMProvider):
     """LLM provider that delegates to OpenAI models via LangChain.
@@ -61,10 +108,10 @@ class OpenAIProvider(LLMProvider):
     @property
     def chat_model(self) -> BaseChatModel:
         if self._chat_model is None:
-            from langchain_openai import ChatOpenAI
+            chat_openai_cls = _get_reasoning_chat_openai_cls()
 
             # 思考模式&思考强度
-            self._chat_model = ChatOpenAI(
+            self._chat_model = chat_openai_cls(
                 api_key=self._api_key or None,
                 model=self._model_name,
                 base_url=self._base_url,

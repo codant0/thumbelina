@@ -283,3 +283,52 @@ async def test_test_connection_network_failure():
     assert result.details is not None
     assert result.details.network.error is not None
     assert "Connection refused" in result.details.network.error
+
+
+def test_chat_model_preserves_reasoning_content_deltas():
+    """OpenAI-compatible reasoning deltas must survive chunk conversion."""
+    from langchain_core.messages import AIMessageChunk
+
+    provider = OpenAIProvider(api_key="test-key", model="deepseek-chat")
+    model = provider.chat_model
+
+    raw_chunk = {
+        "id": "cmpl-1",
+        "object": "chat.completion.chunk",
+        "choices": [
+            {
+                "index": 0,
+                "delta": {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_content": "Let me think step by step...",
+                },
+                "finish_reason": None,
+            }
+        ],
+    }
+    generation = model._convert_chunk_to_generation_chunk(raw_chunk, AIMessageChunk, None)
+    assert generation is not None
+    assert generation.message.additional_kwargs["reasoning_content"] == (
+        "Let me think step by step..."
+    )
+
+
+def test_chat_model_plain_chunks_unchanged():
+    """Regular content deltas should pass through untouched."""
+    from langchain_core.messages import AIMessageChunk
+
+    provider = OpenAIProvider(api_key="test-key", model="gpt-4o")
+    model = provider.chat_model
+
+    raw_chunk = {
+        "id": "cmpl-2",
+        "object": "chat.completion.chunk",
+        "choices": [
+            {"index": 0, "delta": {"role": "assistant", "content": "Hello"}, "finish_reason": None}
+        ],
+    }
+    generation = model._convert_chunk_to_generation_chunk(raw_chunk, AIMessageChunk, None)
+    assert generation is not None
+    assert generation.message.content == "Hello"
+    assert "reasoning_content" not in generation.message.additional_kwargs

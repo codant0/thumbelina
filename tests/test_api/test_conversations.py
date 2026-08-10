@@ -201,6 +201,52 @@ def test_set_knowledge_base_nonexistent_conversation(client):
     assert response.status_code == 404
 
 
+def test_set_thinking_nonexistent_conversation(client):
+    """PUT /conversations/{id}/thinking should 404 for unknown IDs."""
+    response = client.put(
+        "/api/v1/conversations/nonexistent-id/thinking",
+        json={"enabled": True, "effort": "low"},
+    )
+    assert response.status_code == 404
+
+
+def test_set_conversation_thinking(client, conversation_id):
+    """PUT /conversations/{id}/thinking should enable thinking with effort."""
+    response = client.put(
+        f"/api/v1/conversations/{conversation_id}/thinking",
+        json={"enabled": True, "effort": "high"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["thinking_enabled"] is True
+    assert data["thinking_effort"] == "high"
+
+
+def test_disable_conversation_thinking(client, conversation_id):
+    """PUT /conversations/{id}/thinking should disable thinking mode."""
+    client.put(
+        f"/api/v1/conversations/{conversation_id}/thinking",
+        json={"enabled": True, "effort": "high"},
+    )
+    response = client.put(
+        f"/api/v1/conversations/{conversation_id}/thinking",
+        json={"enabled": False, "effort": "medium"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["thinking_enabled"] is False
+    assert data["thinking_effort"] == "medium"
+
+
+def test_set_thinking_rejects_invalid_effort(client, conversation_id):
+    """PUT /conversations/{id}/thinking should reject unknown effort levels."""
+    response = client.put(
+        f"/api/v1/conversations/{conversation_id}/thinking",
+        json={"enabled": True, "effort": "extreme"},
+    )
+    assert response.status_code == 422
+
+
 def test_clear_conversation_messages(client, conversation_id):
     """DELETE /conversations/{id}/messages should empty the history."""
     detail = client.get(f"/api/v1/conversations/{conversation_id}").json()

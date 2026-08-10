@@ -14,6 +14,24 @@ from thumbelina.memory.manager import MemoryManager
 
 router = APIRouter(tags=["chat"])
 
+# Extended-thinking token budgets mapped from the UI intensity levels.
+_THINKING_BUDGETS = {"low": 2048, "medium": 8192, "high": 16384}
+
+
+def _thinking_kwargs(provider: str, enabled: bool, effort: str) -> dict[str, Any]:
+    """Build provider kwargs that enable thinking mode at the given intensity."""
+    if not enabled:
+        return {}
+    if provider == "openai":
+        return {"reasoning_effort": effort}
+    if provider == "anthropic":
+        budget = _THINKING_BUDGETS.get(effort, _THINKING_BUDGETS["medium"])
+        return {
+            "thinking": {"type": "enabled", "budget_tokens": budget},
+            "max_tokens": budget + 1024,
+        }
+    return {}
+
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(
@@ -47,6 +65,32 @@ async def chat(
     return ChatResponse(response=response_text, conversation_id=conversation_id)
 
 
+async def _apply_default_provider_thinking(
+    http_request: Any, agent: ThumbelinaAgent, effort: str
+) -> None:
+    """Rebuild the config-file default provider with thinking kwargs.
+
+    Used when thinking mode is enabled on a conversation but no endpoint
+    (per-conversation or globally active) is configured — otherwise the
+    shared default provider would be used without any thinking parameters.
+    """
+    config = getattr(http_request.app.state, "config", None)
+    if config is None:
+        agent.llm = None
+        return
+    kwargs: dict[str, Any] = {"model": config.llm.model}
+    if config.llm.api_key:
+        kwargs["api_key"] = config.llm.api_key
+    if config.llm.base_url:
+        kwargs["base_url"] = config.llm.base_url
+    kwargs.update(_thinking_kwargs(config.llm.provider, True, effort))
+    try:
+        provider = create_provider(config.llm.provider, **kwargs)
+        agent.llm = provider.chat_model
+    except Exception:
+        agent.llm = None
+
+
 async def _apply_conversation_endpoint(
     http_request: Any, agent: ThumbelinaAgent, conversation_id: str
 ) -> None:
@@ -65,6 +109,8 @@ async def _apply_conversation_endpoint(
         return
     if conv is None:
         return
+    thinking_enabled = bool(conv.get("thinking_enabled"))
+    effort = conv.get("thinking_effort") or "medium"
     endpoint_id = conv.get("endpoint_id")
     conv_model = conv.get("model")
     if not endpoint_id:
@@ -72,7 +118,10 @@ async def _apply_conversation_endpoint(
         # (endpoint, model) pair if one is set, else the shared default provider.
         active = await endpoint_manager.get_active_endpoint_model()
         if active is None or not active[0].api_key:
-            agent.llm = None
+            if thinking_enabled:
+                await _apply_default_provider_thinking(http_request, agent, effort)
+            else:
+                agent.llm = None
             return
         endpoint, active_model = active
         model = active_model
@@ -92,6 +141,7 @@ async def _apply_conversation_endpoint(
     }
     if endpoint.base_url:
         kwargs["base_url"] = endpoint.base_url
+    kwargs.update(_thinking_kwargs(endpoint.provider, thinking_enabled, effort))
     try:
         provider = create_provider(endpoint.provider, **kwargs)
         # Swap only the underlying chat model so the shared default

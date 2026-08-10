@@ -4,8 +4,9 @@ import { MessageList } from './MessageList'
 import { InputBox } from './InputBox'
 import { ConversationModelSelector } from './ConversationModelSelector'
 import { KnowledgeBaseSelector } from './KnowledgeBaseSelector'
+import { ThinkingSelector } from './ThinkingSelector'
 import { Mail, Eraser } from 'lucide-react'
-import type { Conversation } from '../../types/chat'
+import type { Conversation, ThinkingEffort } from '../../types/chat'
 import { useTranslation } from '../../i18n'
 import { clearConversationMessages } from '../../api/conversations'
 
@@ -16,9 +17,10 @@ interface ChatWindowProps {
   onDefaultConversation?: (id: string) => void
   onSetEndpoint?: (id: string, endpointId: string | null, model: string | null) => void
   onSetKnowledgeBase?: (id: string, knowledgeBaseId: string | null) => void
+  onSetThinking?: (id: string, enabled: boolean, effort: ThinkingEffort) => void
 }
 
-export function ChatWindow({ conversationId, conversations, onConversationCreated, onDefaultConversation, onSetEndpoint, onSetKnowledgeBase }: ChatWindowProps) {
+export function ChatWindow({ conversationId, conversations, onConversationCreated, onDefaultConversation, onSetEndpoint, onSetKnowledgeBase, onSetThinking }: ChatWindowProps) {
   const wsUrl = useMemo(() => {
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     return `${wsProtocol}//${window.location.host}/ws/chat`
@@ -159,18 +161,30 @@ export function ChatWindow({ conversationId, conversations, onConversationCreate
           <p className="empty-hint">{t('chat.startHint')}</p>
         </div>
       ) : (
-        <MessageList messages={messages} waitingForReply={waitingForReply} />
+        <MessageList messages={messages} waitingForReply={waitingForReply} isStreaming={isStreaming} />
       )}
       <InputBox
         onSend={handleSend}
         disabled={!isConnected || isStreaming}
         toolbar={
-          onSetKnowledgeBase && conversationId ? (
-            <KnowledgeBaseSelector
-              conversationId={conversationId}
-              selectedKnowledgeBaseId={activeConversation?.knowledge_base_id ?? null}
-              onChange={(kbId) => onSetKnowledgeBase(conversationId, kbId)}
-            />
+          conversationId ? (
+            <>
+              {onSetThinking && (
+                <ThinkingSelector
+                  conversationId={conversationId}
+                  enabled={activeConversation?.thinking_enabled ?? false}
+                  effort={activeConversation?.thinking_effort ?? 'medium'}
+                  onChange={(enabled, effort) => onSetThinking(conversationId, enabled, effort)}
+                />
+              )}
+              {onSetKnowledgeBase && (
+                <KnowledgeBaseSelector
+                  conversationId={conversationId}
+                  selectedKnowledgeBaseId={activeConversation?.knowledge_base_id ?? null}
+                  onChange={(kbId) => onSetKnowledgeBase(conversationId, kbId)}
+                />
+              )}
+            </>
           ) : undefined
         }
       />
