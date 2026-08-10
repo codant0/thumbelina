@@ -281,9 +281,7 @@ class MemoryManager:
         bool
             True if set successfully, False if conversation not found.
         """
-        return await self.repository.set_conversation_thinking(
-            conversation_id, enabled, effort
-        )
+        return await self.repository.set_conversation_thinking(conversation_id, enabled, effort)
 
     async def search(
         self,

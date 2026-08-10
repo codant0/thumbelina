@@ -75,9 +75,7 @@ def test_websocket_streams_reasoning_chunks(client):
         messages = _collect_ws_messages(ws)
 
         reasoning = [m for m in messages if m.get("chunk_type") == "reasoning"]
-        content = [
-            m for m in messages if "chunk" in m and m.get("chunk_type") != "reasoning"
-        ]
+        content = [m for m in messages if "chunk" in m and m.get("chunk_type") != "reasoning"]
         assert [m["chunk"] for m in reasoning] == ["Let me think..."]
         assert [m["chunk"] for m in content] == ["Final answer"]
         assert any(m.get("done") for m in messages)

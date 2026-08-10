@@ -54,22 +54,16 @@ def _get_reasoning_chat_openai_cls() -> type:
                 ):
                     try:
                         choices = (
-                            chunk.get("choices")
-                            or chunk.get("chunk", {}).get("choices")
-                            or []
+                            chunk.get("choices") or chunk.get("chunk", {}).get("choices") or []
                         )
                         delta = (choices[0].get("delta") or {}) if choices else {}
-                        reasoning = delta.get("reasoning_content") or delta.get(
-                            "reasoning"
-                        )
+                        reasoning = delta.get("reasoning_content") or delta.get("reasoning")
                         if reasoning:
-                            generation_chunk.message.additional_kwargs[
-                                "reasoning_content"
-                            ] = reasoning
+                            generation_chunk.message.additional_kwargs["reasoning_content"] = (
+                                reasoning
+                            )
                     except Exception:  # noqa: BLE001
-                        logger.debug(
-                            "Failed to extract reasoning_content", exc_info=True
-                        )
+                        logger.debug("Failed to extract reasoning_content", exc_info=True)
                 return generation_chunk
 
         _REASONING_CHAT_OPENAI_CLS = ReasoningAwareChatOpenAI

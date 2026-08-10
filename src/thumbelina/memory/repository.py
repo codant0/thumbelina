@@ -335,9 +335,7 @@ class ConversationRepository:
             if conversation is None:
                 return False
 
-            session.execute(
-                delete(Message).where(Message.conversation_id == conversation_id)
-            )
+            session.execute(delete(Message).where(Message.conversation_id == conversation_id))
             conversation.summary = None
             session.commit()
             return True
@@ -501,9 +499,7 @@ class ConversationRepository:
             self._set_knowledge_base_sync, conversation_id, knowledge_base_id
         )
 
-    def _set_thinking_sync(
-        self, conversation_id: str, enabled: bool, effort: str
-    ) -> bool:
+    def _set_thinking_sync(self, conversation_id: str, enabled: bool, effort: str) -> bool:
         """Synchronous implementation of set_conversation_thinking."""
         with self._get_session() as session:
             conversation = session.get(Conversation, conversation_id)
@@ -533,9 +529,7 @@ class ConversationRepository:
         bool
             True if set successfully, False if conversation not found.
         """
-        return await asyncio.to_thread(
-            self._set_thinking_sync, conversation_id, enabled, effort
-        )
+        return await asyncio.to_thread(self._set_thinking_sync, conversation_id, enabled, effort)
 
     def _search_messages_sync(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
         """Synchronous implementation of search_messages."""

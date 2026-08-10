@@ -108,9 +108,7 @@ async def test_apply_endpoint_default_provider_gets_thinking():
     request.app.state.config = config
 
     provider = MagicMock()
-    with patch(
-        "thumbelina.api.routes.chat.create_provider", return_value=provider
-    ) as mock_create:
+    with patch("thumbelina.api.routes.chat.create_provider", return_value=provider) as mock_create:
         await _apply_conversation_endpoint(request, agent, "c1")
 
     mock_create.assert_called_once_with(

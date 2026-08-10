@@ -16,13 +16,12 @@ interface ThinkingBlockProps {
 }
 
 function ThinkingBlock({ thinking, active }: ThinkingBlockProps) {
-  const [open, setOpen] = useState(active)
+  const [userOverride, setUserOverride] = useState<boolean | null>(null)
   const { t } = useTranslation()
 
-  // Auto-expand while the model is still thinking, auto-collapse when done.
-  useEffect(() => {
-    setOpen(active)
-  }, [active])
+  // Auto-expand while the model is still thinking, auto-collapse when done,
+  // unless the user explicitly toggled the block for this message.
+  const open = userOverride ?? active
 
   return (
     <div className={`msg-thinking${active ? ' is-active' : ''}`} data-testid="thinking-block">
@@ -30,7 +29,7 @@ function ThinkingBlock({ thinking, active }: ThinkingBlockProps) {
         type="button"
         className="msg-thinking__header"
         aria-expanded={open}
-        onClick={() => setOpen(o => !o)}
+        onClick={() => setUserOverride(!open)}
       >
         <Brain size={13} className="msg-thinking__icon" />
         <span className="msg-thinking__label">{t('chat.thinkingProcess')}</span>

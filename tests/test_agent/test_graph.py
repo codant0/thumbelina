@@ -467,9 +467,7 @@ class TestToolBinding:
         bound_model.ainvoke.side_effect = [
             AIMessage(
                 content="",
-                tool_calls=[
-                    {"id": "call_1", "name": "read_file", "args": {"path": "a.txt"}}
-                ],
+                tool_calls=[{"id": "call_1", "name": "read_file", "args": {"path": "a.txt"}}],
             ),
             AIMessage(content="The file contains: file-content"),
         ]
@@ -493,9 +491,7 @@ class TestToolBinding:
         mock_provider = MagicMock()
         mock_provider.chat_model = MagicMock()
         mock_provider.chat_model.bind_tools.side_effect = NotImplementedError
-        mock_provider.chat_model.ainvoke = AsyncMock(
-            return_value=AIMessage(content="plain")
-        )
+        mock_provider.chat_model.ainvoke = AsyncMock(return_value=AIMessage(content="plain"))
 
         agent = ThumbelinaAgent(llm_provider=mock_provider, tools=[echo])
         result = await agent.run("hi")
