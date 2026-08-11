@@ -33,12 +33,19 @@ export function useWebSocket(url: string, activeConversationId?: string) {
   const [isConnected, setIsConnected] = useState(false)
   const [isStreaming, setIsStreaming] = useState(false)
   const [streamingMode, setStreamingMode] = useState(true)
-  const [waitingForReply, setWaitingForReply] = useState(false)
   const [lastConversationId, setLastConversationId] = useState<string | null>(null)
   const [newConversationId, setNewConversationId] = useState<string | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const knownConversationsRef = useRef<Set<string>>(new Set())
   const activeConversationRef = useRef<string | undefined>(activeConversationId)
+  const lastConversationIdRef = useRef<string | null>(null)
+  // Conversation the in-flight request belongs to. `@pending` means a request
+  // was sent before the backend assigned a conversation id; `null` = no request
+  // in flight. The backend serializes replies per connection, so at most one
+  // session exists at a time, but it must not block other conversations' UI.
+  const sessionConvRef = useRef<string | null>(null)
+  const [streamingConvId, setStreamingConvId] = useState<string | null>(null)
+  const [waitingConvIds, setWaitingConvIds] = useState<string[]>([])
   const bufferRef = useRef('')
   const reasoningBufferRef = useRef('')
   const displayedRef = useRef(0)
@@ -53,29 +60,21 @@ export function useWebSocket(url: string, activeConversationId?: string) {
     activeConversationRef.current = activeConversationId
   }, [activeConversationId])
 
+  useEffect(() => {
+    lastConversationIdRef.current = lastConversationId
+  }, [lastConversationId])
+
+  const clearWaitingFor = useCallback((convId: string | null) => {
+    if (!convId) return
+    setWaitingConvIds(prev => (prev.includes(convId) ? prev.filter(id => id !== convId) : prev))
+  }, [])
+
   const clearReplyTimer = useCallback(() => {
     if (replyTimerRef.current) {
       clearTimeout(replyTimerRef.current)
       replyTimerRef.current = null
     }
   }, [])
-
-  const startReplyTimer = useCallback(() => {
-    clearReplyTimer()
-    replyTimerRef.current = setTimeout(() => {
-      replyTimerRef.current = null
-      setWaitingForReply(false)
-      setMessages(prev => [
-        ...prev,
-        {
-          id: String(msgIdRef.current++),
-          role: 'system',
-          content: 'Request timed out. The model may be unresponsive — please try again.',
-          timestamp: new Date().toISOString(),
-        },
-      ])
-    }, REPLY_TIMEOUT_MS)
-  }, [clearReplyTimer])
 
   const stopTypewriter = useCallback((finalId?: string) => {
     if (twTimerRef.current) clearInterval(twTimerRef.current)
@@ -96,7 +95,28 @@ export function useWebSocket(url: string, activeConversationId?: string) {
       })
     }
     setIsStreaming(false)
+    setStreamingConvId(null)
   }, [])
+
+  const startReplyTimer = useCallback(() => {
+    clearReplyTimer()
+    replyTimerRef.current = setTimeout(() => {
+      replyTimerRef.current = null
+      stopTypewriter()
+      sessionConvRef.current = null
+      setStreamingConvId(null)
+      setWaitingConvIds([])
+      setMessages(prev => [
+        ...prev,
+        {
+          id: String(msgIdRef.current++),
+          role: 'system',
+          content: 'Request timed out. The model may be unresponsive — please try again.',
+          timestamp: new Date().toISOString(),
+        },
+      ])
+    }, REPLY_TIMEOUT_MS)
+  }, [clearReplyTimer, stopTypewriter])
 
   useEffect(() => {
     const ws = new WebSocket(url)
@@ -117,23 +137,36 @@ export function useWebSocket(url: string, activeConversationId?: string) {
       clearReplyTimer()
 
       if (data.error) {
-        setWaitingForReply(false)
-        if (data.conversation_id) {
-          setLastConversationId(data.conversation_id)
-          if (!knownConversationsRef.current.has(data.conversation_id)) {
-            knownConversationsRef.current.add(data.conversation_id)
-            setNewConversationId(data.conversation_id)
+        const conv = data.conversation_id ?? null
+        if (conv) {
+          setLastConversationId(conv)
+          if (!knownConversationsRef.current.has(conv)) {
+            knownConversationsRef.current.add(conv)
+            setNewConversationId(conv)
           }
         }
-        setMessages(prev => [
-          ...prev,
-          {
-            id: String(msgIdRef.current++),
-            role: 'system',
-            content: `Error: ${data.error}`,
-            timestamp: new Date().toISOString(),
-          },
-        ])
+        if (sessionConvRef.current === '@pending' && conv) {
+          sessionConvRef.current = conv
+          setWaitingConvIds(prev => prev.map(id => (id === '@pending' ? conv : id)))
+        }
+        if (conv) clearWaitingFor(conv)
+        if (sessionConvRef.current === conv || sessionConvRef.current === '@pending') {
+          stopTypewriter()
+          sessionConvRef.current = null
+          setStreamingConvId(null)
+        }
+        // Only surface the error in the conversation it belongs to
+        if (!conv || conv === activeConversationRef.current) {
+          setMessages(prev => [
+            ...prev,
+            {
+              id: String(msgIdRef.current++),
+              role: 'system',
+              content: `Error: ${data.error}`,
+              timestamp: new Date().toISOString(),
+            },
+          ])
+        }
         return
       }
 
@@ -156,9 +189,17 @@ export function useWebSocket(url: string, activeConversationId?: string) {
 
       // Backend created a conversation lazily (first message, no prior conversation)
       if (data.conversation_created) {
-        knownConversationsRef.current.add(data.conversation_created)
-        setLastConversationId(data.conversation_created)
-        setNewConversationId(data.conversation_created)
+        const created = data.conversation_created
+        knownConversationsRef.current.add(created)
+        setLastConversationId(created)
+        setNewConversationId(created)
+        if (sessionConvRef.current === '@pending') {
+          sessionConvRef.current = created
+          // Chunks for this conversation may arrive before the prop
+          // round-trip selects it; treat it as active immediately.
+          activeConversationRef.current = created
+          setWaitingConvIds(prev => prev.map(id => (id === '@pending' ? created : id)))
+        }
         return
       }
 
@@ -202,15 +243,33 @@ export function useWebSocket(url: string, activeConversationId?: string) {
 
       // Streaming chunk — buffer + typewriter reveal
       if (data.chunk !== undefined) {
-        setWaitingForReply(false)
-        if (data.conversation_id) {
-          setLastConversationId(data.conversation_id)
-          if (!knownConversationsRef.current.has(data.conversation_id)) {
-            knownConversationsRef.current.add(data.conversation_id)
-            setNewConversationId(data.conversation_id)
+        const conv = data.conversation_id ?? null
+        if (conv) {
+          clearWaitingFor(conv)
+          setLastConversationId(conv)
+          if (!knownConversationsRef.current.has(conv)) {
+            knownConversationsRef.current.add(conv)
+            setNewConversationId(conv)
           }
         }
+
+        const session = sessionConvRef.current
+        // Session handoff: the previous conversation's typewriter may still
+        // be draining when the next reply starts — finalize it immediately
+        // so this conversation's stream starts with clean buffers.
+        if (twMsgIdRef.current && conv && session !== conv) {
+          stopTypewriter(String(msgIdRef.current++))
+        }
+        if (conv && session !== conv) {
+          sessionConvRef.current = conv
+          if (session === '@pending') {
+            activeConversationRef.current = conv
+            setWaitingConvIds(prev => prev.map(id => (id === '@pending' ? conv : id)))
+          }
+        }
+
         setIsStreaming(true)
+        if (conv) setStreamingConvId(conv)
         streamDoneRef.current = false
         const isReasoning = data.chunk_type === 'reasoning'
         if (isReasoning) {
@@ -219,20 +278,26 @@ export function useWebSocket(url: string, activeConversationId?: string) {
           bufferRef.current += data.chunk
         }
 
+        // Render into the message list only while this conversation is on
+        // screen; otherwise the persisted history is shown when it reopens.
+        const isActiveView = !conv || conv === activeConversationRef.current
+
         if (!twMsgIdRef.current) {
           const msgId = `stream-${msgIdRef.current}`
           twMsgIdRef.current = msgId
           displayedRef.current = 0
-          setMessages(prev => [
-            ...prev,
-            {
-              id: msgId,
-              role: 'assistant',
-              content: '',
-              thinking: isReasoning ? reasoningBufferRef.current : undefined,
-              timestamp: new Date().toISOString(),
-            },
-          ])
+          if (isActiveView) {
+            setMessages(prev => [
+              ...prev,
+              {
+                id: msgId,
+                role: 'assistant',
+                content: '',
+                thinking: isReasoning ? reasoningBufferRef.current : undefined,
+                timestamp: new Date().toISOString(),
+              },
+            ])
+          }
 
           // Start typewriter interval
           twTimerRef.current = setInterval(() => {
@@ -248,7 +313,22 @@ export function useWebSocket(url: string, activeConversationId?: string) {
             const displayed = bufferRef.current.slice(0, displayedRef.current)
             setMessages(prev => {
               const idx = prev.findIndex(m => m.id === twMsgIdRef.current)
-              if (idx === -1) return prev
+              if (idx === -1) {
+                // The view switched away and back mid-stream — recreate the
+                // streaming message if this conversation is on screen again.
+                const owner = sessionConvRef.current
+                if (!owner || owner !== activeConversationRef.current) return prev
+                return [
+                  ...prev,
+                  {
+                    id: twMsgIdRef.current!,
+                    role: 'assistant',
+                    content: displayed,
+                    thinking: reasoningBufferRef.current || undefined,
+                    timestamp: new Date().toISOString(),
+                  },
+                ]
+              }
               const updated = [...prev]
               updated[idx] = { ...updated[idx], content: displayed }
               return updated
@@ -269,20 +349,26 @@ export function useWebSocket(url: string, activeConversationId?: string) {
 
       // Stream done
       if (data.done) {
-        if (data.conversation_id) {
-          setLastConversationId(data.conversation_id)
-          if (!knownConversationsRef.current.has(data.conversation_id)) {
-            knownConversationsRef.current.add(data.conversation_id)
-            setNewConversationId(data.conversation_id)
+        const conv = data.conversation_id ?? null
+        if (conv) {
+          setLastConversationId(conv)
+          if (!knownConversationsRef.current.has(conv)) {
+            knownConversationsRef.current.add(conv)
+            setNewConversationId(conv)
           }
+          clearWaitingFor(conv)
         }
+        sessionConvRef.current = null
         if (twTimerRef.current) {
-          // Typewriter running — mark done, it will finalize when caught up
+          // Typewriter running — mark done, it will finalize when caught up.
+          // Keep streamingConvId so the streaming conversation (and only it)
+          // stays locked until the typewriter drains.
           streamDoneRef.current = true
           return
         }
         // No typewriter — finalize immediately
         setIsStreaming(false)
+        setStreamingConvId(null)
         bufferRef.current = ''
         displayedRef.current = 0
         setMessages(prev => {
@@ -297,23 +383,30 @@ export function useWebSocket(url: string, activeConversationId?: string) {
 
       // Non-streaming full response — display immediately
       if (data.response !== undefined) {
-        setWaitingForReply(false)
-        if (data.conversation_id) {
-          setLastConversationId(data.conversation_id)
-          if (!knownConversationsRef.current.has(data.conversation_id)) {
-            knownConversationsRef.current.add(data.conversation_id)
-            setNewConversationId(data.conversation_id)
+        const conv = data.conversation_id ?? null
+        if (conv) {
+          setLastConversationId(conv)
+          if (!knownConversationsRef.current.has(conv)) {
+            knownConversationsRef.current.add(conv)
+            setNewConversationId(conv)
           }
+          clearWaitingFor(conv)
         }
-        setMessages(prev => [
-          ...prev,
-          {
-            id: String(msgIdRef.current++),
-            role: 'assistant',
-            content: data.response!,
-            timestamp: new Date().toISOString(),
-          },
-        ])
+        sessionConvRef.current = null
+        setStreamingConvId(null)
+        // Only render in the conversation it belongs to; other views load
+        // the persisted history when opened.
+        if (!conv || conv === activeConversationRef.current) {
+          setMessages(prev => [
+            ...prev,
+            {
+              id: String(msgIdRef.current++),
+              role: 'assistant',
+              content: data.response!,
+              timestamp: new Date().toISOString(),
+            },
+          ])
+        }
       }
     }
 
@@ -321,14 +414,18 @@ export function useWebSocket(url: string, activeConversationId?: string) {
       setIsConnected(false)
       setIsStreaming(false)
       clearReplyTimer()
-      setWaitingForReply(false)
+      sessionConvRef.current = null
+      setStreamingConvId(null)
+      setWaitingConvIds([])
     }
 
     ws.onerror = () => {
       setIsConnected(false)
       setIsStreaming(false)
       clearReplyTimer()
-      setWaitingForReply(false)
+      sessionConvRef.current = null
+      setStreamingConvId(null)
+      setWaitingConvIds([])
     }
 
     return () => {
@@ -340,7 +437,17 @@ export function useWebSocket(url: string, activeConversationId?: string) {
   }, [url])
 
   const sendMessage = useCallback((message: string, conversationId?: string) => {
-    stopTypewriter()
+    const targetConv = conversationId ?? lastConversationIdRef.current ?? '@pending'
+    const inFlight = sessionConvRef.current !== null
+    // Only reset stream buffers when no other conversation's reply is in
+    // flight — the backend serializes replies, so this send simply queues.
+    if (!inFlight) {
+      stopTypewriter()
+      bufferRef.current = ''
+      reasoningBufferRef.current = ''
+      displayedRef.current = 0
+      sessionConvRef.current = targetConv
+    }
 
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       setMessages(prev => [
@@ -352,10 +459,7 @@ export function useWebSocket(url: string, activeConversationId?: string) {
           timestamp: new Date().toISOString(),
         },
       ])
-      bufferRef.current = ''
-      reasoningBufferRef.current = ''
-      displayedRef.current = 0
-      setWaitingForReply(true)
+      setWaitingConvIds(prev => (prev.includes(targetConv) ? prev : [...prev, targetConv]))
       startReplyTimer()
       const payload: Record<string, string> = { message }
       if (conversationId) {
@@ -365,7 +469,10 @@ export function useWebSocket(url: string, activeConversationId?: string) {
         wsRef.current.send(JSON.stringify(payload))
       } catch {
         clearReplyTimer()
-        setWaitingForReply(false)
+        setWaitingConvIds(prev => prev.filter(id => id !== targetConv))
+        if (sessionConvRef.current === targetConv) {
+          sessionConvRef.current = null
+        }
         setMessages(prev => [
           ...prev,
           {
@@ -412,12 +519,20 @@ export function useWebSocket(url: string, activeConversationId?: string) {
     reasoningBufferRef.current = ''
     displayedRef.current = 0
     msgIdRef.current = 0
-    setWaitingForReply(false)
   }, [stopTypewriter])
 
   const clearNewConversation = useCallback(() => {
     setNewConversationId(null)
   }, [])
 
-  return { messages, isConnected, isStreaming, streamingMode, waitingForReply, lastConversationId, newConversationId, clearNewConversation, sendMessage, clearMessages, switchConversation, loadHistory }
+  // Expose streaming/waiting state relative to the active conversation so a
+  // busy conversation does not lock the others. A null streamingConvId means
+  // the reply did not report a conversation — treat it as the active one.
+  const isStreamingActive =
+    isStreaming && (streamingConvId === null || streamingConvId === activeConversationId)
+  const waitingForReply =
+    (activeConversationId && waitingConvIds.includes(activeConversationId)) ||
+    (!activeConversationId && waitingConvIds.includes('@pending')) || false
+
+  return { messages, isConnected, isStreaming: isStreamingActive, streamingMode, waitingForReply, lastConversationId, newConversationId, clearNewConversation, sendMessage, clearMessages, switchConversation, loadHistory }
 }

@@ -17,11 +17,21 @@ interface ThinkingBlockProps {
 
 function ThinkingBlock({ thinking, active }: ThinkingBlockProps) {
   const [userOverride, setUserOverride] = useState<boolean | null>(null)
+  const bodyRef = useRef<HTMLDivElement>(null)
   const { t } = useTranslation()
 
   // Auto-expand while the model is still thinking, auto-collapse when done,
   // unless the user explicitly toggled the block for this message.
   const open = userOverride ?? active
+
+  // The body has its own scroll area (max-height in CSS). Follow the
+  // newest thinking content unless the user has scrolled up to read.
+  useEffect(() => {
+    const el = bodyRef.current
+    if (!el) return
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24
+    if (nearBottom) el.scrollTop = el.scrollHeight
+  }, [thinking, open])
 
   return (
     <div className={`msg-thinking${active ? ' is-active' : ''}`} data-testid="thinking-block">
@@ -37,7 +47,7 @@ function ThinkingBlock({ thinking, active }: ThinkingBlockProps) {
         <ChevronDown size={13} className={`msg-thinking__caret${open ? ' is-open' : ''}`} />
       </button>
       {open && (
-        <div className="msg-thinking__body" data-testid="thinking-body">
+        <div className="msg-thinking__body" data-testid="thinking-body" ref={bodyRef}>
           <MarkdownContent content={thinking} />
         </div>
       )}
@@ -47,11 +57,35 @@ function ThinkingBlock({ thinking, active }: ThinkingBlockProps) {
 
 export function MessageList({ messages, waitingForReply, isStreaming }: MessageListProps) {
   const listRef = useRef<HTMLDivElement>(null)
+  // Whether to keep following new content. False once the user scrolls up to read.
+  const stickToBottomRef = useRef(true)
+  const firstMsgIdRef = useRef<string | undefined>(undefined)
   const { t } = useTranslation()
+
+  const handleScroll = () => {
+    const el = listRef.current
+    if (!el) return
+    // Consider "at bottom" within a small threshold to tolerate rounding.
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    stickToBottomRef.current = distanceFromBottom < 40
+  }
 
   useEffect(() => {
     const el = listRef.current
-    if (el) {
+    if (!el) return
+    // The list was replaced entirely (conversation switch / history reload) —
+    // resume following and jump to the latest message.
+    const firstId = messages[0]?.id
+    if (firstId !== firstMsgIdRef.current) {
+      firstMsgIdRef.current = firstId
+      stickToBottomRef.current = true
+    }
+    // Always jump to the bottom when the newest message is one the user just sent.
+    const last = messages[messages.length - 1]
+    if (last?.role === 'user') {
+      stickToBottomRef.current = true
+    }
+    if (stickToBottomRef.current) {
       el.scrollTop = el.scrollHeight
     }
   }, [messages, waitingForReply])
@@ -61,7 +95,12 @@ export function MessageList({ messages, waitingForReply, isStreaming }: MessageL
     : undefined
 
   return (
-    <div className="message-list" data-testid="message-list" ref={listRef}>
+    <div
+      className="message-list"
+      data-testid="message-list"
+      ref={listRef}
+      onScroll={handleScroll}
+    >
       {messages.map(msg => (
         <div key={msg.id} data-testid="message-item" className={`message ${msg.role}`}>
           <span className="msg-role">
