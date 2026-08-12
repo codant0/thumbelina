@@ -160,9 +160,7 @@ async def test_apply_conversation_role_overrides_agent_role():
     agent.role = "assistant"
     agent.role_prompt = get_role_prompt("assistant")
     agent.memory_manager = MagicMock()
-    agent.memory_manager.get_conversation = AsyncMock(
-        return_value={"id": "c1", "role": "coder"}
-    )
+    agent.memory_manager.get_conversation = AsyncMock(return_value={"id": "c1", "role": "coder"})
 
     await _apply_conversation_role(agent, "c1")
 
@@ -182,9 +180,7 @@ async def test_apply_conversation_role_unknown_role_keeps_default():
     agent.role = "assistant"
     agent.role_prompt = get_role_prompt("assistant")
     agent.memory_manager = MagicMock()
-    agent.memory_manager.get_conversation = AsyncMock(
-        return_value={"id": "c1", "role": "ghost"}
-    )
+    agent.memory_manager.get_conversation = AsyncMock(return_value={"id": "c1", "role": "ghost"})
 
     await _apply_conversation_role(agent, "c1")
 

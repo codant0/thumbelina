@@ -182,9 +182,7 @@ class TestBootWithoutLLMAndAuth:
             with TestClient(app) as client:
                 assert client.get("/api/v1/config").status_code == 200
 
-    def test_unauthenticated_request_rejected_when_auth_enabled(
-        self, mock_agent, mock_memory
-    ):
+    def test_unauthenticated_request_rejected_when_auth_enabled(self, mock_agent, mock_memory):
         """With a valid secret, non-whitelisted routes require a Bearer token."""
         from thumbelina.api.app import create_app
         from thumbelina.config.models import AuthConfig
