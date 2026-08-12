@@ -76,7 +76,7 @@ export function ChatWindow({ conversationId, conversations, onConversationCreate
     setClearing(true)
     try {
       await clearConversationMessages(conversationId)
-      clearMessages()
+      clearMessages(conversationId)
     } catch {
       // keep messages on failure
     } finally {

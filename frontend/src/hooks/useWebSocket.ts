@@ -54,6 +54,14 @@ export function useWebSocket(url: string, activeConversationId?: string) {
   const twTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const streamDoneRef = useRef(false)
   const replyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Conversation the current stream buffer belongs to. Used to decide whether
+  // clearing a conversation's context should also drop the preserved buffer.
+  const streamConvRef = useRef<string | null>(null)
+  // Snapshot of a reply that just finished, so a history fetch that races the
+  // DB write can still reconcile the response when the user returns to view.
+  const completedContentRef = useRef<{ convId: string; content: string; reasoning: string } | null>(null)
+  // Monotonic sequence guarding loadHistory against out-of-order responses.
+  const historyFetchRef = useRef(0)
 
   // Keep the active conversation ref in sync with the prop
   useEffect(() => {
@@ -97,6 +105,44 @@ export function useWebSocket(url: string, activeConversationId?: string) {
     setIsStreaming(false)
     setStreamingConvId(null)
   }, [])
+
+  const startTypewriter = useCallback(() => {
+    if (twTimerRef.current) clearInterval(twTimerRef.current)
+    twTimerRef.current = setInterval(() => {
+      const total = bufferRef.current.length
+      if (displayedRef.current >= total) {
+        if (streamDoneRef.current) {
+          stopTypewriter(String(msgIdRef.current++))
+        }
+        return
+      }
+      // Reveal characters
+      displayedRef.current = Math.min(displayedRef.current + CHARS_PER_TICK, total)
+      const displayed = bufferRef.current.slice(0, displayedRef.current)
+      setMessages(prev => {
+        const idx = prev.findIndex(m => m.id === twMsgIdRef.current)
+        if (idx === -1) {
+          // The view switched away and back mid-stream — recreate the
+          // streaming message if this conversation is on screen again.
+          const owner = sessionConvRef.current
+          if (!owner || owner !== activeConversationRef.current) return prev
+          return [
+            ...prev,
+            {
+              id: twMsgIdRef.current!,
+              role: 'assistant',
+              content: displayed,
+              thinking: reasoningBufferRef.current || undefined,
+              timestamp: new Date().toISOString(),
+            },
+          ]
+        }
+        const updated = [...prev]
+        updated[idx] = { ...updated[idx], content: displayed }
+        return updated
+      })
+    }, TICK_INTERVAL)
+  }, [stopTypewriter])
 
   const startReplyTimer = useCallback(() => {
     clearReplyTimer()
@@ -262,11 +308,14 @@ export function useWebSocket(url: string, activeConversationId?: string) {
         }
         if (conv && session !== conv) {
           sessionConvRef.current = conv
+          completedContentRef.current = null
           if (session === '@pending') {
             activeConversationRef.current = conv
             setWaitingConvIds(prev => prev.map(id => (id === '@pending' ? conv : id)))
           }
         }
+
+        if (conv) streamConvRef.current = conv
 
         setIsStreaming(true)
         if (conv) setStreamingConvId(conv)
@@ -299,41 +348,7 @@ export function useWebSocket(url: string, activeConversationId?: string) {
             ])
           }
 
-          // Start typewriter interval
-          twTimerRef.current = setInterval(() => {
-            const total = bufferRef.current.length
-            if (displayedRef.current >= total) {
-              if (streamDoneRef.current) {
-                stopTypewriter(String(msgIdRef.current++))
-              }
-              return
-            }
-            // Reveal characters
-            displayedRef.current = Math.min(displayedRef.current + CHARS_PER_TICK, total)
-            const displayed = bufferRef.current.slice(0, displayedRef.current)
-            setMessages(prev => {
-              const idx = prev.findIndex(m => m.id === twMsgIdRef.current)
-              if (idx === -1) {
-                // The view switched away and back mid-stream — recreate the
-                // streaming message if this conversation is on screen again.
-                const owner = sessionConvRef.current
-                if (!owner || owner !== activeConversationRef.current) return prev
-                return [
-                  ...prev,
-                  {
-                    id: twMsgIdRef.current!,
-                    role: 'assistant',
-                    content: displayed,
-                    thinking: reasoningBufferRef.current || undefined,
-                    timestamp: new Date().toISOString(),
-                  },
-                ]
-              }
-              const updated = [...prev]
-              updated[idx] = { ...updated[idx], content: displayed }
-              return updated
-            })
-          }, TICK_INTERVAL)
+          startTypewriter()
         } else if (isReasoning) {
           const thinking = reasoningBufferRef.current
           setMessages(prev => {
@@ -357,6 +372,16 @@ export function useWebSocket(url: string, activeConversationId?: string) {
             setNewConversationId(conv)
           }
           clearWaitingFor(conv)
+          // Snapshot the finished reply so a history fetch racing the DB
+          // write can still reconcile the response on the next view.
+          if (bufferRef.current) {
+            completedContentRef.current = {
+              convId: conv,
+              content: bufferRef.current,
+              reasoning: reasoningBufferRef.current,
+            }
+          }
+          streamConvRef.current = conv
         }
         sessionConvRef.current = null
         if (twTimerRef.current) {
@@ -391,6 +416,7 @@ export function useWebSocket(url: string, activeConversationId?: string) {
             setNewConversationId(conv)
           }
           clearWaitingFor(conv)
+          streamConvRef.current = conv
         }
         sessionConvRef.current = null
         setStreamingConvId(null)
@@ -446,6 +472,8 @@ export function useWebSocket(url: string, activeConversationId?: string) {
       bufferRef.current = ''
       reasoningBufferRef.current = ''
       displayedRef.current = 0
+      completedContentRef.current = null
+      streamConvRef.current = targetConv
       sessionConvRef.current = targetConv
     }
 
@@ -493,32 +521,83 @@ export function useWebSocket(url: string, activeConversationId?: string) {
   }, [])
 
   const loadHistory = useCallback(async (conversationId: string) => {
+    const fetchId = ++historyFetchRef.current
     try {
       const res = await fetch(`/api/v1/conversations/${conversationId}`)
       if (!res.ok) return
       const data = await res.json()
-      if (Array.isArray(data.messages)) {
-        const history: Message[] = data.messages.map((m: { id: string; role: string; content: string; reasoning_content?: string | null; created_at: string }) => ({
-          id: m.id,
-          role: m.role as Message['role'],
-          content: m.content,
-          thinking: m.reasoning_content ?? undefined,
-          timestamp: m.created_at,
-        }))
-        setMessages(history)
+      if (!Array.isArray(data.messages)) return
+      // A slower response for a previously-opened conversation must not
+      // overwrite the view of the conversation the user is on now.
+      if (fetchId !== historyFetchRef.current) return
+      const history: Message[] = data.messages.map((m: { id: string; role: string; content: string; reasoning_content?: string | null; created_at: string }) => ({
+        id: m.id,
+        role: m.role as Message['role'],
+        content: m.content,
+        thinking: m.reasoning_content ?? undefined,
+        timestamp: m.created_at,
+      }))
+
+      let list: Message[] = history
+      // A reply that is still streaming is not persisted until done, so the
+      // DB history only contains the user message. Carry the preserved buffer
+      // forward so switching away and back does not truncate the response.
+      if (sessionConvRef.current === conversationId) {
+        const msgId = `stream-${msgIdRef.current++}`
+        twMsgIdRef.current = msgId
+        displayedRef.current = bufferRef.current.length
+        setIsStreaming(true)
+        setStreamingConvId(conversationId)
+        list = [
+          ...history,
+          {
+            id: msgId,
+            role: 'assistant',
+            content: bufferRef.current,
+            thinking: reasoningBufferRef.current || undefined,
+            timestamp: new Date().toISOString(),
+          },
+        ]
+        startTypewriter()
+      } else if (completedContentRef.current?.convId === conversationId) {
+        // The reply finished but the DB write may have raced this fetch.
+        const completed = completedContentRef.current
+        completedContentRef.current = null
+        if (
+          completed.content &&
+          !history.some(m => m.role === 'assistant' && m.content === completed.content)
+        ) {
+          list = [
+            ...history,
+            {
+              id: String(msgIdRef.current++),
+              role: 'assistant',
+              content: completed.content,
+              thinking: completed.reasoning || undefined,
+              timestamp: new Date().toISOString(),
+            },
+          ]
+        }
       }
+      setMessages(list)
     } catch {
       // ignore
     }
-  }, [])
+  }, [startTypewriter])
 
-  const clearMessages = useCallback(() => {
+  const clearMessages = useCallback((conversationId?: string) => {
     stopTypewriter()
     setMessages([])
-    bufferRef.current = ''
-    reasoningBufferRef.current = ''
-    displayedRef.current = 0
     msgIdRef.current = 0
+    // Preserve an in-flight reply's buffer across a conversation switch so
+    // returning to it mid-stream does not truncate the response. Only an
+    // explicit clear of the conversation that owns the buffer drops it.
+    if (conversationId && streamConvRef.current === conversationId) {
+      bufferRef.current = ''
+      reasoningBufferRef.current = ''
+      displayedRef.current = 0
+      completedContentRef.current = null
+    }
   }, [stopTypewriter])
 
   const clearNewConversation = useCallback(() => {
