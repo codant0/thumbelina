@@ -201,3 +201,33 @@ class TestLoadConfig:
         cfg = load_config()
         assert cfg.llm.provider == "ollama"
         assert cfg.llm.model == "llama3"
+
+
+class TestExampleConfigFile:
+    """The shipped example config must not require llm/auth at startup."""
+
+    @staticmethod
+    def _example_path():
+        from pathlib import Path
+
+        # tests/test_config/test_loader.py -> repo root
+        return Path(__file__).resolve().parents[2] / "thumbelina.yaml.example"
+
+    def test_example_has_no_llm_or_auth_sections(self):
+        data = yaml.safe_load(self._example_path().read_text(encoding="utf-8"))
+        assert isinstance(data, dict)
+        assert "llm" not in data
+        assert "auth" not in data
+
+    def test_load_example_yields_empty_llm_and_auth(self):
+        from thumbelina.config.loader import load_config
+
+        with patch.dict(os.environ, {}, clear=True):
+            cfg = load_config(str(self._example_path()))
+
+        # llm/auth fall back to code defaults — no boot-time requirement
+        assert cfg.llm.api_key == ""
+        assert cfg.auth.secret_key == ""
+        # role default stays in the code model
+        assert cfg.llm.role == "assistant"
+        assert cfg.memory.database_url == "sqlite:///thumbelina.db"

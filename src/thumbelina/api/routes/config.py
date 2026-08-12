@@ -78,6 +78,7 @@ class ConfigUpdateRequest(BaseModel):
     """Request body for POST /config (hot-reloadable fields only)."""
 
     llm: dict[str, str | bool | None] = Field(default_factory=dict)
+    auth: dict[str, list[str]] = Field(default_factory=dict)
     rate_limit: dict[str, bool] = Field(default_factory=dict)
 
 
@@ -171,9 +172,11 @@ async def update_config(
 ) -> dict[str, str]:
     """Apply runtime configuration changes.
 
-    Only ``streaming_enabled`` and ``rate_limit.enabled`` can be changed
-    at runtime via this endpoint.  Use ``PUT /config/llm`` or
-    ``PUT /config/channels/{name}`` for full hot-swap.
+    Only ``streaming_enabled``, ``auth.required_roles`` and
+    ``rate_limit.enabled`` can be changed at runtime via this endpoint.
+    Use ``PUT /config/llm`` or ``PUT /config/channels/{name}`` for full
+    hot-swap.  ``auth.secret_key`` is not supported here — secrets are
+    never stored in the config database.
     """
     config = request.app.state.config
     manager = request.app.state.runtime_config_manager
@@ -183,6 +186,15 @@ async def update_config(
         if hasattr(manager, "_persist_to_db"):
             await manager._persist_to_db(
                 "llm", "llm.streaming_enabled", config.llm.streaming_enabled
+            )
+
+    if "required_roles" in body.auth:
+        # In-place update so the running auth middleware (which captured
+        # the same list object) picks up the change without a restart.
+        config.auth.required_roles[:] = body.auth["required_roles"]
+        if hasattr(manager, "_persist_to_db"):
+            await manager._persist_to_db(
+                "auth", "auth.required_roles", list(config.auth.required_roles)
             )
 
     if "enabled" in body.rate_limit:

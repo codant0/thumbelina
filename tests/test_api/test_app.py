@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from thumbelina.config.models import AppConfig, LLMConfig, MemoryConfig
 
@@ -95,3 +98,109 @@ def test_app_includes_conversations_router(test_config):
     paths = _collect_paths(app)
     assert "/api/v1/conversations" in paths
     assert "/api/v1/conversations/{conversation_id}" in paths
+
+
+class TestBootWithoutLLMAndAuth:
+    """llm/auth configuration must not be required at startup."""
+
+    @staticmethod
+    def _middleware_classes(app: FastAPI) -> list[type]:
+        return [m.cls for m in app.user_middleware]
+
+    def test_create_app_with_minimal_config(self):
+        """App starts with default config: no api_key, no auth secret."""
+        from thumbelina.api.app import create_app
+
+        config = AppConfig(memory=MemoryConfig(database_url="sqlite:///:memory:"))
+        assert config.llm.api_key == ""
+        assert config.auth.secret_key == ""
+
+        app = create_app(config)
+        assert isinstance(app, FastAPI)
+
+    def test_no_auth_middleware_when_secret_empty(self):
+        """Empty secret_key disables the auth middleware."""
+        from thumbelina.api.app import _AuthMiddleware, create_app
+
+        config = AppConfig(memory=MemoryConfig(database_url="sqlite:///:memory:"))
+        app = create_app(config)
+        assert _AuthMiddleware not in self._middleware_classes(app)
+
+    def test_short_secret_key_degrades_gracefully(self):
+        """A too-short secret_key disables auth instead of crashing startup."""
+        from thumbelina.api.app import _AuthMiddleware, create_app
+        from thumbelina.config.models import AuthConfig
+
+        config = AppConfig(
+            auth=AuthConfig(secret_key="too-short"),
+            memory=MemoryConfig(database_url="sqlite:///:memory:"),
+        )
+        app = create_app(config)  # must not raise
+        assert _AuthMiddleware not in self._middleware_classes(app)
+
+    def test_valid_secret_key_attaches_auth_middleware(self):
+        """A valid secret_key attaches the auth middleware."""
+        from thumbelina.api.app import _AuthMiddleware, create_app
+        from thumbelina.config.models import AuthConfig
+
+        config = AppConfig(
+            auth=AuthConfig(secret_key="s" * 48),
+            memory=MemoryConfig(database_url="sqlite:///:memory:"),
+        )
+        app = create_app(config)
+        assert _AuthMiddleware in self._middleware_classes(app)
+
+    def test_health_ok_without_llm_credentials(self, mock_agent, mock_memory):
+        """Full startup succeeds with empty LLM api_key and no auth secret."""
+        from thumbelina.api.app import create_app
+
+        config = AppConfig(
+            llm=LLMConfig(api_key=""),
+            memory=MemoryConfig(database_url="sqlite:///:memory:"),
+        )
+        with (
+            patch("thumbelina.api.app.MemoryManager", return_value=mock_memory),
+            patch("thumbelina.api.app.create_provider", return_value=MagicMock()),
+            patch("thumbelina.api.app.ThumbelinaAgent", return_value=mock_agent),
+        ):
+            app = create_app(config)
+            with TestClient(app) as client:
+                response = client.get("/health")
+                assert response.status_code == 200
+
+    def test_routes_open_when_auth_disabled(self, mock_agent, mock_memory):
+        """Protected routes are reachable without a token when auth is off."""
+        from thumbelina.api.app import create_app
+
+        config = AppConfig(memory=MemoryConfig(database_url="sqlite:///:memory:"))
+        with (
+            patch("thumbelina.api.app.MemoryManager", return_value=mock_memory),
+            patch("thumbelina.api.app.create_provider", return_value=MagicMock()),
+            patch("thumbelina.api.app.ThumbelinaAgent", return_value=mock_agent),
+        ):
+            app = create_app(config)
+            with TestClient(app) as client:
+                assert client.get("/api/v1/config").status_code == 200
+
+    def test_unauthenticated_request_rejected_when_auth_enabled(
+        self, mock_agent, mock_memory
+    ):
+        """With a valid secret, non-whitelisted routes require a Bearer token."""
+        from thumbelina.api.app import create_app
+        from thumbelina.config.models import AuthConfig
+
+        config = AppConfig(
+            auth=AuthConfig(secret_key="s" * 48),
+            memory=MemoryConfig(database_url="sqlite:///:memory:"),
+        )
+        with (
+            patch("thumbelina.api.app.MemoryManager", return_value=mock_memory),
+            patch("thumbelina.api.app.create_provider", return_value=MagicMock()),
+            patch("thumbelina.api.app.ThumbelinaAgent", return_value=mock_agent),
+        ):
+            app = create_app(config)
+            with TestClient(app) as client:
+                # Whitelisted health endpoint stays open
+                assert client.get("/health").status_code == 200
+                # Protected route rejects unauthenticated requests
+                assert client.get("/api/v1/config").status_code == 401
