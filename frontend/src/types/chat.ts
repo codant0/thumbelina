@@ -22,6 +22,7 @@ export interface Conversation {
   endpoint_id?: string | null
   model?: string | null
   knowledge_base_id?: string | null
+  role?: string | null
   thinking_enabled?: boolean
   thinking_effort?: ThinkingEffort
   created_at: string

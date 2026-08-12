@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -11,6 +12,9 @@ from thumbelina.api.deps import get_agent, get_memory_manager
 from thumbelina.api.schemas import ChatRequest, ChatResponse
 from thumbelina.llm.factory import create_provider
 from thumbelina.memory.manager import MemoryManager
+from thumbelina.prompts.roles import get_role_prompt
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["chat"])
 
@@ -59,6 +63,9 @@ async def chat(
 
     # Apply per-conversation model selection when configured
     await _apply_conversation_endpoint(http_request, isolated_agent, conversation_id)
+
+    # Apply per-conversation role override when configured
+    await _apply_conversation_role(isolated_agent, conversation_id)
 
     response_text = await isolated_agent.run(request.message)
 
@@ -150,3 +157,35 @@ async def _apply_conversation_endpoint(
     except Exception:
         # Fall back to the default provider if the endpoint is unusable.
         agent.llm = None
+
+
+async def _apply_conversation_role(agent: ThumbelinaAgent, conversation_id: str) -> None:
+    """Override the agent's role with the conversation's configured role.
+
+    When the conversation has a ``role`` set, its prompt is resolved via
+    ``get_role_prompt`` and installed on the cloned agent. Unknown role
+    names are logged and the agent keeps its current (global default) role.
+    """
+    memory = agent.memory_manager
+    if memory is None:
+        return
+    try:
+        conv = await memory.get_conversation(conversation_id)
+    except Exception:
+        return
+    if conv is None:
+        return
+    role = conv.get("role")
+    if not role:
+        return
+    try:
+        role_prompt = get_role_prompt(role)
+    except ValueError:
+        logger.warning(
+            "Conversation %s has unknown role %r; keeping default role",
+            conversation_id,
+            role,
+        )
+        return
+    agent.role = role
+    agent.role_prompt = role_prompt

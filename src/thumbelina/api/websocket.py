@@ -10,7 +10,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
 from thumbelina.agent.graph import ThumbelinaAgent
-from thumbelina.api.routes.chat import _apply_conversation_endpoint
+from thumbelina.api.routes.chat import _apply_conversation_endpoint, _apply_conversation_role
 from thumbelina.api.schemas import WebSocketMessage
 
 logger = logging.getLogger(__name__)
@@ -121,6 +121,8 @@ async def websocket_chat(websocket: WebSocket) -> None:
                 agent.current_conversation_id = cid
                 # Apply per-conversation model selection when configured
                 await _apply_conversation_endpoint(websocket, agent, cid)
+                # Apply per-conversation role override when configured
+                await _apply_conversation_role(agent, cid)
 
             # Check if this is the WeChat conversation using the cached ID
             wechat_cid = getattr(websocket.app.state, "wechat_conversation_id", None)

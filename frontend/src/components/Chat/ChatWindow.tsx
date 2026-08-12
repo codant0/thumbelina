@@ -4,6 +4,7 @@ import { MessageList } from './MessageList'
 import { InputBox } from './InputBox'
 import { ConversationModelSelector } from './ConversationModelSelector'
 import { KnowledgeBaseSelector } from './KnowledgeBaseSelector'
+import { RoleSelector } from './RoleSelector'
 import { ThinkingSelector } from './ThinkingSelector'
 import { Mail, Eraser } from 'lucide-react'
 import type { Conversation, ThinkingEffort } from '../../types/chat'
@@ -17,10 +18,11 @@ interface ChatWindowProps {
   onDefaultConversation?: (id: string) => void
   onSetEndpoint?: (id: string, endpointId: string | null, model: string | null) => void
   onSetKnowledgeBase?: (id: string, knowledgeBaseId: string | null) => void
+  onSetRole?: (id: string, role: string | null) => void
   onSetThinking?: (id: string, enabled: boolean, effort: ThinkingEffort) => void
 }
 
-export function ChatWindow({ conversationId, conversations, onConversationCreated, onDefaultConversation, onSetEndpoint, onSetKnowledgeBase, onSetThinking }: ChatWindowProps) {
+export function ChatWindow({ conversationId, conversations, onConversationCreated, onDefaultConversation, onSetEndpoint, onSetKnowledgeBase, onSetRole, onSetThinking }: ChatWindowProps) {
   const wsUrl = useMemo(() => {
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     return `${wsProtocol}//${window.location.host}/ws/chat`
@@ -175,6 +177,13 @@ export function ChatWindow({ conversationId, conversations, onConversationCreate
                   enabled={activeConversation?.thinking_enabled ?? false}
                   effort={activeConversation?.thinking_effort ?? 'medium'}
                   onChange={(enabled, effort) => onSetThinking(conversationId, enabled, effort)}
+                />
+              )}
+              {onSetRole && (
+                <RoleSelector
+                  conversationId={conversationId}
+                  selectedRole={activeConversation?.role ?? null}
+                  onChange={(role) => onSetRole(conversationId, role)}
                 />
               )}
               {onSetKnowledgeBase && (

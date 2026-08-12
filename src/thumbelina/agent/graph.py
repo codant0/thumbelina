@@ -20,6 +20,7 @@ from thumbelina.llm.base import LLMProvider
 from thumbelina.memory.manager import MemoryManager
 from thumbelina.memory.namer import AUTO_NAME_AFTER_MESSAGES, ConversationNamer
 from thumbelina.memory.profiler import UserProfiler
+from thumbelina.prompts.roles import get_role_prompt
 from thumbelina.scheduler.scheduler import ScheduledTask, TaskScheduler
 from thumbelina.scheduler.time_parser import TimeParser
 from thumbelina.skills.application import SkillApplicationEngine
@@ -248,6 +249,9 @@ class ThumbelinaAgent:
         Optional composition engine for creating and executing skill compositions.
     user_profiler:
         Optional user profiler for building user profiles from conversations.
+    role:
+        Optional role persona name; the matching ``prompts/roles/<role>.md``
+        file is injected as the leading system message on every request.
     """
 
     def __init__(
@@ -262,6 +266,7 @@ class ThumbelinaAgent:
         composition_engine: CompositionEngine | None = None,
         user_profiler: UserProfiler | None = None,
         conversation_namer: ConversationNamer | None = None,
+        role: str | None = None,
     ) -> None:
         self.llm_provider = llm_provider
         self.memory_manager = memory_manager
@@ -272,6 +277,8 @@ class ThumbelinaAgent:
         self.composition_engine = composition_engine
         self.user_profiler = user_profiler
         self.conversation_namer = conversation_namer
+        self.role = role
+        self.role_prompt = get_role_prompt(role) if role else None
         self.current_conversation_id: str | None = None
         # Lazily-resolved chat model; None means resolve from llm_provider.
         self._llm: BaseChatModel | None = None
@@ -480,6 +487,7 @@ class ThumbelinaAgent:
             composition_engine=self.composition_engine,
             user_profiler=self.user_profiler,
             conversation_namer=self.conversation_namer,
+            role=self.role,
         )
         cloned._rag_store_manager = self._rag_store_manager
         cloned._rag_embedding_registry = self._rag_embedding_registry
@@ -492,6 +500,8 @@ class ThumbelinaAgent:
 
         # Check for matching skills and prepend context if found
         initial_messages: list[Any] = []
+        if self.role_prompt:
+            initial_messages.append(SystemMessage(content=self.role_prompt))
         user_context = await self._get_user_context()
         if user_context:
             initial_messages.append(SystemMessage(content=user_context))
@@ -539,6 +549,8 @@ class ThumbelinaAgent:
 
         # Check for matching skills and prepend context if found
         initial_messages: list[Any] = []
+        if self.role_prompt:
+            initial_messages.append(SystemMessage(content=self.role_prompt))
         user_context = await self._get_user_context()
         if user_context:
             initial_messages.append(SystemMessage(content=user_context))

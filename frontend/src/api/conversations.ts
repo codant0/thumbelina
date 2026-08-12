@@ -48,6 +48,32 @@ export async function setConversationKnowledgeBase(
   return res.json() as Promise<Conversation>
 }
 
+export async function listRoles(): Promise<string[]> {
+  const res = await fetch(`${API_BASE}/roles`)
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.detail || `HTTP ${res.status}`)
+  }
+  const data = await res.json()
+  return Array.isArray(data) ? data : []
+}
+
+export async function setConversationRole(
+  id: string,
+  role: string | null,
+): Promise<Conversation> {
+  const res = await fetch(`${API_BASE}/conversations/${id}/role`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role }),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.detail || `HTTP ${res.status}`)
+  }
+  return res.json() as Promise<Conversation>
+}
+
 export async function setConversationThinking(
   id: string,
   enabled: boolean,

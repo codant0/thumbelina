@@ -146,3 +146,83 @@ async def test_apply_endpoint_default_provider_no_thinking():
 
     mock_create.assert_not_called()
     assert agent.llm is None
+
+
+@pytest.mark.asyncio
+async def test_apply_conversation_role_overrides_agent_role():
+    """A conversation role should override the cloned agent's role and prompt."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from thumbelina.api.routes.chat import _apply_conversation_role
+    from thumbelina.prompts.roles import get_role_prompt
+
+    agent = MagicMock()
+    agent.role = "assistant"
+    agent.role_prompt = get_role_prompt("assistant")
+    agent.memory_manager = MagicMock()
+    agent.memory_manager.get_conversation = AsyncMock(
+        return_value={"id": "c1", "role": "coder"}
+    )
+
+    await _apply_conversation_role(agent, "c1")
+
+    assert agent.role == "coder"
+    assert agent.role_prompt == get_role_prompt("coder")
+
+
+@pytest.mark.asyncio
+async def test_apply_conversation_role_unknown_role_keeps_default():
+    """Unknown conversation roles should be ignored (agent keeps its default)."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from thumbelina.api.routes.chat import _apply_conversation_role
+    from thumbelina.prompts.roles import get_role_prompt
+
+    agent = MagicMock()
+    agent.role = "assistant"
+    agent.role_prompt = get_role_prompt("assistant")
+    agent.memory_manager = MagicMock()
+    agent.memory_manager.get_conversation = AsyncMock(
+        return_value={"id": "c1", "role": "ghost"}
+    )
+
+    await _apply_conversation_role(agent, "c1")
+
+    assert agent.role == "assistant"
+    assert agent.role_prompt == get_role_prompt("assistant")
+
+
+@pytest.mark.asyncio
+async def test_apply_conversation_role_no_role_configured():
+    """Without a conversation role, the agent's role stays untouched."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from thumbelina.api.routes.chat import _apply_conversation_role
+
+    agent = MagicMock()
+    agent.role = "assistant"
+    agent.role_prompt = "default prompt"
+    agent.memory_manager = MagicMock()
+    agent.memory_manager.get_conversation = AsyncMock(return_value={"id": "c1"})
+
+    await _apply_conversation_role(agent, "c1")
+
+    assert agent.role == "assistant"
+    assert agent.role_prompt == "default prompt"
+
+
+@pytest.mark.asyncio
+async def test_apply_conversation_role_without_memory():
+    """Without a memory manager the helper should be a no-op."""
+    from unittest.mock import MagicMock
+
+    from thumbelina.api.routes.chat import _apply_conversation_role
+
+    agent = MagicMock()
+    agent.role = "assistant"
+    agent.role_prompt = "default prompt"
+    agent.memory_manager = None
+
+    await _apply_conversation_role(agent, "c1")
+
+    assert agent.role == "assistant"

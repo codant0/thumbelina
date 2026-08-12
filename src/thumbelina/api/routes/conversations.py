@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from thumbelina.api.deps import get_memory_manager
 from thumbelina.api.schemas import ConversationDetailSchema, ConversationSchema, MessageSchema
 from thumbelina.memory.manager import MemoryManager
+from thumbelina.prompts.roles import list_roles
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,15 @@ class SetConversationKnowledgeBaseRequest(BaseModel):
     knowledge_base_id: str | None = Field(
         default=None,
         description="ID of the RAG knowledge base, or null to unbind",
+    )
+
+
+class SetConversationRoleRequest(BaseModel):
+    """Request body for setting the agent role of a conversation."""
+
+    role: str | None = Field(
+        default=None,
+        description="Role name matching a prompts/roles/<role>.md file, or null for the default",
     )
 
 
@@ -128,6 +138,7 @@ async def get_conversation(
         endpoint_id=conversation.get("endpoint_id"),
         model=conversation.get("model"),
         knowledge_base_id=conversation.get("knowledge_base_id"),
+        role=conversation.get("role"),
         thinking_enabled=conversation.get("thinking_enabled", False),
         thinking_effort=conversation.get("thinking_effort", "medium"),
         created_at=conversation["created_at"],
@@ -213,6 +224,31 @@ async def set_conversation_knowledge_base(
     ``null`` to unbind the conversation from any knowledge base.
     """
     ok = await memory.set_conversation_knowledge_base(conversation_id, body.knowledge_base_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    conv = await memory.get_conversation(conversation_id)
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return ConversationSchema(**conv)
+
+
+@router.put(
+    "/conversations/{conversation_id}/role",
+    response_model=ConversationSchema,
+)
+async def set_conversation_role(
+    conversation_id: str,
+    body: SetConversationRoleRequest,
+    memory: MemoryManager = Depends(get_memory_manager),
+) -> ConversationSchema:
+    """Set the agent persona role used for a conversation.
+
+    ``role`` must match a ``prompts/roles/<role>.md`` file, or be ``null``
+    to revert the conversation to the global default role.
+    """
+    if body.role is not None and body.role not in list_roles():
+        raise HTTPException(status_code=422, detail=f"Unknown role: '{body.role}'")
+    ok = await memory.set_conversation_role(conversation_id, body.role)
     if not ok:
         raise HTTPException(status_code=404, detail="Conversation not found")
     conv = await memory.get_conversation(conversation_id)

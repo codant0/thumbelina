@@ -152,6 +152,12 @@ class Conversation(Base):
         default=None,
         comment="ID of the RAG knowledge base bound to this conversation",
     )
+    role: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        default=None,
+        comment="Agent persona role for this conversation; None uses the global default",
+    )
     thinking_enabled: Mapped[bool] = mapped_column(
         default=False,
         comment="Whether thinking/reasoning mode is enabled for this conversation",

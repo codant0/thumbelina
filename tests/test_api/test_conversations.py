@@ -201,6 +201,70 @@ def test_set_knowledge_base_nonexistent_conversation(client):
     assert response.status_code == 404
 
 
+def test_get_roles_lists_available_roles(client):
+    """GET /api/v1/roles should return the available role names."""
+    response = client.get("/api/v1/roles")
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, list)
+    assert "assistant" in data
+    assert "coder" in data
+    assert data == sorted(data)
+
+
+def test_set_conversation_role(client, conversation_id):
+    """PUT /conversations/{id}/role should set the conversation's role."""
+    response = client.put(
+        f"/api/v1/conversations/{conversation_id}/role",
+        json={"role": "coder"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == conversation_id
+    assert data["role"] == "coder"
+
+    detail = client.get(f"/api/v1/conversations/{conversation_id}").json()
+    assert detail["role"] == "coder"
+
+
+def test_clear_conversation_role(client, conversation_id):
+    """PUT /conversations/{id}/role with null reverts to the default role."""
+    client.put(
+        f"/api/v1/conversations/{conversation_id}/role",
+        json={"role": "coder"},
+    )
+    response = client.put(
+        f"/api/v1/conversations/{conversation_id}/role",
+        json={"role": None},
+    )
+    assert response.status_code == 200
+    assert response.json()["role"] is None
+
+
+def test_set_conversation_role_rejects_unknown_role(client, conversation_id):
+    """PUT /conversations/{id}/role should reject roles without a prompt file."""
+    response = client.put(
+        f"/api/v1/conversations/{conversation_id}/role",
+        json={"role": "ghost"},
+    )
+    assert response.status_code == 422
+
+
+def test_set_role_nonexistent_conversation(client):
+    """PUT /conversations/{id}/role should 404 for unknown IDs."""
+    response = client.put(
+        "/api/v1/conversations/nonexistent-id/role",
+        json={"role": "coder"},
+    )
+    assert response.status_code == 404
+
+
+def test_new_conversation_role_is_null(client, conversation_id):
+    """A fresh conversation should expose role=None (global default)."""
+    response = client.get(f"/api/v1/conversations/{conversation_id}")
+    assert response.json()["role"] is None
+
+
 def test_set_thinking_nonexistent_conversation(client):
     """PUT /conversations/{id}/thinking should 404 for unknown IDs."""
     response = client.put(
