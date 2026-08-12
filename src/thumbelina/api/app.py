@@ -33,6 +33,7 @@ from thumbelina.api.routes import (
     plugins,
     qq,
     rag,
+    roles,
     skills,
     tasks,
     wechat,
@@ -82,7 +83,9 @@ def require_roles(
 class _AuthMiddleware(BaseHTTPMiddleware):
     """ASGI middleware that validates Bearer JWT tokens.
 
-    Attached only when ``config.auth.secret_key`` is non-empty.
+    Attached only when ``config.auth.secret_key`` is non-empty and valid.
+    An empty or invalid secret disables auth so the service can start
+    without any auth configuration.
     """
 
     def __init__(
@@ -435,6 +438,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         composition_engine=composition_engine,
         user_profiler=user_profiler,
         conversation_namer=conversation_namer,
+        role=config.llm.role,
     )
     app.state.agent = agent
 
@@ -686,15 +690,21 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         )
         app.add_middleware(_RateLimitMiddleware, limiter=limiter)
 
-    # Add auth middleware when a secret key is configured
+    # Add auth middleware when a secret key is configured.
+    # An invalid secret (e.g. too short) degrades gracefully: the service
+    # still starts, with auth disabled and a warning logged.
     if config.auth.secret_key:
-        auth_service = AuthService(secret_key=config.auth.secret_key)
-        required_roles = config.auth.required_roles or None
-        app.add_middleware(
-            _AuthMiddleware,
-            auth_service=auth_service,
-            required_roles=required_roles,
-        )
+        try:
+            auth_service = AuthService(secret_key=config.auth.secret_key)
+        except ValueError as exc:
+            logger.warning("Auth disabled at startup: %s", exc)
+        else:
+            required_roles = config.auth.required_roles or None
+            app.add_middleware(
+                _AuthMiddleware,
+                auth_service=auth_service,
+                required_roles=required_roles,
+            )
 
     # Global exception handlers
     @app.exception_handler(Exception)
@@ -733,6 +743,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(chat.router, prefix="/api/v1")
     app.include_router(config_routes.router, prefix="/api/v1")
     app.include_router(conversations.router, prefix="/api/v1")
+    app.include_router(roles.router, prefix="/api/v1")
     app.include_router(data.router, prefix="/api/v1")
     app.include_router(tasks.router, prefix="/api/v1")
     app.include_router(skills.router, prefix="/api/v1")

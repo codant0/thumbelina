@@ -31,6 +31,14 @@ class LLMConfig(BaseModel):
         default=True,
         description="Enable streaming responses. When false, full response is sent at once.",
     )
+    role: str = Field(
+        default="assistant",
+        min_length=1,
+        description=(
+            "Role persona name; the matching prompt file under "
+            "prompts/roles/<role>.md is injected as the system prompt."
+        ),
+    )
 
 
 class MemoryConfig(BaseModel):

@@ -201,6 +201,7 @@ class ConversationRepository:
                     "endpoint_id": conv.endpoint_id,
                     "model": conv.model,
                     "knowledge_base_id": conv.knowledge_base_id,
+                    "role": conv.role,
                     "thinking_enabled": conv.thinking_enabled or False,
                     "thinking_effort": conv.thinking_effort or "medium",
                     "created_at": conv.created_at.isoformat(),
@@ -239,6 +240,7 @@ class ConversationRepository:
                     "endpoint_id": conv.endpoint_id,
                     "model": conv.model,
                     "knowledge_base_id": conv.knowledge_base_id,
+                    "role": conv.role,
                     "thinking_enabled": conv.thinking_enabled or False,
                     "thinking_effort": conv.thinking_effort or "medium",
                     "created_at": conv.created_at.isoformat(),
@@ -278,6 +280,7 @@ class ConversationRepository:
                 "endpoint_id": conversation.endpoint_id,
                 "model": conversation.model,
                 "knowledge_base_id": conversation.knowledge_base_id,
+                "role": conversation.role,
                 "thinking_enabled": conversation.thinking_enabled or False,
                 "thinking_effort": conversation.thinking_effort or "medium",
                 "created_at": conversation.created_at.isoformat(),
@@ -498,6 +501,34 @@ class ConversationRepository:
         return await asyncio.to_thread(
             self._set_knowledge_base_sync, conversation_id, knowledge_base_id
         )
+
+    def _set_role_sync(self, conversation_id: str, role: str | None) -> bool:
+        """Synchronous implementation of set_conversation_role."""
+        with self._get_session() as session:
+            conversation = session.get(Conversation, conversation_id)
+            if conversation is None:
+                return False
+            conversation.role = role
+            session.commit()
+            return True
+
+    async def set_conversation_role(self, conversation_id: str, role: str | None) -> bool:
+        """Set the agent persona role for a conversation.
+
+        Parameters
+        ----------
+        conversation_id:
+            ID of the conversation to update.
+        role:
+            Role name matching a ``prompts/roles/<role>.md`` file, or None
+            to revert to the global default role.
+
+        Returns
+        -------
+        bool
+            True if set successfully, False if conversation not found.
+        """
+        return await asyncio.to_thread(self._set_role_sync, conversation_id, role)
 
     def _set_thinking_sync(self, conversation_id: str, enabled: bool, effort: str) -> bool:
         """Synchronous implementation of set_conversation_thinking."""

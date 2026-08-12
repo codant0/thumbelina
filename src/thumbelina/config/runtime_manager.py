@@ -277,7 +277,12 @@ class RuntimeConfigManager:
 
         Database values take precedence over YAML/env values for
         hot-swappable fields only (LLM provider/model/base_url,
-        channel enabled states, streaming_enabled, rate_limit).
+        channel enabled states, streaming_enabled, rate_limit,
+        auth.required_roles).
+
+        Secrets (``auth.secret_key``, ``llm.api_key``, …) are never
+        stored in the database, so only non-sensitive auth fields can
+        appear here.
         """
         if self._config_repo is None:
             return
@@ -334,5 +339,15 @@ class RuntimeConfigManager:
             self._config.rate_limit.max_requests = rate_limit["max_requests"]
         if "window_seconds" in rate_limit:
             self._config.rate_limit.window_seconds = rate_limit["window_seconds"]
+
+        # Apply auth overrides (non-sensitive fields only — secret_key
+        # is never stored in the database).
+        auth = db_config.get("auth", {})
+        if "required_roles" in auth:
+            roles = auth["required_roles"]
+            if isinstance(roles, list):
+                # In-place update so a running auth middleware that
+                # captured the same list object picks up the change.
+                self._config.auth.required_roles[:] = [str(role) for role in roles]
 
         logger.info("Loaded config overrides from database")

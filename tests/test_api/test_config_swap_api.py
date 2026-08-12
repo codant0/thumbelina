@@ -220,6 +220,19 @@ class TestPostConfigStillWorks:
         )
         assert resp.status_code == 200
 
+    def test_post_auth_required_roles(self, client):
+        """auth.required_roles is hot-reloadable and persisted to the DB."""
+        resp = client.post(
+            "/api/v1/config",
+            json={"auth": {"required_roles": ["admin", "ops"]}},
+        )
+        assert resp.status_code == 200
+        config = client.app.state.config
+        assert config.auth.required_roles == ["admin", "ops"]
+        client.app.state.runtime_config_manager._persist_to_db.assert_any_await(
+            "auth", "auth.required_roles", ["admin", "ops"]
+        )
+
 
 class TestGetConfigExport:
     """Tests for GET /config/export."""

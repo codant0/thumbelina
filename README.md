@@ -11,6 +11,7 @@ An AI-powered personal assistant built with [FastAPI](https://fastapi.tiangolo.c
 - **LLM Connection Test** — Three-level connectivity verification (network reachability → auth validity → service availability) for any provider endpoint
 - **DeepSeek API Support** — Compatible via `openai` provider with graceful fallback for `/models` endpoint
 - **Agent Core** — LangGraph-powered agent loop with tool calling and conditional routing
+- **Role Prompts** — Role personas stored as files under `prompts/roles/` (built-in: assistant / coder), injected as the system prompt; supports a global default role and per-conversation switching in the Web UI
 - **Built-in Tools** — File operations, web requests, shell commands, and data processing (JSON/CSV/text analysis/regex search)
 - **RAG (Retrieval-Augmented Generation)** — Document ingestion, chunking, embedding (HuggingFace via llama-index), vector retrieval (ChromaDB), and context-aware indexing pipeline
 - **Conversation Memory** — Persistent storage (SQLite) with keyword search, LLM-generated summaries, and auto-naming for new conversations
@@ -56,27 +57,33 @@ cd frontend && npm install && cd ..
 
 ### Configuration
 
-Copy the example config and edit it with your settings:
+The service starts with **no** LLM or auth configuration required — it works out of the box. `thumbelina.yaml` only covers infrastructure settings such as database and logging (optional):
 
 ```bash
 cp thumbelina.yaml.example thumbelina.yaml
 ```
 
-Or use environment variables:
+LLM (provider, model, API key) and auth are configured **after startup**:
+
+- **LLM**: manage presets and endpoints in the Web UI "Settings" page (or via the `/api/v1/config/llm` API family); persisted to the config database and restored on restart.
+- **Auth**: `auth.required_roles` can be hot-updated at runtime via the config API; `auth.secret_key` is sensitive and can only be supplied via environment variable (≥32 bytes, restart required).
+
+Optional startup overrides via environment variables:
 
 ```bash
-export OPENAI_API_KEY="sk-..."
-# Or for Anthropic:
-export ANTHROPIC_API_KEY="sk-ant-..."
+# Optional: inject an LLM API key at startup (not required)
+export THUMBELINA_LLM__API_KEY="sk-..."
+# Optional: enable JWT auth (takes effect when non-empty and ≥32 bytes)
+export THUMBELINA_AUTH__SECRET_KEY="..."
 ```
 
 Configuration priority (highest to lowest):
 1. Database overrides (via `POST /api/v1/config` or `PUT /api/v1/config/llm`)
 2. Environment variables (`THUMBELINA_*` with `__` nesting, e.g. `THUMBELINA_LLM__PROVIDER`)
 3. YAML config file (`thumbelina.yaml`)
-4. Defaults in `thumbelina.yaml.example`
+4. Code defaults
 
-Sensitive fields (API keys, tokens) stored in LLM endpoints are managed via the endpoint manager API — prefer environment variables for initial setup.
+Sensitive fields (API keys, secret_key) are never written to the config database — LLM keys are managed through the endpoint/preset APIs, and `secret_key` is only accepted from the environment.
 
 ### Running
 
@@ -99,7 +106,7 @@ thumb
 ### Docker
 
 ```bash
-# Set the LLM API key (or write api_key directly into thumbelina.yaml)
+# Optional: preset the LLM API key at startup (not required; can also be configured in the Web UI Settings after startup)
 export THUMBELINA_LLM__API_KEY="sk-..."
 
 # Build and start (first run)
@@ -242,6 +249,7 @@ thumbelina/
 | GET | `/api/v1/conversations/{id}` | Get conversation with messages |
 | PATCH | `/api/v1/conversations/{id}` | Rename a conversation |
 | PUT | `/api/v1/conversations/{id}/endpoint` | Set per-conversation LLM endpoint and model |
+| PUT | `/api/v1/conversations/{id}/role` | Set per-conversation role (`null` = restore global default) |
 | PUT | `/api/v1/conversations/{id}/knowledge-base` | Bind a RAG knowledge base to a conversation |
 | DELETE | `/api/v1/conversations/{id}` | Delete a conversation |
 | GET | `/api/v1/tasks` | List scheduled tasks |
@@ -260,6 +268,7 @@ thumbelina/
 | GET | `/api/v1/plugins` | List loaded plugins with sandbox status |
 | GET | `/api/v1/plugins/sandbox-report` | Plugin sandbox validation report |
 | GET | `/api/v1/plugins/dependencies` | Plugin dependency graph |
+| GET | `/api/v1/roles` | List available roles (prompts live in `prompts/roles/`) |
 | GET | `/api/v1/config` | Current configuration snapshot |
 | POST | `/api/v1/config` | Update runtime configuration |
 | PUT | `/api/v1/config/llm` | Hot-swap LLM provider/model |
@@ -391,10 +400,6 @@ npm run build        # Production build
 `thumbelina.yaml.example` — all fields optional, shown with defaults:
 
 ```yaml
-auth:
-  secret_key: ""            # JWT signing key; Bearer auth enabled when non-empty
-  required_roles: []        # Global role list; empty = all authenticated users allowed
-
 rate_limit:
   enabled: false            # Whether rate limiting is enabled
   max_requests: 60          # Max requests per window
@@ -407,17 +412,14 @@ logging:
   level: INFO               # DEBUG | INFO | WARNING | ERROR | CRITICAL
 ```
 
+> `llm` and `auth` are no longer startup configuration:
+> - **llm.\*** — managed after startup via the Web UI "Settings" page or the `/api/v1/config/llm` API family (presets/endpoints persisted to the config database).
+> - **auth.required_roles** — hot-updatable at runtime via the config API.
+> - **auth.secret_key** — sensitive; only accepted from the `THUMBELINA_AUTH__SECRET_KEY` environment variable (≥32 bytes, restart required). Auth is automatically disabled when empty.
+
 The following sections are optional — uncomment in `thumbelina.yaml` to enable:
 
 ```yaml
-# llm:
-#   provider: openai          # openai | anthropic | ollama
-#   model: gpt-4o             # Model identifier
-#   api_key: ${OPENAI_API_KEY} # Supports ${VAR} env substitution
-#   base_url: null            # Custom API endpoint URL
-#   request_timeout: null     # LLM request timeout in seconds
-#   streaming_enabled: true   # Enable WebSocket streaming responses
-
 # cors_origins: ["*"]         # CORS allowed origins; restrict in production
 
 # plugin_dirs: []             # Directories to scan for plugins
@@ -437,6 +439,14 @@ The following sections are optional — uncomment in `thumbelina.yaml` to enable
 #     ilink_base_url: "https://ilinkai.weixin.qq.com"
 #     webhook_secret: ""
 ```
+
+### Role Prompts
+
+Role prompt files live in `src/thumbelina/prompts/roles/` — adding a new role only requires a new `<role>.md` file:
+
+- **Global default role**: `assistant` by default; override with the `THUMBELINA_LLM__ROLE` environment variable.
+- **Per-conversation switching**: a conversation-level role overrides the global default. Switch it via the role selector in the Web UI chat input toolbar, or call `PUT /api/v1/conversations/{id}/role` (pass `null` to restore the global default).
+- Built-in roles: `assistant` (personal assistant), `coder` (software engineer).
 
 ## Tech Stack
 

@@ -162,6 +162,20 @@ class TestConfigRepositoryAsync:
         assert value == json.dumps("openai")
 
     @pytest.mark.asyncio()
+    async def test_set_auth_secret_key_not_stored(self, repo):
+        """auth.secret_key is sensitive and never stored."""
+        await repo.set("auth.secret_key", json.dumps("s" * 48), "auth")
+        value = await repo.get("auth.secret_key")
+        assert value is None
+
+    @pytest.mark.asyncio()
+    async def test_set_auth_required_roles_stored(self, repo):
+        """Non-sensitive auth keys (required_roles) are runtime-configurable."""
+        await repo.set("auth.required_roles", json.dumps(["admin"]), "auth")
+        value = await repo.get("auth.required_roles")
+        assert value == json.dumps(["admin"])
+
+    @pytest.mark.asyncio()
     async def test_import_from_dict(self, repo):
         """Import config from nested dict."""
         data = {

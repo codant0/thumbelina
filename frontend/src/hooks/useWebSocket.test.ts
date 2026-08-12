@@ -46,15 +46,18 @@ class MockWebSocket {
 
 describe('useWebSocket', () => {
   let originalWebSocket: typeof globalThis.WebSocket
+  let originalFetch: typeof globalThis.fetch
 
   beforeEach(() => {
     originalWebSocket = globalThis.WebSocket
     globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket
+    originalFetch = globalThis.fetch
     MockWebSocket.instances = []
   })
 
   afterEach(() => {
     globalThis.WebSocket = originalWebSocket
+    globalThis.fetch = originalFetch
     vi.useRealTimers()
   })
 
@@ -254,5 +257,145 @@ describe('useWebSocket', () => {
     })
 
     expect(result.current.messages).toHaveLength(0)
+  })
+
+  it('preserves an in-flight response when switching away and back mid-stream', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn()
+    globalThis.fetch = fetchMock
+    const { result, rerender } = renderHook(
+      ({ conv }: { conv?: string }) => useWebSocket('ws://localhost:8000/ws/chat', conv),
+      { initialProps: { conv: 'A' as string | undefined } },
+    )
+
+    await act(async () => {
+      vi.advanceTimersByTime(10)
+    })
+
+    // Send and stream the first part of a reply in A
+    act(() => {
+      result.current.sendMessage('hello', 'A')
+    })
+    act(() => {
+      MockWebSocket.instances[0].simulateMessage(
+        JSON.stringify({ chunk: 'part one. ', conversation_id: 'A' }),
+      )
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(200)
+    })
+    expect(result.current.messages.find(m => m.role === 'assistant')?.content).toBe('part one. ')
+
+    // Switch away to B (as ChatWindow does: switch + clear + load history)
+    act(() => {
+      rerender({ conv: 'B' })
+    })
+    act(() => {
+      result.current.clearMessages()
+    })
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ messages: [] }) })
+    await act(async () => {
+      await result.current.loadHistory('B')
+    })
+
+    // More of A streams while we're away — buffered, not rendered on B
+    act(() => {
+      MockWebSocket.instances[0].simulateMessage(
+        JSON.stringify({ chunk: 'part two. ', conversation_id: 'A' }),
+      )
+    })
+    expect(result.current.messages).toHaveLength(0)
+
+    // Switch back to A while still streaming. The DB history does not yet
+    // contain the assistant reply (persisted only on done).
+    act(() => {
+      rerender({ conv: 'A' })
+    })
+    act(() => {
+      result.current.clearMessages()
+    })
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        messages: [
+          { id: 'u1', role: 'user', content: 'hello', created_at: '2024-01-01T00:00:00Z' },
+        ],
+      }),
+    })
+    await act(async () => {
+      await result.current.loadHistory('A')
+    })
+
+    // The preserved buffer is seeded — no truncation
+    expect(result.current.messages).toHaveLength(2)
+    expect(result.current.messages[1].role).toBe('assistant')
+    expect(result.current.messages[1].content).toBe('part one. part two. ')
+
+    // Stream continues and finishes
+    act(() => {
+      MockWebSocket.instances[0].simulateMessage(
+        JSON.stringify({ chunk: 'part three', conversation_id: 'A' }),
+      )
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(200)
+    })
+    expect(result.current.messages[1].content).toBe('part one. part two. part three')
+
+    act(() => {
+      MockWebSocket.instances[0].simulateMessage(JSON.stringify({ done: true, conversation_id: 'A' }))
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(500)
+    })
+    expect(result.current.messages[1].content).toBe('part one. part two. part three')
+    expect(result.current.messages[1].id).not.toMatch(/^stream-/)
+  })
+
+  it('ignores stale history responses from an earlier conversation switch', async () => {
+    const fetchMock = vi.fn()
+    globalThis.fetch = fetchMock
+    const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'B'))
+
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    })
+
+    // The response for A is requested first but resolves last.
+    let resolveA!: (value: {
+      ok: boolean
+      json: () => Promise<{ messages: { id: string; role: string; content: string; created_at: string }[] }>
+    }) => void
+    fetchMock.mockImplementationOnce(() => new Promise(res => { resolveA = res }))
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        messages: [
+          { id: 'b1', role: 'user', content: 'B history', created_at: '2024-01-01T00:00:00Z' },
+        ],
+      }),
+    })
+
+    let pA!: Promise<void>
+    let pB!: Promise<void>
+    act(() => {
+      pA = result.current.loadHistory('A')
+      pB = result.current.loadHistory('B')
+    })
+    await act(async () => {
+      resolveA({
+        ok: true,
+        json: async () => ({
+          messages: [
+            { id: 'a1', role: 'user', content: 'A history', created_at: '2024-01-01T00:00:00Z' },
+          ],
+        }),
+      })
+      await pA
+      await pB
+    })
+
+    // A's late response must not overwrite the view of B.
+    expect(result.current.messages.map(m => m.content)).toEqual(['B history'])
   })
 })

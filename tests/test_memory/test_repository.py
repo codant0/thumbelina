@@ -344,3 +344,54 @@ class TestConversationKnowledgeBase:
         cid = await repo.create_conversation()
         conv = await repo.get_conversation(cid)
         assert conv["knowledge_base_id"] is None
+
+
+class TestConversationRole:
+    """Tests for set_conversation_role."""
+
+    @pytest.mark.asyncio
+    async def test_set_conversation_role(self, repo: ConversationRepository):
+        """set_conversation_role should persist the role."""
+        cid = await repo.create_conversation()
+        assert await repo.set_conversation_role(cid, "coder") is True
+        conv = await repo.get_conversation(cid)
+        assert conv["role"] == "coder"
+
+    @pytest.mark.asyncio
+    async def test_clear_conversation_role(self, repo: ConversationRepository):
+        """Passing None should clear the role."""
+        cid = await repo.create_conversation()
+        await repo.set_conversation_role(cid, "coder")
+        assert await repo.set_conversation_role(cid, None) is True
+        conv = await repo.get_conversation(cid)
+        assert conv["role"] is None
+
+    @pytest.mark.asyncio
+    async def test_set_role_nonexistent_returns_false(self, repo: ConversationRepository):
+        """set_conversation_role should return False for unknown IDs."""
+        assert await repo.set_conversation_role("nope", "coder") is False
+
+    @pytest.mark.asyncio
+    async def test_role_exposed_in_list(self, repo: ConversationRepository):
+        """The role should be visible via get_conversations."""
+        cid = await repo.create_conversation()
+        await repo.set_conversation_role(cid, "assistant")
+        convs = await repo.get_conversations()
+        target = next(c for c in convs if c["id"] == cid)
+        assert target["role"] == "assistant"
+
+    @pytest.mark.asyncio
+    async def test_role_exposed_in_get_all_with_messages(self, repo: ConversationRepository):
+        """The role should be visible via get_all_conversations_with_messages."""
+        cid = await repo.create_conversation()
+        await repo.set_conversation_role(cid, "coder")
+        convs = await repo.get_all_conversations_with_messages()
+        target = next(c for c in convs if c["id"] == cid)
+        assert target["role"] == "coder"
+
+    @pytest.mark.asyncio
+    async def test_new_conversation_has_null_role(self, repo: ConversationRepository):
+        """A newly created conversation should have role=None (global default)."""
+        cid = await repo.create_conversation()
+        conv = await repo.get_conversation(cid)
+        assert conv["role"] is None

@@ -9,7 +9,7 @@ import { SettingsPanel } from './components/Settings/SettingsPanel'
 import { PluginsPage } from './components/Plugins/PluginsPage'
 import { ChannelsPage } from './components/Channels/ChannelsPage'
 import { KnowledgeBasePage } from './components/KnowledgeBase/KnowledgeBasePage'
-import { renameConversation, setConversationEndpoint, setConversationKnowledgeBase, setConversationThinking } from './api/conversations'
+import { renameConversation, setConversationEndpoint, setConversationKnowledgeBase, setConversationRole, setConversationThinking } from './api/conversations'
 import type { Conversation, ThinkingEffort } from './types/chat'
 import './App.css'
 
@@ -125,6 +125,13 @@ function App() {
     } catch { /* ignore */ }
   }, [updateConversationInState])
 
+  const handleSetRole = useCallback(async (id: string, role: string | null) => {
+    try {
+      const updated = await setConversationRole(id, role)
+      updateConversationInState(updated)
+    } catch { /* ignore */ }
+  }, [updateConversationInState])
+
   const handleSetThinking = useCallback(async (id: string, enabled: boolean, effort: ThinkingEffort) => {
     try {
       const updated = await setConversationThinking(id, enabled, effort)
@@ -167,6 +174,7 @@ function App() {
               onDefaultConversation={handleDefaultConversation}
               onSetEndpoint={handleSetEndpoint}
               onSetKnowledgeBase={handleSetKnowledgeBase}
+              onSetRole={handleSetRole}
               onSetThinking={handleSetThinking}
             />
           </>

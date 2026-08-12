@@ -262,6 +262,24 @@ class MemoryManager:
             conversation_id, knowledge_base_id
         )
 
+    async def set_conversation_role(self, conversation_id: str, role: str | None) -> bool:
+        """Set the agent persona role for a conversation.
+
+        Parameters
+        ----------
+        conversation_id:
+            ID of the conversation to update.
+        role:
+            Role name matching a ``prompts/roles/<role>.md`` file, or None
+            to revert to the global default role.
+
+        Returns
+        -------
+        bool
+            True if set successfully, False if conversation not found.
+        """
+        return await self.repository.set_conversation_role(conversation_id, role)
+
     async def set_conversation_thinking(
         self, conversation_id: str, enabled: bool, effort: str
     ) -> bool:

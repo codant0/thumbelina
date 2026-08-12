@@ -11,6 +11,7 @@
 - **LLM 连接测试** — 三层连通性验证（网络可达 → 鉴权有效 → 服务可用），覆盖任意 provider 端点
 - **DeepSeek API 兼容** — 通过 openai provider 接入，/models 端点自动降级处理
 - **代理核心** — LangGraph 驱动的代理循环，支持工具调用和条件路由
+- **角色提示词** — 角色人设以文件形式存放于 `prompts/roles/`（内置 assistant / coder），作为系统提示词注入；支持全局默认角色，并可在 Web 界面按对话随时切换
 - **内置工具** — 文件操作、网络请求、Shell 命令、数据处理（JSON/CSV/文本分析/正则搜索）
 - **RAG（检索增强生成）** — 文档加载、分块、向量化嵌入（llama-index + HuggingFace）、向量检索（ChromaDB）、上下文感知索引流水线
 - **对话记忆** — 持久化存储（SQLite），支持关键词搜索、LLM 生成摘要和对话自动命名
@@ -56,27 +57,33 @@ cd frontend && npm install && cd ..
 
 ### 配置
 
-复制示例配置文件并编辑：
+启动**无需**任何 LLM 或认证配置，服务开箱即用。`thumbelina.yaml` 仅用于数据库、日志等基础设施项（可选）：
 
 ```bash
 cp thumbelina.yaml.example thumbelina.yaml
 ```
 
-或使用环境变量：
+LLM（提供商、模型、API Key）与认证在**启动后**配置：
+
+- **LLM**：在 Web 界面「设置」页管理预设与端点（或调用 `/api/v1/config/llm` 系列 API），持久化到配置数据库，重启后自动恢复。
+- **认证**：`auth.required_roles` 可在运行时通过配置 API 热更新；`auth.secret_key` 属敏感字段，仅可通过环境变量指定（≥32 字节，重启生效）。
+
+如需在启动期覆盖，仍可使用环境变量：
 
 ```bash
-export OPENAI_API_KEY="sk-..."
-# 或使用 Anthropic：
-export ANTHROPIC_API_KEY="sk-ant-..."
+# 可选：启动期注入 LLM API Key（非必需）
+export THUMBELINA_LLM__API_KEY="sk-..."
+# 可选：启用 JWT 认证（非空且 ≥32 字节时生效）
+export THUMBELINA_AUTH__SECRET_KEY="..."
 ```
 
 配置优先级（从高到低）：
 1. 数据库覆盖（通过 `POST /api/v1/config` 或 `PUT /api/v1/config/llm` 设置）
 2. 环境变量（`THUMBELINA_*`，双下划线嵌套，如 `THUMBELINA_LLM__PROVIDER`）
 3. YAML 配置文件（`thumbelina.yaml`）
-4. `thumbelina.yaml.example` 中的默认值
+4. 代码默认值
 
-敏感字段（API 密钥、Token 等）通过端点管理器 API 存储和管理——建议初次配置时使用环境变量。
+敏感字段（API 密钥、secret_key 等）不会写入配置数据库——LLM 密钥通过端点/预设 API 管理，`secret_key` 只接受环境变量。
 
 ### 运行
 
@@ -99,7 +106,7 @@ thumb
 ### Docker 部署
 
 ```bash
-# 设置 LLM API Key（或直接写入 thumbelina.yaml 的 api_key）
+# 可选：启动期预置 LLM API Key（非必需，启动后也可在 Web 界面「设置」中配置）
 export THUMBELINA_LLM__API_KEY="sk-..."
 
 # 首次构建并启动
@@ -234,6 +241,7 @@ thumbelina/
 | GET | `/api/v1/conversations/{id}` | 获取对话详情及消息 |
 | PATCH | `/api/v1/conversations/{id}` | 重命名对话 |
 | PUT | `/api/v1/conversations/{id}/endpoint` | 设置对话使用的 LLM 端点和模型 |
+| PUT | `/api/v1/conversations/{id}/role` | 设置对话使用的角色（`null` = 恢复全局默认） |
 | DELETE | `/api/v1/conversations/{id}` | 删除对话 |
 | GET | `/api/v1/tasks` | 列出定时任务 |
 | POST | `/api/v1/tasks/{id}/cancel` | 取消定时任务 |
@@ -251,6 +259,7 @@ thumbelina/
 | GET | `/api/v1/plugins` | 列出已加载插件（含沙箱状态） |
 | GET | `/api/v1/plugins/sandbox-report` | 插件沙箱验证报告 |
 | GET | `/api/v1/plugins/dependencies` | 插件依赖图 |
+| GET | `/api/v1/roles` | 列出可用角色（提示词位于 `prompts/roles/`） |
 | GET | `/api/v1/config` | 获取当前配置快照 |
 | POST | `/api/v1/config` | 更新运行时配置 |
 | PUT | `/api/v1/config/llm` | 热切换 LLM 提供商/模型 |
@@ -382,10 +391,6 @@ npm run build        # 生产构建
 `thumbelina.yaml.example` — 所有字段可选，以下为默认值：
 
 ```yaml
-auth:
-  secret_key: ""            # JWT 签名密钥，非空时启用 Bearer 认证
-  required_roles: []        # 全局角色列表，空 = 允许所有已认证用户
-
 rate_limit:
   enabled: false            # 是否启用速率限制
   max_requests: 60          # 每窗口最大请求数
@@ -398,17 +403,14 @@ logging:
   level: INFO               # DEBUG | INFO | WARNING | ERROR | CRITICAL
 ```
 
+> `llm` 与 `auth` 不再是启动配置：
+> - **llm.\*** — 启动后在 Web 界面「设置」或经 `/api/v1/config/llm` 系列 API 管理（预设/端点持久化到配置数据库）。
+> - **auth.required_roles** — 可通过配置 API 运行时热更新。
+> - **auth.secret_key** — 敏感字段，仅接受环境变量 `THUMBELINA_AUTH__SECRET_KEY`（≥32 字节，重启生效）；为空时认证自动禁用。
+
 以下部分为可选配置——在 `thumbelina.yaml` 中取消注释即可启用：
 
 ```yaml
-# llm:
-#   provider: openai          # openai | anthropic | ollama
-#   model: gpt-4o             # 模型标识
-#   api_key: ${OPENAI_API_KEY} # 支持 ${VAR} 环境变量替换
-#   base_url: null            # 自定义 API 端点 URL
-#   request_timeout: null     # LLM 请求超时秒数
-#   streaming_enabled: true   # 启用 WebSocket 流式响应
-
 # cors_origins: ["*"]         # CORS 允许的来源；生产环境应限制域名
 
 # plugin_dirs: []             # 插件扫描目录
@@ -428,6 +430,14 @@ logging:
 #     ilink_base_url: "https://ilinkai.weixin.qq.com"
 #     webhook_secret: ""
 ```
+
+### 角色提示词
+
+角色提示词文件位于 `src/thumbelina/prompts/roles/`，新增角色只需添加 `<role>.md` 文件：
+
+- **全局默认角色**：代码默认 `assistant`，可用环境变量 `THUMBELINA_LLM__ROLE` 覆盖。
+- **按对话切换**：对话级角色优先于全局默认，可通过 Web 界面输入框工具栏的角色选择器切换，或调用 `PUT /api/v1/conversations/{id}/role`（传 `null` 恢复全局默认）。
+- 内置角色：`assistant`（个人助理）、`coder`（软件工程师）。
 
 ## 技术栈
 

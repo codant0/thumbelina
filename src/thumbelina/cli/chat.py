@@ -231,6 +231,7 @@ def run_chat(provider: str, model: str | None = None) -> None:
         subagent_manager=subagent_manager,
         scheduler=scheduler,
         composition_engine=composition_engine,
+        role=config.llm.role,
     )
 
     session = ChatSession(agent=agent)

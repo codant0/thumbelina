@@ -306,3 +306,50 @@ class TestPersistConfig:
 
         raw = yaml.safe_load(open(config_file, encoding="utf-8").read())
         assert raw["llm"]["provider"] == "ollama"
+
+
+class TestLoadFromDatabase:
+    """Tests for RuntimeConfigManager.load_from_database auth overrides."""
+
+    @staticmethod
+    def _manager_with_db_config(config, db_config):
+        repo = MagicMock()
+        repo.export_to_dict = AsyncMock(return_value=db_config)
+        return RuntimeConfigManager(config, None, config_repo=repo)
+
+    @pytest.mark.asyncio
+    async def test_auth_required_roles_applied_in_place(self):
+        """required_roles from the DB update the existing list in place."""
+        config = AppConfig.model_validate({"auth": {"required_roles": ["user"]}})
+        original_list = config.auth.required_roles
+
+        manager = self._manager_with_db_config(
+            config, {"auth": {"required_roles": ["admin", "ops"]}}
+        )
+        await manager.load_from_database()
+
+        assert config.auth.required_roles == ["admin", "ops"]
+        # In-place update so a running auth middleware sees the change
+        assert config.auth.required_roles is original_list
+
+    @pytest.mark.asyncio
+    async def test_auth_secret_key_never_applied_from_db(self):
+        """secret_key is a secret and must never be applied from the DB."""
+        config = AppConfig()
+        manager = self._manager_with_db_config(
+            config,
+            {"auth": {"secret_key": "injected-from-db", "required_roles": ["admin"]}},
+        )
+        await manager.load_from_database()
+
+        assert config.auth.secret_key == ""
+        assert config.auth.required_roles == ["admin"]
+
+    @pytest.mark.asyncio
+    async def test_non_list_required_roles_ignored(self):
+        """Malformed required_roles values are ignored without error."""
+        config = AppConfig.model_validate({"auth": {"required_roles": ["user"]}})
+        manager = self._manager_with_db_config(config, {"auth": {"required_roles": "admin"}})
+        await manager.load_from_database()
+
+        assert config.auth.required_roles == ["user"]

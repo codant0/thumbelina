@@ -212,7 +212,10 @@
     "thinkingEffortLow": "Low",
     "thinkingEffortMedium": "Medium",
     "thinkingEffortHigh": "High",
-    "thinkingProcess": "Thinking process"
+    "thinkingProcess": "Thinking process",
+    "defaultRole": "Default role",
+    "chooseRole": "Choose a role for this conversation",
+    "noRoles": "No roles available"
   },
   "taskManager": {
     "title": "Task Manager",

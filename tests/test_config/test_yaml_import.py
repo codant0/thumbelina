@@ -62,6 +62,9 @@ class TestImportYamlToDb:
                 "provider": "openai",
                 "api_key": "sk-secret",
             },
+            "auth": {
+                "secret_key": "jwt-secret",
+            },
             "channels": {
                 "qq": {
                     "app_secret": "qq-secret",
@@ -88,6 +91,9 @@ class TestImportYamlToDb:
             # Sensitive should NOT be imported
             api_key = repo._get_sync("llm.api_key")
             assert api_key is None
+
+            secret_key = repo._get_sync("auth.secret_key")
+            assert secret_key is None
 
             app_secret = repo._get_sync("channels.qq.app_secret")
             assert app_secret is None

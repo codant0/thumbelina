@@ -11,6 +11,9 @@ services:
       - ./thumbelina.yaml:/app/thumbelina.yaml:ro
       - thumbelina-data:/app/data
     environment:
+      # LLM/auth 配置不再是启动必需项：不设置也能正常启动，
+      # LLM 端点/模型可在启动后通过 Web UI Settings（配置数据库）管理。
+      # 此变量仅作为可选的启动期覆盖。
       - THUMBELINA_LLM__API_KEY=${THUMBELINA_LLM__API_KEY:-}
       # Put the SQLite database inside the persistent volume so data
       # survives container rebuilds (env vars override thumbelina.yaml)

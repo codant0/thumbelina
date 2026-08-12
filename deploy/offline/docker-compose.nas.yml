@@ -3,10 +3,13 @@
 # NAS 只拉起容器，不做构建。
 #
 # 用法（在 NAS 上本文件所在目录执行）：
-#   export THUMBELINA_LLM__API_KEY="sk-..."   # 若未写进 thumbelina.yaml
 #   docker compose -f docker-compose.nas.yml up -d
 #
-# 需要与本文件同目录准备 thumbelina.yaml（应用配置）。
+# LLM/auth 配置不再是启动必需项：未配置 LLM 密钥也能启动，
+# 启动后可在 Web UI Settings（配置数据库）中管理 LLM 端点/模型。
+# 如需启动期注入可用可选变量：export THUMBELINA_LLM__API_KEY="sk-..."
+#
+# 需要与本文件同目录准备 thumbelina.yaml（应用配置，可为最小配置）。
 services:
   thumbelina:
     # 与 export-image.sh 的 IMAGE_NAME:TAG 保持一致
@@ -17,6 +20,7 @@ services:
       - ./thumbelina.yaml:/app/thumbelina.yaml:ro
       - thumbelina-data:/app/data
     environment:
+      # 可选的启动期覆盖；LLM 密钥不是启动必需项，启动后可在 Web UI 配置
       - THUMBELINA_LLM__API_KEY=${THUMBELINA_LLM__API_KEY:-}
       # SQLite 放进持久卷，重建容器不丢数据（4 个斜杠 = 容器内绝对路径）
       - THUMBELINA_MEMORY__DATABASE_URL=sqlite:////app/data/thumbelina.db

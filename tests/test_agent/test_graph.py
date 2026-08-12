@@ -137,6 +137,74 @@ class TestThumbelinaAgent:
         assert content == "The answer is 4."
 
 
+class TestRolePrompt:
+    """Tests for role persona prompt injection."""
+
+    @pytest.mark.asyncio
+    async def test_run_injects_role_prompt_first(self):
+        """run() should prepend the role SystemMessage before the user input."""
+        from langchain_core.messages import SystemMessage
+
+        from thumbelina.agent.graph import ThumbelinaAgent
+        from thumbelina.prompts.roles import get_role_prompt
+
+        mock_provider = _create_mock_provider()
+        agent = ThumbelinaAgent(llm_provider=mock_provider, role="assistant")
+        await agent.run("Hi")
+
+        sent = mock_provider.chat_model.ainvoke.call_args[0][0]
+        assert len(sent) == 2
+        assert isinstance(sent[0], SystemMessage)
+        assert sent[0].content == get_role_prompt("assistant")
+        assert isinstance(sent[1], HumanMessage)
+
+    @pytest.mark.asyncio
+    async def test_stream_injects_role_prompt_first(self):
+        """stream() should also prepend the role SystemMessage."""
+        from langchain_core.messages import SystemMessage
+
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        mock_provider = _create_mock_provider()
+        agent = ThumbelinaAgent(llm_provider=mock_provider, role="coder")
+
+        async for _ in agent.stream("Hi"):
+            pass
+
+        sent = mock_provider.chat_model.ainvoke.call_args[0][0]
+        assert isinstance(sent[0], SystemMessage)
+        assert "工程师" in sent[0].content
+
+    def test_no_role_means_no_system_message(self):
+        """Without a role, no prompt should be resolved."""
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        mock_provider = _create_mock_provider()
+        agent = ThumbelinaAgent(llm_provider=mock_provider)
+
+        assert agent.role is None
+        assert agent.role_prompt is None
+
+    def test_unknown_role_raises(self):
+        """Constructing with a missing role file should fail fast."""
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        mock_provider = _create_mock_provider()
+        with pytest.raises(ValueError, match="Unknown role"):
+            ThumbelinaAgent(llm_provider=mock_provider, role="ghost")
+
+    def test_clone_propagates_role(self):
+        """clone() should keep the same role and resolved prompt."""
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        mock_provider = _create_mock_provider()
+        agent = ThumbelinaAgent(llm_provider=mock_provider, role="coder")
+        cloned = agent.clone()
+
+        assert cloned.role == "coder"
+        assert cloned.role_prompt == agent.role_prompt
+
+
 class TestGraphStructure:
     """Tests for the agent graph structure."""
 

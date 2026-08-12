@@ -41,6 +41,7 @@ class ConversationSchema(BaseModel):
     endpoint_id: str | None = None
     model: str | None = None
     knowledge_base_id: str | None = None
+    role: str | None = None
     thinking_enabled: bool = False
     thinking_effort: str = "medium"
     created_at: str
@@ -57,6 +58,7 @@ class ConversationDetailSchema(BaseModel):
     endpoint_id: str | None = None
     model: str | None = None
     knowledge_base_id: str | None = None
+    role: str | None = None
     thinking_enabled: bool = False
     thinking_effort: str = "medium"
     created_at: str

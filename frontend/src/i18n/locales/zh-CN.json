@@ -212,7 +212,10 @@
     "thinkingEffortLow": "低",
     "thinkingEffortMedium": "中",
     "thinkingEffortHigh": "高",
-    "thinkingProcess": "思考过程"
+    "thinkingProcess": "思考过程",
+    "defaultRole": "默认角色",
+    "chooseRole": "为当前对话选择角色",
+    "noRoles": "暂无可用角色"
   },
   "taskManager": {
     "title": "任务管理器",
