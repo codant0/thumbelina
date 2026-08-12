@@ -65,6 +65,23 @@ describe('MessageList', () => {
     expect(code?.textContent).toBe('inline code')
   })
 
+  it('should preserve single line breaks in assistant markdown', () => {
+    const messages: Message[] = [
+      {
+        id: '1',
+        role: 'assistant',
+        content: 'line one\nline two\n\nnew paragraph',
+        timestamp: '2024-01-01T00:00:00Z',
+      },
+    ]
+    const { container } = render(<MessageList messages={messages} />)
+    // Single newlines become <br> (soft breaks), while blank lines still
+    // produce separate paragraphs.
+    const brs = container.querySelectorAll('.md-body br')
+    expect(brs.length).toBe(1)
+    expect(container.querySelectorAll('.md-body p')).toHaveLength(2)
+  })
+
   it('should keep user messages as plain text', () => {
     const messages: Message[] = [
       { id: '1', role: 'user', content: '**not rendered**', timestamp: '2024-01-01T00:00:00Z' },
