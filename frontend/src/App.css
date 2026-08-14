@@ -3886,3 +3886,186 @@
 .msg-thinking__body .md-body {
   font-size: var(--fs-sm);
 }
+
+/* ===== Todo Page ===== */
+.todo-page {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+.todo-page__panel {
+  margin-bottom: 0;
+}
+
+.todo-page__error {
+  color: var(--error);
+  font-size: var(--fs-sm);
+  margin-bottom: var(--sp-3);
+}
+
+.todo-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-6);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+}
+
+.todo-disabled {
+  padding: var(--sp-6);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  text-align: center;
+}
+
+.todo-add {
+  display: flex;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+
+.todo-add__input {
+  flex: 1;
+}
+
+.todo-list,
+.todo-note-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.todo-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+
+.todo-item:hover {
+  border-color: var(--text-secondary);
+}
+
+.todo-item__checkbox {
+  accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.todo-item__text {
+  flex: 1;
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.todo-item--done .todo-item__text {
+  text-decoration: line-through;
+  color: var(--text-secondary);
+}
+
+.todo-item__actions,
+.todo-note__actions {
+  display: flex;
+  gap: var(--sp-1);
+  flex-shrink: 0;
+}
+
+.todo-item__edit {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: 1;
+  min-width: 0;
+}
+
+.todo-item__edit-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.todo-empty {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  padding: var(--sp-2) 0;
+}
+
+.todo-note-form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+
+.todo-note-form__textarea,
+.todo-note__edit-textarea {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.todo-note {
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+
+.todo-note:hover {
+  border-color: var(--text-secondary);
+}
+
+.todo-note__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-1);
+}
+
+.todo-note__time {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+
+.todo-note__content {
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.todo-note__edit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.todo-note__edit-actions {
+  display: flex;
+  gap: var(--sp-2);
+  justify-content: flex-end;
+}
+
+@media (max-width: 900px) {
+  .todo-page {
+    grid-template-columns: 1fr;
+  }
+}
