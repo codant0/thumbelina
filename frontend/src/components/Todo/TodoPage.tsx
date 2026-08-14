@@ -46,6 +46,18 @@ function TodoListPanel({ items, busy, onAdd, onToggle, onDelete, onSaveText }: T
     setEditText('')
   }, [])
 
+  // Reset editing state whenever the list changes (e.g. another action
+  // re-indexed items server-side), so a draft can never be saved onto a
+  // different item that shifted into the edited position. Reference
+  // comparison also skips the initial mount.
+  const itemsRef = useRef(items)
+  useEffect(() => {
+    if (itemsRef.current !== items) {
+      itemsRef.current = items
+      cancelEdit()
+    }
+  }, [items, cancelEdit])
+
   const saveEdit = useCallback(() => {
     const text = editText.trim()
     if (editingIndex === null || !text || busy) return
@@ -193,6 +205,17 @@ function TodoNotesPanel({ notes, busy, onAdd, onUpdate, onDelete }: TodoNotesPan
     setEditingIndex(null)
     setEditDraft('')
   }, [])
+
+  // Reset editing state whenever the notes list changes, so a draft can
+  // never be saved onto a different note that shifted into the edited
+  // position. Reference comparison also skips the initial mount.
+  const notesRef = useRef(notes)
+  useEffect(() => {
+    if (notesRef.current !== notes) {
+      notesRef.current = notes
+      cancelEdit()
+    }
+  }, [notes, cancelEdit])
 
   const saveEdit = useCallback(() => {
     const content = editDraft.trim()

@@ -182,6 +182,50 @@ describe('TodoPage', () => {
     expect(await screen.findByText('dup task')).toBeInTheDocument()
   })
 
+  it('cancels inline editing when another action refreshes the items list', async () => {
+    const refreshed = [
+      { index: 0, text: 'task b', done: false },
+      { index: 1, text: 'task c', done: false },
+    ]
+    const fetchSpy = mockFetch(enabledHandler((url, init) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/v1/todo/items' && method === 'GET') {
+        return jsonResponse({
+          items: [
+            { index: 0, text: 'task a', done: false },
+            { index: 1, text: 'task b', done: false },
+            { index: 2, text: 'task c', done: false },
+          ],
+        })
+      }
+      if (url === '/api/v1/todo/items/0' && method === 'DELETE') {
+        return jsonResponse({ items: refreshed })
+      }
+      return undefined
+    }))
+    const user = userEvent.setup()
+    render(<TodoPage />)
+    const rows = await screen.findAllByTestId('todo-item')
+    expect(rows).toHaveLength(3)
+
+    await user.click(within(rows[1]).getByText('Edit'))
+    expect(screen.getByDisplayValue('task b').tagName).toBe('INPUT')
+
+    await user.click(within(rows[0]).getByText('Delete'))
+
+    await waitFor(() => {
+      const del = fetchSpy.mock.calls.find(
+        ([url, init]) => init?.method === 'DELETE' && String(url) === '/api/v1/todo/items/0',
+      )
+      expect(del).toBeDefined()
+    })
+    // The edit box must disappear instead of attaching to the item that
+    // shifted into the edited position after server-side re-indexing.
+    await waitFor(() => expect(screen.queryByDisplayValue('task b')).toBeNull())
+    expect(screen.getByText('task b')).toBeInTheDocument()
+    expect(screen.getAllByTestId('todo-item')).toHaveLength(2)
+  })
+
   it('toggles a todo item done via checkbox with PATCH done:true', async () => {
     const fetchSpy = mockFetch(enabledHandler())
     const user = userEvent.setup()
