@@ -3942,32 +3942,75 @@
   gap: var(--sp-2);
 }
 
+@keyframes todo-item-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 .todo-item {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
   padding: var(--sp-2) var(--sp-3);
-  background: var(--bg);
-  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  transition: border-color var(--dur-fast) var(--ease-out);
+  transition: background var(--dur-fast) var(--ease-out);
+  animation: todo-item-in var(--dur-base) var(--ease-out);
 }
 
 .todo-item:hover {
-  border-color: var(--text-secondary);
+  background: var(--bg-hover);
 }
 
+.todo-item--done {
+  opacity: 0.68;
+}
+
+/* Custom circular checkbox: appearance none + rotated-border checkmark. */
 .todo-item__checkbox {
-  accent-color: var(--accent);
-  width: 14px;
-  height: 14px;
+  appearance: none;
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
+  border: 2px solid var(--border);
+  border-radius: 50%;
+  background: transparent;
   cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.todo-item__checkbox:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.todo-item__checkbox:checked::after {
+  content: '';
+  display: block;
+  width: 4px;
+  height: 8px;
+  margin: 1px auto 0;
+  border-right: 2px solid var(--bg-surface);
+  border-bottom: 2px solid var(--bg-surface);
+  transform: rotate(45deg);
+  position: relative;
+  left: 1px;
+}
+
+.todo-item__checkbox:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 .todo-item__text {
   flex: 1;
-  font-size: var(--fs-sm);
+  font-size: var(--fs-base);
   color: var(--text-primary);
   overflow-wrap: anywhere;
 }
@@ -3982,6 +4025,58 @@
   display: flex;
   gap: var(--sp-1);
   flex-shrink: 0;
+}
+
+/* Row actions stay focusable in the DOM but only become visible on
+   hover or keyboard focus (:focus-within). */
+.todo-item__actions {
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.todo-item:hover .todo-item__actions,
+.todo-item:focus-within .todo-item__actions {
+  opacity: 1;
+}
+
+.todo-item__action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.todo-item__action:hover:not(:disabled) {
+  background: var(--bg-active);
+  color: var(--text-primary);
+}
+
+.todo-item__action:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.todo-item__action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.todo-item__action--danger {
+  color: var(--error);
+}
+
+.todo-item__action--danger:hover:not(:disabled) {
+  background: var(--error-muted);
+  color: var(--error);
 }
 
 .todo-item__edit {

@@ -283,20 +283,22 @@ function TodoListPanel({
                   <span className="todo-item__text">{item.text}</span>
                   <div className="todo-item__actions">
                     <button
-                      className="btn btn-ghost btn-sm"
+                      className="todo-item__action"
+                      aria-label={t('todo.edit')}
+                      title={t('todo.edit')}
                       disabled={busy}
                       onClick={() => startEdit(item)}
                     >
                       <Pencil size={14} />
-                      {t('todo.edit')}
                     </button>
                     <button
-                      className="btn btn-danger btn-sm"
+                      className="todo-item__action todo-item__action--danger"
+                      aria-label={t('todo.delete')}
+                      title={t('todo.delete')}
                       disabled={busy}
                       onClick={() => onDelete(item.index)}
                     >
                       <Trash2 size={14} />
-                      {t('todo.delete')}
                     </button>
                   </div>
                 </>

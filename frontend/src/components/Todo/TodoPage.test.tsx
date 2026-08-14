@@ -262,10 +262,10 @@ describe('TodoPage', () => {
     const rows = await screen.findAllByTestId('todo-item')
     expect(rows).toHaveLength(3)
 
-    await user.click(within(rows[1]).getByText('Edit'))
+    await user.click(within(rows[1]).getByLabelText('Edit'))
     expect(screen.getByDisplayValue('task b').tagName).toBe('INPUT')
 
-    await user.click(within(rows[0]).getByText('Delete'))
+    await user.click(within(rows[0]).getByLabelText('Delete'))
 
     await waitFor(() => {
       const del = fetchSpy.mock.calls.find(
@@ -545,5 +545,34 @@ describe('TodoPage', () => {
       { num: '1', label: 'completed' },
       { num: '1', label: 'notes' },
     ])
+  })
+
+  it('item action buttons have accessible labels', async () => {
+    mockFetch(enabledHandler())
+    render(<TodoPage />)
+    await screen.findByText('buy milk')
+
+    // Row actions are icon-only buttons; their text lives in aria-label/title.
+    const editButton = screen.getByLabelText('Edit')
+    const deleteButton = screen.getByLabelText('Delete')
+    expect(editButton.tagName).toBe('BUTTON')
+    expect(deleteButton.tagName).toBe('BUTTON')
+    expect(editButton).not.toBeDisabled()
+    expect(deleteButton).not.toBeDisabled()
+  })
+
+  it('edit mode keeps save/cancel text buttons', async () => {
+    mockFetch(enabledHandler())
+    const user = userEvent.setup()
+    render(<TodoPage />)
+    await screen.findByText('buy milk')
+
+    await user.click(screen.getByLabelText('Edit'))
+
+    // Save/Cancel keep their visible text labels (they are not icon-only).
+    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
+    expect(screen.getByText('Save')).toBeInTheDocument()
+    expect(screen.getByText('Cancel')).toBeInTheDocument()
   })
 })
