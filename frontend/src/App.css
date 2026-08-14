@@ -4003,6 +4003,61 @@
   padding: var(--sp-2) 0;
 }
 
+.todo-filter-tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  margin-bottom: var(--sp-3);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+}
+
+.todo-filter-tabs__tab {
+  padding: var(--sp-1) var(--sp-3);
+  border: none;
+  border-radius: var(--radius-full);
+  background: transparent;
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+
+.todo-filter-tabs__tab:hover {
+  color: var(--text-primary);
+}
+
+.todo-filter-tabs__tab--active,
+.todo-filter-tabs__tab--active:hover {
+  background: var(--accent-muted);
+  color: var(--accent);
+  font-weight: var(--fw-med);
+}
+
+.todo-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-8) 0;
+  color: var(--text-secondary);
+}
+
+.todo-empty-state svg {
+  opacity: 0.6;
+}
+
+.todo-empty-state p {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
+.todo-empty-state--celebrate svg {
+  color: var(--success);
+}
+
 .todo-note-form {
   display: flex;
   flex-direction: column;

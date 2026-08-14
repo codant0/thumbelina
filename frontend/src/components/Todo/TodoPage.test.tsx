@@ -22,6 +22,21 @@ const SAMPLE_ITEMS = [{ index: 0, text: 'buy milk', done: false }]
 const SAMPLE_NOTES = [
   { index: 0, timestamp: '2026-08-14 10:00', content: 'remember the milk' },
 ]
+const FILTER_ITEMS = [
+  { index: 0, text: 'active task', done: false },
+  { index: 1, text: 'finished task', done: true },
+]
+
+/** Enabled handler with two items (one active, one done) for the filter tests. */
+function twoItemsHandler(): FetchHandler {
+  return enabledHandler((url, init) => {
+    const method = init?.method ?? 'GET'
+    if (url === '/api/v1/todo/items' && method === 'GET') {
+      return jsonResponse({ items: FILTER_ITEMS })
+    }
+    return undefined
+  })
+}
 
 /** Default handler: module enabled, one item, one note; write ops echo sensible lists. */
 function enabledHandler(
@@ -73,6 +88,33 @@ function readStats(container: HTMLElement): Array<{ num: string; label: string }
     num: item.querySelector('.todo-stats__num')?.textContent ?? '',
     label: item.querySelector('.todo-stats__label')?.textContent ?? '',
   }))
+}
+
+/** Locates a filter tab button by its visible label ('All' / 'Active' / 'Done'). */
+function getFilterTab(label: string): HTMLButtonElement {
+  const tab = screen
+    .getAllByRole('button')
+    .find(button => button.textContent?.includes(label))
+  if (!tab) throw new Error(`filter tab "${label}" not found`)
+  return tab as HTMLButtonElement
+}
+
+/** Reads each `.todo-filter-tabs` button as an exact { label, count, pressed }
+ * triple. Exact per-button matching avoids the false positives substring
+ * matching would allow (e.g. a count of '12' containing '1'). */
+function readFilterTabs(
+  container: HTMLElement,
+): Array<{ label: string; count: string; pressed: boolean }> {
+  const tabs = container.querySelector('.todo-filter-tabs')
+  if (!tabs) throw new Error('.todo-filter-tabs is not rendered')
+  return Array.from(tabs.querySelectorAll('button')).map(button => {
+    const count = button.querySelector('.todo-filter-tabs__count')?.textContent ?? ''
+    return {
+      label: (button.textContent ?? '').replace(count, '').trim(),
+      count,
+      pressed: button.getAttribute('aria-pressed') === 'true',
+    }
+  })
 }
 
 afterEach(() => {
@@ -372,5 +414,86 @@ describe('TodoPage', () => {
     expect(screen.getByTestId('todo-loading')).toHaveAttribute('aria-busy', 'true')
     expect(container.querySelectorAll('.todo-skeleton').length).toBeGreaterThan(0)
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+  })
+
+  it('filter tabs toggle visible items', async () => {
+    mockFetch(twoItemsHandler())
+    const user = userEvent.setup()
+    render(<TodoPage />)
+    await screen.findByText('active task')
+    expect(screen.getByText('finished task')).toBeInTheDocument()
+
+    await user.click(getFilterTab('Active'))
+    expect(screen.queryByText('finished task')).not.toBeInTheDocument()
+    expect(screen.getByText('active task')).toBeInTheDocument()
+
+    await user.click(getFilterTab('Done'))
+    expect(screen.queryByText('active task')).not.toBeInTheDocument()
+    expect(screen.getByText('finished task')).toBeInTheDocument()
+
+    await user.click(getFilterTab('All'))
+    expect(screen.getByText('active task')).toBeInTheDocument()
+    expect(screen.getByText('finished task')).toBeInTheDocument()
+  })
+
+  it('filter tabs show aria-pressed', async () => {
+    mockFetch(twoItemsHandler())
+    const user = userEvent.setup()
+    render(<TodoPage />)
+    await screen.findByText('active task')
+
+    expect(getFilterTab('All')).toHaveAttribute('aria-pressed', 'true')
+    expect(getFilterTab('Active')).toHaveAttribute('aria-pressed', 'false')
+    expect(getFilterTab('Done')).toHaveAttribute('aria-pressed', 'false')
+
+    await user.click(getFilterTab('Active'))
+    expect(getFilterTab('All')).toHaveAttribute('aria-pressed', 'false')
+    expect(getFilterTab('Active')).toHaveAttribute('aria-pressed', 'true')
+    expect(getFilterTab('Done')).toHaveAttribute('aria-pressed', 'false')
+
+    await user.click(getFilterTab('Done'))
+    expect(getFilterTab('All')).toHaveAttribute('aria-pressed', 'false')
+    expect(getFilterTab('Active')).toHaveAttribute('aria-pressed', 'false')
+    expect(getFilterTab('Done')).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('active filter empty shows celebration', async () => {
+    mockFetch(enabledHandler((url, init) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/v1/todo/items' && method === 'GET') {
+        return jsonResponse({ items: [{ index: 0, text: 'finished task', done: true }] })
+      }
+      return undefined
+    }))
+    const user = userEvent.setup()
+    render(<TodoPage />)
+    await screen.findByText('finished task')
+
+    await user.click(getFilterTab('Active'))
+    expect(await screen.findByText('All done!')).toBeInTheDocument()
+    expect(screen.queryByText('finished task')).not.toBeInTheDocument()
+  })
+
+  it('done filter empty shows noCompleted', async () => {
+    mockFetch(enabledHandler())
+    const user = userEvent.setup()
+    render(<TodoPage />)
+    await screen.findByText('buy milk')
+
+    await user.click(getFilterTab('Done'))
+    expect(await screen.findByText('Nothing completed yet')).toBeInTheDocument()
+    expect(screen.queryByText('buy milk')).not.toBeInTheDocument()
+  })
+
+  it('filter tabs show counts', async () => {
+    mockFetch(twoItemsHandler())
+    const { container } = render(<TodoPage />)
+    await screen.findByTestId('todo-page')
+
+    expect(readFilterTabs(container)).toEqual([
+      { label: 'All', count: '2', pressed: true },
+      { label: 'Active', count: '1', pressed: false },
+      { label: 'Done', count: '1', pressed: false },
+    ])
   })
 })
