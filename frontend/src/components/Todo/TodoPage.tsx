@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ClipboardList, StickyNote, Plus, Pencil, Trash2, Check, X } from 'lucide-react'
+import {
+  ClipboardList,
+  StickyNote,
+  Plus,
+  Pencil,
+  Trash2,
+  Check,
+  X,
+  CheckCircle2,
+} from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import {
   fetchTodoStatus,
@@ -13,6 +22,50 @@ import {
   deleteNote,
 } from '../../api/todo'
 import type { TodoItem, TodoNote } from '../../api/todo'
+
+interface TodoStatsBarProps {
+  items: TodoItem[]
+  notes: TodoNote[]
+}
+
+function TodoStatsBar({ items, notes }: TodoStatsBarProps) {
+  const { t } = useTranslation()
+  const total = items.length
+  const done = items.filter(item => item.done).length
+  const remaining = total - done
+  const pct = total === 0 ? 0 : Math.round((done / total) * 100)
+
+  return (
+    <div className="todo-stats card">
+      <div className="todo-stats__item">
+        <ClipboardList className="todo-stats__icon" size={16} />
+        <span className="todo-stats__num">{remaining}</span>{' '}
+        <span className="todo-stats__label">{t('todo.remaining')}</span>
+      </div>
+      <div className="todo-stats__item">
+        <CheckCircle2 className="todo-stats__icon todo-stats__icon--done" size={16} />
+        <span className="todo-stats__num">{done}</span>{' '}
+        <span className="todo-stats__label">{t('todo.doneCount')}</span>
+      </div>
+      <div className="todo-stats__item">
+        <StickyNote className="todo-stats__icon todo-stats__icon--notes" size={16} />
+        <span className="todo-stats__num">{notes.length}</span>{' '}
+        <span className="todo-stats__label">{t('todo.noteCount')}</span>
+      </div>
+      <div
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={pct}
+        aria-label={t('todo.progress')}
+        className="todo-stats__progress"
+      >
+        <div className="todo-stats__progress-fill" style={{ width: `${pct}%` }} />
+      </div>
+      <span className="todo-stats__pct">{pct}%</span>
+    </div>
+  )
+}
 
 interface TodoListPanelProps {
   items: TodoItem[]
@@ -416,7 +469,12 @@ export function TodoPage() {
   if (loading) {
     return (
       <div className="page-container" data-testid="todo-loading">
-        <p className="todo-status">{t('common.loading')}</p>
+        <div className="page-title">{t('todo.title')}</div>
+        <div className="todo-skeleton todo-skeleton--stats" />
+        <div className="todo-page">
+          <div className="todo-skeleton todo-skeleton--panel" />
+          <div className="todo-skeleton todo-skeleton--panel" />
+        </div>
       </div>
     )
   }
@@ -454,6 +512,7 @@ export function TodoPage() {
           {error}
         </p>
       )}
+      <TodoStatsBar items={items} notes={notes} />
       <div className="todo-page" data-testid="todo-page">
         <section className="todo-page__panel card" data-testid="todo-items-panel">
           <div className="card-title">

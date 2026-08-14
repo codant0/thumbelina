@@ -295,4 +295,67 @@ describe('TodoPage', () => {
     expect(await screen.findByTestId('todo-error')).toBeInTheDocument()
     expect(screen.getByText('buy milk')).toBeInTheDocument()
   })
+
+  it('renders stats bar with correct counts', async () => {
+    mockFetch(enabledHandler((url, init) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/v1/todo/items' && method === 'GET') {
+        return jsonResponse({
+          items: [
+            { index: 0, text: 'task a', done: false },
+            { index: 1, text: 'task b', done: true },
+          ],
+        })
+      }
+      if (url === '/api/v1/todo/notes' && method === 'GET') {
+        return jsonResponse({
+          notes: [
+            { index: 0, timestamp: '2026-08-14 10:00', content: 'note a' },
+            { index: 1, timestamp: '2026-08-14 11:00', content: 'note b' },
+            { index: 2, timestamp: '2026-08-14 12:00', content: 'note c' },
+          ],
+        })
+      }
+      return undefined
+    }))
+    const { container } = render(<TodoPage />)
+    await screen.findByTestId('todo-page')
+
+    const stats = container.querySelector('.todo-stats')
+    expect(stats).not.toBeNull()
+    expect(stats).toHaveTextContent('1 pending')
+    expect(stats).toHaveTextContent('1 completed')
+    expect(stats).toHaveTextContent('3 notes')
+    const progressbar = screen.getByRole('progressbar')
+    expect(progressbar).toHaveAttribute('aria-valuenow', '50')
+    expect(progressbar).toHaveAttribute('aria-valuemin', '0')
+    expect(progressbar).toHaveAttribute('aria-valuemax', '100')
+  })
+
+  it('stats bar shows zero state', async () => {
+    mockFetch(enabledHandler((url, init) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/v1/todo/items' && method === 'GET') return jsonResponse({ items: [] })
+      if (url === '/api/v1/todo/notes' && method === 'GET') return jsonResponse({ notes: [] })
+      return undefined
+    }))
+    const { container } = render(<TodoPage />)
+    await screen.findByTestId('todo-page')
+
+    const stats = container.querySelector('.todo-stats')
+    expect(stats).not.toBeNull()
+    expect(stats).toHaveTextContent('0 pending')
+    expect(stats).toHaveTextContent('0 completed')
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '0')
+  })
+
+  it('loading renders skeletons', async () => {
+    // Fetch never resolves, so the page stays in its loading state.
+    mockFetch(() => new Promise<Response>(() => undefined))
+    const { container } = render(<TodoPage />)
+
+    await screen.findByTestId('todo-loading')
+    expect(container.querySelectorAll('.todo-skeleton').length).toBeGreaterThan(0)
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+  })
 })

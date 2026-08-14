@@ -241,7 +241,18 @@
     "edit": "编辑",
     "delete": "删除",
     "save": "保存",
-    "cancel": "取消"
+    "cancel": "取消",
+    "all": "全部",
+    "active": "未完成",
+    "done": "已完成",
+    "remaining": "待办",
+    "doneCount": "已完成",
+    "noteCount": "随手记",
+    "progress": "完成进度",
+    "noActive": "全部完成！",
+    "noCompleted": "还没有已完成项",
+    "today": "今天",
+    "yesterday": "昨天"
   },
   "memory": {
     "title": "记忆",
