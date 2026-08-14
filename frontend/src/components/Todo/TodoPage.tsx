@@ -429,7 +429,7 @@ function TodoNotesPanel({ notes, busy, onAdd, onUpdate, onDelete }: TodoNotesPan
       </div>
 
       {notes.length === 0 ? (
-        <p className="todo-empty">{t('todo.emptyNotes')}</p>
+        <TodoEmptyState icon={StickyNote} text={t('todo.emptyNotes')} />
       ) : (
         <div className="todo-note-list">
           {groups.flatMap(group => [
