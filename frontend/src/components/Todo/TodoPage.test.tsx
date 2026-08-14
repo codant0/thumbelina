@@ -496,4 +496,54 @@ describe('TodoPage', () => {
       { label: 'Done', count: '1', pressed: false },
     ])
   })
+
+  it('completing item under active filter removes it from view', async () => {
+    // Locks the invariant that writes replace `items` with the full server
+    // list and the visible subset re-derives from the active filter.
+    const fetchSpy = mockFetch(enabledHandler((url, init) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/v1/todo/items' && method === 'GET') {
+        return jsonResponse({
+          items: [
+            { index: 0, text: 'task one', done: false },
+            { index: 1, text: 'task two', done: false },
+          ],
+        })
+      }
+      if (url === '/api/v1/todo/items/0' && method === 'PATCH') {
+        return jsonResponse({
+          items: [
+            { index: 0, text: 'task one', done: true },
+            { index: 1, text: 'task two', done: false },
+          ],
+        })
+      }
+      return undefined
+    }))
+    const user = userEvent.setup()
+    const { container } = render(<TodoPage />)
+    await screen.findByText('task one')
+    expect(screen.getByText('task two')).toBeInTheDocument()
+
+    await user.click(getFilterTab('Active'))
+    expect(screen.getByText('task one')).toBeInTheDocument()
+    expect(screen.getByText('task two')).toBeInTheDocument()
+
+    await user.click(screen.getByLabelText('task one'))
+
+    await waitFor(() => {
+      const patch = fetchSpy.mock.calls.find(
+        ([url, init]) => String(url) === '/api/v1/todo/items/0' && init?.method === 'PATCH',
+      )
+      expect(patch).toBeDefined()
+      expect(JSON.parse(String(patch?.[1]?.body))).toEqual({ done: true })
+    })
+    await waitFor(() => expect(screen.queryByText('task one')).not.toBeInTheDocument())
+    expect(screen.getByText('task two')).toBeInTheDocument()
+    expect(readStats(container)).toEqual([
+      { num: '1', label: 'pending' },
+      { num: '1', label: 'completed' },
+      { num: '1', label: 'notes' },
+    ])
+  })
 })
