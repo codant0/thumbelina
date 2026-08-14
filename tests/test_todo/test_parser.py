@@ -66,6 +66,25 @@ class TestParseTodolist:
         assert [item.text for item in items] == ["a", "b", "c"]
         assert [item.index for item in items] == [0, 1, 2]
 
+    def test_serialize_todolist_normalizes_trailing_newline(self):
+        """Input without a trailing newline is normalized to end with one."""
+        assert serialize_todolist(parse_todolist("- [ ] a")) == "- [ ] a\n"
+
+    def test_parse_todolist_crlf(self):
+        """Windows CRLF line endings parse identically to LF input."""
+        crlf_segments = parse_todolist("- [ ] a\r\n- [x] b\r\n")
+        lf_segments = parse_todolist("- [ ] a\n- [x] b\n")
+
+        assert crlf_segments == lf_segments
+        assert len(crlf_segments) == 2
+        first, second = crlf_segments
+        assert isinstance(first, TodoItem)
+        assert first.text == "a"
+        assert first.done is False
+        assert isinstance(second, TodoItem)
+        assert second.text == "b"
+        assert second.done is True
+
 
 class TestParseNotes:
     """Tests for ``parse_notes`` / ``serialize_notes``."""
