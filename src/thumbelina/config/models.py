@@ -88,6 +88,16 @@ class RateLimitConfig(BaseModel):
     window_seconds: int = Field(default=60, description="Time window in seconds")
 
 
+class TodoConfig(BaseModel):
+    """TODO module configuration (local Markdown files)."""
+
+    enabled: bool = Field(default=True, description="Enable the TODO module")
+    directory: str = Field(
+        default="TODO",
+        description="Directory for the Markdown files (todolist.md / notes.md)",
+    )
+
+
 class AppConfig(BaseModel):
     """Top-level application configuration."""
 
@@ -96,6 +106,7 @@ class AppConfig(BaseModel):
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
     rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
+    todo: TodoConfig = Field(default_factory=TodoConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     cors_origins: list[str] = Field(
         default_factory=lambda: ["*"],

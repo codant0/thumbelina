@@ -25,3 +25,8 @@ memory:
 
 logging:
   level: INFO
+
+# TODO module: local Markdown-based todo list & quick notes
+todo:
+  enabled: true
+  directory: TODO
