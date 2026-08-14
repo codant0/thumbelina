@@ -105,6 +105,11 @@ def test_patch_invalid_index_404(todo_client: TestClient) -> None:
     assert response.status_code == 404
 
 
+def test_patch_negative_index_404(todo_client: TestClient) -> None:
+    response = todo_client.patch("/api/v1/todo/items/-1", json={"done": True})
+    assert response.status_code == 404
+
+
 def test_delete_invalid_index_404(todo_client: TestClient) -> None:
     response = todo_client.delete("/api/v1/todo/items/99")
     assert response.status_code == 404
