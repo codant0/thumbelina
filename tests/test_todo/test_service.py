@@ -44,6 +44,12 @@ class TestInit:
         assert (directory / "todolist.md").read_text(encoding="utf-8") == todolist_text
         assert (directory / "notes.md").read_text(encoding="utf-8") == notes_text
 
+    async def test_list_before_init_returns_empty(self, tmp_path: Path) -> None:
+        service = TodoService(tmp_path / "TODO")
+
+        assert await service.list_items() == []
+        assert await service.list_notes() == []
+
 
 class TestItems:
     """CRUD on ``todolist.md`` checkbox items."""

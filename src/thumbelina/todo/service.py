@@ -32,6 +32,13 @@ class TodoService:
     """Async CRUD service over ``todolist.md`` and ``notes.md`` in a directory."""
 
     def __init__(self, directory: str | Path) -> None:
+        """Bind the service to ``directory`` (created by :meth:`init`).
+
+        The write lock is **instance-level**: create exactly one
+        ``TodoService`` per directory. Two instances pointing at the same
+        directory do not mutually exclude each other and can interleave
+        read-modify-write cycles.
+        """
         self._directory = Path(directory)
         self._todolist_path = self._directory / TODO_LIST_FILENAME
         self._notes_path = self._directory / NOTES_FILENAME
@@ -149,9 +156,13 @@ class TodoService:
     async def _write_atomic(self, path: Path, text: str) -> None:
         def _write() -> None:
             tmp_path = path.with_name(path.name + TMP_SUFFIX)
-            with open(tmp_path, "w", encoding="utf-8", newline="\n") as handle:
-                handle.write(text)
-            os.replace(tmp_path, path)
+            try:
+                with open(tmp_path, "w", encoding="utf-8", newline="\n") as handle:
+                    handle.write(text)
+                os.replace(tmp_path, path)
+            except BaseException:
+                tmp_path.unlink(missing_ok=True)
+                raise
 
         await asyncio.to_thread(_write)
 
