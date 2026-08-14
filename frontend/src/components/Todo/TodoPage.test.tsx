@@ -75,14 +75,14 @@ describe('TodoPage', () => {
     expect(await screen.findByTestId('todo-page')).toBeInTheDocument()
     expect(screen.getByTestId('todo-items-panel')).toBeInTheDocument()
     expect(screen.getByTestId('todo-notes-panel')).toBeInTheDocument()
-    expect(screen.getByText('todo.items')).toBeInTheDocument()
-    expect(screen.getByText('todo.notes')).toBeInTheDocument()
+    expect(screen.getByText('Todo List')).toBeInTheDocument()
+    expect(screen.getByText('Quick Notes')).toBeInTheDocument()
     expect(screen.getByText('buy milk')).toBeInTheDocument()
     expect(screen.getByText('remember the milk')).toBeInTheDocument()
     expect(screen.getByText('2026-08-14 10:00')).toBeInTheDocument()
-    // Accessibility: checkbox is labeled with the item text, textarea with its placeholder key
+    // Accessibility: checkbox is labeled with the item text, textarea with its placeholder text
     expect((screen.getByLabelText('buy milk') as HTMLInputElement).type).toBe('checkbox')
-    expect(screen.getByLabelText('todo.notePlaceholder').tagName).toBe('TEXTAREA')
+    expect(screen.getByLabelText('Write a quick note…').tagName).toBe('TEXTAREA')
   })
 
   it('shows empty placeholders when both lists are empty', async () => {
@@ -94,8 +94,8 @@ describe('TodoPage', () => {
     }))
     render(<TodoPage />)
 
-    expect(await screen.findByText('todo.empty')).toBeInTheDocument()
-    expect(screen.getByText('todo.emptyNotes')).toBeInTheDocument()
+    expect(await screen.findByText('No tasks yet')).toBeInTheDocument()
+    expect(screen.getByText('No notes yet')).toBeInTheDocument()
   })
 
   it('shows degraded message when the todo module is disabled', async () => {
@@ -106,7 +106,7 @@ describe('TodoPage', () => {
     render(<TodoPage />)
 
     const disabled = await screen.findByTestId('todo-disabled')
-    expect(disabled).toHaveTextContent('todo.disabled')
+    expect(disabled).toHaveTextContent('TODO module is disabled')
     expect(screen.queryByTestId('todo-page')).not.toBeInTheDocument()
   })
 
@@ -116,9 +116,9 @@ describe('TodoPage', () => {
     render(<TodoPage />)
     await screen.findByText('buy milk')
 
-    const input = screen.getByPlaceholderText('todo.placeholder')
+    const input = screen.getByPlaceholderText('Add a new task…')
     await user.type(input, 'new task')
-    await user.click(screen.getByText('todo.add'))
+    await user.click(screen.getByText('Add'))
 
     await waitFor(() => {
       const post = fetchSpy.mock.calls.find(
@@ -137,7 +137,7 @@ describe('TodoPage', () => {
     render(<TodoPage />)
     await screen.findByText('buy milk')
 
-    await user.type(screen.getByPlaceholderText('todo.placeholder'), 'typed task{Enter}')
+    await user.type(screen.getByPlaceholderText('Add a new task…'), 'typed task{Enter}')
 
     await waitFor(() => {
       const post = fetchSpy.mock.calls.find(
@@ -154,7 +154,7 @@ describe('TodoPage', () => {
     render(<TodoPage />)
     await screen.findByText('buy milk')
 
-    await user.type(screen.getByPlaceholderText('todo.placeholder'), '   {Enter}')
+    await user.type(screen.getByPlaceholderText('Add a new task…'), '   {Enter}')
 
     const post = fetchSpy.mock.calls.find(
       ([url, init]) => String(url) === '/api/v1/todo/items' && init?.method === 'POST',
@@ -167,9 +167,9 @@ describe('TodoPage', () => {
     render(<TodoPage />)
     await screen.findByText('buy milk')
 
-    const input = screen.getByPlaceholderText('todo.placeholder')
+    const input = screen.getByPlaceholderText('Add a new task…')
     fireEvent.change(input, { target: { value: 'dup task' } })
-    const addButton = screen.getByText('todo.add')
+    const addButton = screen.getByText('Add')
     fireEvent.click(addButton)
     fireEvent.click(addButton)
 
@@ -213,7 +213,7 @@ describe('TodoPage', () => {
       )
       expect(del?.[0]).toBe('/api/v1/todo/notes/0')
     })
-    expect(await screen.findByText('todo.emptyNotes')).toBeInTheDocument()
+    expect(await screen.findByText('No notes yet')).toBeInTheDocument()
   })
 
   it('shows an error state when data loading fails with 500', async () => {
@@ -245,8 +245,8 @@ describe('TodoPage', () => {
     render(<TodoPage />)
     await screen.findByText('buy milk')
 
-    await user.type(screen.getByPlaceholderText('todo.placeholder'), 'oops')
-    await user.click(screen.getByText('todo.add'))
+    await user.type(screen.getByPlaceholderText('Add a new task…'), 'oops')
+    await user.click(screen.getByText('Add'))
 
     expect(await screen.findByTestId('todo-error')).toBeInTheDocument()
     expect(screen.getByText('buy milk')).toBeInTheDocument()

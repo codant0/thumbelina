@@ -17,6 +17,7 @@ describe('Header', () => {
     render(<Header activePage="chat" onNavigate={vi.fn()} />)
     expect(screen.getByTestId('nav-chat')).toBeInTheDocument()
     expect(screen.getByTestId('nav-tasks')).toBeInTheDocument()
+    expect(screen.getByTestId('nav-todo')).toBeInTheDocument()
     expect(screen.getByTestId('nav-memory')).toBeInTheDocument()
     expect(screen.getByTestId('nav-dream')).toBeInTheDocument()
     expect(screen.getByTestId('nav-settings')).toBeInTheDocument()
