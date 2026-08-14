@@ -4039,6 +4039,13 @@
   opacity: 1;
 }
 
+/* Touch devices have no hover: keep the row actions visible. */
+@media (hover: none) {
+  .todo-item__actions {
+    opacity: 1;
+  }
+}
+
 .todo-item__action {
   display: inline-flex;
   align-items: center;
