@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ClipboardList, StickyNote, Plus, Pencil, Trash2, Check, X } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import {
@@ -62,6 +62,7 @@ function TodoListPanel({ items, busy, onAdd, onToggle, onDelete, onSaveText }: T
           type="text"
           value={newText}
           placeholder={t('todo.placeholder')}
+          aria-label={t('todo.placeholder')}
           disabled={busy}
           onChange={e => setNewText(e.target.value)}
           onKeyDown={e => {
@@ -97,6 +98,7 @@ function TodoListPanel({ items, busy, onAdd, onToggle, onDelete, onSaveText }: T
                     className="todo-item__edit-input form-input"
                     type="text"
                     value={editText}
+                    aria-label={t('todo.edit')}
                     autoFocus
                     disabled={busy}
                     onChange={e => setEditText(e.target.value)}
@@ -129,6 +131,7 @@ function TodoListPanel({ items, busy, onAdd, onToggle, onDelete, onSaveText }: T
                     type="checkbox"
                     checked={item.done}
                     disabled={busy}
+                    aria-label={item.text}
                     onChange={() => onToggle(item)}
                   />
                   <span className="todo-item__text">{item.text}</span>
@@ -206,6 +209,7 @@ function TodoNotesPanel({ notes, busy, onAdd, onUpdate, onDelete }: TodoNotesPan
           className="todo-note-form__textarea form-input"
           value={draft}
           placeholder={t('todo.notePlaceholder')}
+          aria-label={t('todo.notePlaceholder')}
           rows={3}
           disabled={busy}
           onChange={e => setDraft(e.target.value)}
@@ -253,6 +257,7 @@ function TodoNotesPanel({ notes, busy, onAdd, onUpdate, onDelete }: TodoNotesPan
                   <textarea
                     className="todo-note__edit-textarea form-input"
                     value={editDraft}
+                    aria-label={t('todo.edit')}
                     rows={3}
                     autoFocus
                     disabled={busy}
@@ -292,6 +297,9 @@ export function TodoPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  // Synchronous mutex: guards against duplicate requests from rapid clicks
+  // before the busy state re-render takes effect.
+  const busyRef = useRef(false)
 
   const loadAll = useCallback(async () => {
     setLoading(true)
@@ -319,6 +327,8 @@ export function TodoPage() {
 
   const writeItems = useCallback(
     async (operation: () => Promise<TodoItem[]>) => {
+      if (busyRef.current) return
+      busyRef.current = true
       setBusy(true)
       setError('')
       try {
@@ -326,6 +336,7 @@ export function TodoPage() {
       } catch {
         setError(t('common.error'))
       } finally {
+        busyRef.current = false
         setBusy(false)
       }
     },
@@ -334,6 +345,8 @@ export function TodoPage() {
 
   const writeNotes = useCallback(
     async (operation: () => Promise<TodoNote[]>) => {
+      if (busyRef.current) return
+      busyRef.current = true
       setBusy(true)
       setError('')
       try {
@@ -341,6 +354,7 @@ export function TodoPage() {
       } catch {
         setError(t('common.error'))
       } finally {
+        busyRef.current = false
         setBusy(false)
       }
     },

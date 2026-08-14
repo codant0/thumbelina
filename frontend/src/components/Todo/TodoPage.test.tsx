@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen, waitFor, within, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { TodoPage } from './TodoPage'
 
@@ -80,6 +80,9 @@ describe('TodoPage', () => {
     expect(screen.getByText('buy milk')).toBeInTheDocument()
     expect(screen.getByText('remember the milk')).toBeInTheDocument()
     expect(screen.getByText('2026-08-14 10:00')).toBeInTheDocument()
+    // Accessibility: checkbox is labeled with the item text, textarea with its placeholder key
+    expect((screen.getByLabelText('buy milk') as HTMLInputElement).type).toBe('checkbox')
+    expect(screen.getByLabelText('todo.notePlaceholder').tagName).toBe('TEXTAREA')
   })
 
   it('shows empty placeholders when both lists are empty', async () => {
@@ -157,6 +160,26 @@ describe('TodoPage', () => {
       ([url, init]) => String(url) === '/api/v1/todo/items' && init?.method === 'POST',
     )
     expect(post).toBeUndefined()
+  })
+
+  it('sends only one request when the add button is clicked twice rapidly', async () => {
+    const fetchSpy = mockFetch(enabledHandler())
+    render(<TodoPage />)
+    await screen.findByText('buy milk')
+
+    const input = screen.getByPlaceholderText('todo.placeholder')
+    fireEvent.change(input, { target: { value: 'dup task' } })
+    const addButton = screen.getByText('todo.add')
+    fireEvent.click(addButton)
+    fireEvent.click(addButton)
+
+    await waitFor(() => {
+      const posts = fetchSpy.mock.calls.filter(
+        ([url, init]) => String(url) === '/api/v1/todo/items' && init?.method === 'POST',
+      )
+      expect(posts).toHaveLength(1)
+    })
+    expect(await screen.findByText('dup task')).toBeInTheDocument()
   })
 
   it('toggles a todo item done via checkbox with PATCH done:true', async () => {
