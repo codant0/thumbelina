@@ -1,5 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { ClipboardList, StickyNote, Plus, Pencil, Trash2, Check, X } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  ClipboardList,
+  StickyNote,
+  Plus,
+  Pencil,
+  Trash2,
+  Check,
+  X,
+  CheckCircle2,
+  Inbox,
+} from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import {
   fetchTodoStatus,
@@ -14,8 +25,106 @@ import {
 } from '../../api/todo'
 import type { TodoItem, TodoNote } from '../../api/todo'
 
-interface TodoListPanelProps {
+interface TodoStatsBarProps {
   items: TodoItem[]
+  notes: TodoNote[]
+}
+
+function TodoStatsBar({ items, notes }: TodoStatsBarProps) {
+  const { t } = useTranslation()
+  const total = items.length
+  const done = items.filter(item => item.done).length
+  const remaining = total - done
+  const pct = total === 0 ? 0 : Math.round((done / total) * 100)
+
+  return (
+    <div className="todo-stats card">
+      <div className="todo-stats__item">
+        <ClipboardList className="todo-stats__icon" size={16} />
+        <span className="todo-stats__num">{remaining}</span>{' '}
+        <span className="todo-stats__label">{t('todo.remaining')}</span>
+      </div>
+      <div className="todo-stats__item">
+        <CheckCircle2 className="todo-stats__icon todo-stats__icon--done" size={16} />
+        <span className="todo-stats__num">{done}</span>{' '}
+        <span className="todo-stats__label">{t('todo.doneCount')}</span>
+      </div>
+      <div className="todo-stats__item">
+        <StickyNote className="todo-stats__icon todo-stats__icon--notes" size={16} />
+        <span className="todo-stats__num">{notes.length}</span>{' '}
+        <span className="todo-stats__label">{t('todo.noteCount')}</span>
+      </div>
+      <div
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={pct}
+        aria-valuetext={`${pct}%`}
+        aria-label={t('todo.progress')}
+        className="todo-stats__progress"
+      >
+        <div className="todo-stats__progress-fill" style={{ width: `${pct}%` }} />
+      </div>
+      <span className="todo-stats__pct">{pct}%</span>
+    </div>
+  )
+}
+
+type TodoFilter = 'all' | 'active' | 'done'
+
+interface TodoEmptyStateProps {
+  icon: LucideIcon
+  text: string
+  variant?: 'default' | 'celebrate'
+}
+
+function TodoEmptyState({ icon: Icon, text, variant = 'default' }: TodoEmptyStateProps) {
+  const modifier = variant === 'celebrate' ? ' todo-empty-state--celebrate' : ''
+  return (
+    <div className={`todo-empty-state${modifier}`}>
+      <Icon size={32} />
+      <p>{text}</p>
+    </div>
+  )
+}
+
+interface TodoFilterTabsProps {
+  value: TodoFilter
+  counts: { all: number; active: number; done: number }
+  onChange: (value: TodoFilter) => void
+}
+
+function TodoFilterTabs({ value, counts, onChange }: TodoFilterTabsProps) {
+  const { t } = useTranslation()
+  const tabs: Array<{ key: TodoFilter; label: string; count: number }> = [
+    { key: 'all', label: t('todo.all'), count: counts.all },
+    { key: 'active', label: t('todo.active'), count: counts.active },
+    { key: 'done', label: t('todo.done'), count: counts.done },
+  ]
+  return (
+    <div className="todo-filter-tabs">
+      {tabs.map(tab => (
+        <button
+          key={tab.key}
+          type="button"
+          aria-pressed={value === tab.key}
+          className={`todo-filter-tabs__tab${value === tab.key ? ' todo-filter-tabs__tab--active' : ''}`}
+          onClick={() => onChange(tab.key)}
+        >
+          {tab.label} <span className="todo-filter-tabs__count">{tab.count}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+interface TodoListPanelProps {
+  /** Items visible under the current filter. */
+  items: TodoItem[]
+  /** Unfiltered items, used for the filter counts and the empty-state decision. */
+  allItems: TodoItem[]
+  filter: TodoFilter
+  onFilterChange: (value: TodoFilter) => void
   busy: boolean
   onAdd: (text: string) => void
   onToggle: (item: TodoItem) => void
@@ -23,7 +132,17 @@ interface TodoListPanelProps {
   onSaveText: (index: number, text: string) => void
 }
 
-function TodoListPanel({ items, busy, onAdd, onToggle, onDelete, onSaveText }: TodoListPanelProps) {
+function TodoListPanel({
+  items,
+  allItems,
+  filter,
+  onFilterChange,
+  busy,
+  onAdd,
+  onToggle,
+  onDelete,
+  onSaveText,
+}: TodoListPanelProps) {
   const { t } = useTranslation()
   const [newText, setNewText] = useState('')
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
@@ -66,8 +185,23 @@ function TodoListPanel({ items, busy, onAdd, onToggle, onDelete, onSaveText }: T
     setEditText('')
   }, [editingIndex, editText, busy, onSaveText])
 
+  const doneCount = allItems.filter(item => item.done).length
+  const counts = { all: allItems.length, active: allItems.length - doneCount, done: doneCount }
+
+  const renderEmptyState = () => {
+    if (allItems.length === 0) {
+      return <TodoEmptyState icon={ClipboardList} text={t('todo.empty')} />
+    }
+    if (filter === 'active') {
+      return <TodoEmptyState icon={CheckCircle2} variant="celebrate" text={t('todo.noActive')} />
+    }
+    return <TodoEmptyState icon={Inbox} text={t('todo.noCompleted')} />
+  }
+
   return (
     <>
+      <TodoFilterTabs value={filter} counts={counts} onChange={onFilterChange} />
+
       <div className="todo-add">
         <input
           className="todo-add__input form-input"
@@ -95,7 +229,7 @@ function TodoListPanel({ items, busy, onAdd, onToggle, onDelete, onSaveText }: T
       </div>
 
       {items.length === 0 ? (
-        <p className="todo-empty">{t('todo.empty')}</p>
+        renderEmptyState()
       ) : (
         <div className="todo-list">
           {items.map(item => (
@@ -149,20 +283,22 @@ function TodoListPanel({ items, busy, onAdd, onToggle, onDelete, onSaveText }: T
                   <span className="todo-item__text">{item.text}</span>
                   <div className="todo-item__actions">
                     <button
-                      className="btn btn-ghost btn-sm"
+                      className="todo-item__action"
+                      aria-label={t('todo.edit')}
+                      title={t('todo.edit')}
                       disabled={busy}
                       onClick={() => startEdit(item)}
                     >
                       <Pencil size={14} />
-                      {t('todo.edit')}
                     </button>
                     <button
-                      className="btn btn-danger btn-sm"
+                      className="todo-item__action todo-item__action--danger"
+                      aria-label={t('todo.delete')}
+                      title={t('todo.delete')}
                       disabled={busy}
                       onClick={() => onDelete(item.index)}
                     >
                       <Trash2 size={14} />
-                      {t('todo.delete')}
                     </button>
                   </div>
                 </>
@@ -181,6 +317,36 @@ interface TodoNotesPanelProps {
   onAdd: (content: string) => void
   onUpdate: (index: number, content: string) => void
   onDelete: (index: number) => void
+}
+
+interface NoteGroup {
+  key: string
+  notes: TodoNote[]
+}
+
+/** Groups notes by the date part of their 'YYYY-MM-DD HH:MM' timestamp.
+ * Pure function: input order is preserved (API returns newest first) and
+ * groups appear in first-occurrence order. */
+function groupNotesByDay(notes: TodoNote[]): NoteGroup[] {
+  const groups = new Map<string, TodoNote[]>()
+  for (const note of notes) {
+    const key = note.timestamp.slice(0, 10)
+    const bucket = groups.get(key)
+    if (bucket) {
+      bucket.push(note)
+    } else {
+      groups.set(key, [note])
+    }
+  }
+  return Array.from(groups, ([key, bucket]) => ({ key, notes: bucket }))
+}
+
+/** Formats a Date as local YYYY-MM-DD, matching the date part of note
+ * timestamps. Manual padding is locale/timezone stable (no 'sv-SE' trick). */
+function toLocalDateKey(date: Date): string {
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${date.getFullYear()}-${month}-${day}`
 }
 
 function TodoNotesPanel({ notes, busy, onAdd, onUpdate, onDelete }: TodoNotesPanelProps) {
@@ -225,6 +391,21 @@ function TodoNotesPanel({ notes, busy, onAdd, onUpdate, onDelete }: TodoNotesPan
     setEditDraft('')
   }, [editingIndex, editDraft, busy, onUpdate])
 
+  // Translate date-group keys: today/yesterday get friendly labels, older
+  // groups show their raw YYYY-MM-DD key. Local date arithmetic avoids the
+  // UTC drift that parsing 'YYYY-MM-DD' timestamps would introduce.
+  const groups = groupNotesByDay(notes)
+  const now = new Date()
+  const todayKey = toLocalDateKey(now)
+  const yesterdayKey = toLocalDateKey(
+    new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1),
+  )
+  const groupLabel = (key: string): string => {
+    if (key === todayKey) return t('todo.today')
+    if (key === yesterdayKey) return t('todo.yesterday')
+    return key
+  }
+
   return (
     <>
       <div className="todo-note-form">
@@ -248,64 +429,75 @@ function TodoNotesPanel({ notes, busy, onAdd, onUpdate, onDelete }: TodoNotesPan
       </div>
 
       {notes.length === 0 ? (
-        <p className="todo-empty">{t('todo.emptyNotes')}</p>
+        <TodoEmptyState icon={StickyNote} text={t('todo.emptyNotes')} />
       ) : (
         <div className="todo-note-list">
-          {notes.map(note => (
-            <div key={note.index} className="todo-note" data-testid="todo-note">
-              <div className="todo-note__header">
-                <span className="todo-note__time">{note.timestamp}</span>
-                <div className="todo-note__actions">
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    disabled={busy}
-                    onClick={() => startEdit(note)}
-                  >
-                    <Pencil size={14} />
-                    {t('todo.edit')}
-                  </button>
-                  <button
-                    className="btn btn-danger btn-sm"
-                    disabled={busy}
-                    onClick={() => onDelete(note.index)}
-                    data-testid="note-delete"
-                  >
-                    <Trash2 size={14} />
-                    {t('todo.delete')}
-                  </button>
-                </div>
-              </div>
-              {editingIndex === note.index ? (
-                <div className="todo-note__edit">
-                  <textarea
-                    className="todo-note__edit-textarea form-input"
-                    value={editDraft}
-                    aria-label={t('todo.edit')}
-                    rows={3}
-                    autoFocus
-                    disabled={busy}
-                    onChange={e => setEditDraft(e.target.value)}
-                  />
-                  <div className="todo-note__edit-actions">
+          {groups.flatMap(group => [
+            <div
+              key={`group-${group.key}`}
+              className="todo-note-group__header"
+              data-testid="note-group-header"
+            >
+              {groupLabel(group.key)}
+            </div>,
+            ...group.notes.map(note => (
+              <div key={note.index} className="todo-note" data-testid="todo-note">
+                <div className="todo-note__header">
+                  <span className="todo-note__time">{note.timestamp}</span>
+                  <div className="todo-note__actions">
                     <button
-                      className="btn btn-primary btn-sm"
-                      disabled={busy || !editDraft.trim()}
-                      onClick={saveEdit}
+                      className="todo-note__action"
+                      aria-label={t('todo.edit')}
+                      title={t('todo.edit')}
+                      disabled={busy}
+                      onClick={() => startEdit(note)}
                     >
-                      <Check size={14} />
-                      {t('todo.save')}
+                      <Pencil size={14} />
                     </button>
-                    <button className="btn btn-ghost btn-sm" disabled={busy} onClick={cancelEdit}>
-                      <X size={14} />
-                      {t('todo.cancel')}
+                    <button
+                      className="todo-note__action todo-note__action--danger"
+                      aria-label={t('todo.delete')}
+                      title={t('todo.delete')}
+                      disabled={busy}
+                      onClick={() => onDelete(note.index)}
+                      data-testid="note-delete"
+                    >
+                      <Trash2 size={14} />
                     </button>
                   </div>
                 </div>
-              ) : (
-                <div className="todo-note__content">{note.content}</div>
-              )}
-            </div>
-          ))}
+                {editingIndex === note.index ? (
+                  <div className="todo-note__edit">
+                    <textarea
+                      className="todo-note__edit-textarea form-input"
+                      value={editDraft}
+                      aria-label={t('todo.edit')}
+                      rows={3}
+                      autoFocus
+                      disabled={busy}
+                      onChange={e => setEditDraft(e.target.value)}
+                    />
+                    <div className="todo-note__edit-actions">
+                      <button
+                        className="btn btn-primary btn-sm"
+                        disabled={busy || !editDraft.trim()}
+                        onClick={saveEdit}
+                      >
+                        <Check size={14} />
+                        {t('todo.save')}
+                      </button>
+                      <button className="btn btn-ghost btn-sm" disabled={busy} onClick={cancelEdit}>
+                        <X size={14} />
+                        {t('todo.cancel')}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="todo-note__content">{note.content}</div>
+                )}
+              </div>
+            )),
+          ])}
         </div>
       )}
     </>
@@ -320,9 +512,18 @@ export function TodoPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [filter, setFilter] = useState<TodoFilter>('all')
   // Synchronous mutex: guards against duplicate requests from rapid clicks
   // before the busy state re-render takes effect.
   const busyRef = useRef(false)
+
+  // Filtering is a pure view-layer concern: write operations replace `items`
+  // with the full server list and the visible subset re-derives automatically.
+  const visibleItems = useMemo(() => {
+    if (filter === 'active') return items.filter(item => !item.done)
+    if (filter === 'done') return items.filter(item => item.done)
+    return items
+  }, [items, filter])
 
   const loadAll = useCallback(async () => {
     setLoading(true)
@@ -415,8 +616,13 @@ export function TodoPage() {
 
   if (loading) {
     return (
-      <div className="page-container" data-testid="todo-loading">
-        <p className="todo-status">{t('common.loading')}</p>
+      <div className="page-container" data-testid="todo-loading" aria-busy="true">
+        <div className="page-title">{t('todo.title')}</div>
+        <div className="todo-skeleton todo-skeleton--stats" />
+        <div className="todo-page">
+          <div className="todo-skeleton todo-skeleton--panel" />
+          <div className="todo-skeleton todo-skeleton--panel" />
+        </div>
       </div>
     )
   }
@@ -454,6 +660,7 @@ export function TodoPage() {
           {error}
         </p>
       )}
+      <TodoStatsBar items={items} notes={notes} />
       <div className="todo-page" data-testid="todo-page">
         <section className="todo-page__panel card" data-testid="todo-items-panel">
           <div className="card-title">
@@ -461,7 +668,10 @@ export function TodoPage() {
             {t('todo.items')}
           </div>
           <TodoListPanel
-            items={items}
+            items={visibleItems}
+            allItems={items}
+            filter={filter}
+            onFilterChange={setFilter}
             busy={busy}
             onAdd={handleAddItem}
             onToggle={handleToggleItem}

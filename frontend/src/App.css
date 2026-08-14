@@ -3942,32 +3942,75 @@
   gap: var(--sp-2);
 }
 
+@keyframes todo-item-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 .todo-item {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
   padding: var(--sp-2) var(--sp-3);
-  background: var(--bg);
-  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  transition: border-color var(--dur-fast) var(--ease-out);
+  transition: background var(--dur-fast) var(--ease-out);
+  animation: todo-item-in var(--dur-base) var(--ease-out);
 }
 
 .todo-item:hover {
-  border-color: var(--text-secondary);
+  background: var(--bg-hover);
 }
 
+.todo-item--done {
+  opacity: 0.68;
+}
+
+/* Custom circular checkbox: appearance none + rotated-border checkmark. */
 .todo-item__checkbox {
-  accent-color: var(--accent);
-  width: 14px;
-  height: 14px;
+  appearance: none;
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
+  border: 2px solid var(--border);
+  border-radius: 50%;
+  background: transparent;
   cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.todo-item__checkbox:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.todo-item__checkbox:checked::after {
+  content: '';
+  display: block;
+  width: 4px;
+  height: 8px;
+  margin: 1px auto 0;
+  border-right: 2px solid var(--bg-surface);
+  border-bottom: 2px solid var(--bg-surface);
+  transform: rotate(45deg);
+  position: relative;
+  left: 1px;
+}
+
+.todo-item__checkbox:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 .todo-item__text {
   flex: 1;
-  font-size: var(--fs-sm);
+  font-size: var(--fs-base);
   color: var(--text-primary);
   overflow-wrap: anywhere;
 }
@@ -3982,6 +4025,75 @@
   display: flex;
   gap: var(--sp-1);
   flex-shrink: 0;
+}
+
+/* Row actions stay focusable in the DOM but only become visible on
+   hover or keyboard focus (:focus-within). */
+.todo-item__actions,
+.todo-note__actions {
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.todo-item:hover .todo-item__actions,
+.todo-item:focus-within .todo-item__actions,
+.todo-note:hover .todo-note__actions,
+.todo-note:focus-within .todo-note__actions {
+  opacity: 1;
+}
+
+/* Touch devices have no hover: keep the actions visible. */
+@media (hover: none) {
+  .todo-item__actions,
+  .todo-note__actions {
+    opacity: 1;
+  }
+}
+
+.todo-item__action,
+.todo-note__action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.todo-item__action:hover:not(:disabled),
+.todo-note__action:hover:not(:disabled) {
+  background: var(--bg-active);
+  color: var(--text-primary);
+}
+
+.todo-item__action:focus-visible,
+.todo-note__action:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.todo-item__action:disabled,
+.todo-note__action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.todo-item__action--danger,
+.todo-note__action--danger {
+  color: var(--error);
+}
+
+.todo-item__action--danger:hover:not(:disabled),
+.todo-note__action--danger:hover:not(:disabled) {
+  background: var(--error-muted);
+  color: var(--error);
 }
 
 .todo-item__edit {
@@ -4003,6 +4115,61 @@
   padding: var(--sp-2) 0;
 }
 
+.todo-filter-tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  margin-bottom: var(--sp-3);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+}
+
+.todo-filter-tabs__tab {
+  padding: var(--sp-1) var(--sp-3);
+  border: none;
+  border-radius: var(--radius-full);
+  background: transparent;
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+
+.todo-filter-tabs__tab:hover {
+  color: var(--text-primary);
+}
+
+.todo-filter-tabs__tab--active,
+.todo-filter-tabs__tab--active:hover {
+  background: var(--accent-muted);
+  color: var(--accent);
+  font-weight: var(--fw-med);
+}
+
+.todo-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-8) 0;
+  color: var(--text-secondary);
+}
+
+.todo-empty-state svg {
+  opacity: 0.6;
+}
+
+.todo-empty-state p {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
+.todo-empty-state--celebrate svg {
+  color: var(--success);
+}
+
 .todo-note-form {
   display: flex;
   flex-direction: column;
@@ -4019,16 +4186,38 @@
   line-height: 1.5;
 }
 
+/* Date-group header: label flanked by hairlines on both sides. */
+.todo-note-group__header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: var(--sp-3) 0 var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+
+.todo-note-group__header::before,
+.todo-note-group__header::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* Sticky-note card: orange accent bar marks the notes identity. */
 .todo-note {
-  padding: var(--sp-2) var(--sp-3);
+  padding: var(--sp-3);
   background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  transition: border-color var(--dur-fast) var(--ease-out);
+  border: none;
+  border-left: 3px solid var(--accent-secondary);
+  border-radius: var(--radius);
+  transition: transform var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
 }
 
 .todo-note:hover {
-  border-color: var(--text-secondary);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
 }
 
 .todo-note__header {
@@ -4047,7 +4236,7 @@
 .todo-note__content {
   font-size: var(--fs-sm);
   color: var(--text-primary);
-  line-height: 1.5;
+  line-height: 1.6;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -4062,6 +4251,93 @@
   display: flex;
   gap: var(--sp-2);
   justify-content: flex-end;
+}
+
+.todo-stats {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-5);
+}
+
+.todo-stats__item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  white-space: nowrap;
+}
+
+.todo-stats__icon {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.todo-stats__icon--done {
+  color: var(--success);
+}
+
+.todo-stats__icon--notes {
+  color: var(--accent-secondary);
+}
+
+.todo-stats__num {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semi);
+  color: var(--text-heading);
+}
+
+.todo-stats__label {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+
+.todo-stats__progress {
+  flex: 1;
+  min-width: 120px;
+  height: 6px;
+  background: var(--bg-hover);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.todo-stats__progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-hover));
+  border-radius: var(--radius-full);
+  transition: width var(--dur-slow) var(--ease-out);
+}
+
+.todo-stats__pct {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semi);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+@keyframes todo-shimmer {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.todo-skeleton {
+  background: var(--bg-hover);
+  border-radius: var(--radius-sm);
+  animation: todo-shimmer 1.2s ease-in-out infinite;
+}
+
+.todo-skeleton--stats {
+  height: 56px;
+  margin-bottom: var(--sp-3);
+}
+
+.todo-skeleton--panel {
+  height: 320px;
+  border-radius: var(--radius);
 }
 
 @media (max-width: 1023px) {

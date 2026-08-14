@@ -241,7 +241,18 @@
     "edit": "Edit",
     "delete": "Delete",
     "save": "Save",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "all": "All",
+    "active": "Active",
+    "done": "Done",
+    "remaining": "pending",
+    "doneCount": "completed",
+    "noteCount": "notes",
+    "progress": "Completion progress",
+    "noActive": "All done!",
+    "noCompleted": "Nothing completed yet",
+    "today": "Today",
+    "yesterday": "Yesterday"
   },
   "memory": {
     "title": "Memory",
