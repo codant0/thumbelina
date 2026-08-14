@@ -10,6 +10,7 @@ from thumbelina.channels.wechat_channel import WeChatChannel
 from thumbelina.memory.feedback_repo import FeedbackRepository
 from thumbelina.memory.manager import MemoryManager
 from thumbelina.memory.profiler import UserProfiler
+from thumbelina.todo.service import TodoService
 
 
 def get_memory_manager(request: Request) -> MemoryManager:
@@ -30,6 +31,14 @@ def get_user_profiler(request: Request) -> UserProfiler | None:
 def get_feedback_repo(request: Request) -> FeedbackRepository | None:
     """Get the FeedbackRepository from app.state, if available."""
     return getattr(request.app.state, "feedback_repo", None)
+
+
+def get_todo_service(request: Request) -> TodoService:
+    """Get the TodoService from app.state, or 503 if unavailable."""
+    service: TodoService | None = getattr(request.app.state, "todo_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="TODO module is not available")
+    return service
 
 
 def get_wechat_channel(request: Request) -> WeChatChannel:

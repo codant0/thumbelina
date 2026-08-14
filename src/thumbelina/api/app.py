@@ -36,6 +36,7 @@ from thumbelina.api.routes import (
     roles,
     skills,
     tasks,
+    todo,
     wechat,
 )
 from thumbelina.api.routes import (
@@ -240,6 +241,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         app.state.feedback_repo = feedback_repo
     except Exception:
         logger.warning("Feedback repository not initialized", exc_info=True)
+
+    # Initialize TODO module (independent and pluggable)
+    todo_service = None
+    if config.todo.enabled:
+        try:
+            from thumbelina.todo.service import TodoService
+
+            todo_service = TodoService(config.todo.directory)
+            await todo_service.init()
+        except Exception:
+            logger.warning("TODO module not initialized", exc_info=True)
+    app.state.todo_service = todo_service
 
     # Initialize optional subsystems
     skill_engine = None
@@ -751,6 +764,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(wechat.router, prefix="/api/v1")
     app.include_router(qq.router, prefix="/api/v1")
     app.include_router(rag.router, prefix="/api/v1")
+    app.include_router(todo.router, prefix="/api/v1")
     app.include_router(ws_router)
 
     return app
