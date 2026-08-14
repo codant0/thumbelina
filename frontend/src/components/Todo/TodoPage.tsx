@@ -319,6 +319,36 @@ interface TodoNotesPanelProps {
   onDelete: (index: number) => void
 }
 
+interface NoteGroup {
+  key: string
+  notes: TodoNote[]
+}
+
+/** Groups notes by the date part of their 'YYYY-MM-DD HH:MM' timestamp.
+ * Pure function: input order is preserved (API returns newest first) and
+ * groups appear in first-occurrence order. */
+function groupNotesByDay(notes: TodoNote[]): NoteGroup[] {
+  const groups = new Map<string, TodoNote[]>()
+  for (const note of notes) {
+    const key = note.timestamp.slice(0, 10)
+    const bucket = groups.get(key)
+    if (bucket) {
+      bucket.push(note)
+    } else {
+      groups.set(key, [note])
+    }
+  }
+  return Array.from(groups, ([key, bucket]) => ({ key, notes: bucket }))
+}
+
+/** Formats a Date as local YYYY-MM-DD, matching the date part of note
+ * timestamps. Manual padding is locale/timezone stable (no 'sv-SE' trick). */
+function toLocalDateKey(date: Date): string {
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${date.getFullYear()}-${month}-${day}`
+}
+
 function TodoNotesPanel({ notes, busy, onAdd, onUpdate, onDelete }: TodoNotesPanelProps) {
   const { t } = useTranslation()
   const [draft, setDraft] = useState('')
@@ -361,6 +391,21 @@ function TodoNotesPanel({ notes, busy, onAdd, onUpdate, onDelete }: TodoNotesPan
     setEditDraft('')
   }, [editingIndex, editDraft, busy, onUpdate])
 
+  // Translate date-group keys: today/yesterday get friendly labels, older
+  // groups show their raw YYYY-MM-DD key. Local date arithmetic avoids the
+  // UTC drift that parsing 'YYYY-MM-DD' timestamps would introduce.
+  const groups = groupNotesByDay(notes)
+  const now = new Date()
+  const todayKey = toLocalDateKey(now)
+  const yesterdayKey = toLocalDateKey(
+    new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1),
+  )
+  const groupLabel = (key: string): string => {
+    if (key === todayKey) return t('todo.today')
+    if (key === yesterdayKey) return t('todo.yesterday')
+    return key
+  }
+
   return (
     <>
       <div className="todo-note-form">
@@ -387,61 +432,72 @@ function TodoNotesPanel({ notes, busy, onAdd, onUpdate, onDelete }: TodoNotesPan
         <p className="todo-empty">{t('todo.emptyNotes')}</p>
       ) : (
         <div className="todo-note-list">
-          {notes.map(note => (
-            <div key={note.index} className="todo-note" data-testid="todo-note">
-              <div className="todo-note__header">
-                <span className="todo-note__time">{note.timestamp}</span>
-                <div className="todo-note__actions">
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    disabled={busy}
-                    onClick={() => startEdit(note)}
-                  >
-                    <Pencil size={14} />
-                    {t('todo.edit')}
-                  </button>
-                  <button
-                    className="btn btn-danger btn-sm"
-                    disabled={busy}
-                    onClick={() => onDelete(note.index)}
-                    data-testid="note-delete"
-                  >
-                    <Trash2 size={14} />
-                    {t('todo.delete')}
-                  </button>
-                </div>
-              </div>
-              {editingIndex === note.index ? (
-                <div className="todo-note__edit">
-                  <textarea
-                    className="todo-note__edit-textarea form-input"
-                    value={editDraft}
-                    aria-label={t('todo.edit')}
-                    rows={3}
-                    autoFocus
-                    disabled={busy}
-                    onChange={e => setEditDraft(e.target.value)}
-                  />
-                  <div className="todo-note__edit-actions">
+          {groups.flatMap(group => [
+            <div
+              key={`group-${group.key}`}
+              className="todo-note-group__header"
+              data-testid="note-group-header"
+            >
+              {groupLabel(group.key)}
+            </div>,
+            ...group.notes.map(note => (
+              <div key={note.index} className="todo-note" data-testid="todo-note">
+                <div className="todo-note__header">
+                  <span className="todo-note__time">{note.timestamp}</span>
+                  <div className="todo-note__actions">
                     <button
-                      className="btn btn-primary btn-sm"
-                      disabled={busy || !editDraft.trim()}
-                      onClick={saveEdit}
+                      className="todo-note__action"
+                      aria-label={t('todo.edit')}
+                      title={t('todo.edit')}
+                      disabled={busy}
+                      onClick={() => startEdit(note)}
                     >
-                      <Check size={14} />
-                      {t('todo.save')}
+                      <Pencil size={14} />
                     </button>
-                    <button className="btn btn-ghost btn-sm" disabled={busy} onClick={cancelEdit}>
-                      <X size={14} />
-                      {t('todo.cancel')}
+                    <button
+                      className="todo-note__action todo-note__action--danger"
+                      aria-label={t('todo.delete')}
+                      title={t('todo.delete')}
+                      disabled={busy}
+                      onClick={() => onDelete(note.index)}
+                      data-testid="note-delete"
+                    >
+                      <Trash2 size={14} />
                     </button>
                   </div>
                 </div>
-              ) : (
-                <div className="todo-note__content">{note.content}</div>
-              )}
-            </div>
-          ))}
+                {editingIndex === note.index ? (
+                  <div className="todo-note__edit">
+                    <textarea
+                      className="todo-note__edit-textarea form-input"
+                      value={editDraft}
+                      aria-label={t('todo.edit')}
+                      rows={3}
+                      autoFocus
+                      disabled={busy}
+                      onChange={e => setEditDraft(e.target.value)}
+                    />
+                    <div className="todo-note__edit-actions">
+                      <button
+                        className="btn btn-primary btn-sm"
+                        disabled={busy || !editDraft.trim()}
+                        onClick={saveEdit}
+                      >
+                        <Check size={14} />
+                        {t('todo.save')}
+                      </button>
+                      <button className="btn btn-ghost btn-sm" disabled={busy} onClick={cancelEdit}>
+                        <X size={14} />
+                        {t('todo.cancel')}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="todo-note__content">{note.content}</div>
+                )}
+              </div>
+            )),
+          ])}
         </div>
       )}
     </>

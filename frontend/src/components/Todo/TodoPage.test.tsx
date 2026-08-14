@@ -117,6 +117,28 @@ function readFilterTabs(
   })
 }
 
+/** Formats a Date as local YYYY-MM-DD — the same shape as the date part of
+ * note timestamps ('YYYY-MM-DD HH:MM'). Manual padding keeps the format
+ * locale-independent (no 'sv-SE' toLocaleDateString trick). */
+function toDateString(date: Date): string {
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${date.getFullYear()}-${month}-${day}`
+}
+
+/** Handler serving a custom note list, for the date-grouping tests. */
+function notesHandler(
+  notes: Array<{ index: number; timestamp: string; content: string }>,
+): FetchHandler {
+  return enabledHandler((url, init) => {
+    const method = init?.method ?? 'GET'
+    if (url === '/api/v1/todo/notes' && method === 'GET') {
+      return jsonResponse({ notes })
+    }
+    return undefined
+  })
+}
+
 afterEach(() => {
   vi.restoreAllMocks()
 })
@@ -553,8 +575,10 @@ describe('TodoPage', () => {
     await screen.findByText('buy milk')
 
     // Row actions are icon-only buttons; their text lives in aria-label/title.
-    const editButton = screen.getByLabelText('Edit')
-    const deleteButton = screen.getByLabelText('Delete')
+    // Scoped to the item row because note cards carry identically labeled actions.
+    const row = screen.getByTestId('todo-item')
+    const editButton = within(row).getByLabelText('Edit')
+    const deleteButton = within(row).getByLabelText('Delete')
     expect(editButton.tagName).toBe('BUTTON')
     expect(deleteButton.tagName).toBe('BUTTON')
     expect(editButton).not.toBeDisabled()
@@ -567,12 +591,61 @@ describe('TodoPage', () => {
     render(<TodoPage />)
     await screen.findByText('buy milk')
 
-    await user.click(screen.getByLabelText('Edit'))
+    await user.click(within(screen.getByTestId('todo-item')).getByLabelText('Edit'))
 
     // Save/Cancel keep their visible text labels (they are not icon-only).
     expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
     expect(screen.getByText('Save')).toBeInTheDocument()
     expect(screen.getByText('Cancel')).toBeInTheDocument()
+  })
+
+  it('notes grouped by day', async () => {
+    const today = toDateString(new Date())
+    const yesterday = toDateString(new Date(Date.now() - 86400000))
+    mockFetch(
+      notesHandler([
+        { index: 0, timestamp: `${today} 09:00`, content: 'today note' },
+        { index: 1, timestamp: `${yesterday} 09:00`, content: 'yesterday note' },
+      ]),
+    )
+    render(<TodoPage />)
+    await screen.findByText('today note')
+
+    // Two group headers: the current day reads 'Today', the previous one 'Yesterday'.
+    const headers = screen.getAllByTestId('note-group-header')
+    expect(headers).toHaveLength(2)
+    expect(headers[0]).toHaveTextContent('Today')
+    expect(headers[1]).toHaveTextContent('Yesterday')
+  })
+
+  it('older notes show date header', async () => {
+    mockFetch(
+      notesHandler([{ index: 0, timestamp: '2026-01-01 10:00', content: 'old note' }]),
+    )
+    render(<TodoPage />)
+    await screen.findByText('old note')
+
+    const headers = screen.getAllByTestId('note-group-header')
+    expect(headers).toHaveLength(1)
+    expect(headers[0]).toHaveTextContent('2026-01-01')
+  })
+
+  it('group preserves api order', async () => {
+    const today = toDateString(new Date())
+    mockFetch(
+      notesHandler([
+        { index: 0, timestamp: `${today} 09:00`, content: 'first note' },
+        { index: 1, timestamp: `${today} 08:00`, content: 'second note' },
+      ]),
+    )
+    render(<TodoPage />)
+    await screen.findByText('first note')
+
+    // Same-day notes stay in API order (newest first): index 0 renders first.
+    const cards = screen.getAllByTestId('todo-note')
+    expect(cards).toHaveLength(2)
+    expect(within(cards[0]).getByText('first note')).toBeInTheDocument()
+    expect(within(cards[1]).getByText('second note')).toBeInTheDocument()
   })
 })
