@@ -21,6 +21,7 @@
 - **用户建模** — 分析对话模式，构建用户偏好画像，实现个性化响应
 - **子代理系统** — 并行任务执行，支持监控/工作代理、代理间消息传递和共享状态
 - **任务调度器** — 自然语言时间解析（中英文），支持条件触发和通知广播
+- **待办清单与随手记** — 基于本地 Markdown 文件的待办清单与随手记（`TODO/todolist.md` + `TODO/notes.md`），可在 Web 界面管理
 - **插件系统** — 注册和管理工具、技能、渠道、提供商，支持沙箱验证和依赖解析
 - **QQ Bot 频道** — 通过 QQ 官方 Bot SDK（`qq-botpy`）接入，支持频道、群聊和私聊
 - **微信频道** — 通过 [weixin-bot](https://github.com/epiral/weixin-bot) 协议接入个人微信号，支持扫码登录
@@ -401,6 +402,10 @@ memory:
 
 logging:
   level: INFO               # DEBUG | INFO | WARNING | ERROR | CRITICAL
+
+todo:
+  enabled: true             # 是否启用 TODO 模块（本地 Markdown 待办清单与随手记）
+  directory: TODO           # todolist.md / notes.md 所在目录
 ```
 
 > `llm` 与 `auth` 不再是启动配置：

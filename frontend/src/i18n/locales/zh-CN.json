@@ -2,6 +2,7 @@
   "nav": {
     "chat": "聊天",
     "tasks": "任务",
+    "todo": "待办",
     "memory": "记忆",
     "dream": "梦境",
     "settings": "设置",
@@ -28,7 +29,8 @@
     "testing": "测试中…",
     "show": "显示",
     "hide": "隐藏",
-    "refresh": "刷新"
+    "refresh": "刷新",
+    "error": "出错了"
   },
   "settings": {
     "title": "设置",
@@ -224,6 +226,22 @@
     "noSubagents": "无活跃子代理",
     "noTasks": "无计划任务",
     "fetchFailed": "获取数据失败"
+  },
+  "todo": {
+    "title": "待办",
+    "items": "待办清单",
+    "notes": "随手记",
+    "placeholder": "添加新待办…",
+    "add": "添加",
+    "notePlaceholder": "写一条随手记…",
+    "addNote": "记一下",
+    "disabled": "TODO 模块未启用",
+    "empty": "暂无待办",
+    "emptyNotes": "暂无随手记",
+    "edit": "编辑",
+    "delete": "删除",
+    "save": "保存",
+    "cancel": "取消"
   },
   "memory": {
     "title": "记忆",

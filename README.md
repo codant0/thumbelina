@@ -21,6 +21,7 @@ An AI-powered personal assistant built with [FastAPI](https://fastapi.tiangolo.c
 - **User Profiler** — Analyzes conversation patterns to build user preference profiles for personalized responses
 - **Sub-Agent System** — Parallel task execution with monitor/worker agents, inter-agent messaging and shared state
 - **Task Scheduler** — Natural language time parsing (Chinese & English) with conditional triggers and notification broadcast
+- **TODO List & Quick Notes** — Local Markdown-based todo list and quick notes (`TODO/todolist.md` + `TODO/notes.md`), manageable from the Web UI
 - **Plugin System** — Register and manage tools, skills, channels, and providers with sandbox validation and dependency resolution
 - **QQ Bot Channel** — Connect via QQ official bot SDK (`qq-botpy`), supports guild, group, and private messages
 - **WeChat Channel** — iLink long-polling integration for personal WeChat account via [weixin-bot](https://github.com/epiral/weixin-bot), with QR code login
@@ -410,6 +411,10 @@ memory:
 
 logging:
   level: INFO               # DEBUG | INFO | WARNING | ERROR | CRITICAL
+
+todo:
+  enabled: true             # Enable the TODO module (local Markdown todo list & quick notes)
+  directory: TODO           # Directory holding todolist.md / notes.md
 ```
 
 > `llm` and `auth` are no longer startup configuration:

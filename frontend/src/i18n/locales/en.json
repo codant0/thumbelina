@@ -2,6 +2,7 @@
   "nav": {
     "chat": "Chat",
     "tasks": "Tasks",
+    "todo": "TODO",
     "memory": "Memory",
     "dream": "Dream",
     "settings": "Settings",
@@ -28,7 +29,8 @@
     "testing": "Testing…",
     "show": "Show",
     "hide": "Hide",
-    "refresh": "Refresh"
+    "refresh": "Refresh",
+    "error": "Something went wrong"
   },
   "settings": {
     "title": "Settings",
@@ -224,6 +226,22 @@
     "noSubagents": "No active subagents",
     "noTasks": "No scheduled tasks",
     "fetchFailed": "Failed to fetch data"
+  },
+  "todo": {
+    "title": "TODO",
+    "items": "Todo List",
+    "notes": "Quick Notes",
+    "placeholder": "Add a new task…",
+    "add": "Add",
+    "notePlaceholder": "Write a quick note…",
+    "addNote": "Add Note",
+    "disabled": "TODO module is disabled",
+    "empty": "No tasks yet",
+    "emptyNotes": "No notes yet",
+    "edit": "Edit",
+    "delete": "Delete",
+    "save": "Save",
+    "cancel": "Cancel"
   },
   "memory": {
     "title": "Memory",

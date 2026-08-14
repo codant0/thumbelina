@@ -3,6 +3,7 @@ import { Header, type Page } from './components/Layout/Header'
 import { Sidebar, WECHAT_CONVERSATION_NAME } from './components/Layout/Sidebar'
 import { ChatWindow } from './components/Chat/ChatWindow'
 import { TaskManager } from './components/Tasks/TaskManager'
+import { TodoPage } from './components/Todo/TodoPage'
 import { MemoryViewer } from './components/Memory/MemoryViewer'
 import { DreamViewer } from './components/Dream/DreamViewer'
 import { SettingsPanel } from './components/Settings/SettingsPanel'
@@ -143,6 +144,8 @@ function App() {
     switch (activePage) {
       case 'tasks':
         return <TaskManager />
+      case 'todo':
+        return <TodoPage />
       case 'memory':
         return <MemoryViewer />
       case 'dream':

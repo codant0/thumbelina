@@ -3,6 +3,7 @@ import { ThemeToggle } from './ThemeToggle'
 import {
   MessageSquare,
   ListTodo,
+  ClipboardList,
   Database,
   Sparkles,
   Settings,
@@ -12,13 +13,14 @@ import {
 } from 'lucide-react'
 import type { ComponentType } from 'react'
 
-export type Page = 'chat' | 'tasks' | 'memory' | 'dream' | 'knowledge-base' | 'settings' | 'plugins' | 'channels'
+export type Page = 'chat' | 'tasks' | 'todo' | 'memory' | 'dream' | 'knowledge-base' | 'settings' | 'plugins' | 'channels'
 
-const navKeys: Page[] = ['chat', 'tasks', 'memory', 'dream', 'knowledge-base', 'settings', 'plugins', 'channels']
+const navKeys: Page[] = ['chat', 'tasks', 'todo', 'memory', 'dream', 'knowledge-base', 'settings', 'plugins', 'channels']
 
 const NAV_ICONS: Record<Page, ComponentType<{ size?: number | string }>> = {
   chat: MessageSquare,
   tasks: ListTodo,
+  todo: ClipboardList,
   memory: Database,
   dream: Sparkles,
   'knowledge-base': BookOpen,
@@ -35,6 +37,7 @@ interface HeaderProps {
 const NAV_I18N: Record<Page, string> = {
   chat: 'nav.chat',
   tasks: 'nav.tasks',
+  todo: 'nav.todo',
   memory: 'nav.memory',
   dream: 'nav.dream',
   'knowledge-base': 'nav.knowledgeBase',
