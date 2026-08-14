@@ -57,6 +57,7 @@ function TodoStatsBar({ items, notes }: TodoStatsBarProps) {
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={pct}
+        aria-valuetext={`${pct}%`}
         aria-label={t('todo.progress')}
         className="todo-stats__progress"
       >
@@ -468,7 +469,7 @@ export function TodoPage() {
 
   if (loading) {
     return (
-      <div className="page-container" data-testid="todo-loading">
+      <div className="page-container" data-testid="todo-loading" aria-busy="true">
         <div className="page-title">{t('todo.title')}</div>
         <div className="todo-skeleton todo-skeleton--stats" />
         <div className="todo-page">

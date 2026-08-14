@@ -63,6 +63,18 @@ function enabledHandler(
   }
 }
 
+/** Reads each `.todo-stats__item` as exact { num, label } pairs. Exact per-span
+ * matching avoids the false positives substring matching would allow (e.g.
+ * '11 pending' contains '1 pending'). */
+function readStats(container: HTMLElement): Array<{ num: string; label: string }> {
+  const stats = container.querySelector('.todo-stats')
+  if (!stats) throw new Error('.todo-stats is not rendered')
+  return Array.from(stats.querySelectorAll('.todo-stats__item')).map(item => ({
+    num: item.querySelector('.todo-stats__num')?.textContent ?? '',
+    label: item.querySelector('.todo-stats__label')?.textContent ?? '',
+  }))
+}
+
 afterEach(() => {
   vi.restoreAllMocks()
 })
@@ -321,15 +333,16 @@ describe('TodoPage', () => {
     const { container } = render(<TodoPage />)
     await screen.findByTestId('todo-page')
 
-    const stats = container.querySelector('.todo-stats')
-    expect(stats).not.toBeNull()
-    expect(stats).toHaveTextContent('1 pending')
-    expect(stats).toHaveTextContent('1 completed')
-    expect(stats).toHaveTextContent('3 notes')
+    expect(readStats(container)).toEqual([
+      { num: '1', label: 'pending' },
+      { num: '1', label: 'completed' },
+      { num: '3', label: 'notes' },
+    ])
     const progressbar = screen.getByRole('progressbar')
     expect(progressbar).toHaveAttribute('aria-valuenow', '50')
     expect(progressbar).toHaveAttribute('aria-valuemin', '0')
     expect(progressbar).toHaveAttribute('aria-valuemax', '100')
+    expect(progressbar).toHaveAttribute('aria-valuetext', '50%')
   })
 
   it('stats bar shows zero state', async () => {
@@ -342,10 +355,11 @@ describe('TodoPage', () => {
     const { container } = render(<TodoPage />)
     await screen.findByTestId('todo-page')
 
-    const stats = container.querySelector('.todo-stats')
-    expect(stats).not.toBeNull()
-    expect(stats).toHaveTextContent('0 pending')
-    expect(stats).toHaveTextContent('0 completed')
+    expect(readStats(container)).toEqual([
+      { num: '0', label: 'pending' },
+      { num: '0', label: 'completed' },
+      { num: '0', label: 'notes' },
+    ])
     expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '0')
   })
 
@@ -355,6 +369,7 @@ describe('TodoPage', () => {
     const { container } = render(<TodoPage />)
 
     await screen.findByTestId('todo-loading')
+    expect(screen.getByTestId('todo-loading')).toHaveAttribute('aria-busy', 'true')
     expect(container.querySelectorAll('.todo-skeleton').length).toBeGreaterThan(0)
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
   })
