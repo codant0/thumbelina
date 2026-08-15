@@ -8,7 +8,7 @@
 
 K 收缩边界：当最近 K 轮本身就超过 50% 低水位时，K 自动收缩
 （不低于 1 —— 当前轮永远保留），超出的轮次并入待摘要区域。
-轮次由原子的删除单元组成，因此
+轮次由原子单元组成，因此
 ``AIMessage(tool_calls)``/``ToolMessage`` 配对绝不会被拆开。
 """
 
@@ -24,13 +24,14 @@ from thumbelina.agent.compression.base import (
     ContextCompressor,
     estimate_messages_tokens,
     flatten_units,
-    group_deletion_units,
+    group_atomic_units,
     leading_system_unit_count,
 )
 from thumbelina.agent.compression.sliding_window import SlidingWindowCompressor
 from thumbelina.agent.compression.summarizer_context import (
     ContextSummarizer,
     build_summary_message,
+    resolve_input_cap,
 )
 from thumbelina.llm.base import LLMProvider
 
@@ -38,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 def _split_turns(units: list[list[BaseMessage]]) -> list[list[list[BaseMessage]]]:
-    """把删除单元切分为会话轮次。
+    """把原子单元切分为会话轮次。
 
     一轮从包含 ``HumanMessage`` 的单元开始，延伸到下一个这样的单元。
     紧贴在 human 单元之前的 ``SystemMessage`` 单元序列（该轮的
@@ -65,7 +66,7 @@ def _split_turns(units: list[list[BaseMessage]]) -> list[list[list[BaseMessage]]
 
 
 def _flatten_turns(turns: list[list[list[BaseMessage]]]) -> list[BaseMessage]:
-    """把轮次（删除单元的列表）展平为单条消息序列。"""
+    """把轮次（原子单元的列表）展平为单条消息序列。"""
     return [message for turn in turns for unit in turn for message in unit]
 
 
@@ -105,7 +106,7 @@ class SummaryRecentCompressor(ContextCompressor):
     ) -> list[BaseMessage]:
         """汇总最近 K 轮之外的所有内容；那些轮次原样保留。"""
         target = max(1, int(window_tokens * LOW_WATERMARK))
-        units = group_deletion_units(messages)
+        units = group_atomic_units(messages)
         head_count = leading_system_unit_count(units)
         head = flatten_units(units[:head_count])
         work = units[head_count:]
@@ -130,7 +131,11 @@ class SummaryRecentCompressor(ContextCompressor):
             # 没有比保留轮次更旧的内容：无法压缩。
             return list(messages)
 
-        summary = await self._summarizer.summarize(middle)
+        # 单次摘要调用的输入上限与模型窗口联动（50%，封顶 12K），
+        # 小窗口模型也能安全完成摘要。
+        summary = await self._summarizer.summarize(
+            middle, max_input_tokens=resolve_input_cap(window_tokens)
+        )
         if not summary:
             logger.warning("summary_recent: summarization unavailable; degrading to pure deletion")
             return await SlidingWindowCompressor().compress(messages, window_tokens)

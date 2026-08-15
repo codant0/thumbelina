@@ -12,7 +12,7 @@ from thumbelina.agent.compression.base import (
     ContextCompressor,
     estimate_messages_tokens,
     flatten_units,
-    group_deletion_units,
+    group_atomic_units,
     leading_system_unit_count,
 )
 
@@ -27,9 +27,9 @@ class SlidingWindowCompressor(ContextCompressor):
 
     - 前导的 ``SystemMessage`` 单元序列 —— 会话级头部（角色提示词 +
       首轮用户画像）必须在整个会话期间保持稳定；
-    - 最后一个删除单元 —— 它承载着当前轮的输入，agent 仍需作答。
+    - 最后一个原子单元 —— 它承载着当前轮的输入，agent 仍需作答。
 
-    中间部分按删除单元从旧到新整体丢弃，
+    中间部分按原子单元从旧到新整体丢弃，
     因此 ``AIMessage(tool_calls)``/``ToolMessage`` 配对绝不会被拆开。
     """
 
@@ -40,7 +40,7 @@ class SlidingWindowCompressor(ContextCompressor):
     ) -> list[BaseMessage]:
         """返回移除了最旧可删单元的 *messages*。"""
         target = max(1, int(window_tokens * LOW_WATERMARK))
-        units = group_deletion_units(messages)
+        units = group_atomic_units(messages)
 
         # 保护前导的 system 消息序列（会话级头部）。
         head = leading_system_unit_count(units)

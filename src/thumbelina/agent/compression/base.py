@@ -7,7 +7,7 @@
 - 压缩到至多 ``window_tokens × LOW_WATERMARK``（50% 低水位），
   避免压缩在接下来的每一轮都反复触发；
 - 绝不把 ``AIMessage(tool_calls)`` 与其 ``ToolMessage`` 回复拆开 ——
-  删除以整块"删除单元"为单位进行（见 :func:`group_deletion_units`）；
+  增删均以原子单元为单位进行（见 :func:`group_atomic_units`）；
 - 返回的序列写回图状态，因此检查点存储器会把压缩后的历史
   固定下来供下一轮使用。
 """
@@ -66,12 +66,12 @@ def estimate_messages_tokens(messages: Sequence[BaseMessage]) -> int:
     return sum(estimate_tokens(message_text(message)) for message in messages)
 
 
-def group_deletion_units(messages: Sequence[BaseMessage]) -> list[list[BaseMessage]]:
-    """将 *messages* 切分为原子的删除单元。
+def group_atomic_units(messages: Sequence[BaseMessage]) -> list[list[BaseMessage]]:
+    """将 *messages* 切分为原子单元。
 
     携带 ``tool_calls`` 的 ``AIMessage`` 会与其后紧跟的 ``ToolMessage``
-    回复（按 ``tool_call_id`` 匹配）归为一组，因此一个单元要么整体
-    删除、要么整体保留。这保证了 ``ToolMessage`` 永远不会失去拥有它的
+    回复（按 ``tool_call_id`` 匹配）归为一组，因此一个单元只能整体
+    删除或整体保留。这保证了 ``ToolMessage`` 永远不会失去拥有它的
     assistant 轮次 —— 提供商会拒绝未配对的工具结果（例如 Anthropic 400）。
     其余消息各自构成单元素单元。
     """
@@ -127,7 +127,7 @@ def strip_thinking_blocks(message: AIMessage) -> AIMessage:
 
 
 def leading_system_unit_count(units: list[list[BaseMessage]]) -> int:
-    """统计仅由 ``SystemMessage`` 构成的前导删除单元数量。
+    """统计仅由 ``SystemMessage`` 构成的前导原子单元数量。
 
     会话级头部（角色提示词 + 首轮用户画像）必须在整个会话期间保持
     稳定，因此每个策略都保护这段前导序列免于删除/摘要。
@@ -139,7 +139,7 @@ def leading_system_unit_count(units: list[list[BaseMessage]]) -> int:
 
 
 def flatten_units(units: list[list[BaseMessage]]) -> list[BaseMessage]:
-    """把删除单元展平回单条消息序列。"""
+    """把原子单元展平回单条消息序列。"""
     return [message for unit in units for message in unit]
 
 
