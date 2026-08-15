@@ -69,8 +69,8 @@ async def async_checkpointer_from_url(database_url: str) -> AsyncIterator[Any]:
         from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver  # type: ignore[import-not-found]  # noqa: I001
     except ImportError:
         logger.warning(
-            "langgraph-checkpoint-sqlite is not installed; context persistence disabled",
-            exc_info=True,
+            "langgraph-checkpoint-sqlite is not installed; context persistence disabled "
+            "(install it with `pip install langgraph-checkpoint-sqlite`)"
         )
         yield None
         return
@@ -79,12 +79,9 @@ async def async_checkpointer_from_url(database_url: str) -> AsyncIterator[Any]:
     try:
         saver = await stack.enter_async_context(AsyncSqliteSaver.from_conn_string(sqlite_path))
         await saver.setup()
-    except Exception:
+    except Exception as exc:
         await stack.aclose()
-        logger.warning(
-            "Checkpointer initialization failed; context persistence disabled",
-            exc_info=True,
-        )
+        logger.warning("Checkpointer initialization failed; context persistence disabled (%s)", exc)
         yield None
         return
 
