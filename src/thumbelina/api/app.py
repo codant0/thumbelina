@@ -217,24 +217,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.memory_manager = memory
 
     # Initialize LangGraph checkpointer (persists agent graph state / the
-    # mutable LLM context between turns, keyed by conversation id). Degrades
-    # to None on failure so startup never breaks: non-sqlite URLs and a
-    # missing langgraph-checkpoint-sqlite package are tolerated.
+    # mutable LLM context between turns, keyed by conversation id).
+    # Checkpointing is a hard runtime requirement: failures (non-sqlite URL,
+    # missing package, open errors) abort startup instead of degrading.
     checkpointer_stack = AsyncExitStack()
-    checkpointer: Any = None
-    try:
-        from thumbelina.agent.checkpointer import async_checkpointer_from_url
+    from thumbelina.agent.checkpointer import async_checkpointer_from_url
 
-        checkpointer = await checkpointer_stack.enter_async_context(
-            async_checkpointer_from_url(config.memory.database_url)
-        )
-    except Exception:
-        logger.warning(
-            "Checkpointer not initialized; context persistence disabled",
-            exc_info=True,
-        )
-        await checkpointer_stack.aclose()
-        checkpointer = None
+    checkpointer = await checkpointer_stack.enter_async_context(
+        async_checkpointer_from_url(config.memory.database_url)
+    )
     app.state.checkpointer = checkpointer
 
     llm_kwargs: dict[str, Any] = {"model": config.llm.model}

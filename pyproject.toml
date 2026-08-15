@@ -79,7 +79,7 @@ target-version = "py311"
 select = ["E", "F", "I", "N", "W", "UP"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.13"
 strict = true
 packages = ["thumbelina"]
 mypy_path = "src"

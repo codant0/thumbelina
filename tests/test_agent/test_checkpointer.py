@@ -30,18 +30,17 @@ class TestAsyncCheckpointerFromUrl:
     """Tests for the async checkpointer factory lifecycle."""
 
     @pytest.mark.asyncio
-    async def test_non_sqlite_url_yields_none(self):
-        """Non-sqlite database URLs degrade to checkpointer=None."""
-        async with async_checkpointer_from_url("postgresql://localhost/db") as saver:
-            assert saver is None
+    async def test_non_sqlite_url_raises(self):
+        """Non-sqlite database URLs fail fast (checkpointing is mandatory)."""
+        with pytest.raises(RuntimeError, match="sqlite"):
+            async with async_checkpointer_from_url("postgresql://localhost/db"):
+                pass
 
     @pytest.mark.asyncio
     async def test_sqlite_url_lifecycle(self, tmp_path):
         """A sqlite URL yields a ready-to-use saver; the file persists after close."""
         db_file = tmp_path / "checkpoints.db"
         async with async_checkpointer_from_url(f"sqlite:///{db_file}") as saver:
-            if saver is None:
-                pytest.skip("langgraph-checkpoint-sqlite is not installed")
             # setup() already ran: checkpoint tables exist, unknown thread is empty.
             assert await saver.aget_tuple({"configurable": {"thread_id": "t1"}}) is None
         assert db_file.exists()

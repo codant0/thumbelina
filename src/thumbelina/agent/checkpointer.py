@@ -5,12 +5,13 @@ between agent turns, keyed by ``thread_id`` (which equals the conversation
 id). This module centralizes saver construction so that API, CLI, and test
 entry points share one lifecycle-safe factory.
 
-Graceful degradation (design doc 四.2):
+Checkpointing is a hard requirement of the runtime: this factory fails fast
+with an actionable error instead of degrading to a stateless agent.
 
-- Non-sqlite ``database_url`` values yield ``checkpointer=None`` — the agent
-  behaves exactly as before checkpointing existed.
-- A missing ``langgraph-checkpoint-sqlite`` package likewise degrades to
-  ``None`` with a warning instead of failing startup.
+- A non-sqlite ``database_url`` raises — Postgres support is a later phase.
+- A missing ``langgraph-checkpoint-sqlite`` package raises with install
+  instructions.
+- An open/setup failure propagates so startup aborts with the root cause.
 """
 
 from __future__ import annotations
@@ -18,7 +19,14 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
-from typing import Any
+
+try:
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver  # noqa: I001
+except ImportError as exc:
+    raise ImportError(
+        "langgraph-checkpoint-sqlite is required for the LangGraph context "
+        "layer. Install it with: pip install langgraph-checkpoint-sqlite"
+    ) from exc
 
 logger = logging.getLogger(__name__)
 
@@ -42,49 +50,33 @@ def sqlite_path_from_url(database_url: str) -> str | None:
 
 
 @asynccontextmanager
-async def async_checkpointer_from_url(database_url: str) -> AsyncIterator[Any]:
+async def async_checkpointer_from_url(database_url: str) -> AsyncIterator[AsyncSqliteSaver]:
     """Yield an ``AsyncSqliteSaver`` for the given database URL.
 
     The saver is created inside the caller's event loop (an aiosqlite
     requirement), its checkpoint tables are created idempotently via
     ``setup()``, and the underlying connection is closed on exit.
 
-    Args:
-        database_url: SQLAlchemy-style URL from ``MemoryConfig.database_url``.
+    Raises:
+        RuntimeError: If *database_url* is not sqlite-based (Postgres support
+            is a later phase).
+        ImportError: If ``langgraph-checkpoint-sqlite`` is not installed.
+            Initialization failures propagate unchanged.
 
     Yields:
-        An ``AsyncSqliteSaver`` instance, or ``None`` when checkpointing is
-        unavailable (non-sqlite URL, missing package, or open failure).
-        Callers must tolerate ``None`` — the agent degrades to stateless.
+        An ``AsyncSqliteSaver`` instance. Checkpointing is a hard runtime
+        requirement, so this never yields ``None`` — failures abort startup.
     """
     sqlite_path = sqlite_path_from_url(database_url)
     if sqlite_path is None:
-        logger.info("Checkpointer disabled: database_url %r is not sqlite-based", database_url)
-        yield None
-        return
-
-    try:
-        # mypy cannot resolve this namespace-package submodule (upstream
-        # packaging quirk); it imports fine at runtime.
-        from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver  # type: ignore[import-not-found]  # noqa: I001
-    except ImportError:
-        logger.warning(
-            "langgraph-checkpoint-sqlite is not installed; context persistence disabled "
-            "(install it with `pip install langgraph-checkpoint-sqlite`)"
+        raise RuntimeError(
+            f"LangGraph checkpointing requires a sqlite database_url, got "
+            f"{database_url!r}. Postgres checkpointer support is a later phase."
         )
-        yield None
-        return
 
     stack = AsyncExitStack()
-    try:
-        saver = await stack.enter_async_context(AsyncSqliteSaver.from_conn_string(sqlite_path))
-        await saver.setup()
-    except Exception as exc:
-        await stack.aclose()
-        logger.warning("Checkpointer initialization failed; context persistence disabled (%s)", exc)
-        yield None
-        return
-
+    saver = await stack.enter_async_context(AsyncSqliteSaver.from_conn_string(sqlite_path))
+    await saver.setup()
     try:
         yield saver
     finally:

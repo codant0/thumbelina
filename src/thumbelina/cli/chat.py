@@ -180,21 +180,12 @@ async def _run_chat_session(config: AppConfig, provider: str, model: str | None)
     memory_manager = MemoryManager(db_url=config.memory.database_url)
 
     # Initialize LangGraph checkpointer (persists the agent's LLM context
-    # between turns, keyed by conversation id). Degrades to None when
-    # unavailable so the CLI keeps working without checkpointing.
+    # between turns, keyed by conversation id). Checkpointing is a hard
+    # requirement: failures abort the CLI session instead of degrading.
     checkpointer_stack = AsyncExitStack()
-    checkpointer: Any = None
-    try:
-        checkpointer = await checkpointer_stack.enter_async_context(
-            async_checkpointer_from_url(config.memory.database_url)
-        )
-    except Exception:
-        logger.warning(
-            "Checkpointer not initialized; context persistence disabled",
-            exc_info=True,
-        )
-        await checkpointer_stack.aclose()
-        checkpointer = None
+    checkpointer = await checkpointer_stack.enter_async_context(
+        async_checkpointer_from_url(config.memory.database_url)
+    )
 
     # Initialize feedback repository
     feedback_repo = None

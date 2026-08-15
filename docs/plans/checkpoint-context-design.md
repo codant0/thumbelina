@@ -60,8 +60,10 @@
 - 在 `api/app.py` lifespan 创建 `AsyncSqliteSaver`（app.py:215 旁），注入共享 agent；
   **saver 挂在共享 agent 上，`clone()` 传递引用**（graph.py:477），
   克隆体共用同一 saver，不重复建连接。
-- `_build_graph()` 改为 `graph.compile(checkpointer=self._checkpointer)`；
-  `checkpointer=None` 时行为与现状完全一致（降级开关）。
+- `_build_graph()` 改为 `graph.compile(checkpointer=self._checkpointer)`。
+- **checkpointer 为硬性要求，不做降级开关**：缺 `langgraph-checkpoint-sqlite`
+  依赖、`database_url` 非 sqlite 或初始化失败时启动直接报错（fail-fast），
+  不再静默退化为无 checkpointer 运行。
 - CLI（`cli/chat.py:162`）同步接入。
 
 ### 2. thread_id 映射与调用改造
@@ -189,13 +191,14 @@ context:
     recent_turns: 6            # summary_recent 策略保留的最近轮数
 ```
 
-- 不再提供功能开关：checkpointer 能力固定开启（回滚方式为回滚代码）。
+- 不再提供功能开关：checkpointer 能力固定开启且为硬性要求——缺依赖、
+  非 sqlite 配置或初始化失败时启动报错（fail-fast），修复方式为修复环境或回滚代码。
 - 策略经 factory 按名称注册，新增策略只需实现 `ContextCompressor` 并注册。
 
 ### 8. 已知边界（本期不处理，仅记录）
 
-- 无功能开关：checkpointer 固定开启，出问题只能回滚代码；
-  上线初期需重点观察 token 消耗与回复质量。
+- 无功能开关：checkpointer 固定开启且为硬性要求（缺依赖/非 sqlite 配置
+  启动即报错），出问题修复环境或回滚代码；上线初期需重点观察 token 消耗与回复质量。
 - 窗口为模型级配置但存在回落链（会话 endpoint → 全局激活 endpoint →
   `llm.context_window`）：endpoint 未填窗口时仍落到默认值，可能与实际模型不符，
   需在 endpoint 表单中引导填写。
