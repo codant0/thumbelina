@@ -1,17 +1,15 @@
-"""Compression-specific LLM summarizer (design doc 四.5.2/5.3).
+"""专用于压缩的 LLM 摘要器（设计文档 四.5.2/5.3）。
 
-:class:`ContextSummarizer` turns a chunk of conversation history into one
-dense summary for the ``full_summary`` / ``summary_recent`` strategies.
-Unlike the memory-layer ``TitleSummarizer`` (a 1-2 sentence naming summary),
-this summarizer is built for context compression:
+:class:`ContextSummarizer` 把一段对话历史转成一条高密度摘要，
+供 ``full_summary`` / ``summary_recent`` 策略使用。与 memory 层的
+``TitleSummarizer``（1-2 句的命名摘要）不同，本摘要器为上下文压缩打造：
 
-- a long prompt that preserves facts, decisions and unfinished items;
-- batch-then-merge summarization (recursive) when a single input exceeds
-  the per-call token cap, plus hard input truncation as a final guard;
-- thinking blocks and overlong tool outputs are stripped/truncated before
-  the LLM sees the text;
-- any failure yields ``None`` so the strategy layer degrades to pure
-  deletion — compression never blocks a conversation.
+- 长提示词，保留事实、决策与未完成事项；
+- 单次输入超过单次调用 token 上限时，先分批再合并（递归），
+  另有硬性输入截断作为最后防线；
+- thinking 块与过长的工具输出在 LLM 看到文本之前先剥离/截断；
+- 任何失败都返回 ``None``，使策略层降级为纯删除 ——
+  压缩永远不会阻塞会话。
 """
 
 from __future__ import annotations
@@ -37,19 +35,19 @@ from thumbelina.rag.retrieval.context_formatter import estimate_tokens
 
 logger = logging.getLogger(__name__)
 
-#: Prefix prepended to the summary ``SystemMessage`` the strategies emit, so
-#: the model can tell the condensed history apart from live turns.
+#: 加在策略产出的摘要 ``SystemMessage`` 前面的前缀，
+#: 让模型能把浓缩历史与实时轮次区分开。
 SUMMARY_MESSAGE_PREFIX = "【对话历史摘要】\n"
 
-#: Tool outputs longer than this (chars) are truncated before summarization.
+#: 工具输出超过该长度（字符）时，在摘要前截断。
 DEFAULT_MAX_TOOL_CHARS = 2_000
 
-#: Per-LLM-call input cap (tokens). Larger inputs are split into batches
-#: that are summarized independently and then merged.
+#: 单次 LLM 调用的输入上限（token）。更大的输入拆成分批，
+#: 各自独立摘要后再合并。
 DEFAULT_MAX_INPUT_TOKENS = 12_000
 
-#: Recursion depth cap for batch-then-merge; at the cap the input is hard
-#: truncated instead of split again (guaranteed termination).
+#: 分批后合并的递归深度上限；到达上限时输入改为硬性截断，
+#: 而不再继续拆分（保证终止）。
 DEFAULT_MAX_DEPTH = 4
 
 SUMMARY_PROMPT = (
@@ -82,12 +80,11 @@ _ROLE_LABELS: dict[type[BaseMessage], str] = {
 def build_summary_message(
     summary: str, reserved_tokens: int, target_tokens: int
 ) -> SystemMessage | None:
-    """Build the summary ``SystemMessage`` sized to fit the remaining budget.
+    """构建尺寸适配剩余预算的摘要 ``SystemMessage``。
 
-    ``reserved_tokens`` is the estimated usage of the messages kept alongside
-    the summary (protected head, kept recent turns, current-turn tail).
-    Returns ``None`` when no summary can fit under ``target_tokens`` — the
-    caller should degrade to pure deletion.
+    ``reserved_tokens`` 是与摘要一同保留的消息（受保护的头部、保留的
+    最近轮次、当前轮尾部）的预估用量。当没有摘要能在 ``target_tokens``
+    之内放下时返回 ``None`` —— 调用方应降级为纯删除。
     """
     budget = target_tokens - reserved_tokens - estimate_tokens(SUMMARY_MESSAGE_PREFIX)
     if budget <= 0:
@@ -97,23 +94,22 @@ def build_summary_message(
 
 
 class ContextSummarizer:
-    """Summarize a message range into a single dense text via the LLM.
+    """通过 LLM 把一段消息区间汇总为单段高密度文本。
 
     Parameters
     ----------
     llm_provider:
-        The LLM provider used for the summarization calls. ``None`` (e.g.
-        a strategy constructed without a provider) makes every call fail
-        gracefully with ``None``.
+        用于摘要调用的 LLM provider。``None``（例如未提供 provider 就
+        构造的策略）会使每次调用都以 ``None`` 优雅失败。
     max_input_tokens:
-        Per-call input cap in estimated tokens; larger inputs are split
-        into batches and summarized recursively.
+        单次调用的输入上限（预估 token）；更大的输入拆成分批，
+        递归摘要。
     max_tool_chars:
-        Tool outputs longer than this many chars are truncated before
-        summarization (overlong tool noise contributes little signal).
+        超过该字符数的工具输出在摘要前截断（过长的工具噪声
+        几乎不贡献有效信号）。
     max_depth:
-        Recursion cap for batch-then-merge; past it the input is hard
-        truncated to ``max_input_tokens`` instead of split again.
+        分批后合并的递归上限；超过后输入改为硬性截断到
+        ``max_input_tokens``，而不再继续拆分。
     """
 
     def __init__(
@@ -130,10 +126,10 @@ class ContextSummarizer:
         self.max_depth = max_depth
 
     async def summarize(self, messages: Sequence[BaseMessage]) -> str | None:
-        """Return a summary for *messages*, or ``None`` on failure.
+        """返回 *messages* 的摘要；失败时返回 ``None``。
 
-        Failures (missing provider, LLM error, empty result) must never
-        raise: strategies fall back to pure deletion on ``None``.
+        失败（缺少 provider、LLM 错误、结果为空）绝不允许抛出：
+        策略在收到 ``None`` 时回退到纯删除。
         """
         entries = self._to_entries(messages)
         if not entries:
@@ -148,10 +144,10 @@ class ContextSummarizer:
             return None
 
     def _to_entries(self, messages: Sequence[BaseMessage]) -> list[str]:
-        """Render messages as labeled text entries, stripped for the LLM.
+        """把消息渲染为带标签的文本条目，并在送入 LLM 前剥离。
 
-        Thinking blocks are removed and overlong tool outputs truncated so
-        the model spends its budget on signal instead of noise.
+        thinking 块被移除、过长的工具输出被截断，
+        让模型把预算花在有效信号而非噪声上。
         """
         entries: list[str] = []
         for message in messages:
@@ -165,12 +161,11 @@ class ContextSummarizer:
         return entries
 
     async def _summarize_text(self, text: str, depth: int) -> str | None:
-        """Summarize *text*, batching and merging recursively when oversized.
+        """摘要 *text*；超限时递归分批再合并。
 
-        Each level splits over-budget input into batches that fit
-        ``max_input_tokens``, summarizes every batch, then merges the
-        partials (recursively again if the merge is still oversized). The
-        depth cap guarantees termination via hard truncation.
+        每一层把超预算的输入拆成适配 ``max_input_tokens`` 的分批，
+        逐批摘要，再合并各部分（若合并后仍超限则再次递归）。
+        深度上限通过硬性截断保证终止。
         """
         if estimate_tokens(text) > self.max_input_tokens and depth < self.max_depth:
             batches = self._split_batches(text)
@@ -189,10 +184,10 @@ class ContextSummarizer:
         return await self._call_llm(truncate_text_to_tokens(text, self.max_input_tokens))
 
     def _split_batches(self, text: str) -> list[str]:
-        """Split *text* into batches that each fit ``max_input_tokens``.
+        """把 *text* 拆成每批都适配 ``max_input_tokens`` 的分批。
 
-        Splits on paragraph boundaries; a single paragraph larger than the
-        cap is hard truncated first (input truncation protection).
+        按段落边界拆分；单个段落超过上限时先硬性截断
+        （输入截断保护）。
         """
         paragraphs = [part for part in text.split("\n\n") if part.strip()]
         if not paragraphs:
@@ -214,7 +209,7 @@ class ContextSummarizer:
         return batches or [text]
 
     async def _call_llm(self, text: str, *, merge: bool = False) -> str | None:
-        """Call the LLM once; ``None`` on failure (never raises)."""
+        """调用一次 LLM；失败返回 ``None``（绝不抛出）。"""
         if self.llm_provider is None:
             logger.warning("ContextSummarizer has no LLM provider; summarization unavailable")
             return None

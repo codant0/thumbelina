@@ -225,7 +225,7 @@ async def test_apply_conversation_role_without_memory():
 
 
 class TestResolveContextWindowTokens:
-    """Per-conversation context window resolution chain (T4)."""
+    """按会话的上下文窗口解析链路（T4）。"""
 
     DEFAULT = 128_000
 
@@ -290,7 +290,7 @@ class TestResolveContextWindowTokens:
 
     @pytest.mark.asyncio
     async def test_unusable_conversation_endpoint_falls_back(self):
-        """An endpoint without an api key is unusable → default window."""
+        """没有 api key 的端点不可用 → 采用默认窗口。"""
         from unittest.mock import AsyncMock, MagicMock
 
         from thumbelina.api.routes.chat import resolve_context_window_tokens
@@ -303,7 +303,7 @@ class TestResolveContextWindowTokens:
         tokens = await resolve_context_window_tokens(memory, endpoint_manager, "c1", self.DEFAULT)
 
         assert tokens == self.DEFAULT
-        # A bound-but-unusable endpoint does not fall through to the global one.
+        # 已绑定但不可用的端点不会回落到全局端点。
         endpoint_manager.get_active_endpoint_model.assert_not_called()
 
     @pytest.mark.asyncio
@@ -382,7 +382,7 @@ class TestResolveContextWindowTokens:
 
 
 def test_chat_route_passes_default_window_tokens(client):
-    """POST /chat should forward the resolved window (default here) to run()."""
+    """POST /chat 应把解析出的窗口（此处为默认值）转发给 run()。"""
     response = client.post("/api/v1/chat", json={"message": "Hello"})
     assert response.status_code == 200
 

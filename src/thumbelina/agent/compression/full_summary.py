@@ -1,17 +1,17 @@
-"""Strategy 2: full summary — replace the droppable history with one summary.
+"""策略 2：全量摘要 —— 用一条摘要替换可丢弃的历史。
 
-Behaviour per design doc 四.5.3: everything between the protected boundaries
-is handed to :class:`~thumbelina.agent.compression.summarizer_context.ContextSummarizer`
-and replaced by a single summary ``SystemMessage``. The boundaries match
-:class:`~thumbelina.agent.compression.sliding_window.SlidingWindowCompressor`:
+行为依据设计文档 四.5.3：受保护边界之间的全部内容交给
+:class:`~thumbelina.agent.compression.summarizer_context.ContextSummarizer`，
+并替换为单条摘要 ``SystemMessage``。边界与
+:class:`~thumbelina.agent.compression.sliding_window.SlidingWindowCompressor`
+一致：
 
-- the leading run of ``SystemMessage`` units (session head: role prompt +
-  first-turn user profile) is kept verbatim;
-- the final deletion unit (the current turn's input) is kept verbatim.
+- 前导的 ``SystemMessage`` 单元序列（会话头部：角色提示词 +
+  首轮用户画像）原样保留；
+- 最后一个删除单元（当前轮的输入）原样保留。
 
-When summarization fails (LLM error, empty result, or no budget left for the
-summary) the strategy degrades to pure deletion so compression never blocks
-a conversation.
+当摘要失败（LLM 错误、结果为空、或没有给摘要留下预算）时，
+该策略降级为纯删除，压缩永远不会阻塞会话。
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 
 class FullSummaryCompressor(ContextCompressor):
-    """Summarize the old history into one message, keep head and current turn."""
+    """把旧历史汇总为一条消息，保留头部与当前轮。"""
 
     name = "full_summary"
 
@@ -49,7 +49,7 @@ class FullSummaryCompressor(ContextCompressor):
 
     @property
     def llm_provider(self) -> LLMProvider | None:
-        """LLM provider used for summarization (kept in sync on hot-swap)."""
+        """用于摘要的 LLM provider（热切换时保持同步）。"""
         return self._summarizer.llm_provider
 
     @llm_provider.setter
@@ -59,13 +59,13 @@ class FullSummaryCompressor(ContextCompressor):
     async def compress(
         self, messages: Sequence[BaseMessage], window_tokens: int
     ) -> list[BaseMessage]:
-        """Summarize the droppable middle of *messages* into one message."""
+        """把 *messages* 中可丢弃的中间部分汇总为一条消息。"""
         target = max(1, int(window_tokens * LOW_WATERMARK))
         units = group_deletion_units(messages)
         head_count = leading_system_unit_count(units)
 
-        # The final unit carries the current turn's input; it must survive.
-        # With nothing between head and tail there is nothing to compress.
+        # 最后一个单元承载当前轮的输入，必须保留。
+        # 若头部与尾部之间没有内容，则无可压缩。
         if len(units) <= head_count + 1:
             return list(messages)
         head = flatten_units(units[:head_count])

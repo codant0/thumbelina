@@ -1,17 +1,17 @@
-"""Context compression framework (design doc 四.5).
+"""上下文压缩框架（设计文档 四.5）。
 
-The compress graph node trims the checkpoint message history once its
-estimated token usage reaches ``window × context.compress.threshold``:
+压缩节点在检查点消息历史的预估 token 用量达到
+``window × context.compress.threshold`` 时对其进行裁剪：
 
-- :class:`ContextCompressor` — strategy abstraction (shared contract);
-- :class:`SlidingWindowCompressor` — built-in pure-deletion strategy;
-- :class:`FullSummaryCompressor` — summarize all droppable history;
-- :class:`SummaryRecentCompressor` — summarize old history, keep the
-  recent K turns verbatim (default strategy);
-- :class:`ContextSummarizer` — the compression-specific LLM summarizer
-  (long prompt, batch-then-merge recursion, thinking/tool-output stripping);
-- :func:`create_compressor` / :func:`register_compressor` — registry so new
-  strategies can be added by configuration name only.
+- :class:`ContextCompressor` —— 策略抽象（共享契约）；
+- :class:`SlidingWindowCompressor` —— 内置的纯删除策略；
+- :class:`FullSummaryCompressor` —— 汇总所有可丢弃的历史；
+- :class:`SummaryRecentCompressor` —— 汇总旧历史，原样保留最近
+  K 轮（默认策略）；
+- :class:`ContextSummarizer` —— 专用于压缩的 LLM 摘要器
+  （长提示词、分批后合并的递归、thinking/工具输出剥离）；
+- :func:`create_compressor` / :func:`register_compressor` —— 注册表，
+  让新策略只需通过配置名即可添加。
 """
 
 from thumbelina.agent.compression.base import (

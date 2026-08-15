@@ -64,7 +64,7 @@ class TestLLMConfig:
 
 
 class TestContextWindowParsing:
-    """Tests for the shared parse_context_window() helper."""
+    """共享 parse_context_window() 辅助函数的测试。"""
 
     def test_plain_int_passthrough(self):
         from thumbelina.config.models import parse_context_window
@@ -126,7 +126,7 @@ class TestLoggingConfig:
 
 
 class TestContextConfig:
-    """Tests for ContextConfig / ContextCompressConfig models."""
+    """ContextConfig / ContextCompressConfig 模型的测试。"""
 
     def test_default_values(self):
         from thumbelina.config.models import ContextConfig
@@ -219,7 +219,7 @@ class TestAppConfig:
         assert data["llm"]["provider"] == "openai"
 
     def test_legacy_config_without_new_keys_loads(self):
-        """Configs predating context_window/ContextConfig keep working."""
+        """早于 context_window/ContextConfig 的配置继续可用。"""
         from thumbelina.config.models import AppConfig
 
         data = {
@@ -228,7 +228,7 @@ class TestAppConfig:
             "logging": {"level": "INFO"},
         }
         cfg = AppConfig.model_validate(data)
-        assert cfg.llm.context_window == "128K"  # default
+        assert cfg.llm.context_window == "128K"  # 默认值
         assert cfg.llm.context_window_tokens == 128_000
         assert cfg.context.compress.strategy == "summary_recent"
         assert cfg.context.compress.threshold == 0.8
@@ -245,4 +245,4 @@ class TestAppConfig:
         assert cfg.llm.context_window_tokens == 1_000_000
         assert cfg.context.compress.strategy == "full_summary"
         assert cfg.context.compress.threshold == 0.75
-        assert cfg.context.compress.recent_turns == 6  # default kept
+        assert cfg.context.compress.recent_turns == 6  # 默认值保留

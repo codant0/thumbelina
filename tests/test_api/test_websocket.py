@@ -124,7 +124,7 @@ def test_websocket_wechat_conversation_forwards_only_reply(client):
 
 
 def test_websocket_passes_context_window_to_stream(client):
-    """The streaming path should receive the resolved context window."""
+    """流式路径应接收到解析出的上下文窗口。"""
     recorded = {}
 
     async def _stream(message, context_window_tokens=None):
@@ -139,13 +139,13 @@ def test_websocket_passes_context_window_to_stream(client):
         messages = _collect_ws_messages(ws)
 
     assert recorded["message"] == "Hello"
-    # No endpoints configured in the fixture → llm.context_window default (128K).
+    # fixture 中未配置端点 → 使用 llm.context_window 默认值（128K）。
     assert recorded["window"] == 128_000
     assert any(m.get("done") for m in messages)
 
 
 def test_websocket_passes_context_window_to_run_when_not_streaming(client):
-    """The non-streaming path should receive the resolved context window."""
+    """非流式路径应接收到解析出的上下文窗口。"""
     client.app.state.config.llm.streaming_enabled = False
 
     with client.websocket_connect("/ws/chat") as ws:
@@ -158,7 +158,7 @@ def test_websocket_passes_context_window_to_run_when_not_streaming(client):
 
 @pytest.mark.asyncio
 async def test_conversation_lock_is_shared_and_does_not_leak():
-    """One conversation maps to one lock; entries die once unreferenced."""
+    """一个会话对应一把锁；条目在被解除引用后消亡。"""
     from thumbelina.api import websocket as ws
 
     lock_a = await ws._conversation_lock_for("cid-a")
@@ -168,14 +168,14 @@ async def test_conversation_lock_is_shared_and_does_not_leak():
     assert lock_a is not lock_b
 
     del lock_a, lock_a2, lock_b
-    # No turn holds any lock anymore, so the weak registry drops the entries.
+    # 不再有任何轮次持有锁，因此弱引用注册表丢弃了这些条目。
     assert "cid-a" not in ws._conversation_locks
     assert "cid-b" not in ws._conversation_locks
 
 
 @pytest.mark.asyncio
 async def test_per_conversation_lock_none_cid_passes_through():
-    """cid=None (no conversation) must not allocate any lock."""
+    """cid=None（无会话）时绝不能分配任何锁。"""
     from thumbelina.api import websocket as ws
 
     async with ws._per_conversation_lock(None):
@@ -185,7 +185,7 @@ async def test_per_conversation_lock_none_cid_passes_through():
 
 @pytest.mark.asyncio
 async def test_websocket_serializes_same_conversation_turns():
-    """Two connections targeting one conversation must run turns sequentially."""
+    """指向同一会话的两个连接必须串行执行各轮。"""
     from thumbelina.api import websocket as ws
 
     order = []
@@ -234,7 +234,7 @@ async def test_websocket_serializes_same_conversation_turns():
     first = asyncio.create_task(ws.websocket_chat(FakeWS("first")))
     await first_started.wait()
     second = asyncio.create_task(ws.websocket_chat(FakeWS("second")))
-    # The second turn must be parked on the conversation lock.
+    # 第二个轮次必须停在会话锁上等待。
     await asyncio.sleep(0.05)
     assert order == [("start", "first")]
     gate.set()

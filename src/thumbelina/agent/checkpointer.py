@@ -1,17 +1,15 @@
-"""Checkpointer creation helpers for the LangGraph context layer.
+"""LangGraph 上下文层的检查点存储器创建辅助函数。
 
-The checkpointer persists graph state (the mutable LLM context workspace)
-between agent turns, keyed by ``thread_id`` (which equals the conversation
-id). This module centralizes saver construction so that API, CLI, and test
-entry points share one lifecycle-safe factory.
+检查点存储器在 agent 轮次之间持久化图状态（可变的 LLM 上下文工作区），
+以 ``thread_id``（即会话 id）为键。本模块集中管理 saver 的构造，
+让 API、CLI 与测试入口共享同一个生命周期安全的工厂。
 
-Checkpointing is a hard requirement of the runtime: this factory fails fast
-with an actionable error instead of degrading to a stateless agent.
+检查点是运行时的硬性要求：该工厂快速失败并给出可操作的错误，
+而不是降级为无状态 agent。
 
-- A non-sqlite ``database_url`` raises — Postgres support is a later phase.
-- A missing ``langgraph-checkpoint-sqlite`` package raises with install
-  instructions.
-- An open/setup failure propagates so startup aborts with the root cause.
+- 非 sqlite 的 ``database_url`` 会直接报错 —— Postgres 支持是后续阶段。
+- 缺少 ``langgraph-checkpoint-sqlite`` 包时报错并附安装说明。
+- 打开/初始化失败会继续向上传播，让启动过程带着根因中止。
 """
 
 from __future__ import annotations
@@ -34,13 +32,13 @@ _SQLITE_URL_PREFIXES = ("sqlite+pysqlite:///", "sqlite:///")
 
 
 def sqlite_path_from_url(database_url: str) -> str | None:
-    """Extract the filesystem path from a sqlite ``database_url``.
+    """从 sqlite ``database_url`` 中提取文件系统路径。
 
     Args:
-        database_url: SQLAlchemy-style URL, e.g. ``sqlite:///thumbelina.db``.
+        database_url: SQLAlchemy 风格的 URL，例如 ``sqlite:///thumbelina.db``。
 
     Returns:
-        The database file path, or ``None`` if the URL is not sqlite-based.
+        数据库文件路径；若 URL 不是基于 sqlite 的，则返回 ``None``。
     """
     for prefix in _SQLITE_URL_PREFIXES:
         if database_url.startswith(prefix):
@@ -51,21 +49,20 @@ def sqlite_path_from_url(database_url: str) -> str | None:
 
 @asynccontextmanager
 async def async_checkpointer_from_url(database_url: str) -> AsyncIterator[AsyncSqliteSaver]:
-    """Yield an ``AsyncSqliteSaver`` for the given database URL.
+    """为给定的数据库 URL 生成一个 ``AsyncSqliteSaver``。
 
-    The saver is created inside the caller's event loop (an aiosqlite
-    requirement), its checkpoint tables are created idempotently via
-    ``setup()``, and the underlying connection is closed on exit.
+    saver 在调用方的事件循环内创建（aiosqlite 的要求），其检查点表
+    通过 ``setup()`` 幂等创建，底层连接在退出时关闭。
 
     Raises:
-        RuntimeError: If *database_url* is not sqlite-based (Postgres support
-            is a later phase).
-        ImportError: If ``langgraph-checkpoint-sqlite`` is not installed.
-            Initialization failures propagate unchanged.
+        RuntimeError: 如果 *database_url* 不是基于 sqlite 的
+            （Postgres 支持是后续阶段）。
+        ImportError: 如果未安装 ``langgraph-checkpoint-sqlite``。
+            初始化失败原样向上传播。
 
     Yields:
-        An ``AsyncSqliteSaver`` instance. Checkpointing is a hard runtime
-        requirement, so this never yields ``None`` — failures abort startup.
+        一个 ``AsyncSqliteSaver`` 实例。检查点是硬性运行时要求，
+        因此这里永远不会产生 ``None`` —— 失败即中止启动。
     """
     sqlite_path = sqlite_path_from_url(database_url)
     if sqlite_path is None:

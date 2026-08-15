@@ -217,7 +217,7 @@ class TestExampleConfigFile:
         data = yaml.safe_load(self._example_path().read_text(encoding="utf-8"))
         assert isinstance(data, dict)
         assert "auth" not in data
-        # llm may only carry the context_window default — no credentials/provider.
+        # llm 只能携带 context_window 默认值 —— 不得包含凭据/provider。
         llm = data.get("llm", {})
         assert set(llm) <= {"context_window"}
 

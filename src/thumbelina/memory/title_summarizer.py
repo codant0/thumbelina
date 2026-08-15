@@ -15,9 +15,9 @@ SUMMARY_PROMPT = "请用1-2句话总结以下对话的主要内容，简洁概�
 class TitleSummarizer:
     """Generates short conversation summaries using an LLM.
 
-    Positioned as a quick 1-2 sentence "title" summary; it is deliberately
-    NOT part of the context-compression pipeline (that role belongs to
-    :class:`thumbelina.agent.compression.summarizer_context.ContextSummarizer`).
+    定位为快速的 1-2 句"标题"摘要；它有意不属于上下文压缩管线
+    （该职责属于
+    :class:`thumbelina.agent.compression.summarizer_context.ContextSummarizer`）。
 
     Parameters
     ----------

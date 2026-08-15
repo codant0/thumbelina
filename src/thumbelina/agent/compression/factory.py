@@ -1,9 +1,9 @@
-"""Registry/factory mapping configuration names to compression strategies.
+"""把配置名映射到压缩策略的注册表/工厂。
 
-Strategies are registered by name; ``context.compress.strategy`` selects one
-at agent construction time. Third-party strategies only need to subclass
-:class:`~thumbelina.agent.compression.base.ContextCompressor` and call
-:func:`register_compressor` — no other code changes required.
+策略按名称注册；``context.compress.strategy`` 在 agent 构造时选定其一。
+第三方策略只需继承
+:class:`~thumbelina.agent.compression.base.ContextCompressor` 并调用
+:func:`register_compressor` —— 无需其他代码改动。
 """
 
 from __future__ import annotations
@@ -17,11 +17,10 @@ _REGISTRY: dict[str, type[ContextCompressor]] = {}
 
 
 def register_compressor(name: str, compressor_cls: type[ContextCompressor]) -> None:
-    """Register *compressor_cls* under configuration name *name*.
+    """将 *compressor_cls* 注册到配置名 *name* 之下。
 
     Raises:
-        ValueError: If *name* is already registered (prevents silently
-            shadowing a built-in strategy).
+        ValueError: 如果 *name* 已被注册（防止悄悄遮蔽内置策略）。
     """
     if name in _REGISTRY:
         raise ValueError(f"Compression strategy {name!r} is already registered")
@@ -29,19 +28,18 @@ def register_compressor(name: str, compressor_cls: type[ContextCompressor]) -> N
 
 
 def available_strategies() -> list[str]:
-    """Sorted names of all registered strategies."""
+    """所有已注册策略的名称（排序后）。"""
     return sorted(_REGISTRY)
 
 
 def create_compressor(name: str, **kwargs: Any) -> ContextCompressor:
-    """Instantiate the strategy registered as *name*.
+    """实例化以 *name* 注册的策略。
 
-    Keyword arguments are forwarded to the strategy constructor, filtered
-    down to the parameters it actually accepts — callers can pass the whole
-    compress-config bundle without knowing each strategy's signature.
+    关键字参数会转发给策略构造函数，并过滤为其实际接受的参数 ——
+    调用方可以传入整个 compress 配置包，而无需了解每个策略的签名。
 
     Raises:
-        ValueError: If *name* is not registered.
+        ValueError: 如果 *name* 未注册。
     """
     compressor_cls = _REGISTRY.get(name)
     if compressor_cls is None:
@@ -52,7 +50,7 @@ def create_compressor(name: str, **kwargs: Any) -> ContextCompressor:
 
 
 def _accepted_kwargs(cls: type[ContextCompressor], kwargs: dict[str, Any]) -> dict[str, Any]:
-    """Filter *kwargs* to the constructor parameters *cls* declares."""
+    """将 *kwargs* 过滤为 *cls* 构造函数声明的参数。"""
     init = cls.__init__
     if init is object.__init__:
         return {}

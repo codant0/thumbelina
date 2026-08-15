@@ -44,16 +44,15 @@ async def resolve_context_window_tokens(
     conversation_id: str | None,
     default_tokens: int,
 ) -> int:
-    """Resolve the effective context window (in tokens) for a conversation.
+    """解析会话的有效上下文窗口（单位为 token）。
 
-    The endpoint selection mirrors :func:`_apply_conversation_endpoint`:
-    the conversation's bound endpoint serves it when set and usable,
-    otherwise the globally active endpoint. The serving endpoint's
-    ``context_window`` wins when configured; otherwise the chain falls back
-    to ``default_tokens`` (``llm.context_window``).
+    端点选择与 :func:`_apply_conversation_endpoint` 保持一致：会话绑定
+    的端点已设置且可用时由它服务，否则使用全局活跃端点。服务端点的
+    ``context_window`` 配置后优先采用；否则链路回退到
+    ``default_tokens``（``llm.context_window``）。
 
-    Resolution must never break a chat request, so any lookup failure falls
-    back to ``default_tokens``.
+    解析绝不能破坏聊天请求，因此任何查询失败都回退到
+    ``default_tokens``。
     """
     if memory is None or endpoint_manager is None or not conversation_id:
         return default_tokens
@@ -64,9 +63,9 @@ async def resolve_context_window_tokens(
             endpoint_id = conv.get("endpoint_id")
             if endpoint_id:
                 candidate = await endpoint_manager.get_endpoint(endpoint_id)
-                # Mirror _apply_conversation_endpoint: an endpoint without an
-                # api key is unusable, so the default provider serves the
-                # conversation and the default window applies.
+                # 与 _apply_conversation_endpoint 保持一致：没有 api key 的
+                # 端点不可用，因此由默认 provider 服务该会话，
+                # 并采用默认窗口。
                 if candidate is not None and candidate.api_key:
                     endpoint = candidate
             else:
@@ -110,8 +109,8 @@ async def chat(
     # Apply per-conversation role override when configured
     await _apply_conversation_role(isolated_agent, conversation_id)
 
-    # Resolve the conversation's context window (session endpoint →
-    # globally active endpoint → llm.context_window) for the compress stage.
+    # 解析会话的上下文窗口（会话端点 → 全局活跃端点 →
+    # llm.context_window），供压缩阶段使用。
     window_tokens = await resolve_context_window_tokens(
         memory,
         getattr(http_request.app.state, "endpoint_manager", None),

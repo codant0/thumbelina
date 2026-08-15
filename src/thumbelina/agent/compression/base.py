@@ -1,17 +1,15 @@
-"""Compression strategy abstraction and shared helpers.
+"""压缩策略抽象与共享辅助函数。
 
-The compress graph node (entry → compress → agent) invokes a
-:class:`ContextCompressor` once the estimated token usage of the checkpoint
-messages reaches ``window × context.compress.threshold``. Every strategy
-shares the same contract (design doc 四.5):
+压缩节点（entry → compress → agent）在检查点消息的预估 token 用量达到
+``window × context.compress.threshold`` 时调用
+:class:`ContextCompressor`。每个策略都遵循同一契约（设计文档 四.5）：
 
-- compress down to at most ``window_tokens × LOW_WATERMARK`` (the 50% low
-  watermark) so compression does not retrigger every following turn;
-- never split an ``AIMessage(tool_calls)`` from its ``ToolMessage`` replies —
-  deletions happen on whole "deletion units" (see
-  :func:`group_deletion_units`);
-- the returned sequence is written back to the graph state, so the
-  checkpointer fixes the compressed history for the next turn.
+- 压缩到至多 ``window_tokens × LOW_WATERMARK``（50% 低水位），
+  避免压缩在接下来的每一轮都反复触发；
+- 绝不把 ``AIMessage(tool_calls)`` 与其 ``ToolMessage`` 回复拆开 ——
+  删除以整块"删除单元"为单位进行（见 :func:`group_deletion_units`）；
+- 返回的序列写回图状态，因此检查点存储器会把压缩后的历史
+  固定下来供下一轮使用。
 """
 
 from __future__ import annotations
@@ -25,21 +23,20 @@ from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolM
 
 from thumbelina.rag.retrieval.context_formatter import estimate_tokens
 
-# Low watermark: compress down to at most 50% of the window so that the
-# next turns can append again without immediately retriggering compression.
+# 低水位：最多压缩到窗口的 50%，让后续轮次可以继续追加，
+# 而不会立即再次触发压缩。
 LOW_WATERMARK = 0.5
 
-# Content-block types carrying model reasoning; Anthropic rejects replayed
-# assistant turns whose thinking blocks lost their signatures (HTTP 400).
+# 承载模型推理的内容块类型；Anthropic 会拒绝重放的、thinking 块
+# 丢失签名的 assistant 轮次（HTTP 400）。
 _THINKING_BLOCK_TYPES = ("thinking", "redacted_thinking", "reasoning")
 
 
 def message_text(message: BaseMessage) -> str:
-    """Extract estimable text from a message's ``content``.
+    """从消息的 ``content`` 中提取可估算的文本。
 
-    Handles both plain-string content and structured content blocks
-    (text/thinking dicts, e.g. Anthropic), so usage estimation covers
-    assistant turns with block-style content too.
+    同时处理纯字符串内容与结构化内容块（text/thinking 字典，
+    例如 Anthropic），使用量估算同样覆盖块式内容的 assistant 轮次。
     """
     content = message.content
     if isinstance(content, str):
@@ -59,25 +56,24 @@ def message_text(message: BaseMessage) -> str:
 
 
 def estimate_messages_tokens(messages: Sequence[BaseMessage]) -> int:
-    """Estimate the total token usage of *messages*.
+    """估算 *messages* 的总 token 用量。
 
-    Reuses the RAG :func:`~thumbelina.rag.retrieval.context_formatter.estimate_tokens`
-    estimator (CJK ≈ 2 tokens/char, other ≈ 0.25 tokens/char) — accurate
-    enough for window budget control and shared with the formatter so both
-    layers agree.
+    复用 RAG 的
+    :func:`~thumbelina.rag.retrieval.context_formatter.estimate_tokens`
+    估算器（CJK ≈ 2 tokens/字符，其他 ≈ 0.25 tokens/字符）——对窗口
+    预算控制来说足够准确，且与 formatter 共享，保证两层口径一致。
     """
     return sum(estimate_tokens(message_text(message)) for message in messages)
 
 
 def group_deletion_units(messages: Sequence[BaseMessage]) -> list[list[BaseMessage]]:
-    """Split *messages* into atomic deletion units.
+    """将 *messages* 切分为原子的删除单元。
 
-    An ``AIMessage`` carrying ``tool_calls`` is grouped with the
-    ``ToolMessage`` replies that immediately follow it (matched by
-    ``tool_call_id``), so a unit is always removed or kept as a whole.
-    This guarantees a ``ToolMessage`` never loses the assistant turn that
-    owns it — providers reject unpaired tool results (e.g. Anthropic 400).
-    All other messages form singleton units.
+    携带 ``tool_calls`` 的 ``AIMessage`` 会与其后紧跟的 ``ToolMessage``
+    回复（按 ``tool_call_id`` 匹配）归为一组，因此一个单元要么整体
+    删除、要么整体保留。这保证了 ``ToolMessage`` 永远不会失去拥有它的
+    assistant 轮次 —— 提供商会拒绝未配对的工具结果（例如 Anthropic 400）。
+    其余消息各自构成单元素单元。
     """
     units: list[list[BaseMessage]] = []
     index = 0
@@ -109,13 +105,11 @@ def group_deletion_units(messages: Sequence[BaseMessage]) -> list[list[BaseMessa
 
 
 def strip_thinking_blocks(message: AIMessage) -> AIMessage:
-    """Return *message* with thinking/reasoning content blocks removed.
+    """返回移除了 thinking/reasoning 内容块的 *message*。
 
-    After compression an assistant turn can end up at the head of the
-    sequence; replaying stale thinking blocks without their signatures makes
-    Anthropic return HTTP 400, so they are stripped defensively. Messages
-    with plain-string content or without thinking blocks are returned
-    unchanged (same object).
+    压缩后某个 assistant 轮次可能落到序列开头；重放丢失签名的过期
+    thinking 块会让 Anthropic 返回 HTTP 400，因此防御性地将其剥离。
+    纯字符串内容或不含 thinking 块的消息原样返回（同一对象）。
     """
     content = message.content
     if not isinstance(content, list):
@@ -133,11 +127,10 @@ def strip_thinking_blocks(message: AIMessage) -> AIMessage:
 
 
 def leading_system_unit_count(units: list[list[BaseMessage]]) -> int:
-    """Count leading deletion units that consist solely of ``SystemMessage``s.
+    """统计仅由 ``SystemMessage`` 构成的前导删除单元数量。
 
-    The session-level head (role prompt + first-turn user profile) must stay
-    stable for the whole conversation, so every strategy protects this
-    leading run from deletion/summarization.
+    会话级头部（角色提示词 + 首轮用户画像）必须在整个会话期间保持
+    稳定，因此每个策略都保护这段前导序列免于删除/摘要。
     """
     count = 0
     while count < len(units) and all(isinstance(m, SystemMessage) for m in units[count]):
@@ -146,17 +139,16 @@ def leading_system_unit_count(units: list[list[BaseMessage]]) -> int:
 
 
 def flatten_units(units: list[list[BaseMessage]]) -> list[BaseMessage]:
-    """Flatten deletion units back into a single message sequence."""
+    """把删除单元展平回单条消息序列。"""
     return [message for unit in units for message in unit]
 
 
 def truncate_text_to_tokens(text: str, budget_tokens: int, marker: str = "…") -> str:
-    """Truncate *text* so it stays within *budget_tokens* estimated tokens.
+    """截断 *text*，使其不超过 *budget_tokens* 个预估 token。
 
-    Appends *marker* when text was cut; the marker's own token cost is
-    accounted for, so the result never exceeds the budget. Returns ``""``
-    when even the marker cannot fit. Used as the hard input-truncation
-    protection for LLM calls (summarization batches, oversized summaries).
+    文本被截断时追加 *marker*；marker 自身的 token 开销也被计入，
+    因此结果永远不会超出预算。当连 marker 都放不下时返回 ``""``。
+    用作 LLM 调用的硬性输入截断保护（摘要分批、过大的摘要）。
     """
     if estimate_tokens(text) <= budget_tokens:
         return text
@@ -165,25 +157,24 @@ def truncate_text_to_tokens(text: str, budget_tokens: int, marker: str = "…") 
     ratio = budget_tokens / max(estimate_tokens(text), 1)
     cutoff = max(1, int(len(text) * ratio))
     result = text[:cutoff]
-    # The char-ratio cut is approximate for CJK/ASCII mixes (and the
-    # estimator floors), so walk back while the marked result still exceeds
-    # the budget — the returned string never does.
+    # 按字符比例截断对 CJK/ASCII 混合文本只是近似（估算器也有下限），
+    # 因此在加上 marker 后仍超出预算时逐步回退 —— 返回的字符串
+    # 永远不会超出。
     while result and estimate_tokens(result + marker) > budget_tokens:
         result = result[:-1]
     return result + marker
 
 
 def strip_first_assistant_thinking(messages: list[BaseMessage]) -> list[BaseMessage]:
-    """Strip thinking blocks from the first assistant message, if present.
+    """若存在，则剥离第一条 assistant 消息中的 thinking 块。
 
-    Compression can promote an ``AIMessage`` to (or near) the head of the
-    sequence. Anthropic requires thinking blocks of replayed turns to stay
-    intact, which cannot be guaranteed after deletions, so the first
-    assistant message's thinking blocks are removed. Later assistant
-    messages are untouched (their preceding tool/user turns still provide
-    the required ordering guarantees as far as this defence is concerned).
+    压缩可能把某条 ``AIMessage`` 提升到（或接近）序列头部。Anthropic
+    要求重放轮次的 thinking 块保持完整，而删除后无法保证这一点，
+    因此移除第一条 assistant 消息的 thinking 块。其后的 assistant 消息
+    不受影响（就本防御而言，它们前面的工具/用户轮次仍然提供了所需的
+    顺序保证）。
 
-    Returns the original list unchanged when nothing was stripped.
+    未剥离任何内容时原样返回原列表。
     """
     for position, message in enumerate(messages):
         if isinstance(message, AIMessage):
@@ -198,11 +189,10 @@ def strip_first_assistant_thinking(messages: list[BaseMessage]) -> list[BaseMess
 
 @dataclass(frozen=True)
 class CompressionResult:
-    """Diagnostic outcome of one compression pass.
+    """单次压缩的诊断结果。
 
-    Strategies return the compressed sequence directly; this container is
-    available for callers (compress node, tests, metrics) that want the
-    before/after usage figures alongside the payload.
+    策略直接返回压缩后的序列；本容器供需要连同载荷一起拿到
+    压缩前后用量数据的调用方（压缩节点、测试、指标）使用。
     """
 
     messages: list[BaseMessage]
@@ -211,45 +201,43 @@ class CompressionResult:
 
     @property
     def saved_tokens(self) -> int:
-        """Tokens freed by the compression pass."""
+        """本次压缩释放的 token 数。"""
         return self.tokens_before - self.tokens_after
 
 
 class ContextCompressor(abc.ABC):
-    """Base class for context compression strategies.
+    """上下文压缩策略的基类。
 
-    Implementations compress an over-budget message sequence down to at most
-    ``window_tokens × LOW_WATERMARK`` tokens while keeping
-    ``AIMessage(tool_calls)``/``ToolMessage`` pairs intact. New strategies
-    only need to subclass this and register via
-    :func:`thumbelina.agent.compression.factory.register_compressor`.
+    实现把超预算的消息序列压缩到至多
+    ``window_tokens × LOW_WATERMARK`` 个 token，同时保持
+    ``AIMessage(tool_calls)``/``ToolMessage`` 配对完整。新策略只需
+    继承本类并通过
+    :func:`thumbelina.agent.compression.factory.register_compressor` 注册。
     """
 
-    #: Configuration name the strategy is registered under
-    #: (``context.compress.strategy``).
+    #: 策略注册时使用的配置名
+    #: （``context.compress.strategy``）。
     name: ClassVar[str] = ""
 
     @abc.abstractmethod
     async def compress(
         self, messages: Sequence[BaseMessage], window_tokens: int
     ) -> list[BaseMessage]:
-        """Return the compressed replacement for *messages*.
+        """返回 *messages* 的压缩替代序列。
 
         Parameters
         ----------
         messages:
-            The full current message sequence from the graph state.
+            来自图状态的当前完整消息序列。
         window_tokens:
-            Context window of the active model, in tokens. The returned
-            sequence should occupy at most ``window_tokens × LOW_WATERMARK``.
+            当前模型的上下文窗口，单位为 token。返回的序列应占用至多
+            ``window_tokens × LOW_WATERMARK``。
 
         Returns
         -------
         list[BaseMessage]
-            The compressed sequence. Kept messages must retain their
-            original objects (and thus ids) so the state update can be a
-            pure deletion; replacement messages (e.g. summaries) are new
-            objects.
+            压缩后的序列。保留的消息必须沿用原对象（从而保留 id），
+            使状态更新可以是纯追加删除；替换消息（例如摘要）是新对象。
         """
         raise NotImplementedError
 
@@ -257,7 +245,7 @@ class ContextCompressor(abc.ABC):
 def compression_stats(
     before: Sequence[BaseMessage], after: Sequence[BaseMessage]
 ) -> CompressionResult:
-    """Build a :class:`CompressionResult` for logging/metrics."""
+    """构建用于日志/指标的 :class:`CompressionResult`。"""
     return CompressionResult(
         messages=list(after),
         tokens_before=estimate_messages_tokens(before),

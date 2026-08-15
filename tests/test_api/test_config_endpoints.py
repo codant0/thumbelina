@@ -84,7 +84,7 @@ def test_create_endpoint_response_includes_context_window(client):
     assert response.status_code == 201
     assert response.json()["context_window"] == "128K"
 
-    # Legacy endpoints without the field serialize it as null.
+    # 没有该字段的历史端点会把它序列化为 null。
     legacy = LLMEndpoint(
         id="e2",
         provider="openai",

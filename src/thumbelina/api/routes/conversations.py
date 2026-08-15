@@ -19,16 +19,14 @@ router = APIRouter(tags=["conversations"])
 
 
 async def _clear_checkpoint(request: Request, conversation_id: str) -> None:
-    """Drop the checkpoint workspace for a conversation (lifecycle linkage).
+    """丢弃会话的检查点工作区（生命周期联动）。
 
-    Deleting a conversation or clearing its messages empties the message
-    log, so the persisted LangGraph context (``thread_id == conversation_id``)
-    must go with it — otherwise recreating the conversation with the same id
-    would revive stale context from the checkpoint.
+    删除会话或清空其消息会清空消息日志，因此持久化的 LangGraph
+    上下文（``thread_id == conversation_id``）必须一并清除 —— 否则以
+    相同 id 重新创建会话会从检查点中复活过期的上下文。
 
-    A missing saver (degraded mode: non-sqlite database or package absent)
-    is a safe no-op; a failed deletion only logs a warning so it never
-    breaks the primary memory operation.
+    缺少 saver（降级模式：非 sqlite 数据库或缺少包）是安全的空操作；
+    删除失败只记录警告，绝不会破坏主要的 memory 操作。
     """
     saver = getattr(request.app.state, "checkpointer", None)
     if saver is None:
@@ -314,8 +312,8 @@ async def clear_conversation_messages(
     if not cleared:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # The LangGraph checkpoint holds the same history as LLM context; drop it
-    # so the cleared conversation restarts with a fresh context workspace.
+    # LangGraph 检查点保存着与 LLM 上下文相同的历史；丢弃它，
+    # 让清空后的会话以全新的上下文工作区重新开始。
     await _clear_checkpoint(request, conversation_id)
 
     return {"cleared": True}
@@ -333,8 +331,8 @@ async def delete_conversation(
     if not deleted:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # Remove the conversation's checkpoint thread so a conversation recreated
-    # with the same id cannot revive the old context.
+    # 移除会话的检查点线程，避免以相同 id 重新创建的会话
+    # 复活旧上下文。
     await _clear_checkpoint(request, conversation_id)
 
     return {"deleted": True}

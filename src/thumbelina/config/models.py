@@ -18,14 +18,14 @@ _CONTEXT_WINDOW_MULTIPLIERS = {"K": 1_000, "M": 1_000_000}
 
 
 def parse_context_window(value: str | int) -> int:
-    """Parse a context-window specification into a token count.
+    """把上下文窗口规格解析为 token 数量。
 
-    Accepts a plain token count (``200000`` or ``"200000"``) or a count with a
-    case-insensitive ``K`` (thousand) / ``M`` (million) token suffix, e.g.
-    ``"128K"`` or ``"1M"``.
+    接受纯 token 数量（``200000`` 或 ``"200000"``），或带大小写不敏感的
+    ``K``（千）/ ``M``（百万）token 后缀的数量，例如
+    ``"128K"`` 或 ``"1M"``。
 
     Raises:
-        ValueError: If the specification is malformed or non-positive.
+        ValueError: 如果规格畸形或为非正数。
     """
     if isinstance(value, bool):
         raise ValueError(f"Invalid context window: {value!r}")
@@ -85,12 +85,12 @@ class LLMConfig(BaseModel):
     @field_validator("context_window", mode="before")
     @classmethod
     def _validate_context_window(cls, value: Any) -> str:
-        parse_context_window(value)  # raises ValueError on invalid formats
+        parse_context_window(value)  # 格式无效时抛出 ValueError
         return str(value).strip()
 
     @property
     def context_window_tokens(self) -> int:
-        """Context window normalized to a token count."""
+        """归一化为 token 数量的上下文窗口。"""
         return parse_context_window(self.context_window)
 
 
@@ -152,7 +152,7 @@ class TodoConfig(BaseModel):
 
 
 class ContextCompressConfig(BaseModel):
-    """Context compression settings applied when usage nears the window."""
+    """用量接近窗口时应用的上下文压缩设置。"""
 
     strategy: Literal["sliding_window", "full_summary", "summary_recent"] = Field(
         default="summary_recent",
@@ -172,7 +172,7 @@ class ContextCompressConfig(BaseModel):
 
 
 class ContextConfig(BaseModel):
-    """Conversation context (checkpointer) configuration."""
+    """会话上下文（检查点存储器）配置。"""
 
     compress: ContextCompressConfig = Field(default_factory=ContextCompressConfig)
 

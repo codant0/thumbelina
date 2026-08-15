@@ -1,4 +1,4 @@
-"""Tests for the compression framework and the compress graph node (T5)."""
+"""压缩框架与压缩图节点（T5）的测试。"""
 
 from __future__ import annotations
 
@@ -37,18 +37,18 @@ def _ai_with_tool_call(call_id: str = "call_1") -> AIMessage:
 def _make_mock_provider() -> MagicMock:
     provider = MagicMock()
     provider.chat_model = AsyncMock()
-    # Fresh AIMessage per call: add_messages merges by id, so a shared
-    # object would be replaced instead of appended.
+    # 每次调用都返回全新的 AIMessage：add_messages 按 id 合并，
+    # 共享对象会被替换而不是追加。
     provider.chat_model.ainvoke.side_effect = lambda *a, **k: AIMessage(content="ack")
     return provider
 
 
 def _sequenced_side_effect(factories):
-    """One fresh reply per ainvoke call.
+    """每次 ainvoke 调用返回一条全新回复。
 
-    ``unittest.mock`` returns elements of an iterable ``side_effect``
-    verbatim (callables are not invoked), so a single dispatcher callable
-    pops the next factory and calls it — each reply is a fresh message.
+    ``unittest.mock`` 会把可迭代 ``side_effect`` 的元素原样返回
+    （可调用对象不会被调用），因此用一个分发可调用对象逐个弹出
+    下一个工厂并调用它 —— 每条回复都是全新消息。
     """
     queue = iter(factories)
 
@@ -84,7 +84,7 @@ def _make_agent(
 
 
 class TestFactory:
-    """Strategy registry and creation."""
+    """策略注册表与创建。"""
 
     def test_builtin_strategies_registered(self):
         assert {"sliding_window", "full_summary", "summary_recent"} <= set(available_strategies())
@@ -118,13 +118,13 @@ class TestFactory:
     def test_kwargs_filtered_by_constructor_signature(self):
         compressor = create_compressor("summary_recent", recent_turns=3)
         assert compressor.recent_turns == 3
-        # sliding_window declares no parameters — extras are dropped.
+        # sliding_window 未声明参数 —— 多余参数被丢弃。
         sliding = create_compressor("sliding_window", recent_turns=3)
         assert isinstance(sliding, SlidingWindowCompressor)
 
 
 class TestEstimation:
-    """Usage estimation reuses the RAG context formatter estimator."""
+    """用量估算复用 RAG 上下文 formatter 的估算器。"""
 
     def test_matches_context_formatter_estimator(self):
         from thumbelina.rag.retrieval.context_formatter import estimate_tokens
@@ -147,7 +147,7 @@ class TestEstimation:
 
 
 class TestGroupDeletionUnits:
-    """AIMessage(tool_calls) and ToolMessages form atomic units."""
+    """AIMessage(tool_calls) 与 ToolMessage 构成原子单元。"""
 
     def test_tool_pair_grouped(self):
         ai = _ai_with_tool_call()
@@ -175,14 +175,14 @@ class TestGroupDeletionUnits:
 
 
 class TestSlidingWindow:
-    """Strategy 1: drop oldest messages down to the low watermark."""
+    """策略 1：丢弃最旧的消息，降到低水位。"""
 
     @pytest.mark.asyncio
     async def test_compresses_below_low_watermark(self):
         messages = [HumanMessage(content="x" * 4000) for _ in range(3)] + [AIMessage(content="ok")]
         result = await SlidingWindowCompressor().compress(messages, window_tokens=1000)
         assert estimate_messages_tokens(result) <= 1000 * LOW_WATERMARK
-        # Oldest dropped first; the final unit always survives.
+        # 先丢最旧的；最后一个单元永远保留。
         assert result[-1].content == "ok"
         assert len(result) < len(messages)
 
@@ -197,9 +197,9 @@ class TestSlidingWindow:
         )
         kept_ai = any(m is ai for m in result)
         kept_tool = any(m is tool for m in result)
-        assert kept_ai == kept_tool  # pair never split
-        assert not kept_ai  # both were dropped to reach the watermark
-        assert any(m is big_tail for m in result)  # current turn protected
+        assert kept_ai == kept_tool  # 配对绝不会被拆开
+        assert not kept_ai  # 两者都被丢弃以降到低水位
+        assert any(m is big_tail for m in result)  # 当前轮受到保护
 
     @pytest.mark.asyncio
     async def test_tool_group_kept_as_a_whole(self):
@@ -210,7 +210,7 @@ class TestSlidingWindow:
         result = await SlidingWindowCompressor().compress(
             [big_head, ai, tool, tail], window_tokens=1000
         )
-        # Dropping the head alone reaches the watermark; the pair survives.
+        # 只丢头部即可降到低水位；配对保留。
         assert any(m is ai for m in result) and any(m is tool for m in result)
         assert not any(m is big_head for m in result)
 
@@ -237,7 +237,7 @@ class TestSlidingWindow:
 
 
 class TestStripThinking:
-    """Anthropic boundary: strip thinking blocks from the first assistant."""
+    """Anthropic 边界：剥离第一条 assistant 的 thinking 块。"""
 
     def test_strips_thinking_from_first_assistant(self):
         ai = AIMessage(
@@ -248,7 +248,7 @@ class TestStripThinking:
         )
         result = strip_first_assistant_thinking([ai])
         assert result[0].content == [{"type": "text", "text": "answer"}]
-        assert result[0].id == ai.id  # same message, updated in place
+        assert result[0].id == ai.id  # 同一条消息，就地更新
 
     def test_only_first_assistant_touched(self):
         ai1 = AIMessage(
@@ -258,8 +258,8 @@ class TestStripThinking:
             content=[{"type": "thinking", "thinking": "b"}, {"type": "text", "text": "2"}]
         )
         result = strip_first_assistant_thinking([HumanMessage(content="q"), ai1, ai2])
-        assert result[1] is not ai1  # replaced by stripped copy
-        assert result[2] is ai2  # untouched
+        assert result[1] is not ai1  # 被剥离后的副本替换
+        assert result[2] is ai2  # 未被触碰
 
     def test_no_thinking_returns_same_list(self):
         messages = [AIMessage(content="plain")]
@@ -271,7 +271,7 @@ class TestStripThinking:
 
 
 class TestMessagesStateUpdate:
-    """Compressed sequences translate into add_messages updates."""
+    """压缩后的序列转换为 add_messages 更新。"""
 
     def test_pure_deletion_emits_remove_only(self):
         kept = AIMessage(content="keep", id="a")
@@ -291,19 +291,18 @@ class TestMessagesStateUpdate:
 
     def test_restructuring_replaces_whole_sequence(self):
         old = [HumanMessage(content="a", id="1"), AIMessage(content="b", id="2")]
-        summary = SystemMessage(content="summary")  # new message, no id
+        summary = SystemMessage(content="summary")  # 新消息，无 id
         update = _messages_state_update(old, [summary, old[1]])
         assert update["messages"][:2] == [RemoveMessage(id="1"), RemoveMessage(id="2")]
         assert update["messages"][2] is summary
-        # Reused kept messages are re-emitted with fresh ids so add_messages
-        # appends them after the summary instead of re-inserting at their
-        # original position.
+        # 被复用的保留消息会以全新 id 重新发出，使 add_messages 把
+        # 它们追加在摘要之后，而不是插回原来的位置。
         assert update["messages"][3].content == "b"
         assert update["messages"][3].id is None
 
 
 class TestCompressNode:
-    """Graph-level behaviour of the compress node (MemorySaver)."""
+    """压缩节点的图级行为（MemorySaver）。"""
 
     def test_graph_has_compress_entry_node(self):
         agent, _ = _make_agent()
@@ -336,7 +335,7 @@ class TestCompressNode:
     @pytest.mark.asyncio
     async def test_direct_node_triggers_at_threshold(self):
         agent, _ = _make_agent(default_window=1000)
-        dropped = HumanMessage(content="x" * 3200, id="h1")  # exactly 800 >= 800
+        dropped = HumanMessage(content="x" * 3200, id="h1")  # 正好 800 >= 800
         kept_ai = AIMessage(content="a", id="a1")
         kept_human = HumanMessage(content="b", id="h2")
         state = {"messages": [dropped, kept_ai, kept_human]}
@@ -363,9 +362,9 @@ class TestCompressNode:
 
         snapshot = await agent.graph.aget_state({"configurable": {"thread_id": "conv-compress"}})
         contents = [m.content for m in snapshot.values["messages"]]
-        # The 1000-token first message was dropped to reach the 50% watermark.
+        # 1000-token 的首条消息被丢弃，以降到 50% 低水位。
         assert contents == ["ack", "second", "ack"]
-        # The LLM never saw the dropped message on the second turn.
+        # LLM 在第二轮从未看到被丢弃的消息。
         sent = provider.chat_model.ainvoke.call_args[0][0]
         assert [m.content for m in sent] == ["ack", "second"]
 
@@ -381,7 +380,7 @@ class TestCompressNode:
 
     @pytest.mark.asyncio
     async def test_window_falls_back_to_agent_default(self):
-        agent, _ = _make_agent(default_window=1000)  # no per-call window passed
+        agent, _ = _make_agent(default_window=1000)  # 未传入单次调用的窗口
         await agent.run("x" * 4000)
         await agent.run("second")
 
@@ -405,19 +404,19 @@ class TestCompressNode:
 
         @tool
         async def echo(text: str) -> str:
-            """Echo the input text."""
+            """原样返回输入的文本。"""
             return text
 
         responses = [
-            # Turn 1: tool-call loop with a large tool result (~1000 tokens).
+            # 第 1 轮：带大工具结果（约 1000 token）的工具调用循环。
             lambda *a, **k: AIMessage(
                 content="",
                 tool_calls=[{"id": "call_A", "name": "echo", "args": {"text": "t" * 4000}}],
             ),
             lambda *a, **k: AIMessage(content="done1 " + "y" * 4000),
-            # Turn 2.
+            # 第 2 轮。
             lambda *a, **k: AIMessage(content="done2 " + "z" * 4000),
-            # Turn 3.
+            # 第 3 轮。
             lambda *a, **k: AIMessage(content="final"),
         ]
         bound_model = AsyncMock()
@@ -434,15 +433,15 @@ class TestCompressNode:
         snapshot = await agent.graph.aget_state({"configurable": {"thread_id": "conv-compress"}})
         messages: list[BaseMessage] = snapshot.values["messages"]
 
-        # Compression actually happened (oldest turns dropped).
+        # 压缩确实发生了（最旧的轮次被丢弃）。
         assert all(m.content != "start" for m in messages)
         assert len(messages) < 7
-        # The tool-call group was dropped as a whole: no orphan half left.
+        # 工具调用组被整体丢弃：没有孤立的半边残留。
         assert not any(isinstance(m, ToolMessage) for m in messages)
         assert not any(isinstance(m, AIMessage) and m.tool_calls for m in messages)
 
-        # Invariant: no orphan ToolMessage and no orphan tool_calls —
-        # every ToolMessage's owning AIMessage precedes it.
+        # 不变量：没有孤立的 ToolMessage，也没有孤立的 tool_calls ——
+        # 每个 ToolMessage 的所有者 AIMessage 都在其之前。
         seen_call_ids: set[str] = set()
         for message in messages:
             if isinstance(message, AIMessage) and message.tool_calls:
@@ -471,14 +470,14 @@ class TestCompressNode:
 
         snapshot = await agent.graph.aget_state({"configurable": {"thread_id": "conv-compress"}})
         messages = snapshot.values["messages"]
-        # The big human turn was dropped, promoting the assistant turn.
+        # 大的 human 轮次被丢弃，assistant 轮次被提升到头部。
         assert isinstance(messages[0], AIMessage)
         assert messages[0].content == [{"type": "text", "text": "first answer"}]
 
     @pytest.mark.asyncio
     async def test_summary_strategy_llm_failure_falls_back_to_sliding_window(self):
-        # summary_recent is implemented since T6: a failing summarizer LLM
-        # must degrade to pure deletion instead of failing the conversation.
+        # summary_recent 自 T6 起实现：摘要 LLM 失败时必须降级为
+        # 纯删除，而不是让会话失败。
         provider = _make_mock_provider()
         provider.chat = AsyncMock(side_effect=RuntimeError("summarizer down"))
         agent, _ = _make_agent(strategy="summary_recent", provider=provider)

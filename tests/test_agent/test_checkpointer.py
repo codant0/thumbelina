@@ -1,4 +1,4 @@
-"""Tests for thumbelina.agent.checkpointer module."""
+"""thumbelina.agent.checkpointer 模块的测试。"""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from thumbelina.agent.checkpointer import async_checkpointer_from_url, sqlite_pa
 
 
 class TestSqlitePathFromUrl:
-    """Tests for sqlite_path_from_url URL parsing."""
+    """sqlite_path_from_url URL 解析的测试。"""
 
     def test_plain_sqlite_url(self):
         assert sqlite_path_from_url("sqlite:///thumbelina.db") == "thumbelina.db"
@@ -27,20 +27,20 @@ class TestSqlitePathFromUrl:
 
 
 class TestAsyncCheckpointerFromUrl:
-    """Tests for the async checkpointer factory lifecycle."""
+    """异步检查点工厂生命周期的测试。"""
 
     @pytest.mark.asyncio
     async def test_non_sqlite_url_raises(self):
-        """Non-sqlite database URLs fail fast (checkpointing is mandatory)."""
+        """非 sqlite 的数据库 URL 快速失败（检查点是强制的）。"""
         with pytest.raises(RuntimeError, match="sqlite"):
             async with async_checkpointer_from_url("postgresql://localhost/db"):
                 pass
 
     @pytest.mark.asyncio
     async def test_sqlite_url_lifecycle(self, tmp_path):
-        """A sqlite URL yields a ready-to-use saver; the file persists after close."""
+        """sqlite URL 产生可直接使用的 saver；关闭后文件仍保留。"""
         db_file = tmp_path / "checkpoints.db"
         async with async_checkpointer_from_url(f"sqlite:///{db_file}") as saver:
-            # setup() already ran: checkpoint tables exist, unknown thread is empty.
+            # setup() 已执行：检查点表存在，未知 thread 为空。
             assert await saver.aget_tuple({"configurable": {"thread_id": "t1"}}) is None
         assert db_file.exists()

@@ -181,7 +181,7 @@ async def test_create_endpoint_with_context_window(manager):
     assert endpoint.context_window == "128K"
     assert endpoint.context_window_tokens == 128_000
 
-    # Round-trips through the JSON blob persistence.
+    # 经 JSON blob 持久化往返。
     loaded = await manager.get_endpoint(endpoint.id)
     assert loaded is not None
     assert loaded.context_window == "128K"
@@ -229,17 +229,17 @@ async def test_update_endpoint_context_window_set_clear_keep(manager):
         context_window="128K",
     )
 
-    # Omitted field keeps the stored value.
+    # 未提供该字段时保留已存储的值。
     updated = await manager.update_endpoint(endpoint.id, LLMEndpointUpdate(name="Renamed"))
     assert updated is not None
     assert updated.context_window == "128K"
 
-    # Explicit value overrides it (lowercase accepted too).
+    # 显式值覆盖原值（小写也接受）。
     updated = await manager.update_endpoint(endpoint.id, LLMEndpointUpdate(context_window="1m"))
     assert updated is not None
     assert updated.context_window == "1m"
 
-    # Explicit None (or empty string) clears the override.
+    # 显式的 None（或空字符串）清除覆盖值。
     updated = await manager.update_endpoint(endpoint.id, LLMEndpointUpdate(context_window=None))
     assert updated is not None
     assert updated.context_window is None
@@ -266,7 +266,7 @@ async def test_update_endpoint_rejects_invalid_context_window(manager):
     )
     with pytest.raises(ValidationError):
         LLMEndpointUpdate(context_window="bogus!")
-    # The stored record stays untouched.
+    # 已存储的记录保持不动。
     loaded = await manager.get_endpoint(endpoint.id)
     assert loaded is not None
     assert loaded.context_window is None

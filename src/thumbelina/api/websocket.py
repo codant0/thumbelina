@@ -31,18 +31,16 @@ MAX_MESSAGE_SIZE = 1024 * 1024
 # Connected chat WebSocket clients (used for cross-channel message broadcast)
 _chat_ws_clients: set[WebSocket] = set()
 
-# Per-conversation locks serializing turns across connections. Several
-# WebSocket connections (and the HTTP chat route) may target the same
-# conversation simultaneously; LangGraph checkpoint updates for one thread
-# must not interleave, so each turn holds the conversation's lock. Entries
-# are weak references: a lock lives only while at least one turn holds it,
-# so conversations never leak locks after their connections close.
+# 按会话加锁，串行化跨连接的轮次。多个 WebSocket 连接（以及 HTTP
+# chat 路由）可能同时指向同一会话；同一线程的 LangGraph 检查点更新
+# 绝不能交错，因此每轮都持有该会话的锁。条目是弱引用：锁只在至少
+# 有一轮持有它时存活，因此会话在连接关闭后绝不会泄漏锁。
 _conversation_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 _conversation_locks_guard = asyncio.Lock()
 
 
 async def _conversation_lock_for(cid: str) -> asyncio.Lock:
-    """Return the shared lock for *cid*, creating it on first use."""
+    """返回 *cid* 的共享锁，首次使用时创建。"""
     async with _conversation_locks_guard:
         lock = _conversation_locks.get(cid)
         if lock is None:
@@ -53,11 +51,11 @@ async def _conversation_lock_for(cid: str) -> asyncio.Lock:
 
 @asynccontextmanager
 async def _per_conversation_lock(cid: str | None) -> AsyncIterator[None]:
-    """Serialize turns of one conversation across connections.
+    """跨连接串行化单个会话的轮次。
 
-    Yields immediately for ``cid=None`` (no conversation, ephemeral thread
-    id — nothing to conflict with). The lock is released on exit; the
-    registry entry dies by weak reference once no turn holds it.
+    ``cid=None``（无会话、临时 thread id —— 没有可冲突的对象）时
+    立即 yield。锁在退出时释放；一旦没有轮次持有它，
+    注册表条目即因弱引用而消亡。
     """
     if cid is None:
         yield
@@ -160,10 +158,9 @@ async def websocket_chat(websocket: WebSocket) -> None:
                 if existing is None:
                     await websocket.send_json({"error": f"Conversation not found: {cid}"})
                     continue
-            # Serialize turns per conversation across connections: multiple
-            # WebSocket connections may point at the same conversation, and
-            # checkpoint updates for one thread must not interleave.
-            # cid=None (no memory manager) passes straight through.
+            # 按会话跨连接串行化轮次：多个 WebSocket 连接可能指向
+            # 同一会话，同一线程的检查点更新绝不能交错。
+            # cid=None（无 memory manager）直接放行。
             async with _per_conversation_lock(cid):
                 if cid:
                     agent.current_conversation_id = cid
@@ -172,10 +169,9 @@ async def websocket_chat(websocket: WebSocket) -> None:
                     # Apply per-conversation role override when configured
                     await _apply_conversation_role(agent, cid)
 
-                # Resolve the conversation's context window (session endpoint →
-                # globally active endpoint → llm.context_window) for the
-                # compress stage. Falls back to the default window when the
-                # conversation has no endpoint or no window is configured.
+                # 解析会话的上下文窗口（会话端点 → 全局活跃端点 →
+                # llm.context_window），供压缩阶段使用。会话没有端点或
+                # 未配置窗口时回退到默认窗口。
                 window_tokens = await resolve_context_window_tokens(
                     agent.memory_manager,
                     getattr(websocket.app.state, "endpoint_manager", None),

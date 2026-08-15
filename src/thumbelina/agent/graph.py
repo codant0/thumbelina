@@ -90,7 +90,7 @@ def _extract_chunk_parts(message_chunk: Any) -> tuple[str, str]:
 
 
 def _is_ordered_subset(subset: Sequence[Any], full: Sequence[Any]) -> bool:
-    """Return ``True`` when *subset* appears in *full* in the same order."""
+    """当 *subset* 以相同顺序出现在 *full* 中时返回 ``True``。"""
     iterator = iter(full)
     return all(any(item == candidate for item in iterator) for candidate in subset)
 
@@ -98,16 +98,14 @@ def _is_ordered_subset(subset: Sequence[Any], full: Sequence[Any]) -> bool:
 def _messages_state_update(
     current: Sequence[BaseMessage], compressed: Sequence[BaseMessage]
 ) -> dict[str, list[Any]]:
-    """Translate a compressed sequence into an ``add_messages`` update.
+    """把压缩后的序列转换为 ``add_messages`` 更新。
 
-    A pure deletion (every kept message keeps its object — and thus id —
-    and order) emits only ``RemoveMessage`` entries plus any kept message
-    that was modified in place (e.g. thinking blocks stripped). Any
-    restructuring (e.g. a summary replacement) replaces the whole
-    sequence: remove every current message, then re-append the compressed
-    sequence. Messages that reuse a current id are re-appended as copies
-    with fresh ids, because ``add_messages`` re-inserts a removed id at its
-    original position — which would break the compressed order.
+    纯删除（每条保留的消息都沿用原对象 —— 从而保留 id 与顺序）只发出
+    ``RemoveMessage`` 条目，外加任何被就地修改的保留消息（例如
+    thinking 块被剥离）。任何结构重组（例如摘要替换）都会替换整个
+    序列：先移除所有当前消息，再重新追加压缩后的序列。复用当前 id
+    的消息会以全新 id 的副本重新追加，因为 ``add_messages`` 会把已移除
+    的 id 重新插回其原始位置 —— 这会破坏压缩后的顺序。
     """
     current_by_id = {message.id: message for message in current if message.id is not None}
     kept_ids = [message.id for message in compressed]
@@ -121,8 +119,8 @@ def _messages_state_update(
             for message in current
             if message.id is not None and message.id not in kept
         ]
-        # Re-emit kept messages that changed so add_messages updates them
-        # in place (same id keeps their position).
+        # 重新发出发生变化的保留消息，让 add_messages 就地更新它们
+        # （相同的 id 使其保持在原位置）。
         update.extend(
             m for m in compressed if m.id is not None and current_by_id.get(m.id) is not m
         )
@@ -322,20 +320,19 @@ class ThumbelinaAgent:
         Optional role persona name; the matching ``prompts/roles/<role>.md``
         file is injected as the leading system message on every request.
     checkpointer:
-        Optional LangGraph checkpoint saver that persists graph state (the
-        mutable LLM context workspace) between turns, keyed by the current
-        conversation id. Clones share the same saver instance so they never
-        open duplicate connections. ``None`` disables checkpointing and
-        preserves pre-checkpoint behaviour exactly.
+        可选的 LangGraph 检查点存储器，在轮次之间持久化图状态
+        （可变的 LLM 上下文工作区），以当前会话 id 为键。克隆实例共享
+        同一个 saver 实例，因此绝不会打开重复连接。``None`` 禁用检查点，
+        并完全保留检查点出现之前的行为。
     context_config:
-        Context/compression settings (``config.context``). Defaults to
-        :class:`ContextConfig` defaults: strategy ``summary_recent``,
-        trigger threshold 0.8, 6 recent turns.
+        上下文/压缩设置（``config.context``）。默认使用
+        :class:`ContextConfig` 的默认值：策略 ``summary_recent``、
+        触发阈值 0.8、保留 6 轮。
     context_window_tokens:
-        Fallback context window (in tokens, from
-        ``config.llm.context_window``) used by the compress node when a
-        run does not carry ``configurable["context_window_tokens"]``
-        (e.g. channel paths that call the graph directly).
+        压缩节点在运行未携带
+        ``configurable["context_window_tokens"]``（例如直接调用图的
+        channel 路径）时使用的兜底上下文窗口（单位为 token，
+        来自 ``config.llm.context_window``）。
     """
 
     def __init__(
@@ -372,13 +369,13 @@ class ThumbelinaAgent:
         # RAG components — injected after construction, shared via clone()
         self._rag_store_manager: Any | None = None
         self._rag_embedding_registry: Any | None = None
-        # Checkpoint saver — shared by reference via clone(); None disables
-        # checkpointing and keeps pre-checkpoint behaviour exactly.
+        # 检查点存储器 —— 经 clone() 按引用共享；None 禁用检查点，
+        # 并完全保留检查点出现之前的行为。
         self._checkpointer = checkpointer
-        # Context compression (design doc 四.5): strategy/threshold from
-        # config.context, fallback window from config.llm.context_window.
-        # Imported lazily: module-level import would create a cycle
-        # (config.models → channels → wechat_channel → agent.graph).
+        # 上下文压缩（设计文档 四.5）：策略/阈值来自
+        # config.context，兜底窗口来自 config.llm.context_window。
+        # 延迟导入：模块级导入会形成循环
+        # （config.models → channels → wechat_channel → agent.graph）。
         if context_config is None:
             from thumbelina.config.models import ContextConfig
 
@@ -425,8 +422,8 @@ class ThumbelinaAgent:
         Updates both ``llm_provider`` and the underlying LangChain
         ``chat_model`` so that subsequent graph invocations use the new
         model.  The compiled graph does **not** need to be rebuilt.
-        Summarizing compressors hold their own provider reference, so it is
-        re-pointed here as well (pure-deletion strategies have none).
+        摘要类压缩器持有各自的 provider 引用，因此这里也会一并重新
+        指向（纯删除策略没有该引用）。
         """
         self.llm_provider = new_provider
         self._llm = new_provider.chat_model
@@ -452,13 +449,12 @@ class ThumbelinaAgent:
         self._llm = value
 
     def _build_graph(self) -> CompiledStateGraph[AgentState, Any]:
-        """Build and compile the LangGraph agent graph.
+        """构建并编译 LangGraph agent 图。
 
-        Structure: entry → compress → agent (→ tools → agent …). The
-        compress node runs once per turn, ahead of the LLM call, and trims
-        the checkpoint history only when usage nears the context window;
-        below the threshold it passes the state through untouched so the
-        pure-append prefix (provider prefix caching) is preserved.
+        结构：entry → compress → agent (→ tools → agent …)。压缩节点
+        每轮运行一次，先于 LLM 调用，仅当用量接近上下文窗口时裁剪
+        检查点历史；低于阈值时原样放行状态，从而保留纯追加前缀
+        （provider 前缀缓存）。
         """
         graph = StateGraph(AgentState)
         graph.add_node("compress", self._compress_node)
@@ -483,12 +479,12 @@ class ThumbelinaAgent:
         return graph.compile(checkpointer=self._checkpointer)
 
     def _resolve_context_window(self, config: RunnableConfig | None) -> int | None:
-        """Resolve the context window for the compress node.
+        """解析压缩节点使用的上下文窗口。
 
-        Priority: ``configurable["context_window_tokens"]`` carried by the
-        run config (resolved per conversation by the caller: session
-        endpoint → globally active endpoint → default), then the
-        agent-level fallback (``config.llm.context_window``).
+        优先级：运行配置携带的
+        ``configurable["context_window_tokens"]``（由调用方按会话解析：
+        会话端点 → 全局活跃端点 → 默认值），其次是 agent 级兜底
+        （``config.llm.context_window``）。
         """
         if config:
             configurable = config.get("configurable") or {}
@@ -498,16 +494,14 @@ class ThumbelinaAgent:
         return self._context_window_tokens
 
     async def _compress_node(self, state: AgentState, config: RunnableConfig) -> dict[str, Any]:
-        """Compress the checkpoint history when usage nears the window.
+        """当用量接近窗口时压缩检查点历史。
 
-        Runs once per turn ahead of the LLM call (entry → compress →
-        agent). Usage is estimated with the shared RAG token estimator;
-        below ``window × context.compress.threshold`` the state passes
-        through with zero changes. When triggered, the configured strategy
-        compresses towards the 50% low watermark; a failing strategy (e.g.
-        the T6 placeholders) degrades to pure deletion so compression never
-        blocks a conversation. The compressed sequence is written back to
-        the state, so the checkpointer fixes it for subsequent turns.
+        每轮在 LLM 调用之前运行一次（entry → compress → agent）。
+        用量通过共享的 RAG token 估算器估算；低于
+        ``window × context.compress.threshold`` 时状态零改动放行。
+        触发后，配置的策略向 50% 低水位压缩；失败的策略（例如 T6
+        占位实现）降级为纯删除，压缩永远不会阻塞会话。压缩后的序列
+        写回状态，因此检查点存储器会把它固定下来供后续轮次使用。
         """
         messages = state["messages"]
         if not messages:
@@ -544,8 +538,8 @@ class ThumbelinaAgent:
                 )
                 return {}
 
-        # Anthropic boundary: a promoted leading assistant turn may carry
-        # thinking blocks that can no longer be replayed (HTTP 400).
+        # Anthropic 边界：被提升到头部的前导 assistant 轮次可能携带
+        # 无法再重放的 thinking 块（HTTP 400）。
         compressed = strip_first_assistant_thinking(list(compressed))
         update = _messages_state_update(messages, compressed)
         if update:
@@ -573,21 +567,17 @@ class ThumbelinaAgent:
         return await tool_node(state, self.tools)
 
     def _run_config(self, context_window_tokens: int | None = None) -> RunnableConfig | None:
-        """Build the LangGraph run config for checkpointing.
+        """构建用于检查点的 LangGraph 运行配置。
 
-        Returns ``None`` when no checkpointer is attached and no context
-        window was supplied so the invocation behaves exactly as before
-        checkpointing existed. With a checkpointer, LangGraph requires a
-        ``thread_id`` in the config (it raises ``ValueError`` otherwise):
-        the active conversation id is used as the thread id so context
-        accumulates across turns of the same conversation; paths without a
-        conversation get an ephemeral id so they remain stateless and
-        error-free.
+        未挂检查点且未提供上下文窗口时返回 ``None``，使调用行为与
+        检查点出现之前完全一致。挂有检查点时，LangGraph 要求配置中
+        带有 ``thread_id``（否则抛出 ``ValueError``）：活跃会话 id 用作
+        thread id，使上下文在同一会话的各轮之间累积；没有会话的路径
+        获得临时 id，从而保持无状态且不报错。
 
-        ``context_window_tokens`` is the per-conversation context window
-        resolved by the caller (session endpoint → globally active endpoint
-        → ``llm.context_window``); it is carried in ``configurable`` so the
-        compress node can read it from the run config.
+        ``context_window_tokens`` 是调用方按会话解析的上下文窗口
+        （会话端点 → 全局活跃端点 → ``llm.context_window``）；它被放入
+        ``configurable``，以便压缩节点从运行配置中读取。
         """
         if self._checkpointer is None and context_window_tokens is None:
             return None
@@ -600,12 +590,11 @@ class ThumbelinaAgent:
         return {"configurable": configurable}
 
     async def _is_first_turn(self, config: RunnableConfig) -> bool:
-        """Return ``True`` when the checkpoint thread holds no messages yet.
+        """当检查点线程尚无任何消息时返回 ``True``。
 
-        Session-level context (role prompt, user profile) is persisted by the
-        checkpointer, so it may only be injected on the thread's first turn;
-        re-injecting it every turn would accumulate duplicate copies in the
-        persisted state.
+        会话级上下文（角色提示词、用户画像）由检查点存储器持久化，
+        因此只能在线程的首轮注入；每轮都重新注入会在持久化状态中
+        累积重复副本。
         """
         try:
             snapshot = await self.graph.aget_state(config)
@@ -619,24 +608,20 @@ class ThumbelinaAgent:
     async def _build_initial_messages(
         self, user_input: str, config: RunnableConfig | None
     ) -> list[Any]:
-        """Build the input message sequence for one turn.
+        """构建单轮的输入消息序列。
 
-        With a checkpointer the persisted state already contains earlier
-        turns, so the sequence is kept pure-append (protects provider-side
-        prefix caching):
+        挂有检查点时，持久化状态已包含更早的轮次，因此序列保持
+        纯追加（保护 provider 侧的前缀缓存）：
 
-        - The role prompt and the user profile are session/user-level and
-          are injected only on the thread's first turn (empty checkpoint),
-          in that order, ahead of the conversation history. Subsequent turns
-          restore them from the checkpoint; re-injecting would accumulate
-          duplicates in the persisted state.
-        - Ephemeral context (RAG chunks, skill instructions) is injected
-          every turn and intentionally left in the state — no per-turn
-          cleanup; it is removed only by the compression stage once usage
-          nears the context window.
+        - 角色提示词与用户画像是会话/用户级的，仅在线程的首轮
+          （空检查点）按此顺序注入，位于对话历史之前。后续轮次从
+          检查点恢复它们；重复注入会在持久化状态中累积副本。
+        - 临时上下文（RAG 片段、skill 指令）每轮注入，并且有意保留
+          在状态中 —— 不做逐轮清理；仅当用量接近上下文窗口时才由
+          压缩阶段移除。
 
-        Without a checkpointer the state never persists, so every turn
-        carries the role prompt and profile exactly as before checkpointing.
+        没有检查点时状态从不持久化，因此每一轮都携带角色提示词与
+        画像，与检查点出现之前完全一致。
         """
         first_turn = True
         if self._checkpointer is not None and config is not None:
@@ -650,7 +635,7 @@ class ThumbelinaAgent:
             if user_context:
                 messages.append(SystemMessage(content=user_context))
 
-        # Inject RAG context if a knowledge base is bound to the conversation
+        # 若会话绑定了知识库，则注入 RAG 上下文
         rag_context = None
         if self.current_conversation_id and self.memory_manager:
             try:
@@ -803,12 +788,11 @@ class ThumbelinaAgent:
         Parameters
         ----------
         user_input:
-            The user's message.
+            用户的消息。
         context_window_tokens:
-            Optional per-conversation context window (in tokens) resolved by
-            the caller (session endpoint → globally active endpoint →
-            ``llm.context_window``). It is carried in the run config for the
-            compress node.
+            可选的按会话上下文窗口（单位为 token），由调用方解析
+            （会话端点 → 全局活跃端点 → ``llm.context_window``）。
+            它被放入运行配置中供压缩节点使用。
         """
         await self._ensure_conversation()
         await self._persist_message("user", user_input)
@@ -837,9 +821,8 @@ class ThumbelinaAgent:
         "text": str}`` so callers can render the model's thinking process
         separately from the visible answer.
 
-        ``context_window_tokens`` is the optional per-conversation context
-        window (in tokens) resolved by the caller; it is carried in the run
-        config for the compress node.
+        ``context_window_tokens`` 是可选的按会话上下文窗口（单位为
+        token），由调用方解析；它被放入运行配置中供压缩节点使用。
         """
         await self._ensure_conversation()
         await self._persist_message("user", user_input)
@@ -864,8 +847,8 @@ class ThumbelinaAgent:
 
             message_chunk = event[0]
             metadata = event[1] if len(event) > 1 and isinstance(event[1], dict) else {}
-            # State maintenance from the compress node (deletions, stripped
-            # assistant re-emissions) is not part of the reply.
+            # 来自压缩节点的状态维护（删除、被剥离的 assistant 重新
+            # 发出）不属于回复内容。
             if metadata.get("langgraph_node") == "compress":
                 continue
 

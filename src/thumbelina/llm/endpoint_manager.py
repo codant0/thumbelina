@@ -19,16 +19,16 @@ _INDEX_KEY = "llm_endpoints.index"
 
 
 def _normalize_context_window(value: Any) -> str | None:
-    """Validate a user-supplied context window; ``None``/empty clears it.
+    """校验用户提供的上下文窗口；``None``/空值表示清除。
 
-    Raises ``ValueError`` (wrapped by Pydantic into a validation error) for
-    malformed specs such as ``"12X"``.
+    对 ``"12X"`` 之类的畸形规格抛出 ``ValueError``（由 Pydantic
+    包装为校验错误）。
     """
     if value is None:
         return None
     if isinstance(value, str) and not value.strip():
         return None
-    parse_context_window(value)  # raises ValueError on invalid formats
+    parse_context_window(value)  # 格式无效时抛出 ValueError
     return str(value).strip()
 
 
@@ -59,7 +59,7 @@ class LLMEndpoint(BaseModel):
 
     @property
     def context_window_tokens(self) -> int | None:
-        """Context window normalized to a token count, if configured."""
+        """已配置时，上下文窗口归一化为 token 数量。"""
         if self.context_window is None:
             return None
         return parse_context_window(self.context_window)
@@ -230,7 +230,7 @@ class EndpointManager:
             endpoint.api_key = data.api_key
             endpoint.api_key_set = bool(data.api_key)
         if "context_window" in data.model_fields_set:
-            # Explicit null/empty clears the override; omitted keeps it.
+            # 显式的 null/空值清除覆盖；未提供字段则保持原值。
             endpoint.context_window = data.context_window
         if data.is_default is True:
             await self._clear_all_active()

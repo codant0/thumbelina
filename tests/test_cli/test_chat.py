@@ -52,7 +52,7 @@ async def test_chat_session_process_input(mock_agent):
 
 @pytest.mark.asyncio
 async def test_chat_session_process_input_forwards_window_tokens(mock_agent):
-    """ChatSession should forward its context window to agent.run()."""
+    """ChatSession 应把其上下文窗口转发给 agent.run()。"""
     session = ChatSession(agent=mock_agent, context_window_tokens=32000)
     await session.process_input("Hello")
     mock_agent.run.assert_called_once_with("Hello", context_window_tokens=32000)

@@ -1,15 +1,15 @@
-"""Strategy 3: summary + recent K turns (default strategy).
+"""策略 3：摘要 + 最近 K 轮（默认策略）。
 
-Behaviour per design doc 四.5.3: the oldest history is replaced by a summary
-``SystemMessage`` while the most recent ``recent_turns`` turns stay verbatim.
-The leading system run (session head) and the current turn are protected like
-:class:`~thumbelina.agent.compression.sliding_window.SlidingWindowCompressor`.
+行为依据设计文档 四.5.3：最旧的历史替换为摘要 ``SystemMessage``，
+而最近的 ``recent_turns`` 轮原样保留。前导 system 序列（会话头部）与
+当前轮受到与
+:class:`~thumbelina.agent.compression.sliding_window.SlidingWindowCompressor`
+相同的保护。
 
-K-shrink boundary: when the recent K turns alone exceed the 50% low
-watermark, K shrinks automatically (never below 1 — the current turn always
-survives) and the excess turns join the summarized region. Turns are built
-from atomic deletion units, so ``AIMessage(tool_calls)``/``ToolMessage``
-pairs are never split.
+K 收缩边界：当最近 K 轮本身就超过 50% 低水位时，K 自动收缩
+（不低于 1 —— 当前轮永远保留），超出的轮次并入待摘要区域。
+轮次由原子的删除单元组成，因此
+``AIMessage(tool_calls)``/``ToolMessage`` 配对绝不会被拆开。
 """
 
 from __future__ import annotations
@@ -38,13 +38,12 @@ logger = logging.getLogger(__name__)
 
 
 def _split_turns(units: list[list[BaseMessage]]) -> list[list[list[BaseMessage]]]:
-    """Split deletion units into conversation turns.
+    """把删除单元切分为会话轮次。
 
-    A turn starts at the unit containing a ``HumanMessage`` and extends to
-    the next such unit. The run of ``SystemMessage`` units immediately
-    preceding a human unit (its per-turn RAG/skill injections) belongs to
-    that turn. Units before the first human unit (none here — the session
-    head is carved off by the caller) form a leading "turn".
+    一轮从包含 ``HumanMessage`` 的单元开始，延伸到下一个这样的单元。
+    紧贴在 human 单元之前的 ``SystemMessage`` 单元序列（该轮的
+    RAG/skill 注入）属于这一轮。第一个 human 单元之前的单元
+    （此处不存在 —— 会话头部已被调用方剥离）构成前导"轮次"。
     """
     human_positions = [
         index for index, unit in enumerate(units) if any(isinstance(m, HumanMessage) for m in unit)
@@ -66,12 +65,12 @@ def _split_turns(units: list[list[BaseMessage]]) -> list[list[list[BaseMessage]]
 
 
 def _flatten_turns(turns: list[list[list[BaseMessage]]]) -> list[BaseMessage]:
-    """Flatten turns (lists of deletion units) into one message sequence."""
+    """把轮次（删除单元的列表）展平为单条消息序列。"""
     return [message for turn in turns for unit in turn for message in unit]
 
 
 class SummaryRecentCompressor(ContextCompressor):
-    """Summarize the old history, keep the most recent K turns verbatim."""
+    """汇总旧历史，原样保留最近的 K 轮。"""
 
     name = "summary_recent"
 
@@ -83,19 +82,18 @@ class SummaryRecentCompressor(ContextCompressor):
         """Parameters
         ----------
         recent_turns:
-            Number of recent turns kept verbatim
-            (``context.compress.recent_turns``). Shrinks automatically when
-            even K turns exceed the low watermark.
+            原样保留的最近轮数（``context.compress.recent_turns``）。
+            即使 K 轮也超过低水位时会自动收缩。
         llm_provider:
-            LLM provider for the :class:`ContextSummarizer`. ``None`` makes
-            summarization degrade to pure deletion at compress time.
+            供 :class:`ContextSummarizer` 使用的 LLM provider。
+            ``None`` 会使摘要在压缩时降级为纯删除。
         """
         self.recent_turns = recent_turns
         self._summarizer = ContextSummarizer(llm_provider)
 
     @property
     def llm_provider(self) -> LLMProvider | None:
-        """LLM provider used for summarization (kept in sync on hot-swap)."""
+        """用于摘要的 LLM provider（热切换时保持同步）。"""
         return self._summarizer.llm_provider
 
     @llm_provider.setter
@@ -105,7 +103,7 @@ class SummaryRecentCompressor(ContextCompressor):
     async def compress(
         self, messages: Sequence[BaseMessage], window_tokens: int
     ) -> list[BaseMessage]:
-        """Summarize all but the recent K turns; keep those turns verbatim."""
+        """汇总最近 K 轮之外的所有内容；那些轮次原样保留。"""
         target = max(1, int(window_tokens * LOW_WATERMARK))
         units = group_deletion_units(messages)
         head_count = leading_system_unit_count(units)
@@ -118,8 +116,8 @@ class SummaryRecentCompressor(ContextCompressor):
         k = min(self.recent_turns, len(turns))
         kept = turns[-k:]
         reserved = estimate_messages_tokens(head) + estimate_messages_tokens(_flatten_turns(kept))
-        # K-shrink boundary: if the recent K turns alone exceed the low
-        # watermark, shrink K — at least the current turn always survives.
+        # K 收缩边界：若最近 K 轮本身就超过低水位，
+        # 则收缩 K —— 至少当前轮永远保留。
         while k > 1 and reserved > target:
             k -= 1
             kept = turns[-k:]
@@ -129,7 +127,7 @@ class SummaryRecentCompressor(ContextCompressor):
 
         middle = _flatten_turns(turns[: len(turns) - k])
         if not middle:
-            # Nothing older than the kept turns: no compression possible.
+            # 没有比保留轮次更旧的内容：无法压缩。
             return list(messages)
 
         summary = await self._summarizer.summarize(middle)

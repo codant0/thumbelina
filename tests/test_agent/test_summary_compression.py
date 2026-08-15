@@ -1,4 +1,4 @@
-"""T6 tests: ContextSummarizer plus the full_summary / summary_recent strategies."""
+"""T6 测试：ContextSummarizer 以及 full_summary / summary_recent 策略。"""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ def _ai_with_tool_call(call_id: str = "call_1") -> AIMessage:
 
 
 class TestContextSummarizer:
-    """Compression-specific summarizer: stripping, batching, failure modes."""
+    """专用于压缩的摘要器：剥离、分批、失败模式。"""
 
     @pytest.mark.asyncio
     async def test_single_shot_summarizes(self):
@@ -103,7 +103,7 @@ class TestContextSummarizer:
 
     @pytest.mark.asyncio
     async def test_batch_recursive_merge(self):
-        # 6 × ~26 tokens exceeds the 60-token cap → 3 batches + 1 merge call.
+        # 6 × ~26 token 超过 60-token 上限 → 3 个分批 + 1 次合并调用。
         chat = AsyncMock(side_effect=["s1", "s2", "s3", "merged"])
         summarizer = ContextSummarizer(_provider(chat), max_input_tokens=60)
         messages = [HumanMessage(content="a" * 100) for _ in range(6)]
@@ -114,7 +114,7 @@ class TestContextSummarizer:
         assert last_prompt[0] == {"role": "system", "content": MERGE_PROMPT}
         merged_input = last_prompt[1]["content"]
         assert "s1" in merged_input and "s3" in merged_input
-        # Batch calls used the plain summary prompt.
+        # 分批调用使用的是普通摘要提示词。
         for call in chat.call_args_list[:3]:
             assert call[0][0][0] == {"role": "system", "content": SUMMARY_PROMPT}
 
@@ -140,7 +140,7 @@ class TestContextSummarizer:
 
 
 class TestFullSummary:
-    """Strategy 2: head + summary + current-turn tail."""
+    """策略 2：头部 + 摘要 + 当前轮尾部。"""
 
     def _messages(self) -> list:
         return [
@@ -156,10 +156,10 @@ class TestFullSummary:
         messages = self._messages()
         result = await FullSummaryCompressor(_provider()).compress(messages, 1000)
         assert estimate_messages_tokens(result) <= 1000 * LOW_WATERMARK
-        assert result[0] is messages[0]  # session head protected
-        assert result[-1] is messages[-1]  # current turn protected
+        assert result[0] is messages[0]  # 会话头部受保护
+        assert result[-1] is messages[-1]  # 当前轮受保护
         summaries = [m for m in result if isinstance(m, SystemMessage)]
-        assert len(summaries) == 2  # head + generated summary
+        assert len(summaries) == 2  # 头部 + 生成的摘要
         assert summaries[1].content.startswith("【对话历史摘要】")
         assert all("x" * 4000 not in str(m.content) for m in result)
         assert all(m.content not in ("y" * 4000, "z" * 4000) for m in result)
@@ -192,12 +192,12 @@ class TestFullSummary:
 
     @pytest.mark.asyncio
     async def test_oversized_summary_truncated_to_budget(self):
-        chat = AsyncMock(return_value="x" * 4000)  # 1000 estimated tokens
+        chat = AsyncMock(return_value="x" * 4000)  # 约 1000 个预估 token
         result = await FullSummaryCompressor(_provider(chat)).compress(self._messages(), 1000)
         assert estimate_messages_tokens(result) <= 1000 * LOW_WATERMARK
         summary = next(m for m in result if isinstance(m, SystemMessage) and m is not result[0])
         assert summary.content.endswith("…")
-        assert len(summary.content) < 2000  # heavily truncated
+        assert len(summary.content) < 2000  # 被大幅截断
 
     @pytest.mark.asyncio
     async def test_noop_when_only_head_and_tail(self):
@@ -207,7 +207,7 @@ class TestFullSummary:
 
 
 class TestSummaryRecent:
-    """Strategy 3: summarize old turns, keep the recent K turns verbatim."""
+    """策略 3：汇总旧轮次，原样保留最近 K 轮。"""
 
     def _turns(self) -> list:
         return [
@@ -229,15 +229,15 @@ class TestSummaryRecent:
         compressor = SummaryRecentCompressor(recent_turns=2, llm_provider=_provider())
         result = await compressor.compress(messages, 100_000)
         assert estimate_messages_tokens(result) <= 100_000 * LOW_WATERMARK
-        # Kept turns 3 and 4 survive with their original objects.
+        # 保留的第 3、4 轮以其原对象留存。
         assert any(m is messages[7] for m in result)  # t3q
         assert any(m is messages[8] for m in result)  # t3a
         assert any(m is messages[9] for m in result)  # t4
-        # Older turns were replaced by the summary.
+        # 更旧的轮次被摘要替换。
         assert not any(str(m.content).startswith("t1") for m in result)
         assert not any(str(m.content).startswith("t2") for m in result)
         summaries = [m for m in result if isinstance(m, SystemMessage)]
-        assert len(summaries) == 2  # role + summary
+        assert len(summaries) == 2  # role + 摘要
         assert summaries[1].content.startswith("【对话历史摘要】")
 
     @pytest.mark.asyncio
@@ -255,18 +255,18 @@ class TestSummaryRecent:
     async def test_k_shrinks_when_recent_turns_exceed_watermark(self):
         messages = [
             SystemMessage(content="role"),
-            HumanMessage(content="x" * 4000),  # turn 1: 1000 tokens
+            HumanMessage(content="x" * 4000),  # 第 1 轮：1000 token
             AIMessage(content="t1a"),
-            HumanMessage(content="y" * 4000),  # turn 2: 1000 tokens
+            HumanMessage(content="y" * 4000),  # 第 2 轮：1000 token
             AIMessage(content="t2a"),
-            HumanMessage(content="now"),  # current turn: small
+            HumanMessage(content="now"),  # 当前轮：很小
         ]
         compressor = SummaryRecentCompressor(recent_turns=6, llm_provider=_provider())
         result = await compressor.compress(messages, 1000)
         assert estimate_messages_tokens(result) <= 1000 * LOW_WATERMARK
-        # K shrank all the way to the current turn.
+        # K 一路收缩到只剩当前轮。
         assert result[-1] is messages[-1]
-        assert len(result) == 3  # role + summary + current turn
+        assert len(result) == 3  # role + 摘要 + 当前轮
         assert not any("x" * 4000 in str(m.content) for m in result)
         assert not any("y" * 4000 in str(m.content) for m in result)
         assert any(
@@ -293,7 +293,7 @@ class TestSummaryRecent:
         ]
         compressor = SummaryRecentCompressor(recent_turns=1, llm_provider=_provider())
         result = await compressor.compress(messages, 100_000)
-        assert any(m is rag for m in result)  # injection kept with current turn
+        assert any(m is rag for m in result)  # 注入随当前轮保留
         assert any(m is messages[3] for m in result)
         assert not any(m is messages[0] for m in result)
 
@@ -324,7 +324,7 @@ class TestSummaryRecent:
         provider = _provider(AsyncMock(side_effect=RuntimeError("down")))
         compressor = SummaryRecentCompressor(recent_turns=2, llm_provider=provider)
         result = await compressor.compress(messages, 1000)
-        # Degradation is exactly the pure-deletion strategy's outcome.
+        # 降级结果与纯删除策略完全一致。
         expected = await SlidingWindowCompressor().compress(messages, 1000)
         assert result == expected
         assert not any(
@@ -334,7 +334,7 @@ class TestSummaryRecent:
 
 
 class TestSummaryStrategiesThroughAgent:
-    """Graph-level behaviour of the summarizing strategies (MemorySaver)."""
+    """摘要策略的图级行为（MemorySaver）。"""
 
     @pytest.mark.asyncio
     async def test_summary_recent_replaces_old_turns_end_to_end(self):
@@ -371,7 +371,7 @@ class TestSummaryStrategiesThroughAgent:
         assert contents[0].startswith("【对话历史摘要】")
         assert "历史摘要文本" in contents[0]
         assert contents[-2:] == ["second", "ack"]
-        # The summarizer ran exactly once (turn 2; turn 1 had no old turns).
+        # 摘要器恰好运行了一次（第 2 轮；第 1 轮没有旧轮次）。
         assert provider.chat.call_count == 1
 
     @pytest.mark.asyncio

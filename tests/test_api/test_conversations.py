@@ -333,7 +333,7 @@ def test_clear_messages_nonexistent_conversation(client):
 
 
 def test_delete_conversation_clears_checkpoint(client, conversation_id):
-    """DELETE should drop the conversation's checkpoint thread."""
+    """DELETE 应丢弃会话的检查点线程。"""
     saver = MagicMock()
     saver.adelete_thread = AsyncMock()
     client.app.state.checkpointer = saver
@@ -344,7 +344,7 @@ def test_delete_conversation_clears_checkpoint(client, conversation_id):
 
 
 def test_clear_messages_clears_checkpoint(client, conversation_id):
-    """DELETE /messages should drop the conversation's checkpoint thread."""
+    """DELETE /messages 应丢弃会话的检查点线程。"""
     saver = MagicMock()
     saver.adelete_thread = AsyncMock()
     client.app.state.checkpointer = saver
@@ -355,7 +355,7 @@ def test_clear_messages_clears_checkpoint(client, conversation_id):
 
 
 def test_delete_conversation_without_checkpointer(client, conversation_id):
-    """A missing saver (degraded mode) must not break deletion."""
+    """缺少 saver（降级模式）时绝不能破坏删除操作。"""
     client.app.state.checkpointer = None
 
     response = client.delete(f"/api/v1/conversations/{conversation_id}")
@@ -363,7 +363,7 @@ def test_delete_conversation_without_checkpointer(client, conversation_id):
 
 
 def test_clear_messages_without_checkpointer(client, conversation_id):
-    """A missing saver (degraded mode) must not break clearing messages."""
+    """缺少 saver（降级模式）时绝不能破坏清空消息操作。"""
     client.app.state.checkpointer = None
 
     response = client.delete(f"/api/v1/conversations/{conversation_id}/messages")
@@ -371,7 +371,7 @@ def test_clear_messages_without_checkpointer(client, conversation_id):
 
 
 def test_delete_conversation_checkpoint_failure_is_tolerated(client, conversation_id):
-    """A failing checkpoint delete must not break the primary operation."""
+    """检查点删除失败绝不能破坏主要操作。"""
     saver = MagicMock()
     saver.adelete_thread = AsyncMock(side_effect=RuntimeError("db down"))
     client.app.state.checkpointer = saver
@@ -381,7 +381,7 @@ def test_delete_conversation_checkpoint_failure_is_tolerated(client, conversatio
 
 
 def test_delete_nonexistent_conversation_skips_checkpoint(client):
-    """A 404 delete must not touch the checkpoint."""
+    """404 删除绝不能触碰检查点。"""
     saver = MagicMock()
     saver.adelete_thread = AsyncMock()
     client.app.state.checkpointer = saver
@@ -392,7 +392,7 @@ def test_delete_nonexistent_conversation_skips_checkpoint(client):
 
 
 def _make_checkpointed_agent(cid: str):
-    """Build a real agent backed by a MemorySaver for lifecycle tests."""
+    """构建一个由 MemorySaver 支撑的真实 agent，用于生命周期测试。"""
     from langchain_core.messages import AIMessage
     from langgraph.checkpoint.memory import MemorySaver
 
@@ -401,7 +401,7 @@ def _make_checkpointed_agent(cid: str):
     saver = MemorySaver()
     mock_provider = MagicMock()
     mock_provider.chat_model = AsyncMock()
-    # Fresh AIMessage per call so add_messages appends instead of replacing.
+    # 每次调用都返回全新的 AIMessage，使 add_messages 追加而不是替换。
     mock_provider.chat_model.ainvoke.side_effect = lambda *a, **k: AIMessage(content="reply")
 
     mock_memory = AsyncMock()
@@ -419,14 +419,14 @@ def _make_checkpointed_agent(cid: str):
 
 
 async def _checkpoint_message_contents(agent, cid: str) -> list[str]:
-    """Return the persisted message contents for the conversation thread."""
+    """返回会话线程中持久化的消息内容。"""
     snapshot = await agent.graph.aget_state({"configurable": {"thread_id": cid}})
     return [m.content for m in snapshot.values["messages"]]
 
 
 @pytest.mark.asyncio
 async def test_delete_conversation_prevents_context_revival():
-    """A conversation recreated with the same id must not revive old context."""
+    """以相同 id 重新创建的会话绝不能复活旧上下文。"""
     from thumbelina.api.routes.conversations import delete_conversation
 
     cid = "cid-revive"
@@ -438,17 +438,17 @@ async def test_delete_conversation_prevents_context_revival():
     result = await delete_conversation(cid, request=request, memory=mock_memory)
     assert result == {"deleted": True}
 
-    # Checkpoint thread is gone.
+    # 检查点线程已删除。
     assert await saver.aget_tuple({"configurable": {"thread_id": cid}}) is None
 
-    # Rebuilding the same conversation id starts from an empty context.
+    # 以相同会话 id 重建后，从空上下文重新开始。
     await agent.run("Second message")
     assert await _checkpoint_message_contents(agent, cid) == ["Second message", "reply"]
 
 
 @pytest.mark.asyncio
 async def test_clear_messages_prevents_context_revival():
-    """Clearing messages must drop the checkpoint; the next turn starts fresh."""
+    """清空消息必须丢弃检查点；下一轮从全新状态开始。"""
     from thumbelina.api.routes.conversations import clear_conversation_messages
 
     cid = "cid-clear"

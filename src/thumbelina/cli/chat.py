@@ -33,10 +33,9 @@ class ChatSession:
     agent:
         The ThumbelinaAgent instance to use for generating responses.
     context_window_tokens:
-        Optional context window of the configured model in tokens. The CLI
-        does not use the EndpointManager, so it takes ``llm.context_window``
-        directly and forwards it to the agent on every turn (consumed by the
-        compress stage).
+        已配置模型的可选上下文窗口，单位为 token。CLI 不使用
+        EndpointManager，因此直接取 ``llm.context_window`` 并在每一轮
+        转发给 agent（由压缩阶段消费）。
     """
 
     def __init__(self, agent: ThumbelinaAgent, context_window_tokens: int | None = None) -> None:
@@ -162,10 +161,10 @@ def run_chat(provider: str, model: str | None = None) -> None:
 
 
 async def _run_chat_session(config: AppConfig, provider: str, model: str | None) -> None:
-    """Set up subsystems and run the interactive chat session.
+    """设置各子系统并运行交互式聊天会话。
 
-    All setup happens inside the running event loop because the LangGraph
-    checkpointer (aiosqlite) must be created there.
+    所有初始化都在运行中的事件循环内完成，因为 LangGraph 检查点
+    存储器（aiosqlite）必须在那里创建。
     """
     kwargs: dict[str, Any] = {}
     if config.llm.api_key:
@@ -179,9 +178,9 @@ async def _run_chat_session(config: AppConfig, provider: str, model: str | None)
 
     memory_manager = MemoryManager(db_url=config.memory.database_url)
 
-    # Initialize LangGraph checkpointer (persists the agent's LLM context
-    # between turns, keyed by conversation id). Checkpointing is a hard
-    # requirement: failures abort the CLI session instead of degrading.
+    # 初始化 LangGraph 检查点存储器（在轮次之间持久化 agent 的 LLM
+    # 上下文，以会话 id 为键）。检查点是硬性要求：失败直接中止
+    # CLI 会话而不是降级。
     checkpointer_stack = AsyncExitStack()
     checkpointer = await checkpointer_stack.enter_async_context(
         async_checkpointer_from_url(config.memory.database_url)
@@ -265,7 +264,7 @@ async def _run_chat_session(config: AppConfig, provider: str, model: str | None)
 
     session = ChatSession(
         agent=agent,
-        # CLI does not go through the EndpointManager: use llm.context_window directly.
+        # CLI 不经过 EndpointManager：直接使用 llm.context_window。
         context_window_tokens=config.llm.context_window_tokens,
     )
 
