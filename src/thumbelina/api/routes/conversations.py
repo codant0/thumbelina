@@ -18,6 +18,29 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["conversations"])
 
 
+async def _clear_checkpoint(request: Request, conversation_id: str) -> None:
+    """Drop the checkpoint workspace for a conversation (lifecycle linkage).
+
+    Deleting a conversation or clearing its messages empties the message
+    log, so the persisted LangGraph context (``thread_id == conversation_id``)
+    must go with it — otherwise recreating the conversation with the same id
+    would revive stale context from the checkpoint.
+
+    A missing saver (degraded mode: non-sqlite database or package absent)
+    is a safe no-op; a failed deletion only logs a warning so it never
+    breaks the primary memory operation.
+    """
+    saver = getattr(request.app.state, "checkpointer", None)
+    if saver is None:
+        return
+    try:
+        await saver.adelete_thread(conversation_id)
+    except Exception:
+        logger.warning(
+            "Failed to clear checkpoint for conversation %s", conversation_id, exc_info=True
+        )
+
+
 class CreateConversationRequest(BaseModel):
     """Request body for creating a new conversation."""
 
@@ -279,6 +302,7 @@ async def set_conversation_thinking(
 @router.delete("/conversations/{conversation_id}/messages")
 async def clear_conversation_messages(
     conversation_id: str,
+    request: Request,
     memory: MemoryManager = Depends(get_memory_manager),
 ) -> dict[str, bool]:
     """Clear all messages of a conversation, keeping the conversation itself.
@@ -290,12 +314,17 @@ async def clear_conversation_messages(
     if not cleared:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
+    # The LangGraph checkpoint holds the same history as LLM context; drop it
+    # so the cleared conversation restarts with a fresh context workspace.
+    await _clear_checkpoint(request, conversation_id)
+
     return {"cleared": True}
 
 
 @router.delete("/conversations/{conversation_id}")
 async def delete_conversation(
     conversation_id: str,
+    request: Request,
     memory: MemoryManager = Depends(get_memory_manager),
 ) -> dict[str, bool]:
     """Delete a conversation."""
@@ -303,5 +332,9 @@ async def delete_conversation(
 
     if not deleted:
         raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # Remove the conversation's checkpoint thread so a conversation recreated
+    # with the same id cannot revive the old context.
+    await _clear_checkpoint(request, conversation_id)
 
     return {"deleted": True}

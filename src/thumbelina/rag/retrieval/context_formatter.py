@@ -36,14 +36,19 @@ from thumbelina.rag.embedding.base import ScoredChunk
 logger = logging.getLogger(__name__)
 
 
-def _default_token_counter(text: str) -> int:
+def estimate_tokens(text: str) -> int:
     """基于字符类型的 token 数估算。
 
     CJK 字符按约 2 token/字估算，其余字符按约 0.25 token/字符
-    （英文平均每个 token 约 4 字符）。足够用于上下文截断的预算控制。
+    （英文平均每个 token 约 4 字符）。足够用于上下文截断的预算控制；
+    agent 侧的上下文压缩占用估算（``agent/compression``）同样复用本函数。
     """
     cjk = sum(1 for ch in text if unicodedata.east_asian_width(ch) in ("W", "F"))
     return int(cjk * 2 + (len(text) - cjk) * 0.25)
+
+
+# 兼容旧私有名称（既有调用与测试仍可直接引用）。
+_default_token_counter = estimate_tokens
 
 
 class ContextFormatter:
@@ -75,7 +80,7 @@ class ContextFormatter:
         self.separator = separator
         self.with_citation = with_citation
         self.include_score = include_score
-        self._count_tokens = token_counter or _default_token_counter
+        self._count_tokens = token_counter or estimate_tokens
 
     def format(
         self,

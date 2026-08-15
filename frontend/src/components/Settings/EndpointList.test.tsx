@@ -87,4 +87,25 @@ describe('EndpointList', () => {
     fireEvent.click(screen.getByTestId('activate-1-gpt-4o-mini'))
     expect(onActivate).toHaveBeenCalledWith('1', 'gpt-4o-mini')
   })
+
+  it('renders the context window badge when configured', () => {
+    render(
+      <LocaleProvider>
+        <EndpointList
+          {...defaultProps}
+          endpoints={[{ ...sampleEndpoint, context_window: '128K' }]}
+        />
+      </LocaleProvider>,
+    )
+    expect(screen.getByTestId('endpoint-context-window-1')).toHaveTextContent('128K')
+  })
+
+  it('omits the context window badge for legacy endpoints', () => {
+    render(
+      <LocaleProvider>
+        <EndpointList {...defaultProps} />
+      </LocaleProvider>,
+    )
+    expect(screen.queryByTestId('endpoint-context-window-1')).not.toBeInTheDocument()
+  })
 })

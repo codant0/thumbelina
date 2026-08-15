@@ -30,6 +30,62 @@ class TestLLMConfig:
         with pytest.raises(Exception):  # Pydantic validation error
             LLMConfig(provider="")
 
+    def test_context_window_default(self):
+        from thumbelina.config.models import LLMConfig
+
+        cfg = LLMConfig()
+        assert cfg.context_window == "128K"
+        assert cfg.context_window_tokens == 128_000
+
+    @pytest.mark.parametrize(
+        ("raw", "expected_tokens"),
+        [
+            ("128K", 128_000),
+            ("1M", 1_000_000),
+            ("128k", 128_000),
+            ("2m", 2_000_000),
+            ("200000", 200_000),
+            (200000, 200_000),
+            (" 64K ", 64_000),
+        ],
+    )
+    def test_context_window_parsing(self, raw, expected_tokens):
+        from thumbelina.config.models import LLMConfig
+
+        cfg = LLMConfig(context_window=raw)
+        assert cfg.context_window_tokens == expected_tokens
+
+    @pytest.mark.parametrize("raw", ["", "abc", "12X", "-5", "0", "1.5M", "K", None])
+    def test_context_window_invalid_formats_raise(self, raw):
+        from thumbelina.config.models import LLMConfig
+
+        with pytest.raises(Exception):  # Pydantic validation error
+            LLMConfig(context_window=raw)
+
+
+class TestContextWindowParsing:
+    """Tests for the shared parse_context_window() helper."""
+
+    def test_plain_int_passthrough(self):
+        from thumbelina.config.models import parse_context_window
+
+        assert parse_context_window(4096) == 4096
+
+    def test_suffixes_are_case_insensitive(self):
+        from thumbelina.config.models import parse_context_window
+
+        assert parse_context_window("128K") == 128_000
+        assert parse_context_window("128k") == 128_000
+        assert parse_context_window("1M") == 1_000_000
+        assert parse_context_window("1m") == 1_000_000
+
+    def test_invalid_values_raise(self):
+        from thumbelina.config.models import parse_context_window
+
+        for bad in ["", "abc", "12X", "-5", "0K", "1.5M", True, ["128K"]]:
+            with pytest.raises(ValueError):
+                parse_context_window(bad)
+
 
 class TestMemoryConfig:
     """Tests for MemoryConfig model."""
@@ -67,6 +123,40 @@ class TestLoggingConfig:
 
         with pytest.raises(Exception):  # Pydantic validation error
             LoggingConfig(level="INVALID")
+
+
+class TestContextConfig:
+    """Tests for ContextConfig / ContextCompressConfig models."""
+
+    def test_default_values(self):
+        from thumbelina.config.models import ContextConfig
+
+        cfg = ContextConfig()
+        assert cfg.compress.strategy == "summary_recent"
+        assert cfg.compress.threshold == 0.8
+        assert cfg.compress.recent_turns == 6
+
+    def test_custom_values(self):
+        from thumbelina.config.models import ContextConfig
+
+        cfg = ContextConfig.model_validate(
+            {"compress": {"strategy": "sliding_window", "threshold": 0.5, "recent_turns": 3}}
+        )
+        assert cfg.compress.strategy == "sliding_window"
+        assert cfg.compress.threshold == 0.5
+        assert cfg.compress.recent_turns == 3
+
+    def test_invalid_strategy_raises(self):
+        from thumbelina.config.models import ContextConfig
+
+        with pytest.raises(Exception):  # Pydantic validation error
+            ContextConfig.model_validate({"compress": {"strategy": "bogus"}})
+
+    def test_threshold_out_of_range_raises(self):
+        from thumbelina.config.models import ContextConfig
+
+        with pytest.raises(Exception):  # Pydantic validation error
+            ContextConfig.model_validate({"compress": {"threshold": 1.5}})
 
 
 class TestAppConfig:
@@ -127,3 +217,32 @@ class TestAppConfig:
         assert "memory" in data
         assert "logging" in data
         assert data["llm"]["provider"] == "openai"
+
+    def test_legacy_config_without_new_keys_loads(self):
+        """Configs predating context_window/ContextConfig keep working."""
+        from thumbelina.config.models import AppConfig
+
+        data = {
+            "llm": {"provider": "openai", "model": "gpt-4o", "api_key": "sk-test"},
+            "memory": {"database_url": "sqlite:///thumbelina.db"},
+            "logging": {"level": "INFO"},
+        }
+        cfg = AppConfig.model_validate(data)
+        assert cfg.llm.context_window == "128K"  # default
+        assert cfg.llm.context_window_tokens == 128_000
+        assert cfg.context.compress.strategy == "summary_recent"
+        assert cfg.context.compress.threshold == 0.8
+        assert cfg.context.compress.recent_turns == 6
+
+    def test_context_keys_parse_from_dict(self):
+        from thumbelina.config.models import AppConfig
+
+        data = {
+            "llm": {"context_window": "1M"},
+            "context": {"compress": {"strategy": "full_summary", "threshold": 0.75}},
+        }
+        cfg = AppConfig.model_validate(data)
+        assert cfg.llm.context_window_tokens == 1_000_000
+        assert cfg.context.compress.strategy == "full_summary"
+        assert cfg.context.compress.threshold == 0.75
+        assert cfg.context.compress.recent_turns == 6  # default kept

@@ -15,7 +15,7 @@ except (OSError, ImportError):
 import asyncio
 import logging
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -215,6 +215,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     memory = MemoryManager(config.memory.database_url)
     app.state.memory_manager = memory
+
+    # Initialize LangGraph checkpointer (persists agent graph state / the
+    # mutable LLM context between turns, keyed by conversation id). Degrades
+    # to None on failure so startup never breaks: non-sqlite URLs and a
+    # missing langgraph-checkpoint-sqlite package are tolerated.
+    checkpointer_stack = AsyncExitStack()
+    checkpointer: Any = None
+    try:
+        from thumbelina.agent.checkpointer import async_checkpointer_from_url
+
+        checkpointer = await checkpointer_stack.enter_async_context(
+            async_checkpointer_from_url(config.memory.database_url)
+        )
+    except Exception:
+        logger.warning(
+            "Checkpointer not initialized; context persistence disabled",
+            exc_info=True,
+        )
+        await checkpointer_stack.aclose()
+        checkpointer = None
+    app.state.checkpointer = checkpointer
 
     llm_kwargs: dict[str, Any] = {"model": config.llm.model}
     if config.llm.api_key:
@@ -452,6 +473,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         user_profiler=user_profiler,
         conversation_namer=conversation_namer,
         role=config.llm.role,
+        checkpointer=checkpointer,
+        context_config=config.context,
+        context_window_tokens=config.llm.context_window_tokens,
     )
     app.state.agent = agent
 
@@ -652,6 +676,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     if _qrcode_manager is not None:
         await _qrcode_manager.close()
+
+    # Close the LangGraph checkpointer connection (aiosqlite)
+    await checkpointer_stack.aclose()
 
     memory.close()
 

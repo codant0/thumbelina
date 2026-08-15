@@ -565,3 +565,266 @@ class TestToolBinding:
         result = await agent.run("hi")
 
         assert result == "plain"
+
+
+class TestCheckpointerWiring:
+    """Tests for LangGraph checkpointer wiring (T3)."""
+
+    def test_checkpointer_defaults_to_none(self):
+        """Without a checkpointer, behaviour matches pre-checkpoint builds."""
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        mock_provider = _create_mock_provider()
+        agent = ThumbelinaAgent(llm_provider=mock_provider)
+
+        assert agent._checkpointer is None
+        assert agent.graph.checkpointer is None
+        assert agent._run_config() is None
+
+    def test_graph_compiled_with_checkpointer(self):
+        """The compiled graph should hold the injected saver."""
+        from langgraph.checkpoint.memory import MemorySaver
+
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        saver = MemorySaver()
+        mock_provider = _create_mock_provider()
+        agent = ThumbelinaAgent(llm_provider=mock_provider, checkpointer=saver)
+
+        assert agent.graph.checkpointer is saver
+
+    def test_clone_shares_checkpointer_reference(self):
+        """clone() must share the same saver — no duplicate connections."""
+        from langgraph.checkpoint.memory import MemorySaver
+
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        saver = MemorySaver()
+        mock_provider = _create_mock_provider()
+        agent = ThumbelinaAgent(llm_provider=mock_provider, checkpointer=saver)
+
+        cloned = agent.clone()
+
+        assert cloned._checkpointer is saver
+        assert cloned.graph.checkpointer is saver
+
+    @pytest.mark.asyncio
+    async def test_multi_turn_context_continuity(self):
+        """Turns of one conversation should accumulate in the checkpoint."""
+        from langgraph.checkpoint.memory import MemorySaver
+
+        from thumbelina.agent.graph import ThumbelinaAgent
+        from thumbelina.memory.manager import MemoryManager
+
+        saver = MemorySaver()
+        mock_provider = _create_mock_provider()
+        # Fresh AIMessage per call: add_messages merges messages by id, so a
+        # shared mock object would be replaced instead of appended.
+        mock_provider.chat_model.ainvoke.side_effect = lambda *a, **k: AIMessage(content="Hello!")
+
+        mock_memory = AsyncMock(spec=MemoryManager)
+        mock_memory.create_conversation.return_value = "conv-checkpoint"
+        # AsyncMock(spec=...) turns every attribute into an AsyncMock, so a
+        # default child return value would make conv.get() an unawaited
+        # coroutine. Return None (no knowledge base bound) instead.
+        mock_memory.get_conversation.return_value = None
+        mock_memory.add_message = AsyncMock()
+
+        agent = ThumbelinaAgent(
+            llm_provider=mock_provider,
+            memory_manager=mock_memory,
+            checkpointer=saver,
+        )
+        await agent.run("First message")
+        await agent.run("Second message")
+
+        snapshot = await agent.graph.aget_state({"configurable": {"thread_id": "conv-checkpoint"}})
+        contents = [m.content for m in snapshot.values["messages"]]
+        assert contents == ["First message", "Hello!", "Second message", "Hello!"]
+
+    @pytest.mark.asyncio
+    async def test_stateless_path_with_checkpointer(self):
+        """Without a conversation id, runs use an ephemeral thread id."""
+        from langgraph.checkpoint.memory import MemorySaver
+
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        saver = MemorySaver()
+        mock_provider = _create_mock_provider()
+        agent = ThumbelinaAgent(llm_provider=mock_provider, checkpointer=saver)
+
+        # No memory manager -> no conversation id; must not raise.
+        result = await agent.run("Hi")
+
+        assert result == "Hello! How can I help?"
+
+
+class TestFirstTurnInjection:
+    """Session-level context injects once per checkpoint thread (T4)."""
+
+    @staticmethod
+    def _make_agent(role=None, profile=None, skill_context=None):
+        from langgraph.checkpoint.memory import MemorySaver
+
+        from thumbelina.agent.graph import ThumbelinaAgent
+        from thumbelina.memory.manager import MemoryManager
+
+        mock_provider = _create_mock_provider()
+        # Fresh AIMessage per call: add_messages merges messages by id, so a
+        # shared mock object would be replaced instead of appended.
+        mock_provider.chat_model.ainvoke.side_effect = lambda *a, **k: AIMessage(content="Hi!")
+
+        mock_memory = AsyncMock(spec=MemoryManager)
+        mock_memory.create_conversation.return_value = "conv-inject"
+        mock_memory.add_message = AsyncMock()
+        mock_memory.get_conversation.return_value = {"knowledge_base_id": None}
+
+        profiler = None
+        if profile is not None:
+            profiler = MagicMock()
+            profiler.get_user_context = AsyncMock(return_value=profile)
+
+        skill_engine = None
+        if skill_context is not None:
+            skill_engine = MagicMock()
+            skill_engine.find_matching_skills = AsyncMock(return_value=[MagicMock()])
+            skill_engine.apply_skill = AsyncMock(return_value=skill_context)
+
+        agent = ThumbelinaAgent(
+            llm_provider=mock_provider,
+            memory_manager=mock_memory,
+            user_profiler=profiler,
+            skill_engine=skill_engine,
+            role=role,
+            checkpointer=MemorySaver(),
+        )
+        return agent, mock_provider
+
+    @pytest.mark.asyncio
+    async def test_role_and_profile_injected_only_on_first_turn(self):
+        """Role prompt + profile appear exactly once, at the sequence head."""
+        from langchain_core.messages import SystemMessage
+
+        from thumbelina.prompts.roles import get_role_prompt
+
+        agent, _ = self._make_agent(role="assistant", profile="User likes tea")
+        await agent.run("First")
+        await agent.run("Second")
+
+        snapshot = await agent.graph.aget_state({"configurable": {"thread_id": "conv-inject"}})
+        messages = snapshot.values["messages"]
+
+        system_contents = [m.content for m in messages if isinstance(m, SystemMessage)]
+        assert system_contents == [get_role_prompt("assistant"), "User likes tea"]
+        # Role prompt leads the sequence, profile right after it.
+        assert messages[0].content == get_role_prompt("assistant")
+        assert messages[1].content == "User likes tea"
+
+        human_contents = [m.content for m in messages if isinstance(m, HumanMessage)]
+        assert human_contents == ["First", "Second"]
+
+    @pytest.mark.asyncio
+    async def test_profile_fetched_only_on_first_turn(self):
+        """The profiler is consulted once per thread, not every turn."""
+        agent, _ = self._make_agent(profile="User likes tea")
+        await agent.run("First")
+        await agent.run("Second")
+
+        assert agent.user_profiler.get_user_context.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_ephemeral_skill_context_appended_every_turn(self):
+        """RAG/skill SystemMessages stay every-turn, pure append, no cleanup."""
+        from langchain_core.messages import SystemMessage
+
+        agent, _ = self._make_agent(skill_context="skill instructions")
+        await agent.run("First")
+        await agent.run("Second")
+
+        snapshot = await agent.graph.aget_state({"configurable": {"thread_id": "conv-inject"}})
+        skill_msgs = [
+            m
+            for m in snapshot.values["messages"]
+            if isinstance(m, SystemMessage) and m.content == "skill instructions"
+        ]
+        assert len(skill_msgs) == 2
+
+    @pytest.mark.asyncio
+    async def test_injects_every_turn_without_checkpointer(self):
+        """Without a checkpointer the legacy per-turn injection is kept."""
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        mock_provider = _create_mock_provider()
+        mock_provider.chat_model.ainvoke.side_effect = lambda *a, **k: AIMessage(content="Hi!")
+        profiler = MagicMock()
+        profiler.get_user_context = AsyncMock(return_value="User likes tea")
+
+        agent = ThumbelinaAgent(
+            llm_provider=mock_provider, user_profiler=profiler, role="assistant"
+        )
+        await agent.run("First")
+        await agent.run("Second")
+
+        assert profiler.get_user_context.await_count == 2
+        # Second turn still carries role + profile (state is not persisted).
+        sent = mock_provider.chat_model.ainvoke.call_args[0][0]
+        assert len(sent) == 3
+
+
+class TestContextWindowPassThrough:
+    """context_window_tokens plumbing towards the compress stage (T4)."""
+
+    def test_run_config_none_without_checkpointer_and_window(self):
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        agent = ThumbelinaAgent(llm_provider=_create_mock_provider())
+        assert agent._run_config() is None
+
+    def test_run_config_window_without_checkpointer(self):
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        agent = ThumbelinaAgent(llm_provider=_create_mock_provider())
+        config = agent._run_config(context_window_tokens=32000)
+        assert config == {"configurable": {"context_window_tokens": 32000}}
+
+    def test_run_config_carries_thread_and_window(self):
+        from langgraph.checkpoint.memory import MemorySaver
+
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        agent = ThumbelinaAgent(llm_provider=_create_mock_provider(), checkpointer=MemorySaver())
+        agent.current_conversation_id = "conv-1"
+
+        config = agent._run_config(context_window_tokens=32000)
+
+        assert config["configurable"]["thread_id"] == "conv-1"
+        assert config["configurable"]["context_window_tokens"] == 32000
+
+    @pytest.mark.asyncio
+    async def test_run_forwards_window_tokens_via_config(self):
+        from unittest.mock import patch
+
+        from langgraph.checkpoint.memory import MemorySaver
+
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        agent = ThumbelinaAgent(llm_provider=_create_mock_provider(), checkpointer=MemorySaver())
+        with patch.object(agent, "_run_config", wraps=agent._run_config) as mock_config:
+            await agent.run("hi", context_window_tokens=8000)
+
+        mock_config.assert_called_once_with(8000)
+
+    @pytest.mark.asyncio
+    async def test_stream_forwards_window_tokens_via_config(self):
+        from unittest.mock import patch
+
+        from langgraph.checkpoint.memory import MemorySaver
+
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        agent = ThumbelinaAgent(llm_provider=_create_mock_provider(), checkpointer=MemorySaver())
+        with patch.object(agent, "_run_config", wraps=agent._run_config) as mock_config:
+            async for _ in agent.stream("hi", context_window_tokens=8000):
+                pass
+
+        mock_config.assert_called_once_with(8000)

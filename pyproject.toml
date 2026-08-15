@@ -12,6 +12,7 @@ dependencies = [
     "python-multipart>=0.0.9",
     "uvicorn[standard]>=0.30",
     "langgraph>=0.2",
+    "langgraph-checkpoint-sqlite>=2.0",
     "langchain-core>=0.3",
     "langchain-openai>=0.2",
     "langchain-anthropic>=0.3",

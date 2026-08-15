@@ -1,7 +1,7 @@
 import type { LLMEndpoint } from '../../api/llmConfig'
 import { useTranslation } from '../../i18n'
 import { SpeedTestResult } from './SpeedTestResult'
-import { Check, Plug, Pencil, Trash2, Zap } from 'lucide-react'
+import { Check, Plug, Pencil, Trash2, Zap, Gauge } from 'lucide-react'
 
 interface EndpointListProps {
   endpoints: LLMEndpoint[]
@@ -50,6 +50,16 @@ export function EndpointList({
               </span>
             </div>
             <div className="endpoint-card__name-actions">
+              {ep.context_window && (
+                <span
+                  className="badge badge-neutral endpoint-card__window-badge"
+                  data-testid={`endpoint-context-window-${ep.id}`}
+                  title={t('endpoint.contextWindow')}
+                >
+                  <Gauge size={11} />
+                  {ep.context_window}
+                </span>
+              )}
               {ep.is_default && ep.active_model && (
                 <span className="endpoint-active-tag" data-testid={`endpoint-active-tag-${ep.id}`}>
                   <Zap size={11} />

@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from thumbelina.agent.graph import ThumbelinaAgent
 from thumbelina.api.deps import get_agent, get_memory_manager
 from thumbelina.api.schemas import ChatRequest, ChatResponse
+from thumbelina.llm.endpoint_manager import EndpointManager
 from thumbelina.llm.factory import create_provider
 from thumbelina.memory.manager import MemoryManager
 from thumbelina.prompts.roles import get_role_prompt
@@ -35,6 +36,48 @@ def _thinking_kwargs(provider: str, enabled: bool, effort: str) -> dict[str, Any
             "max_tokens": budget + 1024,
         }
     return {}
+
+
+async def resolve_context_window_tokens(
+    memory: MemoryManager | None,
+    endpoint_manager: EndpointManager | None,
+    conversation_id: str | None,
+    default_tokens: int,
+) -> int:
+    """Resolve the effective context window (in tokens) for a conversation.
+
+    The endpoint selection mirrors :func:`_apply_conversation_endpoint`:
+    the conversation's bound endpoint serves it when set and usable,
+    otherwise the globally active endpoint. The serving endpoint's
+    ``context_window`` wins when configured; otherwise the chain falls back
+    to ``default_tokens`` (``llm.context_window``).
+
+    Resolution must never break a chat request, so any lookup failure falls
+    back to ``default_tokens``.
+    """
+    if memory is None or endpoint_manager is None or not conversation_id:
+        return default_tokens
+    try:
+        conv = await memory.get_conversation(conversation_id)
+        endpoint = None
+        if conv is not None:
+            endpoint_id = conv.get("endpoint_id")
+            if endpoint_id:
+                candidate = await endpoint_manager.get_endpoint(endpoint_id)
+                # Mirror _apply_conversation_endpoint: an endpoint without an
+                # api key is unusable, so the default provider serves the
+                # conversation and the default window applies.
+                if candidate is not None and candidate.api_key:
+                    endpoint = candidate
+            else:
+                active = await endpoint_manager.get_active_endpoint_model()
+                if active is not None and active[0].api_key:
+                    endpoint = active[0]
+        if endpoint is not None and endpoint.context_window_tokens is not None:
+            return endpoint.context_window_tokens
+    except Exception:
+        logger.warning("Context window resolution failed", exc_info=True)
+    return default_tokens
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -67,7 +110,16 @@ async def chat(
     # Apply per-conversation role override when configured
     await _apply_conversation_role(isolated_agent, conversation_id)
 
-    response_text = await isolated_agent.run(request.message)
+    # Resolve the conversation's context window (session endpoint →
+    # globally active endpoint → llm.context_window) for the compress stage.
+    window_tokens = await resolve_context_window_tokens(
+        memory,
+        getattr(http_request.app.state, "endpoint_manager", None),
+        conversation_id,
+        http_request.app.state.config.llm.context_window_tokens,
+    )
+
+    response_text = await isolated_agent.run(request.message, context_window_tokens=window_tokens)
 
     return ChatResponse(response=response_text, conversation_id=conversation_id)
 

@@ -6,15 +6,30 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from thumbelina.config.config_repo import ConfigRepository
+from thumbelina.config.models import parse_context_window
 from thumbelina.llm.base import ConnectionTestResult, SpeedTestResult
 from thumbelina.llm.factory import create_provider
 
 logger = logging.getLogger(__name__)
 
 _INDEX_KEY = "llm_endpoints.index"
+
+
+def _normalize_context_window(value: Any) -> str | None:
+    """Validate a user-supplied context window; ``None``/empty clears it.
+
+    Raises ``ValueError`` (wrapped by Pydantic into a validation error) for
+    malformed specs such as ``"12X"``.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    parse_context_window(value)  # raises ValueError on invalid formats
+    return str(value).strip()
 
 
 class LLMEndpoint(BaseModel):
@@ -29,12 +44,25 @@ class LLMEndpoint(BaseModel):
     api_key: str = ""
     api_key_set: bool = False
     is_default: bool = False
+    context_window: str | None = None
     last_latency_ms: int | None = None
     last_total_ms: int | None = None
     is_reachable: bool | None = None
     last_tested_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("context_window", mode="before")
+    @classmethod
+    def _validate_context_window(cls, value: Any) -> str | None:
+        return _normalize_context_window(value)
+
+    @property
+    def context_window_tokens(self) -> int | None:
+        """Context window normalized to a token count, if configured."""
+        if self.context_window is None:
+            return None
+        return parse_context_window(self.context_window)
 
 
 class LLMEndpointCreate(BaseModel):
@@ -46,6 +74,12 @@ class LLMEndpointCreate(BaseModel):
     models: list[str] = []
     api_key: str = ""
     is_default: bool = False
+    context_window: str | None = None
+
+    @field_validator("context_window", mode="before")
+    @classmethod
+    def _validate_context_window(cls, value: Any) -> str | None:
+        return _normalize_context_window(value)
 
 
 class LLMEndpointUpdate(BaseModel):
@@ -56,6 +90,12 @@ class LLMEndpointUpdate(BaseModel):
     models: list[str] | None = None
     api_key: str | None = None
     is_default: bool | None = None
+    context_window: str | None = None
+
+    @field_validator("context_window", mode="before")
+    @classmethod
+    def _validate_context_window(cls, value: Any) -> str | None:
+        return _normalize_context_window(value)
 
 
 class LLMEndpointActivate(BaseModel):
@@ -154,6 +194,7 @@ class EndpointManager:
             api_key=data.api_key,
             api_key_set=bool(data.api_key),
             is_default=data.is_default,
+            context_window=data.context_window,
             active_model=data.models[0] if data.is_default and data.models else None,
             created_at=now,
             updated_at=now,
@@ -188,6 +229,9 @@ class EndpointManager:
         if data.api_key is not None:
             endpoint.api_key = data.api_key
             endpoint.api_key_set = bool(data.api_key)
+        if "context_window" in data.model_fields_set:
+            # Explicit null/empty clears the override; omitted keeps it.
+            endpoint.context_window = data.context_window
         if data.is_default is True:
             await self._clear_all_active()
             endpoint.is_default = True

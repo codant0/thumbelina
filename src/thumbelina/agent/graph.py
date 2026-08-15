@@ -4,15 +4,31 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncGenerator
-from typing import Any
+from collections.abc import AsyncGenerator, Sequence
+from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    RemoveMessage,
+    SystemMessage,
+)
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, tool
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
+from thumbelina.agent.compression import (
+    SlidingWindowCompressor,
+    compression_stats,
+    create_compressor,
+    estimate_messages_tokens,
+    strip_first_assistant_thinking,
+)
 from thumbelina.agent.edges import CONTINUE, should_continue
 from thumbelina.agent.nodes import call_model, tool_node
 from thumbelina.agent.state import AgentState
@@ -26,6 +42,9 @@ from thumbelina.scheduler.time_parser import TimeParser
 from thumbelina.skills.application import SkillApplicationEngine
 from thumbelina.skills.composition_engine import CompositionEngine
 from thumbelina.subagents.manager import SubagentManager
+
+if TYPE_CHECKING:
+    from thumbelina.config.models import ContextConfig
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +87,56 @@ def _extract_chunk_parts(message_chunk: Any) -> tuple[str, str]:
         reasoning += str(attr.get("text") or "")
 
     return text, reasoning
+
+
+def _is_ordered_subset(subset: Sequence[Any], full: Sequence[Any]) -> bool:
+    """Return ``True`` when *subset* appears in *full* in the same order."""
+    iterator = iter(full)
+    return all(any(item == candidate for item in iterator) for candidate in subset)
+
+
+def _messages_state_update(
+    current: Sequence[BaseMessage], compressed: Sequence[BaseMessage]
+) -> dict[str, list[Any]]:
+    """Translate a compressed sequence into an ``add_messages`` update.
+
+    A pure deletion (every kept message keeps its object — and thus id —
+    and order) emits only ``RemoveMessage`` entries plus any kept message
+    that was modified in place (e.g. thinking blocks stripped). Any
+    restructuring (e.g. a summary replacement) replaces the whole
+    sequence: remove every current message, then re-append the compressed
+    sequence. Messages that reuse a current id are re-appended as copies
+    with fresh ids, because ``add_messages`` re-inserts a removed id at its
+    original position — which would break the compressed order.
+    """
+    current_by_id = {message.id: message for message in current if message.id is not None}
+    kept_ids = [message.id for message in compressed]
+    pure_deletion = all(mid in current_by_id for mid in kept_ids) and _is_ordered_subset(
+        kept_ids, [message.id for message in current]
+    )
+    if pure_deletion:
+        kept = set(kept_ids)
+        update: list[Any] = [
+            RemoveMessage(id=message.id)
+            for message in current
+            if message.id is not None and message.id not in kept
+        ]
+        # Re-emit kept messages that changed so add_messages updates them
+        # in place (same id keeps their position).
+        update.extend(
+            m for m in compressed if m.id is not None and current_by_id.get(m.id) is not m
+        )
+        return {"messages": update} if update else {}
+
+    replacement: list[Any] = [
+        RemoveMessage(id=message.id) for message in current if message.id is not None
+    ]
+    for message in compressed:
+        if message.id is not None and message.id in current_by_id:
+            replacement.append(message.model_copy(update={"id": None}))
+        else:
+            replacement.append(message)
+    return {"messages": replacement}
 
 
 def _make_subagent_tools(manager: SubagentManager) -> list[BaseTool]:
@@ -252,6 +321,21 @@ class ThumbelinaAgent:
     role:
         Optional role persona name; the matching ``prompts/roles/<role>.md``
         file is injected as the leading system message on every request.
+    checkpointer:
+        Optional LangGraph checkpoint saver that persists graph state (the
+        mutable LLM context workspace) between turns, keyed by the current
+        conversation id. Clones share the same saver instance so they never
+        open duplicate connections. ``None`` disables checkpointing and
+        preserves pre-checkpoint behaviour exactly.
+    context_config:
+        Context/compression settings (``config.context``). Defaults to
+        :class:`ContextConfig` defaults: strategy ``summary_recent``,
+        trigger threshold 0.8, 6 recent turns.
+    context_window_tokens:
+        Fallback context window (in tokens, from
+        ``config.llm.context_window``) used by the compress node when a
+        run does not carry ``configurable["context_window_tokens"]``
+        (e.g. channel paths that call the graph directly).
     """
 
     def __init__(
@@ -267,6 +351,9 @@ class ThumbelinaAgent:
         user_profiler: UserProfiler | None = None,
         conversation_namer: ConversationNamer | None = None,
         role: str | None = None,
+        checkpointer: BaseCheckpointSaver[Any] | None = None,
+        context_config: ContextConfig | None = None,
+        context_window_tokens: int | None = None,
     ) -> None:
         self.llm_provider = llm_provider
         self.memory_manager = memory_manager
@@ -285,6 +372,32 @@ class ThumbelinaAgent:
         # RAG components — injected after construction, shared via clone()
         self._rag_store_manager: Any | None = None
         self._rag_embedding_registry: Any | None = None
+        # Checkpoint saver — shared by reference via clone(); None disables
+        # checkpointing and keeps pre-checkpoint behaviour exactly.
+        self._checkpointer = checkpointer
+        # Context compression (design doc 四.5): strategy/threshold from
+        # config.context, fallback window from config.llm.context_window.
+        # Imported lazily: module-level import would create a cycle
+        # (config.models → channels → wechat_channel → agent.graph).
+        if context_config is None:
+            from thumbelina.config.models import ContextConfig
+
+            context_config = ContextConfig()
+        self._context_config = context_config
+        self._context_window_tokens = context_window_tokens
+        compress_config = self._context_config.compress
+        try:
+            self._compressor = create_compressor(
+                compress_config.strategy,
+                recent_turns=compress_config.recent_turns,
+                llm_provider=self.llm_provider,
+            )
+        except ValueError:
+            logger.warning(
+                "Unknown compression strategy %r; falling back to sliding_window",
+                compress_config.strategy,
+            )
+            self._compressor = SlidingWindowCompressor()
 
         # Build the combined tools list
         self.tools: list[BaseTool] = list(tools) if tools else []
@@ -312,9 +425,14 @@ class ThumbelinaAgent:
         Updates both ``llm_provider`` and the underlying LangChain
         ``chat_model`` so that subsequent graph invocations use the new
         model.  The compiled graph does **not** need to be rebuilt.
+        Summarizing compressors hold their own provider reference, so it is
+        re-pointed here as well (pure-deletion strategies have none).
         """
         self.llm_provider = new_provider
         self._llm = new_provider.chat_model
+        compressor = getattr(self, "_compressor", None)
+        if compressor is not None and hasattr(compressor, "llm_provider"):
+            compressor.llm_provider = new_provider
 
     @property
     def llm(self) -> BaseChatModel:
@@ -334,9 +452,18 @@ class ThumbelinaAgent:
         self._llm = value
 
     def _build_graph(self) -> CompiledStateGraph[AgentState, Any]:
-        """Build and compile the LangGraph agent graph."""
+        """Build and compile the LangGraph agent graph.
+
+        Structure: entry → compress → agent (→ tools → agent …). The
+        compress node runs once per turn, ahead of the LLM call, and trims
+        the checkpoint history only when usage nears the context window;
+        below the threshold it passes the state through untouched so the
+        pure-append prefix (provider prefix caching) is preserved.
+        """
         graph = StateGraph(AgentState)
+        graph.add_node("compress", self._compress_node)
         graph.add_node("agent", self._call_model_node)
+        graph.add_edge("compress", "agent")
 
         if self.tools:
             graph.add_node("tools", self._tool_node_node)
@@ -352,8 +479,84 @@ class ThumbelinaAgent:
         else:
             graph.add_edge("agent", END)
 
-        graph.set_entry_point("agent")
-        return graph.compile()
+        graph.set_entry_point("compress")
+        return graph.compile(checkpointer=self._checkpointer)
+
+    def _resolve_context_window(self, config: RunnableConfig | None) -> int | None:
+        """Resolve the context window for the compress node.
+
+        Priority: ``configurable["context_window_tokens"]`` carried by the
+        run config (resolved per conversation by the caller: session
+        endpoint → globally active endpoint → default), then the
+        agent-level fallback (``config.llm.context_window``).
+        """
+        if config:
+            configurable = config.get("configurable") or {}
+            value = configurable.get("context_window_tokens")
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                return value
+        return self._context_window_tokens
+
+    async def _compress_node(self, state: AgentState, config: RunnableConfig) -> dict[str, Any]:
+        """Compress the checkpoint history when usage nears the window.
+
+        Runs once per turn ahead of the LLM call (entry → compress →
+        agent). Usage is estimated with the shared RAG token estimator;
+        below ``window × context.compress.threshold`` the state passes
+        through with zero changes. When triggered, the configured strategy
+        compresses towards the 50% low watermark; a failing strategy (e.g.
+        the T6 placeholders) degrades to pure deletion so compression never
+        blocks a conversation. The compressed sequence is written back to
+        the state, so the checkpointer fixes it for subsequent turns.
+        """
+        messages = state["messages"]
+        if not messages:
+            return {}
+        window = self._resolve_context_window(config)
+        if window is None:
+            return {}
+
+        compress_config = self._context_config.compress
+        used = estimate_messages_tokens(messages)
+        if used < window * compress_config.threshold:
+            return {}
+
+        logger.info(
+            "Context usage %d tokens reached %.0f%% of window %d; compressing with %r",
+            used,
+            compress_config.threshold * 100,
+            window,
+            getattr(self._compressor, "name", self._compressor.__class__.__name__),
+        )
+        try:
+            compressed = await self._compressor.compress(messages, window)
+        except Exception:
+            logger.warning(
+                "Compression strategy %r failed; falling back to sliding_window",
+                getattr(self._compressor, "name", self._compressor.__class__.__name__),
+                exc_info=True,
+            )
+            try:
+                compressed = await SlidingWindowCompressor().compress(messages, window)
+            except Exception:
+                logger.warning(
+                    "Fallback compression failed; keeping state unchanged", exc_info=True
+                )
+                return {}
+
+        # Anthropic boundary: a promoted leading assistant turn may carry
+        # thinking blocks that can no longer be replayed (HTTP 400).
+        compressed = strip_first_assistant_thinking(list(compressed))
+        update = _messages_state_update(messages, compressed)
+        if update:
+            stats = compression_stats(messages, compressed)
+            logger.info(
+                "Context compressed: %d -> %d estimated tokens (%d message(s) kept)",
+                stats.tokens_before,
+                stats.tokens_after,
+                len(compressed),
+            )
+        return update
 
     async def _call_model_node(self, state: AgentState) -> dict[str, list[AIMessage]]:
         """Node wrapper for calling the LLM."""
@@ -368,6 +571,104 @@ class ThumbelinaAgent:
     async def _tool_node_node(self, state: AgentState) -> dict[str, list[Any]]:
         """Node wrapper for executing tools."""
         return await tool_node(state, self.tools)
+
+    def _run_config(self, context_window_tokens: int | None = None) -> RunnableConfig | None:
+        """Build the LangGraph run config for checkpointing.
+
+        Returns ``None`` when no checkpointer is attached and no context
+        window was supplied so the invocation behaves exactly as before
+        checkpointing existed. With a checkpointer, LangGraph requires a
+        ``thread_id`` in the config (it raises ``ValueError`` otherwise):
+        the active conversation id is used as the thread id so context
+        accumulates across turns of the same conversation; paths without a
+        conversation get an ephemeral id so they remain stateless and
+        error-free.
+
+        ``context_window_tokens`` is the per-conversation context window
+        resolved by the caller (session endpoint → globally active endpoint
+        → ``llm.context_window``); it is carried in ``configurable`` so the
+        compress node can read it from the run config.
+        """
+        if self._checkpointer is None and context_window_tokens is None:
+            return None
+        configurable: dict[str, Any] = {}
+        if self._checkpointer is not None:
+            thread_id = self.current_conversation_id or str(uuid4())
+            configurable["thread_id"] = thread_id
+        if context_window_tokens is not None:
+            configurable["context_window_tokens"] = context_window_tokens
+        return {"configurable": configurable}
+
+    async def _is_first_turn(self, config: RunnableConfig) -> bool:
+        """Return ``True`` when the checkpoint thread holds no messages yet.
+
+        Session-level context (role prompt, user profile) is persisted by the
+        checkpointer, so it may only be injected on the thread's first turn;
+        re-injecting it every turn would accumulate duplicate copies in the
+        persisted state.
+        """
+        try:
+            snapshot = await self.graph.aget_state(config)
+        except Exception:
+            logger.warning("Checkpoint state lookup failed; treating turn as first", exc_info=True)
+            return True
+        if snapshot is None:
+            return True
+        return not snapshot.values.get("messages")
+
+    async def _build_initial_messages(
+        self, user_input: str, config: RunnableConfig | None
+    ) -> list[Any]:
+        """Build the input message sequence for one turn.
+
+        With a checkpointer the persisted state already contains earlier
+        turns, so the sequence is kept pure-append (protects provider-side
+        prefix caching):
+
+        - The role prompt and the user profile are session/user-level and
+          are injected only on the thread's first turn (empty checkpoint),
+          in that order, ahead of the conversation history. Subsequent turns
+          restore them from the checkpoint; re-injecting would accumulate
+          duplicates in the persisted state.
+        - Ephemeral context (RAG chunks, skill instructions) is injected
+          every turn and intentionally left in the state — no per-turn
+          cleanup; it is removed only by the compression stage once usage
+          nears the context window.
+
+        Without a checkpointer the state never persists, so every turn
+        carries the role prompt and profile exactly as before checkpointing.
+        """
+        first_turn = True
+        if self._checkpointer is not None and config is not None:
+            first_turn = await self._is_first_turn(config)
+
+        messages: list[Any] = []
+        if first_turn:
+            if self.role_prompt:
+                messages.append(SystemMessage(content=self.role_prompt))
+            user_context = await self._get_user_context()
+            if user_context:
+                messages.append(SystemMessage(content=user_context))
+
+        # Inject RAG context if a knowledge base is bound to the conversation
+        rag_context = None
+        if self.current_conversation_id and self.memory_manager:
+            try:
+                conv = await self.memory_manager.get_conversation(self.current_conversation_id)
+                if conv:
+                    kb_id = conv.get("knowledge_base_id")
+                    if kb_id:
+                        rag_context = await self._get_rag_context(user_input, kb_id)
+            except Exception:
+                logger.warning("Failed to get RAG context", exc_info=True)
+        if rag_context:
+            messages.append(SystemMessage(content=rag_context))
+
+        skill_context = await self._get_skill_context(user_input)
+        if skill_context:
+            messages.append(SystemMessage(content=skill_context))
+        messages.append(HumanMessage(content=user_input))
+        return messages
 
     async def _ensure_conversation(self) -> None:
         """Create a conversation if memory is enabled and none exists."""
@@ -488,45 +789,35 @@ class ThumbelinaAgent:
             user_profiler=self.user_profiler,
             conversation_namer=self.conversation_namer,
             role=self.role,
+            checkpointer=self._checkpointer,
+            context_config=self._context_config,
+            context_window_tokens=self._context_window_tokens,
         )
         cloned._rag_store_manager = self._rag_store_manager
         cloned._rag_embedding_registry = self._rag_embedding_registry
         return cloned
 
-    async def run(self, user_input: str) -> str:
-        """Run the agent with user input and return the response."""
+    async def run(self, user_input: str, context_window_tokens: int | None = None) -> str:
+        """Run the agent with user input and return the response.
+
+        Parameters
+        ----------
+        user_input:
+            The user's message.
+        context_window_tokens:
+            Optional per-conversation context window (in tokens) resolved by
+            the caller (session endpoint → globally active endpoint →
+            ``llm.context_window``). It is carried in the run config for the
+            compress node.
+        """
         await self._ensure_conversation()
         await self._persist_message("user", user_input)
 
-        # Check for matching skills and prepend context if found
-        initial_messages: list[Any] = []
-        if self.role_prompt:
-            initial_messages.append(SystemMessage(content=self.role_prompt))
-        user_context = await self._get_user_context()
-        if user_context:
-            initial_messages.append(SystemMessage(content=user_context))
-
-        # Inject RAG context if a knowledge base is bound to the conversation
-        rag_context = None
-        if self.current_conversation_id and self.memory_manager:
-            try:
-                conv = await self.memory_manager.get_conversation(self.current_conversation_id)
-                if conv:
-                    kb_id = conv.get("knowledge_base_id")
-                    if kb_id:
-                        rag_context = await self._get_rag_context(user_input, kb_id)
-            except Exception:
-                logger.warning("Failed to get RAG context", exc_info=True)
-        if rag_context:
-            initial_messages.append(SystemMessage(content=rag_context))
-
-        skill_context = await self._get_skill_context(user_input)
-        if skill_context:
-            initial_messages.append(SystemMessage(content=skill_context))
-        initial_messages.append(HumanMessage(content=user_input))
+        config = self._run_config(context_window_tokens)
+        initial_messages = await self._build_initial_messages(user_input, config)
 
         initial_state: AgentState = {"messages": initial_messages}
-        result = await self.graph.ainvoke(initial_state)
+        result = await self.graph.ainvoke(initial_state, config=config)
 
         last_message = result["messages"][-1]
         response = str(last_message.content)
@@ -537,42 +828,24 @@ class ThumbelinaAgent:
 
         return response
 
-    async def stream(self, user_input: str) -> AsyncGenerator[dict[str, str], None]:
+    async def stream(
+        self, user_input: str, context_window_tokens: int | None = None
+    ) -> AsyncGenerator[dict[str, str], None]:
         """Stream the agent's response as typed events.
 
         Yields dicts of the form ``{"type": "content" | "reasoning",
         "text": str}`` so callers can render the model's thinking process
         separately from the visible answer.
+
+        ``context_window_tokens`` is the optional per-conversation context
+        window (in tokens) resolved by the caller; it is carried in the run
+        config for the compress node.
         """
         await self._ensure_conversation()
         await self._persist_message("user", user_input)
 
-        # Check for matching skills and prepend context if found
-        initial_messages: list[Any] = []
-        if self.role_prompt:
-            initial_messages.append(SystemMessage(content=self.role_prompt))
-        user_context = await self._get_user_context()
-        if user_context:
-            initial_messages.append(SystemMessage(content=user_context))
-
-        # Inject RAG context if a knowledge base is bound to the conversation
-        rag_context = None
-        if self.current_conversation_id and self.memory_manager:
-            try:
-                conv = await self.memory_manager.get_conversation(self.current_conversation_id)
-                if conv:
-                    kb_id = conv.get("knowledge_base_id")
-                    if kb_id:
-                        rag_context = await self._get_rag_context(user_input, kb_id)
-            except Exception:
-                logger.warning("Failed to get RAG context", exc_info=True)
-        if rag_context:
-            initial_messages.append(SystemMessage(content=rag_context))
-
-        skill_context = await self._get_skill_context(user_input)
-        if skill_context:
-            initial_messages.append(SystemMessage(content=skill_context))
-        initial_messages.append(HumanMessage(content=user_input))
+        config = self._run_config(context_window_tokens)
+        initial_messages = await self._build_initial_messages(user_input, config)
 
         initial_state: AgentState = {"messages": initial_messages}
         full_response = ""
@@ -584,12 +857,17 @@ class ThumbelinaAgent:
         flush_interval = 0.05  # seconds (50ms) - flush even if batch size not reached
         last_flush = asyncio.get_event_loop().time()
 
-        async for event in self.graph.astream(initial_state, stream_mode="messages"):
+        async for event in self.graph.astream(initial_state, stream_mode="messages", config=config):
             # event is a tuple: (message_chunk, metadata)
             if not isinstance(event, tuple) or len(event) < 1:
                 continue
 
             message_chunk = event[0]
+            metadata = event[1] if len(event) > 1 and isinstance(event[1], dict) else {}
+            # State maintenance from the compress node (deletions, stripped
+            # assistant re-emissions) is not part of the reply.
+            if metadata.get("langgraph_node") == "compress":
+                continue
 
             # Accept both streaming chunks (AIMessageChunk) and complete
             # responses (AIMessage). The latter occurs with non-streaming

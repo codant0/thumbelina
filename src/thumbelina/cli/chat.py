@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Any
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import InMemoryHistory
 
+from thumbelina.agent.checkpointer import async_checkpointer_from_url
 from thumbelina.agent.graph import ThumbelinaAgent
-from thumbelina.config import load_config
+from thumbelina.config import AppConfig, load_config
 from thumbelina.llm.factory import create_provider
 from thumbelina.memory.manager import MemoryManager
 
@@ -30,10 +32,16 @@ class ChatSession:
     ----------
     agent:
         The ThumbelinaAgent instance to use for generating responses.
+    context_window_tokens:
+        Optional context window of the configured model in tokens. The CLI
+        does not use the EndpointManager, so it takes ``llm.context_window``
+        directly and forwards it to the agent on every turn (consumed by the
+        compress stage).
     """
 
-    def __init__(self, agent: ThumbelinaAgent) -> None:
+    def __init__(self, agent: ThumbelinaAgent, context_window_tokens: int | None = None) -> None:
         self.agent = agent
+        self.context_window_tokens = context_window_tokens
         self.history: list[dict[str, str]] = []
         self.running = False
 
@@ -93,7 +101,9 @@ class ChatSession:
         self.history.append({"role": "user", "content": user_input})
 
         # Use the full agent pipeline (with graph, tools, memory)
-        response = await self.agent.run(user_input)
+        response = await self.agent.run(
+            user_input, context_window_tokens=self.context_window_tokens
+        )
 
         self.history.append({"role": "assistant", "content": response})
         return response
@@ -148,7 +158,15 @@ def run_chat(provider: str, model: str | None = None) -> None:
     # 加载配置文件
     config_path = "thumbelina.yaml" if Path("thumbelina.yaml").exists() else None
     config = load_config(config_path)
+    asyncio.run(_run_chat_session(config, provider, model))
 
+
+async def _run_chat_session(config: AppConfig, provider: str, model: str | None) -> None:
+    """Set up subsystems and run the interactive chat session.
+
+    All setup happens inside the running event loop because the LangGraph
+    checkpointer (aiosqlite) must be created there.
+    """
     kwargs: dict[str, Any] = {}
     if config.llm.api_key:
         kwargs["api_key"] = config.llm.api_key
@@ -160,6 +178,23 @@ def run_chat(provider: str, model: str | None = None) -> None:
     llm_provider = create_provider(provider, **kwargs)
 
     memory_manager = MemoryManager(db_url=config.memory.database_url)
+
+    # Initialize LangGraph checkpointer (persists the agent's LLM context
+    # between turns, keyed by conversation id). Degrades to None when
+    # unavailable so the CLI keeps working without checkpointing.
+    checkpointer_stack = AsyncExitStack()
+    checkpointer: Any = None
+    try:
+        checkpointer = await checkpointer_stack.enter_async_context(
+            async_checkpointer_from_url(config.memory.database_url)
+        )
+    except Exception:
+        logger.warning(
+            "Checkpointer not initialized; context persistence disabled",
+            exc_info=True,
+        )
+        await checkpointer_stack.aclose()
+        checkpointer = None
 
     # Initialize feedback repository
     feedback_repo = None
@@ -232,11 +267,19 @@ def run_chat(provider: str, model: str | None = None) -> None:
         scheduler=scheduler,
         composition_engine=composition_engine,
         role=config.llm.role,
+        checkpointer=checkpointer,
+        context_config=config.context,
+        context_window_tokens=config.llm.context_window_tokens,
     )
 
-    session = ChatSession(agent=agent)
+    session = ChatSession(
+        agent=agent,
+        # CLI does not go through the EndpointManager: use llm.context_window directly.
+        context_window_tokens=config.llm.context_window_tokens,
+    )
 
     try:
-        asyncio.run(session.run())
+        await session.run()
     finally:
+        await checkpointer_stack.aclose()
         memory_manager.close()

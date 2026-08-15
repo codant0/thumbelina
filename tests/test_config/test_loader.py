@@ -204,7 +204,7 @@ class TestLoadConfig:
 
 
 class TestExampleConfigFile:
-    """The shipped example config must not require llm/auth at startup."""
+    """The shipped example config must not require llm credentials/auth at startup."""
 
     @staticmethod
     def _example_path():
@@ -213,11 +213,13 @@ class TestExampleConfigFile:
         # tests/test_config/test_loader.py -> repo root
         return Path(__file__).resolve().parents[2] / "thumbelina.yaml.example"
 
-    def test_example_has_no_llm_or_auth_sections(self):
+    def test_example_has_no_auth_and_no_llm_credentials(self):
         data = yaml.safe_load(self._example_path().read_text(encoding="utf-8"))
         assert isinstance(data, dict)
-        assert "llm" not in data
         assert "auth" not in data
+        # llm may only carry the context_window default — no credentials/provider.
+        llm = data.get("llm", {})
+        assert set(llm) <= {"context_window"}
 
     def test_load_example_yields_empty_llm_and_auth(self):
         from thumbelina.config.loader import load_config
@@ -230,4 +232,6 @@ class TestExampleConfigFile:
         assert cfg.auth.secret_key == ""
         # role default stays in the code model
         assert cfg.llm.role == "assistant"
+        assert cfg.llm.context_window == "128K"
+        assert cfg.context.compress.strategy == "summary_recent"
         assert cfg.memory.database_url == "sqlite:///thumbelina.db"

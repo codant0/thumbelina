@@ -1,14 +1,16 @@
 # Thumbelina default configuration
 # Override values with THUMBELINA_* environment variables.
 #
-# NOTE: `llm` and `auth` are intentionally absent here — neither is
+# NOTE: `llm` and `auth` are intentionally minimal here — neither is
 # required at startup, and both are obtained after boot instead:
 #
 #   - llm:   managed at runtime through the config database / REST API
 #            (Web UI "Settings": LLM endpoints & presets,
 #            PUT /api/v1/config/llm, POST /api/v1/config/llm/endpoints...).
 #            The service starts fine without any LLM credentials; the
-#            provider is activated lazily on first use.
+#            provider is activated lazily on first use. Only
+#            `llm.context_window` is set below as the fallback default
+#            context window for the active model.
 #   - auth:  disabled by default (empty secret_key). Secrets are never
 #            stored in the config database; to enable JWT auth set the
 #            environment variable THUMBELINA_AUTH__SECRET_KEY (>= 32 bytes)
@@ -30,3 +32,16 @@ logging:
 todo:
   enabled: true
   directory: TODO
+
+# Default context window of the active LLM model. Individual endpoints can
+# override this via their own context_window field (Web UI "Settings").
+# Supports K (thousand) / M (million) token suffixes, case-insensitive.
+llm:
+  context_window: "128K"
+
+# Conversation context (checkpointer) compression
+context:
+  compress:
+    strategy: summary_recent   # sliding_window | full_summary | summary_recent
+    threshold: 0.8             # trigger compression when usage hits 80% of the window
+    recent_turns: 6            # recent turns kept verbatim by summary_recent

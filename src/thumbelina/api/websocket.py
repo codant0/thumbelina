@@ -2,15 +2,23 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
+from weakref import WeakValueDictionary
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
 from thumbelina.agent.graph import ThumbelinaAgent
-from thumbelina.api.routes.chat import _apply_conversation_endpoint, _apply_conversation_role
+from thumbelina.api.routes.chat import (
+    _apply_conversation_endpoint,
+    _apply_conversation_role,
+    resolve_context_window_tokens,
+)
 from thumbelina.api.schemas import WebSocketMessage
 
 logger = logging.getLogger(__name__)
@@ -22,6 +30,41 @@ MAX_MESSAGE_SIZE = 1024 * 1024
 
 # Connected chat WebSocket clients (used for cross-channel message broadcast)
 _chat_ws_clients: set[WebSocket] = set()
+
+# Per-conversation locks serializing turns across connections. Several
+# WebSocket connections (and the HTTP chat route) may target the same
+# conversation simultaneously; LangGraph checkpoint updates for one thread
+# must not interleave, so each turn holds the conversation's lock. Entries
+# are weak references: a lock lives only while at least one turn holds it,
+# so conversations never leak locks after their connections close.
+_conversation_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
+_conversation_locks_guard = asyncio.Lock()
+
+
+async def _conversation_lock_for(cid: str) -> asyncio.Lock:
+    """Return the shared lock for *cid*, creating it on first use."""
+    async with _conversation_locks_guard:
+        lock = _conversation_locks.get(cid)
+        if lock is None:
+            lock = asyncio.Lock()
+            _conversation_locks[cid] = lock
+        return lock
+
+
+@asynccontextmanager
+async def _per_conversation_lock(cid: str | None) -> AsyncIterator[None]:
+    """Serialize turns of one conversation across connections.
+
+    Yields immediately for ``cid=None`` (no conversation, ephemeral thread
+    id — nothing to conflict with). The lock is released on exit; the
+    registry entry dies by weak reference once no turn holds it.
+    """
+    if cid is None:
+        yield
+        return
+    lock = await _conversation_lock_for(cid)
+    async with lock:
+        yield
 
 
 async def broadcast_chat_message(message: dict[str, Any]) -> None:
@@ -117,86 +160,120 @@ async def websocket_chat(websocket: WebSocket) -> None:
                 if existing is None:
                     await websocket.send_json({"error": f"Conversation not found: {cid}"})
                     continue
-            if cid:
-                agent.current_conversation_id = cid
-                # Apply per-conversation model selection when configured
-                await _apply_conversation_endpoint(websocket, agent, cid)
-                # Apply per-conversation role override when configured
-                await _apply_conversation_role(agent, cid)
+            # Serialize turns per conversation across connections: multiple
+            # WebSocket connections may point at the same conversation, and
+            # checkpoint updates for one thread must not interleave.
+            # cid=None (no memory manager) passes straight through.
+            async with _per_conversation_lock(cid):
+                if cid:
+                    agent.current_conversation_id = cid
+                    # Apply per-conversation model selection when configured
+                    await _apply_conversation_endpoint(websocket, agent, cid)
+                    # Apply per-conversation role override when configured
+                    await _apply_conversation_role(agent, cid)
 
-            # Check if this is the WeChat conversation using the cached ID
-            wechat_cid = getattr(websocket.app.state, "wechat_conversation_id", None)
-            is_wechat_conversation = cid and wechat_cid and cid == wechat_cid
+                # Resolve the conversation's context window (session endpoint →
+                # globally active endpoint → llm.context_window) for the
+                # compress stage. Falls back to the default window when the
+                # conversation has no endpoint or no window is configured.
+                window_tokens = await resolve_context_window_tokens(
+                    agent.memory_manager,
+                    getattr(websocket.app.state, "endpoint_manager", None),
+                    cid,
+                    websocket.app.state.config.llm.context_window_tokens,
+                )
 
-            if is_wechat_conversation:
-                wechat_channel = getattr(websocket.app.state, "wechat_channel", None)
-                if wechat_channel is not None:
-                    try:
-                        # Apply the conversation's endpoint to the WeChat channel agent
-                        await _apply_conversation_endpoint(websocket, wechat_channel._agent, cid)
-                    except Exception as exc:
-                        logger.warning("Failed to apply WeChat endpoint: %s", exc)
+                # Check if this is the WeChat conversation using the cached ID
+                wechat_cid = getattr(websocket.app.state, "wechat_conversation_id", None)
+                is_wechat_conversation = cid and wechat_cid and cid == wechat_cid
 
-            # Use streaming for frontend, regardless of WeChat binding
-            try:
-                streaming = websocket.app.state.config.llm.streaming_enabled
-                full_response = ""
-                if streaming:
-                    try:
-                        async for event in agent.stream(parsed.message):
-                            text = event["text"]
-                            if event["type"] == "reasoning":
-                                await websocket.send_json(
-                                    {
-                                        "chunk": text,
-                                        "chunk_type": "reasoning",
-                                        "conversation_id": cid,
-                                    }
-                                )
-                            else:
-                                full_response += text
-                                await websocket.send_json({"chunk": text, "conversation_id": cid})
-                    except Exception:
-                        # Fallback to non-streaming if streaming fails
-                        full_response = await agent.run(parsed.message)
+                if is_wechat_conversation:
+                    wechat_channel = getattr(websocket.app.state, "wechat_channel", None)
+                    if wechat_channel is not None:
+                        try:
+                            # Apply the conversation's endpoint to the WeChat channel agent
+                            await _apply_conversation_endpoint(
+                                websocket, wechat_channel._agent, cid
+                            )
+                        except Exception as exc:
+                            logger.warning("Failed to apply WeChat endpoint: %s", exc)
+
+                # Use streaming for frontend, regardless of WeChat binding
+                try:
+                    streaming = websocket.app.state.config.llm.streaming_enabled
+                    full_response = ""
+                    if streaming:
+                        try:
+                            async for event in agent.stream(
+                                parsed.message, context_window_tokens=window_tokens
+                            ):
+                                text = event["text"]
+                                if event["type"] == "reasoning":
+                                    await websocket.send_json(
+                                        {
+                                            "chunk": text,
+                                            "chunk_type": "reasoning",
+                                            "conversation_id": cid,
+                                        }
+                                    )
+                                else:
+                                    full_response += text
+                                    await websocket.send_json(
+                                        {"chunk": text, "conversation_id": cid}
+                                    )
+                        except Exception:
+                            # Fallback to non-streaming if streaming fails
+                            full_response = await agent.run(
+                                parsed.message, context_window_tokens=window_tokens
+                            )
+                            await websocket.send_json(
+                                {"response": full_response, "conversation_id": cid}
+                            )
+                    else:
+                        full_response = await agent.run(
+                            parsed.message, context_window_tokens=window_tokens
+                        )
                         await websocket.send_json(
                             {"response": full_response, "conversation_id": cid}
                         )
-                else:
-                    full_response = await agent.run(parsed.message)
-                    await websocket.send_json({"response": full_response, "conversation_id": cid})
 
-                await websocket.send_json(
-                    {
-                        "done": True,
-                        "conversation_id": cid,
-                        "streaming_mode": streaming,
-                    }
-                )
+                    await websocket.send_json(
+                        {
+                            "done": True,
+                            "conversation_id": cid,
+                            "streaming_mode": streaming,
+                        }
+                    )
 
-                # Sync to WeChat if this is a WeChat conversation
-                if is_wechat_conversation and full_response:
-                    wechat_channel = getattr(websocket.app.state, "wechat_channel", None)
-                    if wechat_channel is not None:
-                        logger.info("Sending frontend message response to WeChat")
-                        try:
-                            last_wechat_user = getattr(wechat_channel, "_last_wechat_user_id", None)
-                            last_context_token = getattr(wechat_channel, "_last_context_token", "")
-
-                            if last_wechat_user:
-                                await wechat_channel.send_message(
-                                    last_wechat_user,
-                                    full_response,
-                                    context_token=last_context_token,
+                    # Sync to WeChat if this is a WeChat conversation
+                    if is_wechat_conversation and full_response:
+                        wechat_channel = getattr(websocket.app.state, "wechat_channel", None)
+                        if wechat_channel is not None:
+                            logger.info("Sending frontend message response to WeChat")
+                            try:
+                                last_wechat_user = getattr(
+                                    wechat_channel, "_last_wechat_user_id", None
                                 )
-                                logger.info("Sent response to WeChat user %s", last_wechat_user)
-                            else:
-                                logger.warning("No WeChat user ID available to send response to")
-                        except Exception as send_exc:
-                            logger.warning("Failed to send response to WeChat: %s", send_exc)
+                                last_context_token = getattr(
+                                    wechat_channel, "_last_context_token", ""
+                                )
 
-            except Exception as exc:
-                await websocket.send_json({"error": str(exc), "conversation_id": cid})
+                                if last_wechat_user:
+                                    await wechat_channel.send_message(
+                                        last_wechat_user,
+                                        full_response,
+                                        context_token=last_context_token,
+                                    )
+                                    logger.info("Sent response to WeChat user %s", last_wechat_user)
+                                else:
+                                    logger.warning(
+                                        "No WeChat user ID available to send response to"
+                                    )
+                            except Exception as send_exc:
+                                logger.warning("Failed to send response to WeChat: %s", send_exc)
+
+                except Exception as exc:
+                    await websocket.send_json({"error": str(exc), "conversation_id": cid})
 
     except WebSocketDisconnect:
         pass

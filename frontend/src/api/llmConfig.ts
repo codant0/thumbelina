@@ -7,6 +7,7 @@ export interface LLMEndpoint {
   active_model?: string | null
   api_key_set: boolean
   is_default: boolean
+  context_window?: string | null
   last_latency_ms?: number
   last_total_ms?: number
   is_reachable?: boolean
@@ -20,6 +21,7 @@ export interface EndpointFormData {
   models: string[]
   api_key: string
   is_default: boolean
+  context_window?: string | null
 }
 
 export interface SpeedTestResult {

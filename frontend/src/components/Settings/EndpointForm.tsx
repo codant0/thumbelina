@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react'
 import type { EndpointFormData, LLMEndpoint, ModelList } from '../../api/llmConfig'
 import { useTranslation } from '../../i18n'
 import { ConnectionTestButton } from './ConnectionTestButton'
-import { Cpu, Tag, Server, KeyRound, Box, Star, Save, Download, X, Loader2, Check } from 'lucide-react'
+import { Cpu, Tag, Server, KeyRound, Box, Star, Save, Download, X, Loader2, Check, Gauge } from 'lucide-react'
 
 interface EndpointFormProps {
   initialValues?: LLMEndpoint
@@ -17,6 +17,7 @@ export function EndpointForm({ initialValues, onSubmit, onCancel }: EndpointForm
   const [baseUrl, setBaseUrl] = useState(initialValues?.base_url ?? '')
   const [models, setModels] = useState<string[]>(initialValues?.models ?? [])
   const [apiKey, setApiKey] = useState('')
+  const [contextWindow, setContextWindow] = useState(initialValues?.context_window ?? '')
   const [isDefault, setIsDefault] = useState(initialValues?.is_default ?? false)
   const [error, setError] = useState('')
   const [availableModels, setAvailableModels] = useState<string[]>([])
@@ -79,6 +80,7 @@ export function EndpointForm({ initialValues, onSubmit, onCancel }: EndpointForm
       models,
       api_key: apiKey,
       is_default: isDefault,
+      context_window: contextWindow.trim(),
     })
   }
 
@@ -192,6 +194,19 @@ export function EndpointForm({ initialValues, onSubmit, onCancel }: EndpointForm
             {t('endpoint.addModelManually')}
           </button>
         </div>
+      </div>
+      <div className="form-group">
+        <label className="form-label"><Gauge size={14} />{t('endpoint.contextWindow')}</label>
+        <input
+          className="form-input"
+          data-testid="endpoint-context-window-input"
+          value={contextWindow}
+          onChange={e => setContextWindow(e.target.value)}
+          placeholder={t('endpoint.contextWindowPlaceholder')}
+        />
+        <p className="form-hint" style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0 0' }}>
+          {t('endpoint.contextWindowHint')}
+        </p>
       </div>
       <div className="form-group">
         <ConnectionTestButton

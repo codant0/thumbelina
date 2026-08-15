@@ -1,4 +1,4 @@
-"""Tests for conversation summarizer."""
+"""Tests for the conversation title summarizer."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from thumbelina.memory.summarizer import Summarizer
+from thumbelina.memory.title_summarizer import TitleSummarizer
 
 
 @pytest.fixture
@@ -19,21 +19,21 @@ def mock_llm():
 
 @pytest.fixture
 def summarizer(mock_llm):
-    """Create a Summarizer with mock LLM."""
-    return Summarizer(llm_provider=mock_llm)
+    """Create a TitleSummarizer with mock LLM."""
+    return TitleSummarizer(llm_provider=mock_llm)
 
 
-class TestSummarizer:
-    """Tests for the Summarizer class."""
+class TestTitleSummarizer:
+    """Tests for the TitleSummarizer class."""
 
     def test_summarizer_class_exists(self):
-        """Summarizer should be importable."""
-        assert Summarizer is not None
+        """TitleSummarizer should be importable."""
+        assert TitleSummarizer is not None
 
     def test_summarizer_requires_llm_provider(self):
-        """Summarizer should accept an LLM provider."""
+        """TitleSummarizer should accept an LLM provider."""
         mock_llm = MagicMock()
-        s = Summarizer(llm_provider=mock_llm)
+        s = TitleSummarizer(llm_provider=mock_llm)
         assert s.llm_provider is mock_llm
 
     @pytest.mark.asyncio
@@ -75,7 +75,7 @@ class TestSummarizer:
     async def test_generate_handles_llm_error(self, mock_llm):
         """Should handle LLM errors gracefully."""
         mock_llm.chat = AsyncMock(side_effect=Exception("LLM error"))
-        s = Summarizer(llm_provider=mock_llm)
+        s = TitleSummarizer(llm_provider=mock_llm)
 
         messages = [{"role": "user", "content": "Hello"}]
         summary = await s.generate(messages)
