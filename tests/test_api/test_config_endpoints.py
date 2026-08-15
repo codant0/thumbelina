@@ -60,6 +60,61 @@ def test_create_endpoint(client):
     assert data["api_key_set"] is True
 
 
+def test_create_endpoint_response_includes_context_window(client):
+    endpoint = LLMEndpoint(
+        id="e1",
+        provider="openai",
+        name="Default",
+        base_url="https://api.openai.com/v1",
+        api_key_set=True,
+        context_window="128K",
+        created_at="2026-07-02T00:00:00Z",
+        updated_at="2026-07-02T00:00:00Z",
+    )
+    client.app.state.endpoint_manager.create_endpoint = AsyncMock(return_value=endpoint)
+    response = client.post(
+        "/api/v1/config/llm/endpoints",
+        json={
+            "provider": "openai",
+            "name": "Default",
+            "base_url": "https://api.openai.com/v1",
+            "context_window": "128K",
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["context_window"] == "128K"
+
+    # 没有该字段的历史端点会把它序列化为 null。
+    legacy = LLMEndpoint(
+        id="e2",
+        provider="openai",
+        name="Legacy",
+        base_url="https://api.openai.com/v1",
+        api_key_set=False,
+        created_at="2026-07-02T00:00:00Z",
+        updated_at="2026-07-02T00:00:00Z",
+    )
+    client.app.state.endpoint_manager.list_endpoints = AsyncMock(return_value=[legacy])
+    response = client.get("/api/v1/config/llm/endpoints")
+    assert response.status_code == 200
+    assert response.json()[0]["context_window"] is None
+
+
+def test_create_endpoint_rejects_invalid_context_window(client):
+    client.app.state.endpoint_manager.create_endpoint = AsyncMock()
+    response = client.post(
+        "/api/v1/config/llm/endpoints",
+        json={
+            "provider": "openai",
+            "name": "Default",
+            "base_url": "https://api.openai.com/v1",
+            "context_window": "12X",
+        },
+    )
+    assert response.status_code == 422
+    client.app.state.endpoint_manager.create_endpoint.assert_not_awaited()
+
+
 @pytest.fixture
 def live_client():
     config = AppConfig(

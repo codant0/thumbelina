@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from thumbelina.agent.graph import ThumbelinaAgent
 from thumbelina.api.deps import get_agent, get_memory_manager
 from thumbelina.api.schemas import ChatRequest, ChatResponse
+from thumbelina.llm.endpoint_manager import EndpointManager
 from thumbelina.llm.factory import create_provider
 from thumbelina.memory.manager import MemoryManager
 from thumbelina.prompts.roles import get_role_prompt
@@ -35,6 +36,47 @@ def _thinking_kwargs(provider: str, enabled: bool, effort: str) -> dict[str, Any
             "max_tokens": budget + 1024,
         }
     return {}
+
+
+async def resolve_context_window_tokens(
+    memory: MemoryManager | None,
+    endpoint_manager: EndpointManager | None,
+    conversation_id: str | None,
+    default_tokens: int,
+) -> int:
+    """解析会话的有效上下文窗口（单位为 token）。
+
+    端点选择与 :func:`_apply_conversation_endpoint` 保持一致：会话绑定
+    的端点已设置且可用时由它服务，否则使用全局活跃端点。服务端点的
+    ``context_window`` 配置后优先采用；否则链路回退到
+    ``default_tokens``（``llm.context_window``）。
+
+    解析绝不能破坏聊天请求，因此任何查询失败都回退到
+    ``default_tokens``。
+    """
+    if memory is None or endpoint_manager is None or not conversation_id:
+        return default_tokens
+    try:
+        conv = await memory.get_conversation(conversation_id)
+        endpoint = None
+        if conv is not None:
+            endpoint_id = conv.get("endpoint_id")
+            if endpoint_id:
+                candidate = await endpoint_manager.get_endpoint(endpoint_id)
+                # 与 _apply_conversation_endpoint 保持一致：没有 api key 的
+                # 端点不可用，因此由默认 provider 服务该会话，
+                # 并采用默认窗口。
+                if candidate is not None and candidate.api_key:
+                    endpoint = candidate
+            else:
+                active = await endpoint_manager.get_active_endpoint_model()
+                if active is not None and active[0].api_key:
+                    endpoint = active[0]
+        if endpoint is not None and endpoint.context_window_tokens is not None:
+            return endpoint.context_window_tokens
+    except Exception:
+        logger.warning("Context window resolution failed", exc_info=True)
+    return default_tokens
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -67,7 +109,16 @@ async def chat(
     # Apply per-conversation role override when configured
     await _apply_conversation_role(isolated_agent, conversation_id)
 
-    response_text = await isolated_agent.run(request.message)
+    # 解析会话的上下文窗口（会话端点 → 全局活跃端点 →
+    # llm.context_window），供压缩阶段使用。
+    window_tokens = await resolve_context_window_tokens(
+        memory,
+        getattr(http_request.app.state, "endpoint_manager", None),
+        conversation_id,
+        http_request.app.state.config.llm.context_window_tokens,
+    )
+
+    response_text = await isolated_agent.run(request.message, context_window_tokens=window_tokens)
 
     return ChatResponse(response=response_text, conversation_id=conversation_id)
 

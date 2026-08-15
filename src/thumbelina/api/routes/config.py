@@ -384,6 +384,7 @@ class LLMEndpointResponse(BaseModel):
     active_model: str | None = None
     api_key_set: bool
     is_default: bool
+    context_window: str | None = None
     last_latency_ms: int | None = None
     last_total_ms: int | None = None
     is_reachable: bool | None = None
@@ -461,6 +462,7 @@ def _to_response(endpoint: LLMEndpoint) -> LLMEndpointResponse:
         active_model=endpoint.active_model,
         api_key_set=endpoint.api_key_set,
         is_default=endpoint.is_default,
+        context_window=endpoint.context_window,
         last_latency_ms=endpoint.last_latency_ms,
         last_total_ms=endpoint.last_total_ms,
         is_reachable=endpoint.is_reachable,

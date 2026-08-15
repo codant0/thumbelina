@@ -222,3 +222,169 @@ async def test_apply_conversation_role_without_memory():
     await _apply_conversation_role(agent, "c1")
 
     assert agent.role == "assistant"
+
+
+class TestResolveContextWindowTokens:
+    """按会话的上下文窗口解析链路（T4）。"""
+
+    DEFAULT = 128_000
+
+    @staticmethod
+    def _endpoint(context_window=None, api_key="sk-test", endpoint_id="ep-1"):
+        from datetime import UTC, datetime
+
+        from thumbelina.llm.endpoint_manager import LLMEndpoint
+
+        now = datetime.now(UTC)
+        return LLMEndpoint(
+            id=endpoint_id,
+            provider="openai",
+            name="Test endpoint",
+            base_url="https://api.example.com/v1",
+            models=["gpt-4o"],
+            active_model="gpt-4o",
+            api_key=api_key,
+            context_window=context_window,
+            created_at=now,
+            updated_at=now,
+        )
+
+    @staticmethod
+    def _memory(conv):
+        from unittest.mock import AsyncMock, MagicMock
+
+        memory = MagicMock()
+        memory.get_conversation = AsyncMock(return_value=conv)
+        return memory
+
+    @pytest.mark.asyncio
+    async def test_conversation_endpoint_window_wins(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from thumbelina.api.routes.chat import resolve_context_window_tokens
+
+        endpoint_manager = MagicMock()
+        endpoint_manager.get_endpoint = AsyncMock(return_value=self._endpoint("32K"))
+        endpoint_manager.get_active_endpoint_model = AsyncMock()
+
+        memory = self._memory({"id": "c1", "endpoint_id": "ep-1"})
+        tokens = await resolve_context_window_tokens(memory, endpoint_manager, "c1", self.DEFAULT)
+
+        assert tokens == 32_000
+        endpoint_manager.get_endpoint.assert_awaited_once_with("ep-1")
+        endpoint_manager.get_active_endpoint_model.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_conversation_endpoint_without_window_falls_back(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from thumbelina.api.routes.chat import resolve_context_window_tokens
+
+        endpoint_manager = MagicMock()
+        endpoint_manager.get_endpoint = AsyncMock(return_value=self._endpoint(None))
+
+        memory = self._memory({"id": "c1", "endpoint_id": "ep-1"})
+        tokens = await resolve_context_window_tokens(memory, endpoint_manager, "c1", self.DEFAULT)
+
+        assert tokens == self.DEFAULT
+
+    @pytest.mark.asyncio
+    async def test_unusable_conversation_endpoint_falls_back(self):
+        """没有 api key 的端点不可用 → 采用默认窗口。"""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from thumbelina.api.routes.chat import resolve_context_window_tokens
+
+        endpoint_manager = MagicMock()
+        endpoint_manager.get_endpoint = AsyncMock(return_value=self._endpoint("32K", api_key=""))
+        endpoint_manager.get_active_endpoint_model = AsyncMock()
+
+        memory = self._memory({"id": "c1", "endpoint_id": "ep-1"})
+        tokens = await resolve_context_window_tokens(memory, endpoint_manager, "c1", self.DEFAULT)
+
+        assert tokens == self.DEFAULT
+        # 已绑定但不可用的端点不会回落到全局端点。
+        endpoint_manager.get_active_endpoint_model.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_globally_active_endpoint_window(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from thumbelina.api.routes.chat import resolve_context_window_tokens
+
+        endpoint_manager = MagicMock()
+        endpoint_manager.get_active_endpoint_model = AsyncMock(
+            return_value=(self._endpoint("64K", endpoint_id="ep-active"), "gpt-4o")
+        )
+
+        memory = self._memory({"id": "c1"})
+        tokens = await resolve_context_window_tokens(memory, endpoint_manager, "c1", self.DEFAULT)
+
+        assert tokens == 64_000
+
+    @pytest.mark.asyncio
+    async def test_globally_active_endpoint_without_window_falls_back(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from thumbelina.api.routes.chat import resolve_context_window_tokens
+
+        endpoint_manager = MagicMock()
+        endpoint_manager.get_active_endpoint_model = AsyncMock(
+            return_value=(self._endpoint(None, endpoint_id="ep-active"), "gpt-4o")
+        )
+
+        memory = self._memory({"id": "c1"})
+        tokens = await resolve_context_window_tokens(memory, endpoint_manager, "c1", self.DEFAULT)
+
+        assert tokens == self.DEFAULT
+
+    @pytest.mark.asyncio
+    async def test_no_endpoints_returns_default(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from thumbelina.api.routes.chat import resolve_context_window_tokens
+
+        endpoint_manager = MagicMock()
+        endpoint_manager.get_active_endpoint_model = AsyncMock(return_value=None)
+
+        memory = self._memory({"id": "c1"})
+        tokens = await resolve_context_window_tokens(memory, endpoint_manager, "c1", self.DEFAULT)
+
+        assert tokens == self.DEFAULT
+
+    @pytest.mark.asyncio
+    async def test_missing_dependencies_return_default(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from thumbelina.api.routes.chat import resolve_context_window_tokens
+
+        memory = self._memory({"id": "c1"})
+        endpoint_manager = MagicMock()
+        endpoint_manager.get_active_endpoint_model = AsyncMock()
+
+        assert await resolve_context_window_tokens(None, endpoint_manager, "c1", 999) == 999
+        assert await resolve_context_window_tokens(memory, None, "c1", 999) == 999
+        assert await resolve_context_window_tokens(memory, endpoint_manager, None, 999) == 999
+
+    @pytest.mark.asyncio
+    async def test_lookup_error_returns_default(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from thumbelina.api.routes.chat import resolve_context_window_tokens
+
+        memory = MagicMock()
+        memory.get_conversation = AsyncMock(side_effect=RuntimeError("db down"))
+        endpoint_manager = MagicMock()
+
+        tokens = await resolve_context_window_tokens(memory, endpoint_manager, "c1", self.DEFAULT)
+
+        assert tokens == self.DEFAULT
+
+
+def test_chat_route_passes_default_window_tokens(client):
+    """POST /chat 应把解析出的窗口（此处为默认值）转发给 run()。"""
+    response = client.post("/api/v1/chat", json={"message": "Hello"})
+    assert response.status_code == 200
+
+    agent = client.app.state.agent
+    assert agent.run.await_args.kwargs["context_window_tokens"] == 128_000

@@ -6,15 +6,30 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from thumbelina.config.config_repo import ConfigRepository
+from thumbelina.config.models import parse_context_window
 from thumbelina.llm.base import ConnectionTestResult, SpeedTestResult
 from thumbelina.llm.factory import create_provider
 
 logger = logging.getLogger(__name__)
 
 _INDEX_KEY = "llm_endpoints.index"
+
+
+def _normalize_context_window(value: Any) -> str | None:
+    """校验用户提供的上下文窗口；``None``/空值表示清除。
+
+    对 ``"12X"`` 之类的畸形规格抛出 ``ValueError``（由 Pydantic
+    包装为校验错误）。
+    """
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    parse_context_window(value)  # 格式无效时抛出 ValueError
+    return str(value).strip()
 
 
 class LLMEndpoint(BaseModel):
@@ -29,12 +44,25 @@ class LLMEndpoint(BaseModel):
     api_key: str = ""
     api_key_set: bool = False
     is_default: bool = False
+    context_window: str | None = None
     last_latency_ms: int | None = None
     last_total_ms: int | None = None
     is_reachable: bool | None = None
     last_tested_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("context_window", mode="before")
+    @classmethod
+    def _validate_context_window(cls, value: Any) -> str | None:
+        return _normalize_context_window(value)
+
+    @property
+    def context_window_tokens(self) -> int | None:
+        """已配置时，上下文窗口归一化为 token 数量。"""
+        if self.context_window is None:
+            return None
+        return parse_context_window(self.context_window)
 
 
 class LLMEndpointCreate(BaseModel):
@@ -46,6 +74,12 @@ class LLMEndpointCreate(BaseModel):
     models: list[str] = []
     api_key: str = ""
     is_default: bool = False
+    context_window: str | None = None
+
+    @field_validator("context_window", mode="before")
+    @classmethod
+    def _validate_context_window(cls, value: Any) -> str | None:
+        return _normalize_context_window(value)
 
 
 class LLMEndpointUpdate(BaseModel):
@@ -56,6 +90,12 @@ class LLMEndpointUpdate(BaseModel):
     models: list[str] | None = None
     api_key: str | None = None
     is_default: bool | None = None
+    context_window: str | None = None
+
+    @field_validator("context_window", mode="before")
+    @classmethod
+    def _validate_context_window(cls, value: Any) -> str | None:
+        return _normalize_context_window(value)
 
 
 class LLMEndpointActivate(BaseModel):
@@ -154,6 +194,7 @@ class EndpointManager:
             api_key=data.api_key,
             api_key_set=bool(data.api_key),
             is_default=data.is_default,
+            context_window=data.context_window,
             active_model=data.models[0] if data.is_default and data.models else None,
             created_at=now,
             updated_at=now,
@@ -188,6 +229,9 @@ class EndpointManager:
         if data.api_key is not None:
             endpoint.api_key = data.api_key
             endpoint.api_key_set = bool(data.api_key)
+        if "context_window" in data.model_fields_set:
+            # 显式的 null/空值清除覆盖；未提供字段则保持原值。
+            endpoint.context_window = data.context_window
         if data.is_default is True:
             await self._clear_all_active()
             endpoint.is_default = True

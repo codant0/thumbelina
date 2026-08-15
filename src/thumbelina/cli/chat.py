@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Any
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import InMemoryHistory
 
+from thumbelina.agent.checkpointer import async_checkpointer_from_url
 from thumbelina.agent.graph import ThumbelinaAgent
-from thumbelina.config import load_config
+from thumbelina.config import AppConfig, load_config
 from thumbelina.llm.factory import create_provider
 from thumbelina.memory.manager import MemoryManager
 
@@ -30,10 +32,15 @@ class ChatSession:
     ----------
     agent:
         The ThumbelinaAgent instance to use for generating responses.
+    context_window_tokens:
+        已配置模型的可选上下文窗口，单位为 token。CLI 不使用
+        EndpointManager，因此直接取 ``llm.context_window`` 并在每一轮
+        转发给 agent（由压缩阶段消费）。
     """
 
-    def __init__(self, agent: ThumbelinaAgent) -> None:
+    def __init__(self, agent: ThumbelinaAgent, context_window_tokens: int | None = None) -> None:
         self.agent = agent
+        self.context_window_tokens = context_window_tokens
         self.history: list[dict[str, str]] = []
         self.running = False
 
@@ -93,7 +100,9 @@ class ChatSession:
         self.history.append({"role": "user", "content": user_input})
 
         # Use the full agent pipeline (with graph, tools, memory)
-        response = await self.agent.run(user_input)
+        response = await self.agent.run(
+            user_input, context_window_tokens=self.context_window_tokens
+        )
 
         self.history.append({"role": "assistant", "content": response})
         return response
@@ -148,7 +157,15 @@ def run_chat(provider: str, model: str | None = None) -> None:
     # 加载配置文件
     config_path = "thumbelina.yaml" if Path("thumbelina.yaml").exists() else None
     config = load_config(config_path)
+    asyncio.run(_run_chat_session(config, provider, model))
 
+
+async def _run_chat_session(config: AppConfig, provider: str, model: str | None) -> None:
+    """设置各子系统并运行交互式聊天会话。
+
+    所有初始化都在运行中的事件循环内完成，因为 LangGraph 检查点
+    存储器（aiosqlite）必须在那里创建。
+    """
     kwargs: dict[str, Any] = {}
     if config.llm.api_key:
         kwargs["api_key"] = config.llm.api_key
@@ -160,6 +177,14 @@ def run_chat(provider: str, model: str | None = None) -> None:
     llm_provider = create_provider(provider, **kwargs)
 
     memory_manager = MemoryManager(db_url=config.memory.database_url)
+
+    # 初始化 LangGraph 检查点存储器（在轮次之间持久化 agent 的 LLM
+    # 上下文，以会话 id 为键）。检查点是硬性要求：失败直接中止
+    # CLI 会话而不是降级。
+    checkpointer_stack = AsyncExitStack()
+    checkpointer = await checkpointer_stack.enter_async_context(
+        async_checkpointer_from_url(config.memory.database_url)
+    )
 
     # Initialize feedback repository
     feedback_repo = None
@@ -232,11 +257,19 @@ def run_chat(provider: str, model: str | None = None) -> None:
         scheduler=scheduler,
         composition_engine=composition_engine,
         role=config.llm.role,
+        checkpointer=checkpointer,
+        context_config=config.context,
+        context_window_tokens=config.llm.context_window_tokens,
     )
 
-    session = ChatSession(agent=agent)
+    session = ChatSession(
+        agent=agent,
+        # CLI 不经过 EndpointManager：直接使用 llm.context_window。
+        context_window_tokens=config.llm.context_window_tokens,
+    )
 
     try:
-        asyncio.run(session.run())
+        await session.run()
     finally:
+        await checkpointer_stack.aclose()
         memory_manager.close()

@@ -18,6 +18,27 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["conversations"])
 
 
+async def _clear_checkpoint(request: Request, conversation_id: str) -> None:
+    """丢弃会话的检查点工作区（生命周期联动）。
+
+    删除会话或清空其消息会清空消息日志，因此持久化的 LangGraph
+    上下文（``thread_id == conversation_id``）必须一并清除 —— 否则以
+    相同 id 重新创建会话会从检查点中复活过期的上下文。
+
+    缺少 saver（降级模式：非 sqlite 数据库或缺少包）是安全的空操作；
+    删除失败只记录警告，绝不会破坏主要的 memory 操作。
+    """
+    saver = getattr(request.app.state, "checkpointer", None)
+    if saver is None:
+        return
+    try:
+        await saver.adelete_thread(conversation_id)
+    except Exception:
+        logger.warning(
+            "Failed to clear checkpoint for conversation %s", conversation_id, exc_info=True
+        )
+
+
 class CreateConversationRequest(BaseModel):
     """Request body for creating a new conversation."""
 
@@ -279,6 +300,7 @@ async def set_conversation_thinking(
 @router.delete("/conversations/{conversation_id}/messages")
 async def clear_conversation_messages(
     conversation_id: str,
+    request: Request,
     memory: MemoryManager = Depends(get_memory_manager),
 ) -> dict[str, bool]:
     """Clear all messages of a conversation, keeping the conversation itself.
@@ -290,12 +312,17 @@ async def clear_conversation_messages(
     if not cleared:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
+    # LangGraph 检查点保存着与 LLM 上下文相同的历史；丢弃它，
+    # 让清空后的会话以全新的上下文工作区重新开始。
+    await _clear_checkpoint(request, conversation_id)
+
     return {"cleared": True}
 
 
 @router.delete("/conversations/{conversation_id}")
 async def delete_conversation(
     conversation_id: str,
+    request: Request,
     memory: MemoryManager = Depends(get_memory_manager),
 ) -> dict[str, bool]:
     """Delete a conversation."""
@@ -303,5 +330,9 @@ async def delete_conversation(
 
     if not deleted:
         raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # 移除会话的检查点线程，避免以相同 id 重新创建的会话
+    # 复活旧上下文。
+    await _clear_checkpoint(request, conversation_id)
 
     return {"deleted": True}

@@ -2,15 +2,49 @@
 
 from __future__ import annotations
 
-from typing import Literal
+import re
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from thumbelina.channels.config import (  # noqa: F401
     ChannelsConfig,
     QQChannelConfig,
     WeChatChannelConfig,
 )
+
+_CONTEXT_WINDOW_PATTERN = re.compile(r"^(\d+)\s*([KM])?$", re.IGNORECASE)
+_CONTEXT_WINDOW_MULTIPLIERS = {"K": 1_000, "M": 1_000_000}
+
+
+def parse_context_window(value: str | int) -> int:
+    """把上下文窗口规格解析为 token 数量。
+
+    接受纯 token 数量（``200000`` 或 ``"200000"``），或带大小写不敏感的
+    ``K``（千）/ ``M``（百万）token 后缀的数量，例如
+    ``"128K"`` 或 ``"1M"``。
+
+    Raises:
+        ValueError: 如果规格畸形或为非正数。
+    """
+    if isinstance(value, bool):
+        raise ValueError(f"Invalid context window: {value!r}")
+    if isinstance(value, int):
+        tokens = value
+    elif isinstance(value, str):
+        match = _CONTEXT_WINDOW_PATTERN.match(value.strip())
+        if match is None:
+            raise ValueError(
+                f"Invalid context window {value!r}; expected a positive token count "
+                "with an optional K/M suffix (e.g. '128K', '1M')"
+            )
+        suffix = (match.group(2) or "").upper()
+        tokens = int(match.group(1)) * _CONTEXT_WINDOW_MULTIPLIERS.get(suffix, 1)
+    else:
+        raise ValueError(f"Invalid context window: {value!r}")
+    if tokens <= 0:
+        raise ValueError(f"Context window must be positive, got {value!r}")
+    return tokens
 
 
 class LLMConfig(BaseModel):
@@ -39,6 +73,25 @@ class LLMConfig(BaseModel):
             "prompts/roles/<role>.md is injected as the system prompt."
         ),
     )
+    context_window: str = Field(
+        default="128K",
+        description=(
+            "Default context window of the provider model. Supports K (thousand) / "
+            "M (million) token suffixes, case-insensitive. Endpoints may override "
+            "this via their own context_window field."
+        ),
+    )
+
+    @field_validator("context_window", mode="before")
+    @classmethod
+    def _validate_context_window(cls, value: Any) -> str:
+        parse_context_window(value)  # 格式无效时抛出 ValueError
+        return str(value).strip()
+
+    @property
+    def context_window_tokens(self) -> int:
+        """归一化为 token 数量的上下文窗口。"""
+        return parse_context_window(self.context_window)
 
 
 class MemoryConfig(BaseModel):
@@ -98,6 +151,32 @@ class TodoConfig(BaseModel):
     )
 
 
+class ContextCompressConfig(BaseModel):
+    """用量接近窗口时应用的上下文压缩设置。"""
+
+    strategy: Literal["sliding_window", "full_summary", "summary_recent"] = Field(
+        default="summary_recent",
+        description="Compression strategy used when the context nears the window",
+    )
+    threshold: float = Field(
+        default=0.8,
+        gt=0.0,
+        le=1.0,
+        description="Fraction of the window (0, 1] at which compression triggers",
+    )
+    recent_turns: int = Field(
+        default=6,
+        ge=1,
+        description="Number of recent turns kept verbatim by the summary_recent strategy",
+    )
+
+
+class ContextConfig(BaseModel):
+    """会话上下文（检查点存储器）配置。"""
+
+    compress: ContextCompressConfig = Field(default_factory=ContextCompressConfig)
+
+
 class AppConfig(BaseModel):
     """Top-level application configuration."""
 
@@ -108,6 +187,7 @@ class AppConfig(BaseModel):
     rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
     todo: TodoConfig = Field(default_factory=TodoConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
+    context: ContextConfig = Field(default_factory=ContextConfig)
     cors_origins: list[str] = Field(
         default_factory=lambda: ["*"],
         description="Allowed CORS origins. Use ['*'] for development only.",

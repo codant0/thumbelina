@@ -84,7 +84,7 @@ Integrated subsystems:
 
 SQLAlchemy ORM (`Conversation`, `Message`, `SkillRecord`, `CompositionRecord`, `FeedbackRecord`, `UserProfile`, `UserPreference`) with `ConversationRepository` wrapping sync calls via `asyncio.to_thread`. `MemoryManager` adds validation (100KB content limit) and a `search()` method for hybrid keyword + semantic search. Additional modules:
 - `SearchEngine` — keyword, semantic, and hybrid search
-- `Summarizer` — LLM-based conversation summarization
+- `TitleSummarizer` — LLM-based short conversation summarization (naming-style summaries; context compression uses `agent/compression/` instead)
 - `vector/` — ChromaDB vector store
 - `profiler.py` — `UserProfiler` analyzes conversations to build user preference profiles
 - `feedback_repo.py` — `FeedbackRepository` for user ratings with skill score adjustment

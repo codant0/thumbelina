@@ -166,3 +166,139 @@ async def test_legacy_single_model_record_migrates_on_read(manager):
     loaded = await manager.get_endpoint("legacy-1")
     assert loaded is not None
     assert loaded.models == ["gpt-3.5-turbo"]
+
+
+@pytest.mark.asyncio
+async def test_create_endpoint_with_context_window(manager):
+    endpoint = await manager.create_endpoint(
+        provider="openai",
+        name="OpenAI",
+        base_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        models=["gpt-4o"],
+        context_window="128K",
+    )
+    assert endpoint.context_window == "128K"
+    assert endpoint.context_window_tokens == 128_000
+
+    # 经 JSON blob 持久化往返。
+    loaded = await manager.get_endpoint(endpoint.id)
+    assert loaded is not None
+    assert loaded.context_window == "128K"
+    assert loaded.context_window_tokens == 128_000
+
+
+@pytest.mark.asyncio
+async def test_create_endpoint_context_window_defaults_to_none(manager):
+    endpoint = await manager.create_endpoint(
+        provider="openai",
+        name="OpenAI",
+        base_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        models=["gpt-4o"],
+    )
+    assert endpoint.context_window is None
+    assert endpoint.context_window_tokens is None
+
+
+@pytest.mark.asyncio
+async def test_create_endpoint_rejects_invalid_context_window(manager):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        await manager.create_endpoint(
+            provider="openai",
+            name="OpenAI",
+            base_url="https://api.openai.com/v1",
+            api_key="sk-test",
+            models=["gpt-4o"],
+            context_window="12X",
+        )
+
+
+@pytest.mark.asyncio
+async def test_update_endpoint_context_window_set_clear_keep(manager):
+    from thumbelina.llm.endpoint_manager import LLMEndpointUpdate
+
+    endpoint = await manager.create_endpoint(
+        provider="openai",
+        name="OpenAI",
+        base_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        models=["gpt-4o"],
+        context_window="128K",
+    )
+
+    # 未提供该字段时保留已存储的值。
+    updated = await manager.update_endpoint(endpoint.id, LLMEndpointUpdate(name="Renamed"))
+    assert updated is not None
+    assert updated.context_window == "128K"
+
+    # 显式值覆盖原值（小写也接受）。
+    updated = await manager.update_endpoint(endpoint.id, LLMEndpointUpdate(context_window="1m"))
+    assert updated is not None
+    assert updated.context_window == "1m"
+
+    # 显式的 None（或空字符串）清除覆盖值。
+    updated = await manager.update_endpoint(endpoint.id, LLMEndpointUpdate(context_window=None))
+    assert updated is not None
+    assert updated.context_window is None
+
+    updated = await manager.update_endpoint(endpoint.id, LLMEndpointUpdate(context_window="256K"))
+    assert updated is not None
+    updated = await manager.update_endpoint(endpoint.id, LLMEndpointUpdate(context_window=""))
+    assert updated is not None
+    assert updated.context_window is None
+
+
+@pytest.mark.asyncio
+async def test_update_endpoint_rejects_invalid_context_window(manager):
+    from pydantic import ValidationError
+
+    from thumbelina.llm.endpoint_manager import LLMEndpointUpdate
+
+    endpoint = await manager.create_endpoint(
+        provider="openai",
+        name="OpenAI",
+        base_url="https://api.openai.com/v1",
+        api_key="sk-test",
+        models=["gpt-4o"],
+    )
+    with pytest.raises(ValidationError):
+        LLMEndpointUpdate(context_window="bogus!")
+    # 已存储的记录保持不动。
+    loaded = await manager.get_endpoint(endpoint.id)
+    assert loaded is not None
+    assert loaded.context_window is None
+
+
+@pytest.mark.asyncio
+async def test_legacy_record_without_context_window_loads(manager):
+    import json
+    from datetime import UTC, datetime
+
+    now_iso = datetime.now(UTC).isoformat()
+    raw = {
+        "id": "old-1",
+        "provider": "openai",
+        "name": "Old",
+        "base_url": "https://api.openai.com/v1",
+        "models": ["gpt-4o"],
+        "api_key": "sk-test",
+        "api_key_set": True,
+        "is_default": False,
+        "last_latency_ms": None,
+        "last_total_ms": None,
+        "is_reachable": None,
+        "last_tested_at": None,
+        "created_at": now_iso,
+        "updated_at": now_iso,
+    }
+    await manager._repo.set(manager._record_key("old-1"), json.dumps(raw), "llm_endpoints")
+    index = await manager._load_index()
+    index.append("old-1")
+    await manager._save_index(index)
+
+    loaded = await manager.get_endpoint("old-1")
+    assert loaded is not None
+    assert loaded.context_window is None

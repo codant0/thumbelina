@@ -565,3 +565,266 @@ class TestToolBinding:
         result = await agent.run("hi")
 
         assert result == "plain"
+
+
+class TestCheckpointerWiring:
+    """LangGraph 检查点存储器接线（T3）的测试。"""
+
+    def test_checkpointer_defaults_to_none(self):
+        """没有检查点存储器时，行为与检查点出现之前的构建一致。"""
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        mock_provider = _create_mock_provider()
+        agent = ThumbelinaAgent(llm_provider=mock_provider)
+
+        assert agent._checkpointer is None
+        assert agent.graph.checkpointer is None
+        assert agent._run_config() is None
+
+    def test_graph_compiled_with_checkpointer(self):
+        """编译后的图应持有注入的 saver。"""
+        from langgraph.checkpoint.memory import MemorySaver
+
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        saver = MemorySaver()
+        mock_provider = _create_mock_provider()
+        agent = ThumbelinaAgent(llm_provider=mock_provider, checkpointer=saver)
+
+        assert agent.graph.checkpointer is saver
+
+    def test_clone_shares_checkpointer_reference(self):
+        """clone() 必须共享同一个 saver —— 不产生重复连接。"""
+        from langgraph.checkpoint.memory import MemorySaver
+
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        saver = MemorySaver()
+        mock_provider = _create_mock_provider()
+        agent = ThumbelinaAgent(llm_provider=mock_provider, checkpointer=saver)
+
+        cloned = agent.clone()
+
+        assert cloned._checkpointer is saver
+        assert cloned.graph.checkpointer is saver
+
+    @pytest.mark.asyncio
+    async def test_multi_turn_context_continuity(self):
+        """同一会话的各轮应在检查点中累积。"""
+        from langgraph.checkpoint.memory import MemorySaver
+
+        from thumbelina.agent.graph import ThumbelinaAgent
+        from thumbelina.memory.manager import MemoryManager
+
+        saver = MemorySaver()
+        mock_provider = _create_mock_provider()
+        # 每次调用都返回全新的 AIMessage：add_messages 按 id 合并消息，
+        # 共享的 mock 对象会被替换而不是追加。
+        mock_provider.chat_model.ainvoke.side_effect = lambda *a, **k: AIMessage(content="Hello!")
+
+        mock_memory = AsyncMock(spec=MemoryManager)
+        mock_memory.create_conversation.return_value = "conv-checkpoint"
+        # AsyncMock(spec=...) 会把每个属性都变成 AsyncMock，因此默认的
+        # 子返回值会让 conv.get() 成为未被 await 的协程。
+        # 改为返回 None（未绑定知识库）。
+        mock_memory.get_conversation.return_value = None
+        mock_memory.add_message = AsyncMock()
+
+        agent = ThumbelinaAgent(
+            llm_provider=mock_provider,
+            memory_manager=mock_memory,
+            checkpointer=saver,
+        )
+        await agent.run("First message")
+        await agent.run("Second message")
+
+        snapshot = await agent.graph.aget_state({"configurable": {"thread_id": "conv-checkpoint"}})
+        contents = [m.content for m in snapshot.values["messages"]]
+        assert contents == ["First message", "Hello!", "Second message", "Hello!"]
+
+    @pytest.mark.asyncio
+    async def test_stateless_path_with_checkpointer(self):
+        """没有会话 id 时，运行使用临时 thread id。"""
+        from langgraph.checkpoint.memory import MemorySaver
+
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        saver = MemorySaver()
+        mock_provider = _create_mock_provider()
+        agent = ThumbelinaAgent(llm_provider=mock_provider, checkpointer=saver)
+
+        # 无 memory manager -> 无会话 id；绝不能抛出。
+        result = await agent.run("Hi")
+
+        assert result == "Hello! How can I help?"
+
+
+class TestFirstTurnInjection:
+    """会话级上下文每个检查点线程只注入一次（T4）。"""
+
+    @staticmethod
+    def _make_agent(role=None, profile=None, skill_context=None):
+        from langgraph.checkpoint.memory import MemorySaver
+
+        from thumbelina.agent.graph import ThumbelinaAgent
+        from thumbelina.memory.manager import MemoryManager
+
+        mock_provider = _create_mock_provider()
+        # 每次调用都返回全新的 AIMessage：add_messages 按 id 合并消息，
+        # 共享的 mock 对象会被替换而不是追加。
+        mock_provider.chat_model.ainvoke.side_effect = lambda *a, **k: AIMessage(content="Hi!")
+
+        mock_memory = AsyncMock(spec=MemoryManager)
+        mock_memory.create_conversation.return_value = "conv-inject"
+        mock_memory.add_message = AsyncMock()
+        mock_memory.get_conversation.return_value = {"knowledge_base_id": None}
+
+        profiler = None
+        if profile is not None:
+            profiler = MagicMock()
+            profiler.get_user_context = AsyncMock(return_value=profile)
+
+        skill_engine = None
+        if skill_context is not None:
+            skill_engine = MagicMock()
+            skill_engine.find_matching_skills = AsyncMock(return_value=[MagicMock()])
+            skill_engine.apply_skill = AsyncMock(return_value=skill_context)
+
+        agent = ThumbelinaAgent(
+            llm_provider=mock_provider,
+            memory_manager=mock_memory,
+            user_profiler=profiler,
+            skill_engine=skill_engine,
+            role=role,
+            checkpointer=MemorySaver(),
+        )
+        return agent, mock_provider
+
+    @pytest.mark.asyncio
+    async def test_role_and_profile_injected_only_on_first_turn(self):
+        """角色提示词 + 画像恰好出现一次，位于序列头部。"""
+        from langchain_core.messages import SystemMessage
+
+        from thumbelina.prompts.roles import get_role_prompt
+
+        agent, _ = self._make_agent(role="assistant", profile="User likes tea")
+        await agent.run("First")
+        await agent.run("Second")
+
+        snapshot = await agent.graph.aget_state({"configurable": {"thread_id": "conv-inject"}})
+        messages = snapshot.values["messages"]
+
+        system_contents = [m.content for m in messages if isinstance(m, SystemMessage)]
+        assert system_contents == [get_role_prompt("assistant"), "User likes tea"]
+        # 角色提示词位于序列头部，画像紧随其后。
+        assert messages[0].content == get_role_prompt("assistant")
+        assert messages[1].content == "User likes tea"
+
+        human_contents = [m.content for m in messages if isinstance(m, HumanMessage)]
+        assert human_contents == ["First", "Second"]
+
+    @pytest.mark.asyncio
+    async def test_profile_fetched_only_on_first_turn(self):
+        """每个线程只查询一次 profiler，而不是每轮都查。"""
+        agent, _ = self._make_agent(profile="User likes tea")
+        await agent.run("First")
+        await agent.run("Second")
+
+        assert agent.user_profiler.get_user_context.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_ephemeral_skill_context_appended_every_turn(self):
+        """RAG/skill SystemMessage 每轮保留：纯追加，不做清理。"""
+        from langchain_core.messages import SystemMessage
+
+        agent, _ = self._make_agent(skill_context="skill instructions")
+        await agent.run("First")
+        await agent.run("Second")
+
+        snapshot = await agent.graph.aget_state({"configurable": {"thread_id": "conv-inject"}})
+        skill_msgs = [
+            m
+            for m in snapshot.values["messages"]
+            if isinstance(m, SystemMessage) and m.content == "skill instructions"
+        ]
+        assert len(skill_msgs) == 2
+
+    @pytest.mark.asyncio
+    async def test_injects_every_turn_without_checkpointer(self):
+        """没有检查点存储器时，保留原有的逐轮注入。"""
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        mock_provider = _create_mock_provider()
+        mock_provider.chat_model.ainvoke.side_effect = lambda *a, **k: AIMessage(content="Hi!")
+        profiler = MagicMock()
+        profiler.get_user_context = AsyncMock(return_value="User likes tea")
+
+        agent = ThumbelinaAgent(
+            llm_provider=mock_provider, user_profiler=profiler, role="assistant"
+        )
+        await agent.run("First")
+        await agent.run("Second")
+
+        assert profiler.get_user_context.await_count == 2
+        # 第二轮仍携带角色提示词 + 画像（状态没有被持久化）。
+        sent = mock_provider.chat_model.ainvoke.call_args[0][0]
+        assert len(sent) == 3
+
+
+class TestContextWindowPassThrough:
+    """context_window_tokens 向压缩阶段的传递（T4）。"""
+
+    def test_run_config_none_without_checkpointer_and_window(self):
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        agent = ThumbelinaAgent(llm_provider=_create_mock_provider())
+        assert agent._run_config() is None
+
+    def test_run_config_window_without_checkpointer(self):
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        agent = ThumbelinaAgent(llm_provider=_create_mock_provider())
+        config = agent._run_config(context_window_tokens=32000)
+        assert config == {"configurable": {"context_window_tokens": 32000}}
+
+    def test_run_config_carries_thread_and_window(self):
+        from langgraph.checkpoint.memory import MemorySaver
+
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        agent = ThumbelinaAgent(llm_provider=_create_mock_provider(), checkpointer=MemorySaver())
+        agent.current_conversation_id = "conv-1"
+
+        config = agent._run_config(context_window_tokens=32000)
+
+        assert config["configurable"]["thread_id"] == "conv-1"
+        assert config["configurable"]["context_window_tokens"] == 32000
+
+    @pytest.mark.asyncio
+    async def test_run_forwards_window_tokens_via_config(self):
+        from unittest.mock import patch
+
+        from langgraph.checkpoint.memory import MemorySaver
+
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        agent = ThumbelinaAgent(llm_provider=_create_mock_provider(), checkpointer=MemorySaver())
+        with patch.object(agent, "_run_config", wraps=agent._run_config) as mock_config:
+            await agent.run("hi", context_window_tokens=8000)
+
+        mock_config.assert_called_once_with(8000)
+
+    @pytest.mark.asyncio
+    async def test_stream_forwards_window_tokens_via_config(self):
+        from unittest.mock import patch
+
+        from langgraph.checkpoint.memory import MemorySaver
+
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        agent = ThumbelinaAgent(llm_provider=_create_mock_provider(), checkpointer=MemorySaver())
+        with patch.object(agent, "_run_config", wraps=agent._run_config) as mock_config:
+            async for _ in agent.stream("hi", context_window_tokens=8000):
+                pass
+
+        mock_config.assert_called_once_with(8000)

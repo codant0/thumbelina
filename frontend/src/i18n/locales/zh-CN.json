@@ -141,7 +141,10 @@
     "addModelPlaceholder": "模型名称，回车添加",
     "activeModel": "当前模型",
     "activateModel": "激活",
-    "noModels": "未配置模型"
+    "noModels": "未配置模型",
+    "contextWindow": "上下文窗口",
+    "contextWindowPlaceholder": "如 128K（留空使用全局默认值）",
+    "contextWindowHint": "可选。支持 K/M token 后缀（不区分大小写）；留空则回落到全局 llm.context_window。"
   },
   "channels": {
     "title": "频道",
