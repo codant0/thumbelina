@@ -371,8 +371,9 @@ class TestSummaryStrategiesThroughAgent:
         assert contents[0].startswith("【对话历史摘要】")
         assert "历史摘要文本" in contents[0]
         assert contents[-2:] == ["second", "ack"]
-        # 摘要器恰好运行了一次（第 2 轮；第 1 轮没有旧轮次）。
-        assert provider.chat.call_count == 1
+        # 摘要只在第 2 轮运行（第 1 轮没有旧轮次）。窗口 1000 → 单次输入
+        # 上限 500，约 1000 token 的旧轮被拆成 2 批 + 1 次归并 = 3 次调用。
+        assert provider.chat.call_count == 3
 
     @pytest.mark.asyncio
     async def test_swap_provider_repoints_compressor_summarizer(self):
@@ -402,3 +403,56 @@ def _agent_with_summary_strategy():
         context_config=ContextConfig(compress=ContextCompressConfig(strategy="summary_recent")),
         context_window_tokens=1000,
     )
+
+
+class TestWindowLinkedInputCap:
+    """摘要调用输入上限与模型窗口联动（四.5.2 扩展）。"""
+
+    def test_cap_resolves_to_half_of_window(self):
+        from thumbelina.agent.compression.summarizer_context import resolve_input_cap
+
+        assert resolve_input_cap(100) == 50
+        assert resolve_input_cap(1000) == 500
+
+    def test_cap_capped_at_default_ceiling(self):
+        from thumbelina.agent.compression.summarizer_context import (
+            DEFAULT_MAX_INPUT_TOKENS,
+            resolve_input_cap,
+        )
+
+        assert resolve_input_cap(1_000_000) == DEFAULT_MAX_INPUT_TOKENS
+
+    def test_cap_clamps_tiny_windows_to_one(self):
+        from thumbelina.agent.compression.summarizer_context import resolve_input_cap
+
+        assert resolve_input_cap(1) == 1
+        assert resolve_input_cap(0) == 1
+
+    @pytest.mark.asyncio
+    async def test_full_summary_small_window_caps_single_call_input(self):
+        # 窗口 100 → 输入上限 50；middle 远超上限时调用前截断。
+        chat = AsyncMock(return_value=SUMMARY)
+        compressor = FullSummaryCompressor()
+        compressor.llm_provider = _provider(chat)
+        messages = [HumanMessage(content="x" * 500), AIMessage(content="y" * 500)]
+        result = await compressor.compress(messages, window_tokens=100)
+        assert result is not None
+        sent = chat.call_args[0][0][1]["content"]
+        assert estimate_messages_tokens([HumanMessage(content=sent)]) <= 50
+
+    @pytest.mark.asyncio
+    async def test_summary_recent_small_window_caps_single_call_input(self):
+        # 窗口 100 → 输入上限 50；仅保留最近 1 轮，旧轮进入摘要且被截断。
+        chat = AsyncMock(return_value=SUMMARY)
+        compressor = SummaryRecentCompressor(recent_turns=1)
+        compressor.llm_provider = _provider(chat)
+        messages = [
+            HumanMessage(content="a" * 500),
+            AIMessage(content="b" * 100),
+            HumanMessage(content="c" * 100),
+            AIMessage(content="d" * 100),
+        ]
+        result = await compressor.compress(messages, window_tokens=100)
+        assert result is not None
+        sent = chat.call_args[0][0][1]["content"]
+        assert estimate_messages_tokens([HumanMessage(content=sent)]) <= 50

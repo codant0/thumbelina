@@ -43,8 +43,12 @@ SUMMARY_MESSAGE_PREFIX = "【对话历史摘要】\n"
 DEFAULT_MAX_TOOL_CHARS = 2_000
 
 #: 单次 LLM 调用的输入上限（token）。更大的输入拆成分批，
-#: 各自独立摘要后再合并。
+#: 各自独立摘要后再合并。作为按窗口解析前的封顶值使用。
 DEFAULT_MAX_INPUT_TOKENS = 12_000
+
+#: 单次摘要调用的输入上限占模型窗口的比例 —— 为输出预留另一半空间，
+#: 避免小窗口模型上的摘要调用直接溢出。
+INPUT_CAP_WINDOW_RATIO = 0.5
 
 #: 分批后合并的递归深度上限；到达上限时输入改为硬性截断，
 #: 而不再继续拆分（保证终止）。
@@ -75,6 +79,16 @@ _ROLE_LABELS: dict[type[BaseMessage], str] = {
     ToolMessage: "工具",
     SystemMessage: "系统",
 }
+
+
+def resolve_input_cap(window_tokens: int, default: int = DEFAULT_MAX_INPUT_TOKENS) -> int:
+    """按模型窗口计算单次摘要调用的输入上限。
+
+    上限封顶 ``default``（默认 12K）以控制单次调用成本，同时随窗口
+    收缩到 ``window_tokens × INPUT_CAP_WINDOW_RATIO``（默认 50%），
+    为输出预留空间，避免小窗口模型上的摘要调用直接溢出。
+    """
+    return min(default, max(1, int(window_tokens * INPUT_CAP_WINDOW_RATIO)))
 
 
 def build_summary_message(
@@ -125,8 +139,14 @@ class ContextSummarizer:
         self.max_tool_chars = max_tool_chars
         self.max_depth = max_depth
 
-    async def summarize(self, messages: Sequence[BaseMessage]) -> str | None:
+    async def summarize(
+        self, messages: Sequence[BaseMessage], max_input_tokens: int | None = None
+    ) -> str | None:
         """返回 *messages* 的摘要；失败时返回 ``None``。
+
+        ``max_input_tokens`` 覆盖本次调用的单次输入上限；为 ``None``
+        时使用构造时配置的默认值。调用方（压缩策略）应传入按模型窗口
+        解析出的上限（见 :func:`resolve_input_cap`）。
 
         失败（缺少 provider、LLM 错误、结果为空）绝不允许抛出：
         策略在收到 ``None`` 时回退到纯删除。
@@ -138,7 +158,9 @@ class ContextSummarizer:
         if not text.strip():
             return None
         try:
-            return await self._summarize_text(text, depth=0)
+            return await self._summarize_text(
+                text, depth=0, max_input_tokens=max_input_tokens or self.max_input_tokens
+            )
         except Exception:
             logger.warning("Context summarization failed", exc_info=True)
             return None
@@ -160,30 +182,30 @@ class ContextSummarizer:
             entries.append(f"{label}: {content}")
         return entries
 
-    async def _summarize_text(self, text: str, depth: int) -> str | None:
+    async def _summarize_text(self, text: str, depth: int, max_input_tokens: int) -> str | None:
         """摘要 *text*；超限时递归分批再合并。
 
         每一层把超预算的输入拆成适配 ``max_input_tokens`` 的分批，
         逐批摘要，再合并各部分（若合并后仍超限则再次递归）。
         深度上限通过硬性截断保证终止。
         """
-        if estimate_tokens(text) > self.max_input_tokens and depth < self.max_depth:
-            batches = self._split_batches(text)
+        if estimate_tokens(text) > max_input_tokens and depth < self.max_depth:
+            batches = self._split_batches(text, max_input_tokens)
             if len(batches) > 1:
                 partials: list[str] = []
                 for batch in batches:
-                    partial = await self._summarize_text(batch, depth + 1)
+                    partial = await self._summarize_text(batch, depth + 1, max_input_tokens)
                     if partial is None:
                         return None
                     partials.append(partial)
                 merged = "\n\n".join(partials)
-                if estimate_tokens(merged) > self.max_input_tokens:
-                    return await self._summarize_text(merged, depth + 1)
+                if estimate_tokens(merged) > max_input_tokens:
+                    return await self._summarize_text(merged, depth + 1, max_input_tokens)
                 return await self._call_llm(merged, merge=True)
             text = batches[0]
-        return await self._call_llm(truncate_text_to_tokens(text, self.max_input_tokens))
+        return await self._call_llm(truncate_text_to_tokens(text, max_input_tokens))
 
-    def _split_batches(self, text: str) -> list[str]:
+    def _split_batches(self, text: str, max_input_tokens: int) -> list[str]:
         """把 *text* 拆成每批都适配 ``max_input_tokens`` 的分批。
 
         按段落边界拆分；单个段落超过上限时先硬性截断
@@ -195,11 +217,9 @@ class ContextSummarizer:
         batches: list[str] = []
         current: list[str] = []
         for paragraph in paragraphs:
-            if estimate_tokens(paragraph) > self.max_input_tokens:
-                paragraph = truncate_text_to_tokens(paragraph, self.max_input_tokens)
-            if current and estimate_tokens("\n\n".join(current + [paragraph])) > (
-                self.max_input_tokens
-            ):
+            if estimate_tokens(paragraph) > max_input_tokens:
+                paragraph = truncate_text_to_tokens(paragraph, max_input_tokens)
+            if current and estimate_tokens("\n\n".join(current + [paragraph])) > (max_input_tokens):
                 batches.append("\n\n".join(current))
                 current = [paragraph]
             else:

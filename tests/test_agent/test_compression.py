@@ -21,7 +21,7 @@ from thumbelina.agent.compression import (
     available_strategies,
     create_compressor,
     estimate_messages_tokens,
-    group_deletion_units,
+    group_atomic_units,
     register_compressor,
     strip_first_assistant_thinking,
 )
@@ -152,7 +152,7 @@ class TestGroupDeletionUnits:
     def test_tool_pair_grouped(self):
         ai = _ai_with_tool_call()
         tool = ToolMessage(content="ok", tool_call_id="call_1")
-        units = group_deletion_units(
+        units = group_atomic_units(
             [HumanMessage(content="hi"), ai, tool, AIMessage(content="done")]
         )
         assert [len(unit) for unit in units] == [1, 2, 1]
@@ -161,7 +161,7 @@ class TestGroupDeletionUnits:
 
     def test_plain_messages_are_singletons(self):
         messages = [HumanMessage(content="a"), AIMessage(content="b")]
-        units = group_deletion_units(messages)
+        units = group_atomic_units(messages)
         assert len(units) == 2
         assert all(len(unit) == 1 for unit in units)
         assert units[0][0] is messages[0]
@@ -170,7 +170,7 @@ class TestGroupDeletionUnits:
     def test_unrelated_tool_message_not_grouped(self):
         ai = _ai_with_tool_call("call_1")
         foreign = ToolMessage(content="stale", tool_call_id="call_other")
-        units = group_deletion_units([ai, foreign])
+        units = group_atomic_units([ai, foreign])
         assert [len(unit) for unit in units] == [1, 1]
 
 

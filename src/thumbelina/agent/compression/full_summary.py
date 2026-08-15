@@ -8,7 +8,7 @@
 
 - 前导的 ``SystemMessage`` 单元序列（会话头部：角色提示词 +
   首轮用户画像）原样保留；
-- 最后一个删除单元（当前轮的输入）原样保留。
+- 最后一个原子单元（当前轮的输入）原样保留。
 
 当摘要失败（LLM 错误、结果为空、或没有给摘要留下预算）时，
 该策略降级为纯删除，压缩永远不会阻塞会话。
@@ -26,13 +26,14 @@ from thumbelina.agent.compression.base import (
     ContextCompressor,
     estimate_messages_tokens,
     flatten_units,
-    group_deletion_units,
+    group_atomic_units,
     leading_system_unit_count,
 )
 from thumbelina.agent.compression.sliding_window import SlidingWindowCompressor
 from thumbelina.agent.compression.summarizer_context import (
     ContextSummarizer,
     build_summary_message,
+    resolve_input_cap,
 )
 from thumbelina.llm.base import LLMProvider
 
@@ -61,7 +62,7 @@ class FullSummaryCompressor(ContextCompressor):
     ) -> list[BaseMessage]:
         """把 *messages* 中可丢弃的中间部分汇总为一条消息。"""
         target = max(1, int(window_tokens * LOW_WATERMARK))
-        units = group_deletion_units(messages)
+        units = group_atomic_units(messages)
         head_count = leading_system_unit_count(units)
 
         # 最后一个单元承载当前轮的输入，必须保留。
@@ -72,7 +73,11 @@ class FullSummaryCompressor(ContextCompressor):
         tail = flatten_units([units[-1]])
         middle = flatten_units(units[head_count:-1])
 
-        summary = await self._summarizer.summarize(middle)
+        # 单次摘要调用的输入上限与模型窗口联动（50%，封顶 12K），
+        # 小窗口模型也能安全完成摘要。
+        summary = await self._summarizer.summarize(
+            middle, max_input_tokens=resolve_input_cap(window_tokens)
+        )
         if not summary:
             logger.warning("full_summary: summarization unavailable; degrading to pure deletion")
             return await SlidingWindowCompressor().compress(messages, window_tokens)
