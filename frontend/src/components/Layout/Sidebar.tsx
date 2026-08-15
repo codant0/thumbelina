@@ -82,6 +82,8 @@ export function Sidebar({ conversations, onSelect, onNew, onDelete, onRename, se
                       data-testid="rename-input"
                       value={draft}
                       onChange={e => setDraft(e.target.value)}
+                      onFocus={e => e.currentTarget.select()}
+                      onBlur={commitEdit}
                       onKeyDown={e => {
                         if (e.key === 'Enter') commitEdit()
                         else if (e.key === 'Escape') cancelEdit()
@@ -94,6 +96,7 @@ export function Sidebar({ conversations, onSelect, onNew, onDelete, onRename, se
                       data-testid="rename-confirm"
                       title={t('chat.saveName')}
                       aria-label={t('chat.saveName')}
+                      onMouseDown={e => e.preventDefault()}
                       onClick={e => { e.stopPropagation(); commitEdit() }}
                     >
                       <Check size={14} />

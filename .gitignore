@@ -58,3 +58,4 @@ logs/
 
 # docker image
 thumbelina-*.tar
+node_modules/.vite/vitest/*/results.json

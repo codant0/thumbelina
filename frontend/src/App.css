@@ -906,6 +906,20 @@
   height: var(--icon-sm);
 }
 
+/* 侧栏图标按钮：覆盖 .btn/.btn-sm 的尺寸，且按下时保持垂直居中定位。
+   否则 :active 的 transform 会让按钮跳开约半个列表项高度，click 落到父容器上。 */
+.sidebar-item .sidebar-action,
+.sidebar-item .sidebar-delete,
+.sidebar-item__edit .sidebar-item__confirm {
+  padding: 0;
+  min-height: 22px;
+}
+
+.sidebar-item .sidebar-action:active:not(:disabled),
+.sidebar-item .sidebar-delete:active:not(:disabled) {
+  transform: translateY(-50%);
+}
+
 /* ===== Forms ===== */
 .form-group {
   margin-bottom: var(--sp-4);
