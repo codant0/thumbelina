@@ -24,7 +24,7 @@ class TestLoadConfig:
             cfg = load_config()
         assert cfg.llm.provider == "openai"
         assert cfg.llm.model == "gpt-4o"
-        assert cfg.memory.database_url == "sqlite:///thumbelina.db"
+        assert cfg.repository.database_url == "sqlite:///thumbelina.db"
         assert cfg.logging.level == "INFO"
 
     def test_load_from_yaml_file(self, tmp_path):
@@ -32,7 +32,7 @@ class TestLoadConfig:
 
         config_data = {
             "llm": {"provider": "anthropic", "model": "claude-3", "api_key": "sk-test"},
-            "memory": {"database_url": "postgresql://localhost/test"},
+            "repository": {"database_url": "postgresql://localhost/test"},
             "logging": {"level": "DEBUG"},
         }
         config_file = tmp_path / "config.yaml"
@@ -42,7 +42,7 @@ class TestLoadConfig:
         assert cfg.llm.provider == "anthropic"
         assert cfg.llm.model == "claude-3"
         assert cfg.llm.api_key == "sk-test"
-        assert cfg.memory.database_url == "postgresql://localhost/test"
+        assert cfg.repository.database_url == "postgresql://localhost/test"
         assert cfg.logging.level == "DEBUG"
 
     def test_load_from_yml_file(self, tmp_path):
@@ -65,7 +65,7 @@ class TestLoadConfig:
         cfg = load_config(str(config_file))
         assert cfg.llm.provider == "anthropic"
         assert cfg.llm.model == "gpt-4o"  # default
-        assert cfg.memory.database_url == "sqlite:///thumbelina.db"  # default
+        assert cfg.repository.database_url == "sqlite:///thumbelina.db"  # default
 
     def test_load_nonexistent_file_raises(self):
         from thumbelina.config.loader import load_config
@@ -97,17 +97,17 @@ class TestLoadConfig:
             cfg = load_config(str(config_file))
         assert cfg.llm.api_key == "sk-env-key"
 
-    def test_env_override_memory_url(self, tmp_path):
+    def test_env_override_repository_url(self, tmp_path):
         from thumbelina.config.loader import load_config
 
-        config_data = {"memory": {"database_url": "sqlite:///default.db"}}
+        config_data = {"repository": {"database_url": "sqlite:///default.db"}}
         config_file = tmp_path / "config.yaml"
         config_file.write_text(yaml.dump(config_data))
 
-        env = {"THUMBELINA_MEMORY__DATABASE_URL": "postgresql://localhost/env"}
+        env = {"THUMBELINA_REPOSITORY__DATABASE_URL": "postgresql://localhost/env"}
         with patch.dict(os.environ, env, clear=False):
             cfg = load_config(str(config_file))
-        assert cfg.memory.database_url == "postgresql://localhost/env"
+        assert cfg.repository.database_url == "postgresql://localhost/env"
 
     def test_env_override_logging_level(self, tmp_path):
         from thumbelina.config.loader import load_config
@@ -234,4 +234,4 @@ class TestExampleConfigFile:
         assert cfg.llm.role == "assistant"
         assert cfg.llm.context_window == "128K"
         assert cfg.context.compress.strategy == "summary_recent"
-        assert cfg.memory.database_url == "sqlite:///thumbelina.db"
+        assert cfg.repository.database_url == "sqlite:///thumbelina.db"

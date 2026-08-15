@@ -9,7 +9,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class RagBase(DeclarativeBase):
-    """RAG 模块专用的 Base，独立于 memory 模块。"""
+    """RAG 模块专用的 Base，独立于 repository 模块。"""
 
     pass
 

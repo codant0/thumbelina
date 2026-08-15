@@ -1,7 +1,7 @@
 """专用于压缩的 LLM 摘要器（设计文档 四.5.2/5.3）。
 
 :class:`ContextSummarizer` 把一段对话历史转成一条高密度摘要，
-供 ``full_summary`` / ``summary_recent`` 策略使用。与 memory 层的
+供 ``full_summary`` / ``summary_recent`` 策略使用。与 analysis 层的
 ``TitleSummarizer``（1-2 句的命名摘要）不同，本摘要器为上下文压缩打造：
 
 - 长提示词，保留事实、决策与未完成事项；

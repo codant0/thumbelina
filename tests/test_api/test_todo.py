@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from thumbelina.config.models import AppConfig, LLMConfig, MemoryConfig, TodoConfig
+from thumbelina.config.models import AppConfig, LLMConfig, RepositoryConfig, TodoConfig
 
 TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
 
@@ -20,17 +20,17 @@ TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
 def _build_client(
     tmp_path: Path,
     mock_agent: MagicMock,
-    mock_memory: MagicMock,
+    mock_repository: MagicMock,
     todo_config: TodoConfig,
 ) -> Iterator[TestClient]:
     """Create a TestClient with the same patches as conftest's ``client`` fixture."""
     config = AppConfig(
         llm=LLMConfig(provider="openai", model="test", api_key="k"),
-        memory=MemoryConfig(database_url="sqlite:///:memory:"),
+        repository=RepositoryConfig(database_url="sqlite:///:memory:"),
         todo=todo_config,
     )
     with (
-        patch("thumbelina.api.app.MemoryManager", return_value=mock_memory),
+        patch("thumbelina.api.app.RepositoryManager", return_value=mock_repository),
         patch("thumbelina.api.app.create_provider", return_value=MagicMock()),
         patch("thumbelina.api.app.ThumbelinaAgent", return_value=mock_agent),
     ):
@@ -42,21 +42,21 @@ def _build_client(
 
 
 @pytest.fixture
-def todo_client(tmp_path: Path, mock_agent: MagicMock, mock_memory: MagicMock):
+def todo_client(tmp_path: Path, mock_agent: MagicMock, mock_repository: MagicMock):
     """Test client with the TODO module enabled and rooted at tmp_path."""
     with _build_client(
         tmp_path,
         mock_agent,
-        mock_memory,
+        mock_repository,
         TodoConfig(directory=str(tmp_path / "TODO")),
     ) as test_client:
         yield test_client
 
 
 @pytest.fixture
-def disabled_client(tmp_path: Path, mock_agent: MagicMock, mock_memory: MagicMock):
+def disabled_client(tmp_path: Path, mock_agent: MagicMock, mock_repository: MagicMock):
     """Test client with the TODO module disabled."""
-    with _build_client(tmp_path, mock_agent, mock_memory, TodoConfig(enabled=False)) as (
+    with _build_client(tmp_path, mock_agent, mock_repository, TodoConfig(enabled=False)) as (
         test_client
     ):
         yield test_client

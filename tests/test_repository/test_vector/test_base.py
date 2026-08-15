@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from thumbelina.memory.vector.base import VectorStore
+from thumbelina.repository.vector.base import VectorStore
 
 
 class TestVectorStore:

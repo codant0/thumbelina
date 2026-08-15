@@ -100,12 +100,12 @@ def test_websocket_wechat_conversation_forwards_only_reply(client):
     wechat_conv_id = "wechat-conv-1"
     app.state.wechat_conversation_id = wechat_conv_id
 
-    # Give the shared agent a memory manager that knows about the WeChat conv.
+    # Give the shared agent a repository manager that knows about the WeChat conv.
     mm = MagicMock()
     mm.get_conversation = AsyncMock(
         return_value={"id": wechat_conv_id, "name": "微信Clawbot", "pinned": True}
     )
-    app.state.agent.memory_manager = mm
+    app.state.agent.repository_manager = mm
     app.state.agent.current_conversation_id = wechat_conv_id
     app.state.agent.clone.return_value = app.state.agent
     # Non-streaming so the response comes back as a single payload
@@ -202,7 +202,7 @@ async def test_websocket_serializes_same_conversation_turns():
 
     agent = SimpleNamespace()
     agent.clone = lambda: agent
-    agent.memory_manager = None
+    agent.repository_manager = None
     agent.current_conversation_id = None
     agent.stream = _stream
 

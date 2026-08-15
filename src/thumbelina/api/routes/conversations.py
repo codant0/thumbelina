@@ -8,10 +8,10 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from thumbelina.api.deps import get_memory_manager
+from thumbelina.api.deps import get_repository_manager
 from thumbelina.api.schemas import ConversationDetailSchema, ConversationSchema, MessageSchema
-from thumbelina.memory.manager import MemoryManager
 from thumbelina.prompts.roles import list_roles
+from thumbelina.repository.manager import RepositoryManager
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ async def _clear_checkpoint(request: Request, conversation_id: str) -> None:
     相同 id 重新创建会话会从检查点中复活过期的上下文。
 
     缺少 saver（降级模式：非 sqlite 数据库或缺少包）是安全的空操作；
-    删除失败只记录警告，绝不会破坏主要的 memory 操作。
+    删除失败只记录警告，绝不会破坏主要的 repository 操作。
     """
     saver = getattr(request.app.state, "checkpointer", None)
     if saver is None:
@@ -99,13 +99,13 @@ class SetConversationThinkingRequest(BaseModel):
 @router.post("/conversations", response_model=ConversationSchema)
 async def create_conversation(
     body: CreateConversationRequest | None = None,
-    memory: MemoryManager = Depends(get_memory_manager),
+    repository: RepositoryManager = Depends(get_repository_manager),
 ) -> ConversationSchema:
     """Create a new conversation."""
     name = body.name if body else None
     pinned = body.pinned if body else False
-    conv_id = await memory.create_conversation(name=name, pinned=pinned)
-    conv = await memory.get_conversation(conv_id)
+    conv_id = await repository.create_conversation(name=name, pinned=pinned)
+    conv = await repository.get_conversation(conv_id)
     if conv is None:
         raise HTTPException(status_code=500, detail="Failed to create conversation")
     return ConversationSchema(**conv)
@@ -114,23 +114,23 @@ async def create_conversation(
 @router.get("/conversations/search/{query}")
 async def search_conversations(
     query: str,
-    memory: MemoryManager = Depends(get_memory_manager),
+    repository: RepositoryManager = Depends(get_repository_manager),
 ) -> list[dict]:
     """Search messages across all conversations.
 
     Uses hybrid keyword + semantic search when a vector store
     is configured, falling back to keyword-only search otherwise.
     """
-    return await memory.search(query)
+    return await repository.search(query)
 
 
 @router.get("/conversations", response_model=list[ConversationSchema])
 async def list_conversations(
-    memory: MemoryManager = Depends(get_memory_manager),
+    repository: RepositoryManager = Depends(get_repository_manager),
 ) -> list[ConversationSchema]:
     """List all conversations."""
     try:
-        conversations = await memory.get_conversations()
+        conversations = await repository.get_conversations()
         logger.debug("Fetched %d conversations", len(conversations))
         return [ConversationSchema(**c) for c in conversations]
     except Exception:
@@ -141,15 +141,15 @@ async def list_conversations(
 @router.get("/conversations/{conversation_id}", response_model=ConversationDetailSchema)
 async def get_conversation(
     conversation_id: str,
-    memory: MemoryManager = Depends(get_memory_manager),
+    repository: RepositoryManager = Depends(get_repository_manager),
 ) -> ConversationDetailSchema:
     """Get a conversation with its messages."""
-    conversation = await memory.get_conversation(conversation_id)
+    conversation = await repository.get_conversation(conversation_id)
 
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    messages = await memory.get_messages(conversation_id)
+    messages = await repository.get_messages(conversation_id)
     message_schemas = [MessageSchema(**m) for m in messages]
 
     return ConversationDetailSchema(
@@ -173,7 +173,7 @@ async def get_conversation(
 async def rename_conversation(
     conversation_id: str,
     body: RenameConversationRequest,
-    memory: MemoryManager = Depends(get_memory_manager),
+    repository: RepositoryManager = Depends(get_repository_manager),
 ) -> ConversationSchema:
     """Rename a conversation.
 
@@ -181,10 +181,10 @@ async def rename_conversation(
     conversation's custom title so it can be auto-named again.
     """
     name = body.name.strip()
-    ok = await memory.rename_conversation(conversation_id, name)
+    ok = await repository.rename_conversation(conversation_id, name)
     if not ok:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    conv = await memory.get_conversation(conversation_id)
+    conv = await repository.get_conversation(conversation_id)
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return ConversationSchema(**conv)
@@ -198,7 +198,7 @@ async def set_conversation_endpoint(
     conversation_id: str,
     body: SetConversationEndpointRequest,
     request: Request,
-    memory: MemoryManager = Depends(get_memory_manager),
+    repository: RepositoryManager = Depends(get_repository_manager),
 ) -> ConversationSchema:
     """Set the LLM endpoint (model) used for a conversation.
 
@@ -218,13 +218,15 @@ async def set_conversation_endpoint(
                 detail=f"Model '{body.model}' is not configured on this endpoint",
             )
 
-    ok = await memory.set_conversation_endpoint(conversation_id, body.endpoint_id)
+    ok = await repository.set_conversation_endpoint(conversation_id, body.endpoint_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Conversation not found")
     # Persist the per-conversation model. When clearing the endpoint, also
     # clear the model so a stale name doesn't linger.
-    await memory.set_conversation_model(conversation_id, body.model if body.endpoint_id else None)
-    conv = await memory.get_conversation(conversation_id)
+    await repository.set_conversation_model(
+        conversation_id, body.model if body.endpoint_id else None
+    )
+    conv = await repository.get_conversation(conversation_id)
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return ConversationSchema(**conv)
@@ -237,17 +239,17 @@ async def set_conversation_endpoint(
 async def set_conversation_knowledge_base(
     conversation_id: str,
     body: SetConversationKnowledgeBaseRequest,
-    memory: MemoryManager = Depends(get_memory_manager),
+    repository: RepositoryManager = Depends(get_repository_manager),
 ) -> ConversationSchema:
     """Bind (or unbind) a RAG knowledge base to a conversation.
 
     ``knowledge_base_id`` must reference an existing knowledge base, or be
     ``null`` to unbind the conversation from any knowledge base.
     """
-    ok = await memory.set_conversation_knowledge_base(conversation_id, body.knowledge_base_id)
+    ok = await repository.set_conversation_knowledge_base(conversation_id, body.knowledge_base_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    conv = await memory.get_conversation(conversation_id)
+    conv = await repository.get_conversation(conversation_id)
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return ConversationSchema(**conv)
@@ -260,7 +262,7 @@ async def set_conversation_knowledge_base(
 async def set_conversation_role(
     conversation_id: str,
     body: SetConversationRoleRequest,
-    memory: MemoryManager = Depends(get_memory_manager),
+    repository: RepositoryManager = Depends(get_repository_manager),
 ) -> ConversationSchema:
     """Set the agent persona role used for a conversation.
 
@@ -269,10 +271,10 @@ async def set_conversation_role(
     """
     if body.role is not None and body.role not in list_roles():
         raise HTTPException(status_code=422, detail=f"Unknown role: '{body.role}'")
-    ok = await memory.set_conversation_role(conversation_id, body.role)
+    ok = await repository.set_conversation_role(conversation_id, body.role)
     if not ok:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    conv = await memory.get_conversation(conversation_id)
+    conv = await repository.get_conversation(conversation_id)
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return ConversationSchema(**conv)
@@ -285,13 +287,13 @@ async def set_conversation_role(
 async def set_conversation_thinking(
     conversation_id: str,
     body: SetConversationThinkingRequest,
-    memory: MemoryManager = Depends(get_memory_manager),
+    repository: RepositoryManager = Depends(get_repository_manager),
 ) -> ConversationSchema:
     """Set thinking-mode (on/off + intensity) for a conversation."""
-    ok = await memory.set_conversation_thinking(conversation_id, body.enabled, body.effort)
+    ok = await repository.set_conversation_thinking(conversation_id, body.enabled, body.effort)
     if not ok:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    conv = await memory.get_conversation(conversation_id)
+    conv = await repository.get_conversation(conversation_id)
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return ConversationSchema(**conv)
@@ -301,13 +303,13 @@ async def set_conversation_thinking(
 async def clear_conversation_messages(
     conversation_id: str,
     request: Request,
-    memory: MemoryManager = Depends(get_memory_manager),
+    repository: RepositoryManager = Depends(get_repository_manager),
 ) -> dict[str, bool]:
     """Clear all messages of a conversation, keeping the conversation itself.
 
     Used by the frontend "clear context" action.
     """
-    cleared = await memory.clear_messages(conversation_id)
+    cleared = await repository.clear_messages(conversation_id)
 
     if not cleared:
         raise HTTPException(status_code=404, detail="Conversation not found")
@@ -323,10 +325,10 @@ async def clear_conversation_messages(
 async def delete_conversation(
     conversation_id: str,
     request: Request,
-    memory: MemoryManager = Depends(get_memory_manager),
+    repository: RepositoryManager = Depends(get_repository_manager),
 ) -> dict[str, bool]:
     """Delete a conversation."""
-    deleted = await memory.delete_conversation(conversation_id)
+    deleted = await repository.delete_conversation(conversation_id)
 
     if not deleted:
         raise HTTPException(status_code=404, detail="Conversation not found")

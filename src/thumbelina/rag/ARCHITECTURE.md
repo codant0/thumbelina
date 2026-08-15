@@ -3,7 +3,7 @@
 ## 概述
 
 RAG（Retrieval-Augmented Generation）模块为 Thumbelina 项目提供**外部知识检索**能力。
-与现有的 `memory/` 模块（专注于**对话历史**的记忆与搜索）不同，`rag/` 模块专注于**非对话来源**的文档知识管理——让 Agent 能够读取 PDF、网页、代码库等外部文档，并在对话中引用这些知识来回答问题。
+与现有的 `repository/` 模块（专注于**对话历史**的存储与搜索）不同，`rag/` 模块专注于**非对话来源**的文档知识管理——让 Agent 能够读取 PDF、网页、代码库等外部文档，并在对话中引用这些知识来回答问题。
 
 ### 设计原则
 
@@ -45,7 +45,7 @@ RAG（Retrieval-Augmented Generation）模块为 Thumbelina 项目提供**外部
 │                              │                       │
 │                              ▼                       │
 │  ┌─────────────────────────────────────────────┐    │
-│  │          向量存储 (复用 memory/vector/)        │    │
+│  │          向量存储 (复用 repository/vector/)        │    │
 │  │   ChromaDB / 其他 VectorStore 实现            │    │
 │  └─────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────┘
@@ -154,10 +154,10 @@ llm/  ← 主项目的 LLM 提供者层（不同职责，但可共享模型资�
 3. `ReRankRetriever`：用交叉编码器对 top-k 精排
 4. `MMRRetriever`：在相关性和多样性之间取平衡
 
-**与现有 `memory/search.py` 的关系**：
+**与现有 `repository/search.py` 的关系**：
 
 ```
-memory/search.py      — 搜索对话历史（keyword / semantic / hybrid）
+repository/search.py      — 搜索对话历史（keyword / semantic / hybrid）
 rag/retrieval/        — 搜索外部知识（独立的数据源和流程）
 
 两者可共享 VectorStore 接口，但使用不同的 collection 和数据。
@@ -202,9 +202,9 @@ rag/retrieval/        — 搜索外部知识（独立的数据源和流程）
 
 ---
 
-## 与现有 `memory/` 模块的分工
+## 与现有 `repository/` 模块的分工
 
-| 维度 | `memory/`（对话记忆） | `rag/`（知识检索） |
+| 维度 | `repository/`（对话记忆） | `rag/`（知识检索） |
 |------|----------------------|-------------------|
 | **数据来源** | 用户与 Agent 的聊天记录 | 外部文档（PDF、网页、代码等） |
 | **数据结构** | Conversation → Message | KnowledgeBase → Document → Chunk |
@@ -213,7 +213,7 @@ rag/retrieval/        — 搜索外部知识（独立的数据源和流程）
 | **向量 Collection** | thumbelina（默认） | knowledge（独立 collection） |
 | **当前状态** | 已有完整实现 | 新建，待实现 |
 
-**共享部分**：两者共用 `memory/vector/base.py` 的 `VectorStore` 抽象接口，但使用不同的 ChromaDB collection 实例，数据完全隔离。
+**共享部分**：两者共用 `repository/vector/base.py` 的 `VectorStore` 抽象接口，但使用不同的 ChromaDB collection 实例，数据完全隔离。
 
 ---
 

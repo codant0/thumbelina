@@ -404,18 +404,18 @@ def _make_checkpointed_agent(cid: str):
     # 每次调用都返回全新的 AIMessage，使 add_messages 追加而不是替换。
     mock_provider.chat_model.ainvoke.side_effect = lambda *a, **k: AIMessage(content="reply")
 
-    mock_memory = AsyncMock()
-    mock_memory.create_conversation.return_value = cid
-    mock_memory.add_message = AsyncMock()
-    mock_memory.get_conversation = AsyncMock(return_value={"knowledge_base_id": None})
-    mock_memory.delete_conversation = AsyncMock(return_value=True)
-    mock_memory.clear_messages = AsyncMock(return_value=True)
+    mock_repository = AsyncMock()
+    mock_repository.create_conversation.return_value = cid
+    mock_repository.add_message = AsyncMock()
+    mock_repository.get_conversation = AsyncMock(return_value={"knowledge_base_id": None})
+    mock_repository.delete_conversation = AsyncMock(return_value=True)
+    mock_repository.clear_messages = AsyncMock(return_value=True)
 
     agent = ThumbelinaAgent(
-        llm_provider=mock_provider, memory_manager=mock_memory, checkpointer=saver
+        llm_provider=mock_provider, repository_manager=mock_repository, checkpointer=saver
     )
     agent.current_conversation_id = cid
-    return agent, mock_memory, saver
+    return agent, mock_repository, saver
 
 
 async def _checkpoint_message_contents(agent, cid: str) -> list[str]:
@@ -430,12 +430,12 @@ async def test_delete_conversation_prevents_context_revival():
     from thumbelina.api.routes.conversations import delete_conversation
 
     cid = "cid-revive"
-    agent, mock_memory, saver = _make_checkpointed_agent(cid)
+    agent, mock_repository, saver = _make_checkpointed_agent(cid)
     await agent.run("First message")
     assert await _checkpoint_message_contents(agent, cid) == ["First message", "reply"]
 
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(checkpointer=saver)))
-    result = await delete_conversation(cid, request=request, memory=mock_memory)
+    result = await delete_conversation(cid, request=request, repository=mock_repository)
     assert result == {"deleted": True}
 
     # 检查点线程已删除。
@@ -452,12 +452,12 @@ async def test_clear_messages_prevents_context_revival():
     from thumbelina.api.routes.conversations import clear_conversation_messages
 
     cid = "cid-clear"
-    agent, mock_memory, saver = _make_checkpointed_agent(cid)
+    agent, mock_repository, saver = _make_checkpointed_agent(cid)
     await agent.run("First message")
     assert await _checkpoint_message_contents(agent, cid) == ["First message", "reply"]
 
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(checkpointer=saver)))
-    result = await clear_conversation_messages(cid, request=request, memory=mock_memory)
+    result = await clear_conversation_messages(cid, request=request, repository=mock_repository)
     assert result == {"cleared": True}
 
     assert await saver.aget_tuple({"configurable": {"thread_id": cid}}) is None

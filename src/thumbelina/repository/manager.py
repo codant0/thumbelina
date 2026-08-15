@@ -1,19 +1,19 @@
-"""Memory manager for conversation and message management."""
+"""Repository manager for conversation and message management."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from thumbelina.memory.repository import ConversationRepository
-from thumbelina.memory.search import SearchEngine
-from thumbelina.memory.vector.base import VectorStore
+from thumbelina.repository.repository import ConversationRepository
+from thumbelina.repository.search import SearchEngine
+from thumbelina.repository.vector.base import VectorStore
 
 # Maximum content length for messages (100KB)
 MAX_CONTENT_LENGTH = 100_000
 
 
-class MemoryManager:
-    """High-level manager for conversation memory.
+class RepositoryManager:
+    """High-level manager for conversation storage.
 
     Parameters
     ----------
@@ -28,13 +28,13 @@ class MemoryManager:
         db_url: str,
         vector_store: VectorStore | None = None,
     ) -> None:
-        self.repository = ConversationRepository(db_url)
+        self.conversation_repository = ConversationRepository(db_url)
         self._vector_store = vector_store
-        self._search_engine = SearchEngine(self.repository, vector_store)
+        self._search_engine = SearchEngine(self.conversation_repository, vector_store)
 
     def close(self) -> None:
         """Close the repository and release resources."""
-        self.repository.close()
+        self.conversation_repository.close()
 
     async def create_conversation(self, name: str | None = None, pinned: bool = False) -> str:
         """Create a new conversation.
@@ -51,7 +51,7 @@ class MemoryManager:
         str
             The ID of the newly created conversation.
         """
-        return await self.repository.create_conversation(name=name, pinned=pinned)
+        return await self.conversation_repository.create_conversation(name=name, pinned=pinned)
 
     async def add_message(
         self,
@@ -84,7 +84,7 @@ class MemoryManager:
                 f"Content length ({len(content)}) exceeds maximum ({MAX_CONTENT_LENGTH})"
             )
 
-        await self.repository.add_message(
+        await self.conversation_repository.add_message(
             conversation_id=conversation_id,
             role=role,
             content=content,
@@ -109,7 +109,7 @@ class MemoryManager:
         ValueError
             If the conversation does not exist.
         """
-        return await self.repository.get_messages(conversation_id)
+        return await self.conversation_repository.get_messages(conversation_id)
 
     async def get_conversations(self) -> list[dict[str, Any]]:
         """Get all conversations.
@@ -119,11 +119,11 @@ class MemoryManager:
         list[dict[str, Any]]
             List of conversation dictionaries.
         """
-        return await self.repository.get_conversations()
+        return await self.conversation_repository.get_conversations()
 
     async def get_all_conversations_with_messages(self) -> list[dict[str, Any]]:
         """Get all conversations with their messages."""
-        return await self.repository.get_all_conversations_with_messages()
+        return await self.conversation_repository.get_all_conversations_with_messages()
 
     async def get_conversation(self, conversation_id: str) -> dict[str, Any] | None:
         """Get a single conversation by ID.
@@ -138,7 +138,7 @@ class MemoryManager:
         dict[str, Any] | None
             Conversation dictionary, or None if not found.
         """
-        return await self.repository.get_conversation(conversation_id)
+        return await self.conversation_repository.get_conversation(conversation_id)
 
     async def delete_conversation(self, conversation_id: str) -> bool:
         """Delete a conversation and all its messages.
@@ -153,7 +153,7 @@ class MemoryManager:
         bool
             True if the conversation was deleted, False if not found.
         """
-        return await self.repository.delete_conversation(conversation_id)
+        return await self.conversation_repository.delete_conversation(conversation_id)
 
     async def clear_messages(self, conversation_id: str) -> bool:
         """Clear all messages of a conversation while keeping the conversation.
@@ -168,7 +168,7 @@ class MemoryManager:
         bool
             True if messages were cleared, False if the conversation was not found.
         """
-        return await self.repository.clear_messages(conversation_id)
+        return await self.conversation_repository.clear_messages(conversation_id)
 
     async def set_summary(self, conversation_id: str, summary: str) -> bool:
         """Set the summary for a conversation.
@@ -185,7 +185,7 @@ class MemoryManager:
         bool
             True if set successfully, False if conversation not found.
         """
-        return await self.repository.set_summary(conversation_id, summary)
+        return await self.conversation_repository.set_summary(conversation_id, summary)
 
     async def rename_conversation(self, conversation_id: str, name: str) -> bool:
         """Update the human-readable name of a conversation.
@@ -202,7 +202,7 @@ class MemoryManager:
         bool
             True if renamed successfully, False if conversation not found.
         """
-        return await self.repository.rename_conversation(conversation_id, name)
+        return await self.conversation_repository.rename_conversation(conversation_id, name)
 
     async def set_conversation_endpoint(
         self, conversation_id: str, endpoint_id: str | None
@@ -221,7 +221,9 @@ class MemoryManager:
         bool
             True if set successfully, False if conversation not found.
         """
-        return await self.repository.set_conversation_endpoint(conversation_id, endpoint_id)
+        return await self.conversation_repository.set_conversation_endpoint(
+            conversation_id, endpoint_id
+        )
 
     async def set_conversation_model(self, conversation_id: str, model: str | None) -> bool:
         """Set the specific model used for a conversation.
@@ -239,7 +241,7 @@ class MemoryManager:
         bool
             True if set successfully, False if conversation not found.
         """
-        return await self.repository.set_conversation_model(conversation_id, model)
+        return await self.conversation_repository.set_conversation_model(conversation_id, model)
 
     async def set_conversation_knowledge_base(
         self, conversation_id: str, knowledge_base_id: str | None
@@ -258,7 +260,7 @@ class MemoryManager:
         bool
             True if set successfully, False if conversation not found.
         """
-        return await self.repository.set_conversation_knowledge_base(
+        return await self.conversation_repository.set_conversation_knowledge_base(
             conversation_id, knowledge_base_id
         )
 
@@ -278,7 +280,7 @@ class MemoryManager:
         bool
             True if set successfully, False if conversation not found.
         """
-        return await self.repository.set_conversation_role(conversation_id, role)
+        return await self.conversation_repository.set_conversation_role(conversation_id, role)
 
     async def set_conversation_thinking(
         self, conversation_id: str, enabled: bool, effort: str
@@ -299,7 +301,9 @@ class MemoryManager:
         bool
             True if set successfully, False if conversation not found.
         """
-        return await self.repository.set_conversation_thinking(conversation_id, enabled, effort)
+        return await self.conversation_repository.set_conversation_thinking(
+            conversation_id, enabled, effort
+        )
 
     async def search(
         self,

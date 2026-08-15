@@ -16,8 +16,8 @@ from thumbelina.config.models import (
     ChannelsConfig,
     LLMConfig,
     LoggingConfig,
-    MemoryConfig,
     QQChannelConfig,
+    RepositoryConfig,
     WeChatChannelConfig,
 )
 from thumbelina.config.persistence import save_config
@@ -29,7 +29,7 @@ __all__ = [
     "ConfigRepository",
     "LLMConfig",
     "LoggingConfig",
-    "MemoryConfig",
+    "RepositoryConfig",
     "QQChannelConfig",
     "RuntimeConfigManager",
     "WeChatChannelConfig",

@@ -14,7 +14,7 @@
 - **角色提示词** — 角色人设以文件形式存放于 `prompts/roles/`（内置 assistant / coder），作为系统提示词注入；支持全局默认角色，并可在 Web 界面按对话随时切换
 - **内置工具** — 文件操作、网络请求、Shell 命令、数据处理（JSON/CSV/文本分析/正则搜索）
 - **RAG（检索增强生成）** — 文档加载、分块、向量化嵌入（llama-index + HuggingFace）、向量检索（ChromaDB）、上下文感知索引流水线
-- **对话记忆** — 持久化存储（SQLite），支持关键词搜索、LLM 生成摘要和对话自动命名
+- **对话存储** — 持久化存储（SQLite），支持关键词搜索、LLM 生成摘要和对话自动命名
 - **语义搜索** — 基于 ChromaDB 的向量语义搜索，支持关键词 + 语义混合回退
 - **技能提取与集成** — 从成功对话中自动提取可复用技能，并在代理循环中应用
 - **技能组合** — 将多个技能串联为工作流，支持 LLM 辅助建议
@@ -171,7 +171,7 @@ docker compose up -d --build
            ┌────────────────┼────────────────┐
            ▼                ▼                ▼
      ┌──────────┐   ┌──────────┐   ┌──────────────┐
-     │ LLM      │   │ 记忆     │   │ 技能 /       │
+     │ LLM      │   │ 存储     │   │ 技能 /       │
      │ 提供商   │   │ 管理器   │   │ 子代理 /     │
      │ (OpenAI, │   │ (SQLite, │   │ 调度器 /     │
      │  Anthr., │   │  Chroma) │   │ 频道         │
@@ -192,7 +192,8 @@ thumbelina/
 │   ├── cli/                 # Click CLI + prompt_toolkit 聊天会话
 │   ├── config/              # YAML + 环境变量配置加载、Pydantic 模型
 │   ├── llm/                 # LLM 提供商抽象层（OpenAI, Anthropic, Ollama）
-│   ├── memory/              # 对话持久化、搜索、摘要、向量存储、用户建模、反馈
+│   ├── repository/          # 对话持久化、搜索、向量存储、反馈、用户画像
+│   ├── analysis/            # LLM 分析服务：用户建模、标题摘要、对话命名
 │   ├── notifications.py     # WebSocket 通知广播
 │   ├── plugins/             # 插件系统（注册、沙箱验证、依赖解析）
 │   ├── rag/                 # RAG：文档加载、分块、嵌入、检索、索引流水线
@@ -397,7 +398,7 @@ rate_limit:
   max_requests: 60          # 每窗口最大请求数
   window_seconds: 60        # 时间窗口秒数
 
-memory:
+repository:
   database_url: sqlite:///thumbelina.db
 
 logging:

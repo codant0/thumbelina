@@ -10,7 +10,7 @@ from thumbelina.skills.models import Skill
 from thumbelina.skills.repository import SkillRepository
 
 if TYPE_CHECKING:
-    from thumbelina.memory.feedback_repo import FeedbackRepository
+    from thumbelina.repository.feedback_repo import FeedbackRepository
 
 logger = logging.getLogger(__name__)
 

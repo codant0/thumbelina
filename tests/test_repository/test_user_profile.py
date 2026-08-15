@@ -1,4 +1,4 @@
-"""Tests for thumbelina.memory.user_profile and user_profile_repo modules."""
+"""Tests for thumbelina.repository.user_profile and user_profile_repo modules."""
 
 from __future__ import annotations
 
@@ -6,9 +6,9 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from thumbelina.memory.models import Base
-from thumbelina.memory.user_profile import UserPreference, UserProfile
-from thumbelina.memory.user_profile_repo import UserProfileRepository
+from thumbelina.repository.models import Base
+from thumbelina.repository.user_profile import UserPreference, UserProfile
+from thumbelina.repository.user_profile_repo import UserProfileRepository
 
 
 @pytest.fixture

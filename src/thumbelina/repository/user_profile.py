@@ -8,7 +8,7 @@ from datetime import datetime
 from sqlalchemy import DateTime, Float, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
-from thumbelina.memory.models import Base
+from thumbelina.repository.models import Base
 
 
 class UserProfile(Base):

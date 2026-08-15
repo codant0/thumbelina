@@ -5,7 +5,7 @@ from __future__ import annotations
 from thumbelina.config.models import AppConfig
 
 DEFAULT_CONFIG: dict[str, dict[str, str]] = {
-    "memory": {
+    "repository": {
         "database_url": "sqlite:///thumbelina.db",
     },
     "logging": {

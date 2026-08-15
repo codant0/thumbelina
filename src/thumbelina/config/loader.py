@@ -230,7 +230,7 @@ def load_config_from_db(db_url: str, base_config: AppConfig | None = None) -> Ap
 
 def _load_db_config_sync(repo: Any) -> dict[str, Any]:
     """Synchronously load config from database and convert to nested dict."""
-    from thumbelina.memory.models import SystemConfig
+    from thumbelina.repository.models import SystemConfig
 
     with repo.SessionLocal() as session:
         from sqlalchemy import select

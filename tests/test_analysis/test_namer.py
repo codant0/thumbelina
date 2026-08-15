@@ -1,4 +1,4 @@
-"""Tests for thumbelina.memory.namer module."""
+"""Tests for thumbelina.analysis.namer module."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from thumbelina.memory.namer import ConversationNamer
+from thumbelina.analysis.namer import ConversationNamer
 
 
 class _FakeProvider:

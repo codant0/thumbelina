@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from thumbelina.config.models import AppConfig, LLMConfig, MemoryConfig
+from thumbelina.config.models import AppConfig, LLMConfig, RepositoryConfig
 
 
 @pytest.fixture
@@ -15,7 +15,7 @@ def config_with_channels():
     """Create config with both channels enabled."""
     config = AppConfig(
         llm=LLMConfig(provider="openai", model="test", api_key="test-key"),
-        memory=MemoryConfig(database_url="sqlite:///:memory:"),
+        repository=RepositoryConfig(database_url="sqlite:///:memory:"),
     )
     config.channels.qq.enabled = True
     config.channels.qq.app_id = "test-qq-id"
@@ -64,11 +64,11 @@ class TestQQStatusEndpoint:
 
         config = AppConfig(
             llm=LLMConfig(provider="openai", model="test", api_key="test-key"),
-            memory=MemoryConfig(database_url="sqlite:///:memory:"),
+            repository=RepositoryConfig(database_url="sqlite:///:memory:"),
         )
 
         with (
-            patch("thumbelina.api.app.MemoryManager"),
+            patch("thumbelina.api.app.RepositoryManager"),
             patch("thumbelina.api.app.create_provider"),
             patch("thumbelina.api.app.ThumbelinaAgent"),
         ):

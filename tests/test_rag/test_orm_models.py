@@ -14,7 +14,7 @@ from thumbelina.rag.common.orm_models import (
 
 class TestRagBase:
     def test_independent_from_memory_base(self):
-        from thumbelina.memory.models import Base as MemoryBase
+        from thumbelina.repository.models import Base as MemoryBase
 
         assert RagBase is not MemoryBase
 

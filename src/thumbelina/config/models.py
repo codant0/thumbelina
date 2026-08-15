@@ -94,8 +94,8 @@ class LLMConfig(BaseModel):
         return parse_context_window(self.context_window)
 
 
-class MemoryConfig(BaseModel):
-    """Memory/database configuration."""
+class RepositoryConfig(BaseModel):
+    """Repository/database configuration."""
 
     database_url: str = Field(
         default="sqlite:///thumbelina.db", description="Database connection URL"
@@ -181,7 +181,7 @@ class AppConfig(BaseModel):
     """Top-level application configuration."""
 
     llm: LLMConfig = Field(default_factory=LLMConfig)
-    memory: MemoryConfig = Field(default_factory=MemoryConfig)
+    repository: RepositoryConfig = Field(default_factory=RepositoryConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
     rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)

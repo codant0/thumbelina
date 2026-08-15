@@ -83,7 +83,7 @@ def test_chat_session_get_history(mock_agent):
 
 @patch("thumbelina.cli.chat.ThumbelinaAgent")
 @patch("thumbelina.cli.chat.create_provider")
-@patch("thumbelina.cli.chat.MemoryManager")
+@patch("thumbelina.cli.chat.RepositoryManager")
 def test_run_chat_creates_session(mock_mm_cls, mock_create_provider, mock_agent_cls):
     """run_chat should create an agent and start the session."""
     from thumbelina.cli.chat import run_chat

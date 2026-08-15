@@ -7,7 +7,7 @@ from typing import Any
 
 import chromadb
 
-from thumbelina.memory.vector.base import VectorStore
+from thumbelina.repository.vector.base import VectorStore
 
 
 class ChromaVectorStore(VectorStore):

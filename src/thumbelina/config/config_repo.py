@@ -9,7 +9,7 @@ from typing import Any, cast
 
 from sqlalchemy import select
 
-from thumbelina.memory.models import SystemConfig
+from thumbelina.repository.models import SystemConfig
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ class ConfigRepository:
     """
 
     def __init__(self, db_url: str) -> None:
-        from thumbelina.memory.db import create_db_engine, init_db
+        from thumbelina.repository.db import create_db_engine, init_db
 
         self.engine = create_db_engine(db_url)
         self.SessionLocal = init_db(self.engine)

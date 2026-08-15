@@ -22,7 +22,7 @@ rate_limit:
   max_requests: 60
   window_seconds: 60
 
-memory:
+repository:
   database_url: sqlite:///thumbelina.db
 
 logging:

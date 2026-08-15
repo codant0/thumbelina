@@ -47,8 +47,8 @@ from thumbelina.config import AppConfig, load_config
 from thumbelina.llm.endpoint_manager import EndpointManager
 from thumbelina.llm.factory import create_provider
 from thumbelina.llm.preset_manager import PresetManager
-from thumbelina.memory.manager import MemoryManager
 from thumbelina.notifications import NotificationManager
+from thumbelina.repository.manager import RepositoryManager
 from thumbelina.scheduler.scheduler import ScheduledTask
 from thumbelina.security.auth import AuthService
 from thumbelina.security.rate_limit import RateLimiter
@@ -213,8 +213,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage application startup and shutdown."""
     config: AppConfig = app.state.config
 
-    memory = MemoryManager(config.memory.database_url)
-    app.state.memory_manager = memory
+    repository = RepositoryManager(config.repository.database_url)
+    app.state.repository_manager = repository
 
     # 初始化 LangGraph 检查点存储器（在轮次之间持久化 agent 图状态 /
     # 可变的 LLM 上下文，以会话 id 为键）。检查点是硬性运行时要求：
@@ -223,7 +223,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from thumbelina.agent.checkpointer import async_checkpointer_from_url
 
     checkpointer = await checkpointer_stack.enter_async_context(
-        async_checkpointer_from_url(config.memory.database_url)
+        async_checkpointer_from_url(config.repository.database_url)
     )
     app.state.checkpointer = checkpointer
 
@@ -246,9 +246,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Initialize feedback repository
     feedback_repo = None
     try:
-        from thumbelina.memory.feedback_repo import FeedbackRepository
+        from thumbelina.repository.feedback_repo import FeedbackRepository
 
-        feedback_repo = FeedbackRepository(db_url=config.memory.database_url)
+        feedback_repo = FeedbackRepository(db_url=config.repository.database_url)
         app.state.feedback_repo = feedback_repo
     except Exception:
         logger.warning("Feedback repository not initialized", exc_info=True)
@@ -272,7 +272,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from thumbelina.skills.application import SkillApplicationEngine
         from thumbelina.skills.repository import SkillRepository
 
-        skill_repo = SkillRepository(db_url=config.memory.database_url)
+        skill_repo = SkillRepository(db_url=config.repository.database_url)
         skill_engine = SkillApplicationEngine(
             repository=skill_repo,
             llm_provider=llm_provider,
@@ -289,8 +289,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         if skill_repo is None:
             from thumbelina.skills.repository import SkillRepository
 
-            skill_repo = SkillRepository(db_url=config.memory.database_url)
-        comp_repo = CompositionRepository(db_url=config.memory.database_url)
+            skill_repo = SkillRepository(db_url=config.repository.database_url)
+        comp_repo = CompositionRepository(db_url=config.repository.database_url)
         composition_engine = CompositionEngine(
             composition_repo=comp_repo,
             skill_repo=skill_repo,
@@ -332,7 +332,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from thumbelina.rag.pipeline.upload_tasks import UploadTaskManager
 
         # 复用主数据库引擎初始化 RAG 表
-        rag_session_factory = init_rag_db(memory.repository.engine)
+        rag_session_factory = init_rag_db(repository.conversation_repository.engine)
         rag_kb_repo = KnowledgeBaseRepository(session_factory=rag_session_factory)
         rag_doc_repo = DocumentRepository(session_factory=rag_session_factory)
 
@@ -358,7 +358,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.debug("HuggingFace embedding not available", exc_info=True)
 
         # 存储到 app.state
-        app.state.engine = memory.repository.engine
+        app.state.engine = repository.conversation_repository.engine
         app.state.rag_kb_repo = rag_kb_repo
         app.state.rag_doc_repo = rag_doc_repo
         app.state.rag_store_manager = rag_store_manager
@@ -412,10 +412,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Initialize user profiler
     user_profiler = None
     try:
-        from thumbelina.memory.profiler import UserProfiler
-        from thumbelina.memory.user_profile_repo import UserProfileRepository
+        from thumbelina.analysis.profiler import UserProfiler
+        from thumbelina.repository.user_profile_repo import UserProfileRepository
 
-        profile_repo = UserProfileRepository(db_url=config.memory.database_url)
+        profile_repo = UserProfileRepository(db_url=config.repository.database_url)
         user_profiler = UserProfiler(
             llm_provider=llm_provider,
             profile_repo=profile_repo,
@@ -425,7 +425,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.debug("User profiler not initialized", exc_info=True)
 
     # Initialize conversation auto-namer (shares the active LLM provider)
-    from thumbelina.memory.namer import ConversationNamer
+    from thumbelina.analysis.namer import ConversationNamer
 
     conversation_namer = ConversationNamer(llm_provider=llm_provider)
     app.state.conversation_namer = conversation_namer
@@ -454,7 +454,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     agent = ThumbelinaAgent(
         llm_provider=llm_provider,
         tools=get_all_tools(),
-        memory_manager=memory,
+        repository_manager=repository,
         request_timeout=config.llm.request_timeout,
         skill_engine=skill_engine,
         subagent_manager=subagent_manager,
@@ -483,7 +483,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Initialize config repository for database-backed configuration
     from thumbelina.config.config_repo import ConfigRepository
 
-    config_repo = ConfigRepository(db_url=config.memory.database_url)
+    config_repo = ConfigRepository(db_url=config.repository.database_url)
     app.state.config_repo = config_repo
 
     # Initialize LLM endpoint manager backed by the config repository
@@ -496,7 +496,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     config_path = getattr(app.state, "config_path", None)
     try:
         if await config_repo.is_empty():
-            imported = import_yaml_to_db(config_path, config.memory.database_url)
+            imported = import_yaml_to_db(config_path, config.repository.database_url)
             if imported:
                 logger.info("Imported %d config keys from YAML to database", imported)
         else:
@@ -670,7 +670,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # 关闭 LangGraph 检查点存储器的连接（aiosqlite）
     await checkpointer_stack.aclose()
 
-    memory.close()
+    repository.close()
 
 
 def create_app(config: AppConfig | None = None) -> FastAPI:
@@ -760,8 +760,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
         # Check database connectivity
         try:
-            memory = app.state.memory_manager
-            await memory.repository.ping()
+            repository = app.state.repository_manager
+            await repository.conversation_repository.ping()
             checks["database"] = "ok"
         except Exception:
             checks["database"] = "error"

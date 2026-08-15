@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from thumbelina.memory.feedback_repo import Feedback, FeedbackRepository
+from thumbelina.repository.feedback_repo import Feedback, FeedbackRepository
 
 
 @pytest.fixture

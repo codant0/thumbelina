@@ -1,10 +1,10 @@
-"""Tests for thumbelina.memory.repository module."""
+"""Tests for thumbelina.repository.repository module."""
 
 from __future__ import annotations
 
 import pytest
 
-from thumbelina.memory.repository import ConversationRepository
+from thumbelina.repository.repository import ConversationRepository
 
 
 @pytest.fixture
@@ -18,7 +18,7 @@ class TestConversationRepository:
 
     def test_repository_class_exists(self):
         """ConversationRepository should be importable."""
-        from thumbelina.memory.repository import ConversationRepository
+        from thumbelina.repository.repository import ConversationRepository
 
         assert ConversationRepository is not None
 

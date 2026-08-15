@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from thumbelina.memory.title_summarizer import TitleSummarizer
+from thumbelina.analysis.title_summarizer import TitleSummarizer
 
 
 @pytest.fixture

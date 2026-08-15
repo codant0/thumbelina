@@ -1,4 +1,4 @@
-"""Tests for thumbelina.memory.models module."""
+"""Tests for thumbelina.repository.models module."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from thumbelina.memory.models import Base, Conversation, Message
+from thumbelina.repository.models import Base, Conversation, Message
 
 
 @pytest.fixture

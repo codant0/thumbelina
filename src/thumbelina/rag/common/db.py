@@ -55,7 +55,7 @@ def init_rag_db(engine: Engine) -> sessionmaker[Session]:
     Parameters
     ----------
     engine:
-        SQLAlchemy Engine 实例，可以和 memory 模块共享同一个 SQLite 文件。
+        SQLAlchemy Engine 实例，可以和 repository 模块共享同一个 SQLite 文件。
 
     Returns
     -------

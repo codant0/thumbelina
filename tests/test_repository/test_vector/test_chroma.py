@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from thumbelina.memory.vector.chroma import ChromaVectorStore
+from thumbelina.repository.vector.chroma import ChromaVectorStore
 
 
 @pytest.fixture

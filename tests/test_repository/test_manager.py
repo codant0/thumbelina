@@ -1,39 +1,39 @@
-"""Tests for thumbelina.memory.manager module."""
+"""Tests for thumbelina.repository.manager module."""
 
 from __future__ import annotations
 
 import pytest
 
-from thumbelina.memory.manager import MemoryManager
+from thumbelina.repository.manager import RepositoryManager
 
 
 @pytest.fixture
 def manager():
-    """Create a MemoryManager with in-memory SQLite database."""
-    return MemoryManager("sqlite:///:memory:")
+    """Create a RepositoryManager with in-memory SQLite database."""
+    return RepositoryManager("sqlite:///:memory:")
 
 
-class TestMemoryManager:
-    """Tests for the MemoryManager class."""
+class TestRepositoryManager:
+    """Tests for the RepositoryManager class."""
 
     def test_manager_class_exists(self):
-        """MemoryManager should be importable."""
-        from thumbelina.memory.manager import MemoryManager
+        """RepositoryManager should be importable."""
+        from thumbelina.repository.manager import RepositoryManager
 
-        assert MemoryManager is not None
+        assert RepositoryManager is not None
 
     def test_manager_requires_db_url(self):
-        """MemoryManager should accept a database URL."""
-        manager = MemoryManager("sqlite:///:memory:")
+        """RepositoryManager should accept a database URL."""
+        manager = RepositoryManager("sqlite:///:memory:")
         assert manager is not None
 
-    def test_manager_has_repository(self, manager: MemoryManager):
-        """MemoryManager should have a repository."""
-        assert hasattr(manager, "repository")
-        assert manager.repository is not None
+    def test_manager_has_repository(self, manager: RepositoryManager):
+        """RepositoryManager should have a repository."""
+        assert hasattr(manager, "conversation_repository")
+        assert manager.conversation_repository is not None
 
     @pytest.mark.asyncio
-    async def test_create_conversation(self, manager: MemoryManager):
+    async def test_create_conversation(self, manager: RepositoryManager):
         """Should be able to create a conversation."""
         conversation_id = await manager.create_conversation()
 
@@ -42,7 +42,7 @@ class TestMemoryManager:
         assert len(conversation_id) > 0
 
     @pytest.mark.asyncio
-    async def test_add_message(self, manager: MemoryManager):
+    async def test_add_message(self, manager: RepositoryManager):
         """Should be able to add a message to a conversation."""
         conversation_id = await manager.create_conversation()
 
@@ -53,7 +53,7 @@ class TestMemoryManager:
         )
 
     @pytest.mark.asyncio
-    async def test_add_message_to_nonexistent_conversation(self, manager: MemoryManager):
+    async def test_add_message_to_nonexistent_conversation(self, manager: RepositoryManager):
         """Should raise error when adding message to non-existent conversation."""
         with pytest.raises(ValueError, match="Conversation not found"):
             await manager.add_message(
@@ -63,7 +63,7 @@ class TestMemoryManager:
             )
 
     @pytest.mark.asyncio
-    async def test_get_messages(self, manager: MemoryManager):
+    async def test_get_messages(self, manager: RepositoryManager):
         """Should be able to get messages from a conversation."""
         conversation_id = await manager.create_conversation()
 
@@ -87,7 +87,7 @@ class TestMemoryManager:
         assert messages[1]["content"] == "Hi there!"
 
     @pytest.mark.asyncio
-    async def test_get_messages_empty(self, manager: MemoryManager):
+    async def test_get_messages_empty(self, manager: RepositoryManager):
         """Should return empty list for conversation with no messages."""
         conversation_id = await manager.create_conversation()
         messages = await manager.get_messages(conversation_id)
@@ -95,14 +95,14 @@ class TestMemoryManager:
         assert messages == []
 
     @pytest.mark.asyncio
-    async def test_get_conversations_empty(self, manager: MemoryManager):
+    async def test_get_conversations_empty(self, manager: RepositoryManager):
         """Should return empty list when no conversations exist."""
         conversations = await manager.get_conversations()
 
         assert conversations == []
 
     @pytest.mark.asyncio
-    async def test_get_conversations(self, manager: MemoryManager):
+    async def test_get_conversations(self, manager: RepositoryManager):
         """Should return list of conversations."""
         id1 = await manager.create_conversation()
         id2 = await manager.create_conversation()
@@ -115,7 +115,7 @@ class TestMemoryManager:
         assert id2 in conversation_ids
 
     @pytest.mark.asyncio
-    async def test_get_conversation(self, manager: MemoryManager):
+    async def test_get_conversation(self, manager: RepositoryManager):
         """Should be able to get a single conversation by ID."""
         conversation_id = await manager.create_conversation()
 
@@ -125,14 +125,14 @@ class TestMemoryManager:
         assert conversation["id"] == conversation_id
 
     @pytest.mark.asyncio
-    async def test_get_nonexistent_conversation(self, manager: MemoryManager):
+    async def test_get_nonexistent_conversation(self, manager: RepositoryManager):
         """Should return None for non-existent conversation."""
         conversation = await manager.get_conversation("nonexistent-id")
 
         assert conversation is None
 
     @pytest.mark.asyncio
-    async def test_delete_conversation(self, manager: MemoryManager):
+    async def test_delete_conversation(self, manager: RepositoryManager):
         """Should be able to delete a conversation."""
         conversation_id = await manager.create_conversation()
 
@@ -150,14 +150,14 @@ class TestMemoryManager:
         assert conversation is None
 
     @pytest.mark.asyncio
-    async def test_delete_nonexistent_conversation(self, manager: MemoryManager):
+    async def test_delete_nonexistent_conversation(self, manager: RepositoryManager):
         """Should return False when deleting non-existent conversation."""
         result = await manager.delete_conversation("nonexistent-id")
 
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_full_conversation_flow(self, manager: MemoryManager):
+    async def test_full_conversation_flow(self, manager: RepositoryManager):
         """Should support a full conversation flow."""
         # Create conversation
         conversation_id = await manager.create_conversation()
@@ -186,7 +186,7 @@ class TestMemoryManager:
         assert messages[1]["content"] == "Python is a programming language."
 
     @pytest.mark.asyncio
-    async def test_multiple_conversations(self, manager: MemoryManager):
+    async def test_multiple_conversations(self, manager: RepositoryManager):
         """Should support multiple independent conversations."""
         # Create two conversations
         conv1_id = await manager.create_conversation()

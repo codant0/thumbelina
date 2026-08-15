@@ -32,17 +32,17 @@ def wechat_config() -> WeChatChannelConfig:
 
 @pytest.fixture
 def mock_agent() -> MagicMock:
-    """Create a mock ThumbelinaAgent with memory manager."""
+    """Create a mock ThumbelinaAgent with repository manager."""
     agent = MagicMock()
     agent.run = AsyncMock(return_value="Agent response")
     agent.current_conversation_id = None
 
-    # Mock memory manager with conversation support
+    # Mock repository manager with conversation support
     mm = MagicMock()
     mm.get_conversations = AsyncMock(return_value=[])
     mm.create_conversation = AsyncMock(return_value="conv-wechat-123")
     mm.rename_conversation = AsyncMock(return_value=True)
-    agent.memory_manager = mm
+    agent.repository_manager = mm
 
     return agent
 
@@ -316,7 +316,7 @@ class TestWeChatConversationSetup:
         ch = WeChatChannel(config=wechat_config, agent=mock_agent)
         await ch._ensure_wechat_conversation()
 
-        mock_agent.memory_manager.create_conversation.assert_awaited_once_with(
+        mock_agent.repository_manager.create_conversation.assert_awaited_once_with(
             name="微信Clawbot",
             pinned=True,
         )
@@ -326,20 +326,20 @@ class TestWeChatConversationSetup:
     async def test_reuses_existing_conversation(
         self, wechat_config: WeChatChannelConfig, mock_agent: MagicMock
     ) -> None:
-        mock_agent.memory_manager.get_conversations = AsyncMock(
+        mock_agent.repository_manager.get_conversations = AsyncMock(
             return_value=[{"id": "existing-conv", "name": "微信Clawbot"}]
         )
 
         ch = WeChatChannel(config=wechat_config, agent=mock_agent)
         await ch._ensure_wechat_conversation()
 
-        mock_agent.memory_manager.create_conversation.assert_not_awaited()
+        mock_agent.repository_manager.create_conversation.assert_not_awaited()
         assert mock_agent.current_conversation_id == "existing-conv"
 
     @pytest.mark.asyncio
-    async def test_no_memory_manager_skips(self, wechat_config: WeChatChannelConfig) -> None:
+    async def test_no_repository_manager_skips(self, wechat_config: WeChatChannelConfig) -> None:
         agent = MagicMock()
-        agent.memory_manager = None
+        agent.repository_manager = None
         agent.current_conversation_id = None
 
         ch = WeChatChannel(config=wechat_config, agent=agent)
@@ -351,17 +351,17 @@ class TestWeChatConversationSetup:
     async def test_migrates_legacy_named_conversation(
         self, wechat_config: WeChatChannelConfig, mock_agent: MagicMock
     ) -> None:
-        mock_agent.memory_manager.get_conversations = AsyncMock(
+        mock_agent.repository_manager.get_conversations = AsyncMock(
             return_value=[{"id": "legacy-conv", "name": "微信聊天"}]
         )
 
         ch = WeChatChannel(config=wechat_config, agent=mock_agent)
         await ch._ensure_wechat_conversation()
 
-        mock_agent.memory_manager.rename_conversation.assert_awaited_once_with(
+        mock_agent.repository_manager.rename_conversation.assert_awaited_once_with(
             "legacy-conv", "微信Clawbot"
         )
-        mock_agent.memory_manager.create_conversation.assert_not_awaited()
+        mock_agent.repository_manager.create_conversation.assert_not_awaited()
         assert mock_agent.current_conversation_id == "legacy-conv"
 
 
@@ -464,17 +464,17 @@ class TestWeChatWebhookEndpoints:
     @pytest.fixture
     def client_with_channel(self, mock_agent: MagicMock):
         """Create a TestClient with WeChat channel injected."""
-        from thumbelina.config.models import AppConfig, LLMConfig, MemoryConfig
+        from thumbelina.config.models import AppConfig, LLMConfig, RepositoryConfig
 
         config = AppConfig(
             llm=LLMConfig(provider="openai", model="test", api_key="test-key"),
-            memory=MemoryConfig(database_url="sqlite:///:memory:"),
+            repository=RepositoryConfig(database_url="sqlite:///:memory:"),
         )
 
-        mock_memory = MagicMock()
-        mock_memory.close = MagicMock()
-        mock_memory.repository = MagicMock()
-        mock_memory.repository.ping = AsyncMock(return_value=True)
+        mock_repository = MagicMock()
+        mock_repository.close = MagicMock()
+        mock_repository.conversation_repository = MagicMock()
+        mock_repository.conversation_repository.ping = AsyncMock(return_value=True)
 
         mock_channel = MagicMock(spec=WeChatChannel)
         mock_channel.handle_incoming = AsyncMock(return_value="Agent says hi")
@@ -489,7 +489,7 @@ class TestWeChatWebhookEndpoints:
         )
 
         with (
-            patch("thumbelina.api.app.MemoryManager", return_value=mock_memory),
+            patch("thumbelina.api.app.RepositoryManager", return_value=mock_repository),
             patch("thumbelina.api.app.create_provider", return_value=MagicMock()),
             patch("thumbelina.api.app.ThumbelinaAgent", return_value=mock_agent),
         ):
@@ -537,20 +537,20 @@ class TestWeChatWebhookEndpoints:
 
     def test_incoming_when_channel_not_initialized(self, mock_agent: MagicMock):
         """404 when wechat_channel is not on app.state."""
-        from thumbelina.config.models import AppConfig, LLMConfig, MemoryConfig
+        from thumbelina.config.models import AppConfig, LLMConfig, RepositoryConfig
 
         config = AppConfig(
             llm=LLMConfig(provider="openai", model="test", api_key="test-key"),
-            memory=MemoryConfig(database_url="sqlite:///:memory:"),
+            repository=RepositoryConfig(database_url="sqlite:///:memory:"),
         )
 
-        mock_memory = MagicMock()
-        mock_memory.close = MagicMock()
-        mock_memory.repository = MagicMock()
-        mock_memory.repository.ping = AsyncMock(return_value=True)
+        mock_repository = MagicMock()
+        mock_repository.close = MagicMock()
+        mock_repository.conversation_repository = MagicMock()
+        mock_repository.conversation_repository.ping = AsyncMock(return_value=True)
 
         with (
-            patch("thumbelina.api.app.MemoryManager", return_value=mock_memory),
+            patch("thumbelina.api.app.RepositoryManager", return_value=mock_repository),
             patch("thumbelina.api.app.create_provider", return_value=MagicMock()),
             patch("thumbelina.api.app.ThumbelinaAgent", return_value=mock_agent),
         ):
@@ -579,20 +579,20 @@ class TestWeChatWebhookEndpoints:
 
     def test_send_when_channel_not_initialized(self, mock_agent: MagicMock):
         """404 when wechat_channel is not on app.state."""
-        from thumbelina.config.models import AppConfig, LLMConfig, MemoryConfig
+        from thumbelina.config.models import AppConfig, LLMConfig, RepositoryConfig
 
         config = AppConfig(
             llm=LLMConfig(provider="openai", model="test", api_key="test-key"),
-            memory=MemoryConfig(database_url="sqlite:///:memory:"),
+            repository=RepositoryConfig(database_url="sqlite:///:memory:"),
         )
 
-        mock_memory = MagicMock()
-        mock_memory.close = MagicMock()
-        mock_memory.repository = MagicMock()
-        mock_memory.repository.ping = AsyncMock(return_value=True)
+        mock_repository = MagicMock()
+        mock_repository.close = MagicMock()
+        mock_repository.conversation_repository = MagicMock()
+        mock_repository.conversation_repository.ping = AsyncMock(return_value=True)
 
         with (
-            patch("thumbelina.api.app.MemoryManager", return_value=mock_memory),
+            patch("thumbelina.api.app.RepositoryManager", return_value=mock_repository),
             patch("thumbelina.api.app.create_provider", return_value=MagicMock()),
             patch("thumbelina.api.app.ThumbelinaAgent", return_value=mock_agent),
         ):

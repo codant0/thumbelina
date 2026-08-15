@@ -7,7 +7,7 @@ import logging
 from typing import Any
 
 from thumbelina.llm.base import LLMProvider
-from thumbelina.memory.user_profile_repo import UserProfileRepository
+from thumbelina.repository.user_profile_repo import UserProfileRepository
 
 logger = logging.getLogger(__name__)
 

@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from thumbelina.memory.user_profile import UserPreference, UserProfile
+from thumbelina.repository.user_profile import UserPreference, UserProfile
 
 
 class UserProfileRepository:
@@ -21,7 +21,7 @@ class UserProfileRepository:
     """
 
     def __init__(self, db_url: str) -> None:
-        from thumbelina.memory.db import create_db_engine, init_db
+        from thumbelina.repository.db import create_db_engine, init_db
 
         self.engine = create_db_engine(db_url)
         self.SessionLocal = init_db(self.engine)

@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from thumbelina.api.app import create_app
-from thumbelina.config.models import AppConfig, LLMConfig, MemoryConfig
+from thumbelina.config.models import AppConfig, LLMConfig, RepositoryConfig
 from thumbelina.llm.base import ConnectionTestDetails, ConnectionTestResult, ConnectionTestStep
 from thumbelina.llm.endpoint_manager import EndpointManager, LLMEndpoint
 from thumbelina.llm.preset_manager import PresetManager
@@ -17,7 +17,7 @@ from thumbelina.llm.preset_models import LLMPresetResponse
 def client():
     config = AppConfig(
         llm=LLMConfig(provider="openai", model="test", api_key="test-key"),
-        memory=MemoryConfig(database_url="sqlite:///:memory:"),
+        repository=RepositoryConfig(database_url="sqlite:///:memory:"),
     )
     app = create_app(config)
     app.state.endpoint_manager = MagicMock(spec=EndpointManager)
@@ -119,7 +119,7 @@ def test_create_endpoint_rejects_invalid_context_window(client):
 def live_client():
     config = AppConfig(
         llm=LLMConfig(provider="openai", model="test", api_key="test-key"),
-        memory=MemoryConfig(database_url="sqlite:///:memory:"),
+        repository=RepositoryConfig(database_url="sqlite:///:memory:"),
     )
     app = create_app(config)
     with TestClient(app) as client:

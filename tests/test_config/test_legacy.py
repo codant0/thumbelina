@@ -26,7 +26,7 @@ class TestLegacyConfig:
             cfg = load_config()
         assert cfg.llm.provider == "openai"
         assert cfg.llm.model == "gpt-4o"
-        assert cfg.memory.database_url == "sqlite:///thumbelina.db"
+        assert cfg.repository.database_url == "sqlite:///thumbelina.db"
         assert cfg.logging.level == "INFO"
 
     def test_load_config_from_env(self):
@@ -35,7 +35,7 @@ class TestLegacyConfig:
         env = {
             "THUMBELINA_LLM__PROVIDER": "anthropic",
             "THUMBELINA_LLM__MODEL": "claude-3",
-            "THUMBELINA_MEMORY__DATABASE_URL": "sqlite:///custom.db",
+            "THUMBELINA_REPOSITORY__DATABASE_URL": "sqlite:///custom.db",
         }
         with (
             patch.dict(os.environ, env, clear=False),
@@ -44,7 +44,7 @@ class TestLegacyConfig:
             cfg = load_config()
         assert cfg.llm.provider == "anthropic"
         assert cfg.llm.model == "claude-3"
-        assert cfg.memory.database_url == "sqlite:///custom.db"
+        assert cfg.repository.database_url == "sqlite:///custom.db"
 
     def test_load_config_from_env_defaults_when_unset(self):
         from thumbelina.config import load_config

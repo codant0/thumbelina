@@ -8,12 +8,12 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from thumbelina.agent.graph import ThumbelinaAgent
-from thumbelina.api.deps import get_agent, get_memory_manager
+from thumbelina.api.deps import get_agent, get_repository_manager
 from thumbelina.api.schemas import ChatRequest, ChatResponse
 from thumbelina.llm.endpoint_manager import EndpointManager
 from thumbelina.llm.factory import create_provider
-from thumbelina.memory.manager import MemoryManager
 from thumbelina.prompts.roles import get_role_prompt
+from thumbelina.repository.manager import RepositoryManager
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ def _thinking_kwargs(provider: str, enabled: bool, effort: str) -> dict[str, Any
 
 
 async def resolve_context_window_tokens(
-    memory: MemoryManager | None,
+    repository: RepositoryManager | None,
     endpoint_manager: EndpointManager | None,
     conversation_id: str | None,
     default_tokens: int,
@@ -54,10 +54,10 @@ async def resolve_context_window_tokens(
     解析绝不能破坏聊天请求，因此任何查询失败都回退到
     ``default_tokens``。
     """
-    if memory is None or endpoint_manager is None or not conversation_id:
+    if repository is None or endpoint_manager is None or not conversation_id:
         return default_tokens
     try:
-        conv = await memory.get_conversation(conversation_id)
+        conv = await repository.get_conversation(conversation_id)
         endpoint = None
         if conv is not None:
             endpoint_id = conv.get("endpoint_id")
@@ -84,7 +84,7 @@ async def chat(
     request: ChatRequest,
     http_request: Request,
     agent: ThumbelinaAgent = Depends(get_agent),
-    memory: MemoryManager = Depends(get_memory_manager),
+    repository: RepositoryManager = Depends(get_repository_manager),
 ) -> ChatResponse:
     """Send a message and get a response.
 
@@ -93,9 +93,9 @@ async def chat(
     # Create or reuse conversation
     conversation_id = request.conversation_id
     if conversation_id is None:
-        conversation_id = await memory.create_conversation()
+        conversation_id = await repository.create_conversation()
     else:
-        existing = await memory.get_conversation(conversation_id)
+        existing = await repository.get_conversation(conversation_id)
         if existing is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
 
@@ -112,7 +112,7 @@ async def chat(
     # 解析会话的上下文窗口（会话端点 → 全局活跃端点 →
     # llm.context_window），供压缩阶段使用。
     window_tokens = await resolve_context_window_tokens(
-        memory,
+        repository,
         getattr(http_request.app.state, "endpoint_manager", None),
         conversation_id,
         http_request.app.state.config.llm.context_window_tokens,
@@ -157,12 +157,12 @@ async def _apply_conversation_endpoint(
     ``http_request`` may be a FastAPI ``Request`` or ``WebSocket`` — only
     ``app.state.endpoint_manager`` is accessed.
     """
-    memory = agent.memory_manager
+    repository = agent.repository_manager
     endpoint_manager = getattr(http_request.app.state, "endpoint_manager", None)
-    if memory is None or endpoint_manager is None:
+    if repository is None or endpoint_manager is None:
         return
     try:
-        conv = await memory.get_conversation(conversation_id)
+        conv = await repository.get_conversation(conversation_id)
     except Exception:
         return
     if conv is None:
@@ -217,11 +217,11 @@ async def _apply_conversation_role(agent: ThumbelinaAgent, conversation_id: str)
     ``get_role_prompt`` and installed on the cloned agent. Unknown role
     names are logged and the agent keeps its current (global default) role.
     """
-    memory = agent.memory_manager
-    if memory is None:
+    repository = agent.repository_manager
+    if repository is None:
         return
     try:
-        conv = await memory.get_conversation(conversation_id)
+        conv = await repository.get_conversation(conversation_id)
     except Exception:
         return
     if conv is None:

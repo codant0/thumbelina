@@ -1,4 +1,4 @@
-"""Tests for thumbelina.memory.profiler module."""
+"""Tests for thumbelina.analysis.profiler module."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from thumbelina.memory.profiler import UserProfiler
-from thumbelina.memory.user_profile_repo import UserProfileRepository
+from thumbelina.analysis.profiler import UserProfiler
+from thumbelina.repository.user_profile_repo import UserProfileRepository
 
 
 @pytest.fixture

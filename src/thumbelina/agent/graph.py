@@ -32,11 +32,11 @@ from thumbelina.agent.compression import (
 from thumbelina.agent.edges import CONTINUE, should_continue
 from thumbelina.agent.nodes import call_model, tool_node
 from thumbelina.agent.state import AgentState
+from thumbelina.analysis.namer import AUTO_NAME_AFTER_MESSAGES, ConversationNamer
+from thumbelina.analysis.profiler import UserProfiler
 from thumbelina.llm.base import LLMProvider
-from thumbelina.memory.manager import MemoryManager
-from thumbelina.memory.namer import AUTO_NAME_AFTER_MESSAGES, ConversationNamer
-from thumbelina.memory.profiler import UserProfiler
 from thumbelina.prompts.roles import get_role_prompt
+from thumbelina.repository.manager import RepositoryManager
 from thumbelina.scheduler.scheduler import ScheduledTask, TaskScheduler
 from thumbelina.scheduler.time_parser import TimeParser
 from thumbelina.skills.application import SkillApplicationEngine
@@ -302,8 +302,8 @@ class ThumbelinaAgent:
         The LLM provider to use for generating responses.
     tools:
         Optional list of tools the agent can use.
-    memory_manager:
-        Optional memory manager for conversation persistence.
+    repository_manager:
+        Optional repository manager for conversation persistence.
     request_timeout:
         Optional timeout for LLM requests in seconds.
     skill_engine:
@@ -339,7 +339,7 @@ class ThumbelinaAgent:
         self,
         llm_provider: LLMProvider,
         tools: list[BaseTool] | None = None,
-        memory_manager: MemoryManager | None = None,
+        repository_manager: RepositoryManager | None = None,
         request_timeout: float | None = None,
         skill_engine: SkillApplicationEngine | None = None,
         subagent_manager: SubagentManager | None = None,
@@ -353,7 +353,7 @@ class ThumbelinaAgent:
         context_window_tokens: int | None = None,
     ) -> None:
         self.llm_provider = llm_provider
-        self.memory_manager = memory_manager
+        self.repository_manager = repository_manager
         self.request_timeout = request_timeout
         self.skill_engine = skill_engine
         self.subagent_manager = subagent_manager
@@ -637,9 +637,9 @@ class ThumbelinaAgent:
 
         # 若会话绑定了知识库，则注入 RAG 上下文
         rag_context = None
-        if self.current_conversation_id and self.memory_manager:
+        if self.current_conversation_id and self.repository_manager:
             try:
-                conv = await self.memory_manager.get_conversation(self.current_conversation_id)
+                conv = await self.repository_manager.get_conversation(self.current_conversation_id)
                 if conv:
                     kb_id = conv.get("knowledge_base_id")
                     if kb_id:
@@ -656,10 +656,10 @@ class ThumbelinaAgent:
         return messages
 
     async def _ensure_conversation(self) -> None:
-        """Create a conversation if memory is enabled and none exists."""
-        if self.memory_manager and not self.current_conversation_id:
+        """Create a conversation if repository is enabled and none exists."""
+        if self.repository_manager and not self.current_conversation_id:
             try:
-                self.current_conversation_id = await self.memory_manager.create_conversation()
+                self.current_conversation_id = await self.repository_manager.create_conversation()
             except Exception:
                 logger.warning(
                     "Failed to create conversation — messages will not be persisted "
@@ -670,17 +670,17 @@ class ThumbelinaAgent:
     async def _persist_message(
         self, role: str, content: str, reasoning_content: str | None = None
     ) -> None:
-        """Persist a message to memory if enabled."""
-        if self.memory_manager and self.current_conversation_id:
+        """Persist a message to repository if enabled."""
+        if self.repository_manager and self.current_conversation_id:
             try:
-                await self.memory_manager.add_message(
+                await self.repository_manager.add_message(
                     conversation_id=self.current_conversation_id,
                     role=role,
                     content=content,
                     reasoning_content=reasoning_content,
                 )
             except Exception:
-                logger.warning("Failed to persist message to memory", exc_info=True)
+                logger.warning("Failed to persist message to repository", exc_info=True)
 
     async def _get_skill_context(self, user_input: str) -> str | None:
         """Attempt to find and apply a matching skill for the user input."""
@@ -738,34 +738,36 @@ class ThumbelinaAgent:
         """Generate and persist a conversation title when none is set yet.
 
         Triggered after the first few user turns. Falls back silently when
-        memory, the namer, or the LLM call is unavailable, and never
+        repository, the namer, or the LLM call is unavailable, and never
         overwrites a name the user set explicitly (including the reserved
         WeChat conversation).
         """
-        if self.conversation_namer is None or self.memory_manager is None:
+        if self.conversation_namer is None or self.repository_manager is None:
             return
         if not self.current_conversation_id:
             return
         try:
-            conv = await self.memory_manager.get_conversation(self.current_conversation_id)
+            conv = await self.repository_manager.get_conversation(self.current_conversation_id)
             if conv is None or conv.get("name"):
                 return
-            messages = await self.memory_manager.get_messages(self.current_conversation_id)
+            messages = await self.repository_manager.get_messages(self.current_conversation_id)
             user_count = sum(1 for m in messages if m.get("role") == "user")
             if user_count < AUTO_NAME_AFTER_MESSAGES:
                 return
             name = await self.conversation_namer.suggest_name(messages)
             if name:
-                await self.memory_manager.rename_conversation(self.current_conversation_id, name)
+                await self.repository_manager.rename_conversation(
+                    self.current_conversation_id, name
+                )
         except Exception:
             logger.warning("Auto-naming failed", exc_info=True)
 
     def clone(self) -> ThumbelinaAgent:
-        """Create an independent clone sharing the same LLM provider and memory manager."""
+        """Create an independent clone sharing the same LLM provider and repository manager."""
         cloned = ThumbelinaAgent(
             llm_provider=self.llm_provider,
             tools=list(self.tools),
-            memory_manager=self.memory_manager,
+            repository_manager=self.repository_manager,
             request_timeout=self.request_timeout,
             skill_engine=self.skill_engine,
             subagent_manager=self.subagent_manager,

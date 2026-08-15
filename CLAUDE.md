@@ -44,8 +44,8 @@ npm run build        # TypeScript check + Vite build
 Frontend (React/Vite) --WebSocket/HTTP--> FastAPI (api/app.py)
     ├── /api/v1/chat      → api/routes/chat.py → ThumbelinaAgent.run()
     ├── /ws/chat          → api/websocket.py   → ThumbelinaAgent.run() (streaming)
-    ├── /api/v1/conversations → CRUD on MemoryManager
-    ├── /api/v1/conversations/search/{query} → MemoryManager.search()
+    ├── /api/v1/conversations → CRUD on RepositoryManager
+    ├── /api/v1/conversations/search/{query} → RepositoryManager.search()
     ├── /api/v1/tasks     → TaskScheduler.list_tasks()
     ├── /api/v1/tasks/{id}/cancel → TaskScheduler.cancel_task()
     ├── /api/v1/subagents → SubagentManager.list()
@@ -54,7 +54,7 @@ Frontend (React/Vite) --WebSocket/HTTP--> FastAPI (api/app.py)
     ├── /api/v1/skills/stats → SkillRepository + analytics
     ├── /api/v1/compositions → CompositionRepository.list_all()
     ├── /api/v1/feedback  → FeedbackRepository CRUD + stats
-    ├── /api/v1/data/export|delete → MemoryManager export/delete
+    ├── /api/v1/data/export|delete → RepositoryManager export/delete
     ├── /api/v1/user/profile → UserProfiler.get_user_context()
     ├── /api/v1/plugins   → PluginManager + sandbox report
     ├── /api/v1/config    → RuntimeConfigManager
@@ -80,15 +80,19 @@ Integrated subsystems:
 
 `LLMProvider` ABC with `chat()`, `stream()`, `chat_sync()` methods. Concrete providers: `OpenAIProvider`, `AnthropicProvider`, `OllamaProvider` -- all wrapping LangChain chat models. `create_provider(name)` factory with lazy imports.
 
-### Memory System (`memory/`)
+### Storage Layer (`repository/`)
 
-SQLAlchemy ORM (`Conversation`, `Message`, `SkillRecord`, `CompositionRecord`, `FeedbackRecord`, `UserProfile`, `UserPreference`) with `ConversationRepository` wrapping sync calls via `asyncio.to_thread`. `MemoryManager` adds validation (100KB content limit) and a `search()` method for hybrid keyword + semantic search. Additional modules:
+SQLAlchemy ORM (`Conversation`, `Message`, `SkillRecord`, `CompositionRecord`, `FeedbackRecord`, `UserProfile`, `UserPreference`) with `ConversationRepository` wrapping sync calls via `asyncio.to_thread`. `RepositoryManager` adds validation (100KB content limit) and a `search()` method for hybrid keyword + semantic search. Additional modules:
 - `SearchEngine` — keyword, semantic, and hybrid search
-- `TitleSummarizer` — LLM-based short conversation summarization (naming-style summaries; context compression uses `agent/compression/` instead)
 - `vector/` — ChromaDB vector store
-- `profiler.py` — `UserProfiler` analyzes conversations to build user preference profiles
 - `feedback_repo.py` — `FeedbackRepository` for user ratings with skill score adjustment
 - `user_profile.py` + `user_profile_repo.py` — `UserProfile` and `UserPreference` models
+
+### Analysis Services (`analysis/`)
+
+- `UserProfiler` — analyzes conversations to build user preference profiles
+- `TitleSummarizer` — LLM-based short conversation summarization (naming-style summaries; context compression uses `agent/compression/` instead)
+- `ConversationNamer` — auto-generates short conversation titles from early user messages
 
 ### Channels (`channels/`)
 
@@ -141,7 +145,7 @@ React 19 + TypeScript + Vite 8. Pages: Chat, Tasks, Memory, Dream, Settings, Plu
 
 - **Source layout**: `src/thumbelina/` (PEP 621 with hatchling). Tests mirror source: `tests/test_<module>/`.
 - **Async**: All public APIs are async. Sync SQLAlchemy wrapped with `asyncio.to_thread`. Pure-memory modules use async for interface consistency.
-- **Testing**: `pytest` + `pytest-asyncio` + `httpx`. API tests use a shared `conftest.py` fixture that creates a `TestClient` with mocked `ThumbelinaAgent` and `MemoryManager` injected via lifespan.
+- **Testing**: `pytest` + `pytest-asyncio` + `httpx`. API tests use a shared `conftest.py` fixture that creates a `TestClient` with mocked `ThumbelinaAgent` and `RepositoryManager` injected via lifespan.
 - **Ruff rules**: E, F, I, N, W, UP. Line length 100. Target Python 3.11.
 - **Mypy**: Strict mode enabled.
 - **Streaming**: WebSocket responses stream token-by-token via `ThumbelinaAgent.stream()`.

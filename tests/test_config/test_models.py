@@ -87,19 +87,19 @@ class TestContextWindowParsing:
                 parse_context_window(bad)
 
 
-class TestMemoryConfig:
-    """Tests for MemoryConfig model."""
+class TestRepositoryConfig:
+    """Tests for RepositoryConfig model."""
 
     def test_default_values(self):
-        from thumbelina.config.models import MemoryConfig
+        from thumbelina.config.models import RepositoryConfig
 
-        cfg = MemoryConfig()
+        cfg = RepositoryConfig()
         assert cfg.database_url == "sqlite:///thumbelina.db"
 
     def test_custom_values(self):
-        from thumbelina.config.models import MemoryConfig
+        from thumbelina.config.models import RepositoryConfig
 
-        cfg = MemoryConfig(database_url="postgresql://localhost/test")
+        cfg = RepositoryConfig(database_url="postgresql://localhost/test")
         assert cfg.database_url == "postgresql://localhost/test"
 
 
@@ -163,39 +163,39 @@ class TestAppConfig:
     """Tests for AppConfig model."""
 
     def test_default_values(self):
-        from thumbelina.config.models import AppConfig, LLMConfig, LoggingConfig, MemoryConfig
+        from thumbelina.config.models import AppConfig, LLMConfig, LoggingConfig, RepositoryConfig
 
         cfg = AppConfig()
         assert isinstance(cfg.llm, LLMConfig)
-        assert isinstance(cfg.memory, MemoryConfig)
+        assert isinstance(cfg.repository, RepositoryConfig)
         assert isinstance(cfg.logging, LoggingConfig)
         assert cfg.llm.provider == "openai"
-        assert cfg.memory.database_url == "sqlite:///thumbelina.db"
+        assert cfg.repository.database_url == "sqlite:///thumbelina.db"
         assert cfg.logging.level == "INFO"
 
     def test_nested_config(self):
-        from thumbelina.config.models import AppConfig, LLMConfig, MemoryConfig
+        from thumbelina.config.models import AppConfig, LLMConfig, RepositoryConfig
 
         cfg = AppConfig(
             llm=LLMConfig(provider="anthropic", model="claude-3"),
-            memory=MemoryConfig(database_url="postgresql://localhost/test"),
+            repository=RepositoryConfig(database_url="postgresql://localhost/test"),
         )
         assert cfg.llm.provider == "anthropic"
         assert cfg.llm.model == "claude-3"
-        assert cfg.memory.database_url == "postgresql://localhost/test"
+        assert cfg.repository.database_url == "postgresql://localhost/test"
 
     def test_from_dict(self):
         from thumbelina.config.models import AppConfig
 
         data = {
             "llm": {"provider": "ollama", "model": "llama3"},
-            "memory": {"database_url": "sqlite:///custom.db"},
+            "repository": {"database_url": "sqlite:///custom.db"},
             "logging": {"level": "DEBUG"},
         }
         cfg = AppConfig.model_validate(data)
         assert cfg.llm.provider == "ollama"
         assert cfg.llm.model == "llama3"
-        assert cfg.memory.database_url == "sqlite:///custom.db"
+        assert cfg.repository.database_url == "sqlite:///custom.db"
         assert cfg.logging.level == "DEBUG"
 
     def test_from_dict_partial(self):
@@ -205,7 +205,7 @@ class TestAppConfig:
         cfg = AppConfig.model_validate(data)
         assert cfg.llm.provider == "anthropic"
         assert cfg.llm.model == "gpt-4o"  # default
-        assert cfg.memory.database_url == "sqlite:///thumbelina.db"  # default
+        assert cfg.repository.database_url == "sqlite:///thumbelina.db"  # default
 
     def test_to_dict(self):
         from thumbelina.config.models import AppConfig
@@ -214,7 +214,7 @@ class TestAppConfig:
         data = cfg.model_dump()
         assert isinstance(data, dict)
         assert "llm" in data
-        assert "memory" in data
+        assert "repository" in data
         assert "logging" in data
         assert data["llm"]["provider"] == "openai"
 
@@ -224,7 +224,7 @@ class TestAppConfig:
 
         data = {
             "llm": {"provider": "openai", "model": "gpt-4o", "api_key": "sk-test"},
-            "memory": {"database_url": "sqlite:///thumbelina.db"},
+            "repository": {"database_url": "sqlite:///thumbelina.db"},
             "logging": {"level": "INFO"},
         }
         cfg = AppConfig.model_validate(data)

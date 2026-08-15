@@ -7,7 +7,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from thumbelina.memory.models import Base, ensure_schema
+from thumbelina.repository.models import Base, ensure_schema
 
 
 def create_db_engine(db_url: str) -> Engine:

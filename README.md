@@ -14,7 +14,7 @@ An AI-powered personal assistant built with [FastAPI](https://fastapi.tiangolo.c
 - **Role Prompts** — Role personas stored as files under `prompts/roles/` (built-in: assistant / coder), injected as the system prompt; supports a global default role and per-conversation switching in the Web UI
 - **Built-in Tools** — File operations, web requests, shell commands, and data processing (JSON/CSV/text analysis/regex search)
 - **RAG (Retrieval-Augmented Generation)** — Document ingestion, chunking, embedding (HuggingFace via llama-index), vector retrieval (ChromaDB), and context-aware indexing pipeline
-- **Conversation Memory** — Persistent storage (SQLite) with keyword search, LLM-generated summaries, and auto-naming for new conversations
+- **Conversation Storage** — Persistent storage (SQLite) with keyword search, LLM-generated summaries, and auto-naming for new conversations
 - **Semantic Search** — Vector-based semantic search via ChromaDB, with hybrid keyword + semantic fallback
 - **Skill Extraction & Integration** — Automatically extracts reusable skills from conversations and applies them in the agent loop
 - **Skill Composition** — Chain multiple skills into workflows, with LLM-assisted suggestion
@@ -199,7 +199,8 @@ thumbelina/
 │   ├── cli/                 # Click CLI with prompt_toolkit chat session
 │   ├── config/              # YAML + env var config loader, Pydantic models
 │   ├── llm/                 # LLM provider abstraction (OpenAI, Anthropic, Ollama)
-│   ├── memory/              # Conversation persistence, search, summarizer, vector store, user profiler, feedback
+│   ├── repository/          # Conversation persistence, search, vector store, feedback, user profiles
+│   ├── analysis/            # LLM analysis services: user profiler, title summarizer, conversation namer
 │   ├── notifications.py     # WebSocket notification broadcast
 │   ├── plugins/             # Plugin system (register, sandbox, dependency resolution)
 │   ├── rag/                 # RAG: document ingestion, chunking, embedding, retrieval, indexing pipeline
@@ -406,7 +407,7 @@ rate_limit:
   max_requests: 60          # Max requests per window
   window_seconds: 60        # Time window in seconds
 
-memory:
+repository:
   database_url: sqlite:///thumbelina.db
 
 logging:

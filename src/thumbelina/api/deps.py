@@ -5,17 +5,17 @@ from __future__ import annotations
 from fastapi import HTTPException, Request
 
 from thumbelina.agent.graph import ThumbelinaAgent
+from thumbelina.analysis.profiler import UserProfiler
 from thumbelina.channels.qq_channel import QQChannel
 from thumbelina.channels.wechat_channel import WeChatChannel
-from thumbelina.memory.feedback_repo import FeedbackRepository
-from thumbelina.memory.manager import MemoryManager
-from thumbelina.memory.profiler import UserProfiler
+from thumbelina.repository.feedback_repo import FeedbackRepository
+from thumbelina.repository.manager import RepositoryManager
 from thumbelina.todo.service import TodoService
 
 
-def get_memory_manager(request: Request) -> MemoryManager:
-    """Get the MemoryManager from app.state."""
-    return request.app.state.memory_manager
+def get_repository_manager(request: Request) -> RepositoryManager:
+    """Get the RepositoryManager from app.state."""
+    return request.app.state.repository_manager
 
 
 def get_agent(request: Request) -> ThumbelinaAgent:

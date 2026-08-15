@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy import delete, select, text
 from sqlalchemy.orm import Session, joinedload
 
-from thumbelina.memory.models import Conversation, Message
+from thumbelina.repository.models import Conversation, Message
 
 # Valid roles for messages
 VALID_ROLES = {"user", "assistant", "system"}
@@ -24,7 +24,7 @@ class ConversationRepository:
     """
 
     def __init__(self, db_url: str) -> None:
-        from thumbelina.memory.db import create_db_engine, init_db
+        from thumbelina.repository.db import create_db_engine, init_db
 
         self.engine = create_db_engine(db_url)
         self.SessionLocal = init_db(self.engine)

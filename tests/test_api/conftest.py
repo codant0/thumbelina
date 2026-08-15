@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from thumbelina.config.models import AppConfig, LLMConfig, MemoryConfig
+from thumbelina.config.models import AppConfig, LLMConfig, RepositoryConfig
 
 
 @pytest.fixture
@@ -21,15 +21,15 @@ def mock_agent():
 
     agent.stream = _stream
     agent.current_conversation_id = None
-    agent.memory_manager = None
-    # clone() returns a new mock (memory_manager=None is safe for clone)
+    agent.repository_manager = None
+    # clone() returns a new mock (repository_manager=None is safe for clone)
     agent.clone.return_value = agent
     return agent
 
 
 @pytest.fixture
-def mock_memory():
-    """Create a mock MemoryManager."""
+def mock_repository():
+    """Create a mock RepositoryManager."""
     conv = {
         "id": "test-conv-id",
         "created_at": "2026-01-01",
@@ -105,41 +105,43 @@ def mock_memory():
             return True
         return False
 
-    memory = MagicMock()
-    memory.create_conversation = AsyncMock(return_value="test-conv-id")
-    memory.get_conversation = AsyncMock(side_effect=get_conversation)
-    memory.get_conversations = AsyncMock(return_value=[conv])
-    memory.get_messages = AsyncMock(side_effect=get_messages)
-    memory.delete_conversation = AsyncMock(side_effect=delete_conversation)
-    memory.clear_messages = AsyncMock(side_effect=clear_messages)
-    memory.add_message = AsyncMock()
-    memory.close = MagicMock()
+    repository = MagicMock()
+    repository.create_conversation = AsyncMock(return_value="test-conv-id")
+    repository.get_conversation = AsyncMock(side_effect=get_conversation)
+    repository.get_conversations = AsyncMock(return_value=[conv])
+    repository.get_messages = AsyncMock(side_effect=get_messages)
+    repository.delete_conversation = AsyncMock(side_effect=delete_conversation)
+    repository.clear_messages = AsyncMock(side_effect=clear_messages)
+    repository.add_message = AsyncMock()
+    repository.close = MagicMock()
 
     # Per-conversation rename / endpoint selection (mutate in-memory dict)
-    memory.rename_conversation = AsyncMock(side_effect=rename_conversation)
-    memory.set_conversation_endpoint = AsyncMock(side_effect=set_conversation_endpoint)
-    memory.set_conversation_model = AsyncMock(side_effect=set_conversation_model)
-    memory.set_conversation_knowledge_base = AsyncMock(side_effect=set_conversation_knowledge_base)
-    memory.set_conversation_role = AsyncMock(side_effect=set_conversation_role)
-    memory.set_conversation_thinking = AsyncMock(side_effect=set_conversation_thinking)
+    repository.rename_conversation = AsyncMock(side_effect=rename_conversation)
+    repository.set_conversation_endpoint = AsyncMock(side_effect=set_conversation_endpoint)
+    repository.set_conversation_model = AsyncMock(side_effect=set_conversation_model)
+    repository.set_conversation_knowledge_base = AsyncMock(
+        side_effect=set_conversation_knowledge_base
+    )
+    repository.set_conversation_role = AsyncMock(side_effect=set_conversation_role)
+    repository.set_conversation_thinking = AsyncMock(side_effect=set_conversation_thinking)
 
     # Mock repository with ping method
-    memory.repository = MagicMock()
-    memory.repository.ping = AsyncMock(return_value=True)
+    repository.conversation_repository = MagicMock()
+    repository.conversation_repository.ping = AsyncMock(return_value=True)
 
-    return memory
+    return repository
 
 
 @pytest.fixture
-def client(mock_agent, mock_memory):
+def client(mock_agent, mock_repository):
     """Create a test client with mocked dependencies."""
     config = AppConfig(
         llm=LLMConfig(provider="openai", model="test", api_key="test-key"),
-        memory=MemoryConfig(database_url="sqlite:///:memory:"),
+        repository=RepositoryConfig(database_url="sqlite:///:memory:"),
     )
 
     with (
-        patch("thumbelina.api.app.MemoryManager", return_value=mock_memory),
+        patch("thumbelina.api.app.RepositoryManager", return_value=mock_repository),
         patch("thumbelina.api.app.create_provider", return_value=MagicMock()),
         patch("thumbelina.api.app.ThumbelinaAgent", return_value=mock_agent),
     ):

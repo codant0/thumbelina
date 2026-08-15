@@ -122,8 +122,8 @@ async def websocket_chat(websocket: WebSocket) -> None:
             # Handle conversation switch (no message payload)
             if "switch_conversation" in data:
                 new_cid = data["switch_conversation"]
-                if new_cid and agent.memory_manager:
-                    existing = await agent.memory_manager.get_conversation(new_cid)
+                if new_cid and agent.repository_manager:
+                    existing = await agent.repository_manager.get_conversation(new_cid)
                     if existing is None:
                         await websocket.send_json({"error": f"Conversation not found: {new_cid}"})
                         continue
@@ -149,18 +149,18 @@ async def websocket_chat(websocket: WebSocket) -> None:
 
             # Use client-supplied conversation_id, or fall back to default.
             cid = parsed.conversation_id or default_conversation_id
-            if not cid and agent.memory_manager:
-                cid = await agent.memory_manager.create_conversation()
+            if not cid and agent.repository_manager:
+                cid = await agent.repository_manager.create_conversation()
                 default_conversation_id = cid
                 await websocket.send_json({"conversation_created": cid})
-            if cid and agent.memory_manager:
-                existing = await agent.memory_manager.get_conversation(cid)
+            if cid and agent.repository_manager:
+                existing = await agent.repository_manager.get_conversation(cid)
                 if existing is None:
                     await websocket.send_json({"error": f"Conversation not found: {cid}"})
                     continue
             # 按会话跨连接串行化轮次：多个 WebSocket 连接可能指向
             # 同一会话，同一线程的检查点更新绝不能交错。
-            # cid=None（无 memory manager）直接放行。
+            # cid=None（无 repository manager）直接放行。
             async with _per_conversation_lock(cid):
                 if cid:
                     agent.current_conversation_id = cid
@@ -173,7 +173,7 @@ async def websocket_chat(websocket: WebSocket) -> None:
                 # llm.context_window），供压缩阶段使用。会话没有端点或
                 # 未配置窗口时回退到默认窗口。
                 window_tokens = await resolve_context_window_tokens(
-                    agent.memory_manager,
+                    agent.repository_manager,
                     getattr(websocket.app.state, "endpoint_manager", None),
                     cid,
                     websocket.app.state.config.llm.context_window_tokens,

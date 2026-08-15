@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from thumbelina.memory.repository import ConversationRepository
-from thumbelina.memory.search import SearchEngine
+from thumbelina.repository.repository import ConversationRepository
+from thumbelina.repository.search import SearchEngine
 
 
 @pytest.fixture

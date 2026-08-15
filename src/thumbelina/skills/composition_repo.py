@@ -7,7 +7,7 @@ import json
 
 from sqlalchemy import select
 
-from thumbelina.memory.models import CompositionRecord
+from thumbelina.repository.models import CompositionRecord
 from thumbelina.skills.composition import SkillComposition
 
 
@@ -21,7 +21,7 @@ class CompositionRepository:
     """
 
     def __init__(self, db_url: str = "sqlite:///thumbelina.db") -> None:
-        from thumbelina.memory.db import create_db_engine, init_db
+        from thumbelina.repository.db import create_db_engine, init_db
 
         self.engine = create_db_engine(db_url)
         self.SessionLocal = init_db(self.engine)

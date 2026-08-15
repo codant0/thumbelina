@@ -233,65 +233,65 @@ class TestGraphStructure:
 
 
 class TestAgentMemoryIntegration:
-    """Tests for agent integration with memory system."""
+    """Tests for agent integration with repository system."""
 
-    def test_agent_accepts_memory_manager(self):
-        """ThumbelinaAgent should accept an optional memory manager."""
+    def test_agent_accepts_repository_manager(self):
+        """ThumbelinaAgent should accept an optional repository manager."""
         from thumbelina.agent.graph import ThumbelinaAgent
-        from thumbelina.memory.manager import MemoryManager
+        from thumbelina.repository.manager import RepositoryManager
 
         mock_provider = _create_mock_provider()
-        mock_memory = MagicMock(spec=MemoryManager)
+        mock_repository = MagicMock(spec=RepositoryManager)
 
-        agent = ThumbelinaAgent(llm_provider=mock_provider, memory_manager=mock_memory)
+        agent = ThumbelinaAgent(llm_provider=mock_provider, repository_manager=mock_repository)
 
-        assert agent.memory_manager is mock_memory
+        assert agent.repository_manager is mock_repository
 
     def test_agent_default_no_memory(self):
-        """ThumbelinaAgent should default to no memory manager."""
+        """ThumbelinaAgent should default to no repository manager."""
         from thumbelina.agent.graph import ThumbelinaAgent
 
         mock_provider = _create_mock_provider()
         agent = ThumbelinaAgent(llm_provider=mock_provider)
 
-        assert agent.memory_manager is None
+        assert agent.repository_manager is None
 
     @pytest.mark.asyncio
     async def test_agent_creates_conversation_on_run(self):
-        """Agent should create a conversation when memory is enabled."""
+        """Agent should create a conversation when repository is enabled."""
         from thumbelina.agent.graph import ThumbelinaAgent
-        from thumbelina.memory.manager import MemoryManager
+        from thumbelina.repository.manager import RepositoryManager
 
         mock_provider = _create_mock_provider()
         mock_provider.chat_model.ainvoke.return_value = AIMessage(content="Hello!")
 
-        mock_memory = AsyncMock(spec=MemoryManager)
-        mock_memory.create_conversation.return_value = "test-conversation-id"
-        mock_memory.add_message = AsyncMock()
+        mock_repository = AsyncMock(spec=RepositoryManager)
+        mock_repository.create_conversation.return_value = "test-conversation-id"
+        mock_repository.add_message = AsyncMock()
 
-        agent = ThumbelinaAgent(llm_provider=mock_provider, memory_manager=mock_memory)
+        agent = ThumbelinaAgent(llm_provider=mock_provider, repository_manager=mock_repository)
         await agent.run("Hi")
 
-        mock_memory.create_conversation.assert_called_once()
+        mock_repository.create_conversation.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_agent_saves_user_message(self):
-        """Agent should save user message to memory."""
+        """Agent should save user message to repository."""
         from thumbelina.agent.graph import ThumbelinaAgent
-        from thumbelina.memory.manager import MemoryManager
+        from thumbelina.repository.manager import RepositoryManager
 
         mock_provider = _create_mock_provider()
         mock_provider.chat_model.ainvoke.return_value = AIMessage(content="Hello!")
 
-        mock_memory = AsyncMock(spec=MemoryManager)
-        mock_memory.create_conversation.return_value = "test-conversation-id"
-        mock_memory.add_message = AsyncMock()
+        mock_repository = AsyncMock(spec=RepositoryManager)
+        mock_repository.create_conversation.return_value = "test-conversation-id"
+        mock_repository.add_message = AsyncMock()
 
-        agent = ThumbelinaAgent(llm_provider=mock_provider, memory_manager=mock_memory)
+        agent = ThumbelinaAgent(llm_provider=mock_provider, repository_manager=mock_repository)
         await agent.run("Hi")
 
         # Verify user message was saved
-        mock_memory.add_message.assert_any_call(
+        mock_repository.add_message.assert_any_call(
             conversation_id="test-conversation-id",
             role="user",
             content="Hi",
@@ -300,22 +300,22 @@ class TestAgentMemoryIntegration:
 
     @pytest.mark.asyncio
     async def test_agent_saves_assistant_response(self):
-        """Agent should save assistant response to memory."""
+        """Agent should save assistant response to repository."""
         from thumbelina.agent.graph import ThumbelinaAgent
-        from thumbelina.memory.manager import MemoryManager
+        from thumbelina.repository.manager import RepositoryManager
 
         mock_provider = _create_mock_provider()
         mock_provider.chat_model.ainvoke.return_value = AIMessage(content="Hello!")
 
-        mock_memory = AsyncMock(spec=MemoryManager)
-        mock_memory.create_conversation.return_value = "test-conversation-id"
-        mock_memory.add_message = AsyncMock()
+        mock_repository = AsyncMock(spec=RepositoryManager)
+        mock_repository.create_conversation.return_value = "test-conversation-id"
+        mock_repository.add_message = AsyncMock()
 
-        agent = ThumbelinaAgent(llm_provider=mock_provider, memory_manager=mock_memory)
+        agent = ThumbelinaAgent(llm_provider=mock_provider, repository_manager=mock_repository)
         await agent.run("Hi")
 
         # Verify assistant message was saved
-        mock_memory.add_message.assert_any_call(
+        mock_repository.add_message.assert_any_call(
             conversation_id="test-conversation-id",
             role="assistant",
             content="Hello!",
@@ -324,7 +324,7 @@ class TestAgentMemoryIntegration:
 
     @pytest.mark.asyncio
     async def test_agent_does_not_save_without_memory(self):
-        """Agent should not attempt to save messages without memory manager."""
+        """Agent should not attempt to save messages without repository manager."""
         from thumbelina.agent.graph import ThumbelinaAgent
 
         mock_provider = _create_mock_provider()
@@ -340,42 +340,42 @@ class TestAgentMemoryIntegration:
     async def test_agent_creates_conversation_only_once(self):
         """Agent should create conversation only once for multiple messages."""
         from thumbelina.agent.graph import ThumbelinaAgent
-        from thumbelina.memory.manager import MemoryManager
+        from thumbelina.repository.manager import RepositoryManager
 
         mock_provider = _create_mock_provider()
         mock_provider.chat_model.ainvoke.return_value = AIMessage(content="Response")
 
-        mock_memory = AsyncMock(spec=MemoryManager)
-        mock_memory.create_conversation.return_value = "test-conversation-id"
-        mock_memory.add_message = AsyncMock()
+        mock_repository = AsyncMock(spec=RepositoryManager)
+        mock_repository.create_conversation.return_value = "test-conversation-id"
+        mock_repository.add_message = AsyncMock()
 
-        agent = ThumbelinaAgent(llm_provider=mock_provider, memory_manager=mock_memory)
+        agent = ThumbelinaAgent(llm_provider=mock_provider, repository_manager=mock_repository)
         await agent.run("First message")
         await agent.run("Second message")
 
         # create_conversation should only be called once
-        mock_memory.create_conversation.assert_called_once()
+        mock_repository.create_conversation.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_agent_stream_saves_user_message(self):
         """Agent should save user message during streaming."""
         from thumbelina.agent.graph import ThumbelinaAgent
-        from thumbelina.memory.manager import MemoryManager
+        from thumbelina.repository.manager import RepositoryManager
 
         mock_provider = _create_mock_provider()
 
-        mock_memory = AsyncMock(spec=MemoryManager)
-        mock_memory.create_conversation.return_value = "test-conversation-id"
-        mock_memory.add_message = AsyncMock()
+        mock_repository = AsyncMock(spec=RepositoryManager)
+        mock_repository.create_conversation.return_value = "test-conversation-id"
+        mock_repository.add_message = AsyncMock()
 
-        agent = ThumbelinaAgent(llm_provider=mock_provider, memory_manager=mock_memory)
+        agent = ThumbelinaAgent(llm_provider=mock_provider, repository_manager=mock_repository)
 
         chunks = []
         async for chunk in agent.stream("Hi"):
             chunks.append(chunk)
 
         # Verify user message was saved
-        mock_memory.add_message.assert_any_call(
+        mock_repository.add_message.assert_any_call(
             conversation_id="test-conversation-id",
             role="user",
             content="Hi",
@@ -386,23 +386,23 @@ class TestAgentMemoryIntegration:
     async def test_agent_stream_saves_assistant_response(self):
         """Agent should save assistant response during streaming."""
         from thumbelina.agent.graph import ThumbelinaAgent
-        from thumbelina.memory.manager import MemoryManager
+        from thumbelina.repository.manager import RepositoryManager
 
         mock_provider = _create_mock_provider()
 
-        mock_memory = AsyncMock(spec=MemoryManager)
-        mock_memory.create_conversation.return_value = "test-conversation-id"
-        mock_memory.add_message = AsyncMock()
+        mock_repository = AsyncMock(spec=RepositoryManager)
+        mock_repository.create_conversation.return_value = "test-conversation-id"
+        mock_repository.add_message = AsyncMock()
 
-        agent = ThumbelinaAgent(llm_provider=mock_provider, memory_manager=mock_memory)
+        agent = ThumbelinaAgent(llm_provider=mock_provider, repository_manager=mock_repository)
 
         chunks = []
         async for chunk in agent.stream("Hi"):
             chunks.append(chunk)
 
         # Verify assistant message was saved (should have 2 calls: user + assistant)
-        assert mock_memory.add_message.call_count == 2
-        assistant_call = mock_memory.add_message.call_args_list[1]
+        assert mock_repository.add_message.call_count == 2
+        assistant_call = mock_repository.add_message.call_args_list[1]
         assert assistant_call.kwargs["role"] == "assistant"
         assert assistant_call.kwargs["conversation_id"] == "test-conversation-id"
 
@@ -614,7 +614,7 @@ class TestCheckpointerWiring:
         from langgraph.checkpoint.memory import MemorySaver
 
         from thumbelina.agent.graph import ThumbelinaAgent
-        from thumbelina.memory.manager import MemoryManager
+        from thumbelina.repository.manager import RepositoryManager
 
         saver = MemorySaver()
         mock_provider = _create_mock_provider()
@@ -622,17 +622,17 @@ class TestCheckpointerWiring:
         # 共享的 mock 对象会被替换而不是追加。
         mock_provider.chat_model.ainvoke.side_effect = lambda *a, **k: AIMessage(content="Hello!")
 
-        mock_memory = AsyncMock(spec=MemoryManager)
-        mock_memory.create_conversation.return_value = "conv-checkpoint"
+        mock_repository = AsyncMock(spec=RepositoryManager)
+        mock_repository.create_conversation.return_value = "conv-checkpoint"
         # AsyncMock(spec=...) 会把每个属性都变成 AsyncMock，因此默认的
         # 子返回值会让 conv.get() 成为未被 await 的协程。
         # 改为返回 None（未绑定知识库）。
-        mock_memory.get_conversation.return_value = None
-        mock_memory.add_message = AsyncMock()
+        mock_repository.get_conversation.return_value = None
+        mock_repository.add_message = AsyncMock()
 
         agent = ThumbelinaAgent(
             llm_provider=mock_provider,
-            memory_manager=mock_memory,
+            repository_manager=mock_repository,
             checkpointer=saver,
         )
         await agent.run("First message")
@@ -653,7 +653,7 @@ class TestCheckpointerWiring:
         mock_provider = _create_mock_provider()
         agent = ThumbelinaAgent(llm_provider=mock_provider, checkpointer=saver)
 
-        # 无 memory manager -> 无会话 id；绝不能抛出。
+        # 无 repository manager -> 无会话 id；绝不能抛出。
         result = await agent.run("Hi")
 
         assert result == "Hello! How can I help?"
@@ -667,17 +667,17 @@ class TestFirstTurnInjection:
         from langgraph.checkpoint.memory import MemorySaver
 
         from thumbelina.agent.graph import ThumbelinaAgent
-        from thumbelina.memory.manager import MemoryManager
+        from thumbelina.repository.manager import RepositoryManager
 
         mock_provider = _create_mock_provider()
         # 每次调用都返回全新的 AIMessage：add_messages 按 id 合并消息，
         # 共享的 mock 对象会被替换而不是追加。
         mock_provider.chat_model.ainvoke.side_effect = lambda *a, **k: AIMessage(content="Hi!")
 
-        mock_memory = AsyncMock(spec=MemoryManager)
-        mock_memory.create_conversation.return_value = "conv-inject"
-        mock_memory.add_message = AsyncMock()
-        mock_memory.get_conversation.return_value = {"knowledge_base_id": None}
+        mock_repository = AsyncMock(spec=RepositoryManager)
+        mock_repository.create_conversation.return_value = "conv-inject"
+        mock_repository.add_message = AsyncMock()
+        mock_repository.get_conversation.return_value = {"knowledge_base_id": None}
 
         profiler = None
         if profile is not None:
@@ -692,7 +692,7 @@ class TestFirstTurnInjection:
 
         agent = ThumbelinaAgent(
             llm_provider=mock_provider,
-            memory_manager=mock_memory,
+            repository_manager=mock_repository,
             user_profiler=profiler,
             skill_engine=skill_engine,
             role=role,

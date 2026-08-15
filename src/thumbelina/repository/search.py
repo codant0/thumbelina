@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from thumbelina.memory.repository import ConversationRepository
-from thumbelina.memory.vector.base import VectorStore
+from thumbelina.repository.repository import ConversationRepository
+from thumbelina.repository.vector.base import VectorStore
 
 logger = logging.getLogger(__name__)
 

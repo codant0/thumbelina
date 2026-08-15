@@ -5,10 +5,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from thumbelina.api.deps import get_feedback_repo, get_memory_manager, get_user_profiler
-from thumbelina.memory.feedback_repo import Feedback, FeedbackRepository
-from thumbelina.memory.manager import MemoryManager
-from thumbelina.memory.profiler import UserProfiler
+from thumbelina.analysis.profiler import UserProfiler
+from thumbelina.api.deps import get_feedback_repo, get_repository_manager, get_user_profiler
+from thumbelina.repository.feedback_repo import Feedback, FeedbackRepository
+from thumbelina.repository.manager import RepositoryManager
 
 router = APIRouter(tags=["data"])
 
@@ -54,17 +54,17 @@ def _feedback_to_response(fb: Feedback) -> FeedbackResponse:
 
 @router.get("/data/export")
 async def export_data(
-    memory: MemoryManager = Depends(get_memory_manager),
+    repository: RepositoryManager = Depends(get_repository_manager),
 ) -> dict:
     """Export all user data as JSON."""
-    conversations = await memory.get_all_conversations_with_messages()
+    conversations = await repository.get_all_conversations_with_messages()
     return {"conversations": conversations}
 
 
 @router.delete("/data/all")
 async def delete_all_data(
     confirm: bool = False,
-    memory: MemoryManager = Depends(get_memory_manager),
+    repository: RepositoryManager = Depends(get_repository_manager),
 ) -> dict:
     """Delete all user data.
 
@@ -75,9 +75,9 @@ async def delete_all_data(
             status_code=400,
             detail="Pass ?confirm=true to confirm deletion of all data.",
         )
-    conversations = await memory.get_conversations()
+    conversations = await repository.get_conversations()
     for conv in conversations:
-        await memory.delete_conversation(conv["id"])
+        await repository.delete_conversation(conv["id"])
     return {"deleted": len(conversations)}
 
 

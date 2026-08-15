@@ -148,9 +148,9 @@ class WeChatChannel(Channel):
 
         Migrates any legacy '微信聊天' conversation to the new name.
         """
-        mm = self._agent.memory_manager
+        mm = self._agent.repository_manager
         if mm is None:
-            logger.warning("No memory manager — WeChat messages will not be persisted")
+            logger.warning("No repository manager — WeChat messages will not be persisted")
             return
 
         try:

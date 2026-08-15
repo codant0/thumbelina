@@ -15,7 +15,7 @@ from thumbelina.agent.checkpointer import async_checkpointer_from_url
 from thumbelina.agent.graph import ThumbelinaAgent
 from thumbelina.config import AppConfig, load_config
 from thumbelina.llm.factory import create_provider
-from thumbelina.memory.manager import MemoryManager
+from thumbelina.repository.manager import RepositoryManager
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +99,7 @@ class ChatSession:
         """
         self.history.append({"role": "user", "content": user_input})
 
-        # Use the full agent pipeline (with graph, tools, memory)
+        # Use the full agent pipeline (with graph, tools, repository)
         response = await self.agent.run(
             user_input, context_window_tokens=self.context_window_tokens
         )
@@ -176,22 +176,22 @@ async def _run_chat_session(config: AppConfig, provider: str, model: str | None)
 
     llm_provider = create_provider(provider, **kwargs)
 
-    memory_manager = MemoryManager(db_url=config.memory.database_url)
+    repository_manager = RepositoryManager(db_url=config.repository.database_url)
 
     # 初始化 LangGraph 检查点存储器（在轮次之间持久化 agent 的 LLM
     # 上下文，以会话 id 为键）。检查点是硬性要求：失败直接中止
     # CLI 会话而不是降级。
     checkpointer_stack = AsyncExitStack()
     checkpointer = await checkpointer_stack.enter_async_context(
-        async_checkpointer_from_url(config.memory.database_url)
+        async_checkpointer_from_url(config.repository.database_url)
     )
 
     # Initialize feedback repository
     feedback_repo = None
     try:
-        from thumbelina.memory.feedback_repo import FeedbackRepository
+        from thumbelina.repository.feedback_repo import FeedbackRepository
 
-        feedback_repo = FeedbackRepository(db_url=config.memory.database_url)
+        feedback_repo = FeedbackRepository(db_url=config.repository.database_url)
     except Exception:
         pass
 
@@ -202,7 +202,7 @@ async def _run_chat_session(config: AppConfig, provider: str, model: str | None)
         from thumbelina.skills.application import SkillApplicationEngine
         from thumbelina.skills.repository import SkillRepository
 
-        skill_repo = SkillRepository(db_url=config.memory.database_url)
+        skill_repo = SkillRepository(db_url=config.repository.database_url)
         skill_engine = SkillApplicationEngine(
             repository=skill_repo,
             llm_provider=llm_provider,
@@ -219,8 +219,8 @@ async def _run_chat_session(config: AppConfig, provider: str, model: str | None)
         if skill_repo is None:
             from thumbelina.skills.repository import SkillRepository
 
-            skill_repo = SkillRepository(db_url=config.memory.database_url)
-        comp_repo = CompositionRepository(db_url=config.memory.database_url)
+            skill_repo = SkillRepository(db_url=config.repository.database_url)
+        comp_repo = CompositionRepository(db_url=config.repository.database_url)
         composition_engine = CompositionEngine(
             composition_repo=comp_repo,
             skill_repo=skill_repo,
@@ -250,7 +250,7 @@ async def _run_chat_session(config: AppConfig, provider: str, model: str | None)
     agent = ThumbelinaAgent(
         llm_provider=llm_provider,
         tools=get_all_tools(),
-        memory_manager=memory_manager,
+        repository_manager=repository_manager,
         request_timeout=config.llm.request_timeout,
         skill_engine=skill_engine,
         subagent_manager=subagent_manager,
@@ -272,4 +272,4 @@ async def _run_chat_session(config: AppConfig, provider: str, model: str | None)
         await session.run()
     finally:
         await checkpointer_stack.aclose()
-        memory_manager.close()
+        repository_manager.close()

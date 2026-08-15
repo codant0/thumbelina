@@ -89,8 +89,8 @@ async def test_apply_endpoint_default_provider_gets_thinking():
     from thumbelina.api.routes.chat import _apply_conversation_endpoint
 
     agent = MagicMock()
-    agent.memory_manager = MagicMock()
-    agent.memory_manager.get_conversation = AsyncMock(
+    agent.repository_manager = MagicMock()
+    agent.repository_manager.get_conversation = AsyncMock(
         return_value={"id": "c1", "thinking_enabled": True, "thinking_effort": "high"}
     )
 
@@ -129,8 +129,8 @@ async def test_apply_endpoint_default_provider_no_thinking():
     from thumbelina.api.routes.chat import _apply_conversation_endpoint
 
     agent = MagicMock()
-    agent.memory_manager = MagicMock()
-    agent.memory_manager.get_conversation = AsyncMock(
+    agent.repository_manager = MagicMock()
+    agent.repository_manager.get_conversation = AsyncMock(
         return_value={"id": "c1", "thinking_enabled": False}
     )
 
@@ -159,8 +159,10 @@ async def test_apply_conversation_role_overrides_agent_role():
     agent = MagicMock()
     agent.role = "assistant"
     agent.role_prompt = get_role_prompt("assistant")
-    agent.memory_manager = MagicMock()
-    agent.memory_manager.get_conversation = AsyncMock(return_value={"id": "c1", "role": "coder"})
+    agent.repository_manager = MagicMock()
+    agent.repository_manager.get_conversation = AsyncMock(
+        return_value={"id": "c1", "role": "coder"}
+    )
 
     await _apply_conversation_role(agent, "c1")
 
@@ -179,8 +181,10 @@ async def test_apply_conversation_role_unknown_role_keeps_default():
     agent = MagicMock()
     agent.role = "assistant"
     agent.role_prompt = get_role_prompt("assistant")
-    agent.memory_manager = MagicMock()
-    agent.memory_manager.get_conversation = AsyncMock(return_value={"id": "c1", "role": "ghost"})
+    agent.repository_manager = MagicMock()
+    agent.repository_manager.get_conversation = AsyncMock(
+        return_value={"id": "c1", "role": "ghost"}
+    )
 
     await _apply_conversation_role(agent, "c1")
 
@@ -198,8 +202,8 @@ async def test_apply_conversation_role_no_role_configured():
     agent = MagicMock()
     agent.role = "assistant"
     agent.role_prompt = "default prompt"
-    agent.memory_manager = MagicMock()
-    agent.memory_manager.get_conversation = AsyncMock(return_value={"id": "c1"})
+    agent.repository_manager = MagicMock()
+    agent.repository_manager.get_conversation = AsyncMock(return_value={"id": "c1"})
 
     await _apply_conversation_role(agent, "c1")
 
@@ -208,8 +212,8 @@ async def test_apply_conversation_role_no_role_configured():
 
 
 @pytest.mark.asyncio
-async def test_apply_conversation_role_without_memory():
-    """Without a memory manager the helper should be a no-op."""
+async def test_apply_conversation_role_without_repository():
+    """Without a repository manager the helper should be a no-op."""
     from unittest.mock import MagicMock
 
     from thumbelina.api.routes.chat import _apply_conversation_role
@@ -217,7 +221,7 @@ async def test_apply_conversation_role_without_memory():
     agent = MagicMock()
     agent.role = "assistant"
     agent.role_prompt = "default prompt"
-    agent.memory_manager = None
+    agent.repository_manager = None
 
     await _apply_conversation_role(agent, "c1")
 
@@ -250,12 +254,12 @@ class TestResolveContextWindowTokens:
         )
 
     @staticmethod
-    def _memory(conv):
+    def _repository(conv):
         from unittest.mock import AsyncMock, MagicMock
 
-        memory = MagicMock()
-        memory.get_conversation = AsyncMock(return_value=conv)
-        return memory
+        repository = MagicMock()
+        repository.get_conversation = AsyncMock(return_value=conv)
+        return repository
 
     @pytest.mark.asyncio
     async def test_conversation_endpoint_window_wins(self):
@@ -267,8 +271,10 @@ class TestResolveContextWindowTokens:
         endpoint_manager.get_endpoint = AsyncMock(return_value=self._endpoint("32K"))
         endpoint_manager.get_active_endpoint_model = AsyncMock()
 
-        memory = self._memory({"id": "c1", "endpoint_id": "ep-1"})
-        tokens = await resolve_context_window_tokens(memory, endpoint_manager, "c1", self.DEFAULT)
+        repository = self._repository({"id": "c1", "endpoint_id": "ep-1"})
+        tokens = await resolve_context_window_tokens(
+            repository, endpoint_manager, "c1", self.DEFAULT
+        )
 
         assert tokens == 32_000
         endpoint_manager.get_endpoint.assert_awaited_once_with("ep-1")
@@ -283,8 +289,10 @@ class TestResolveContextWindowTokens:
         endpoint_manager = MagicMock()
         endpoint_manager.get_endpoint = AsyncMock(return_value=self._endpoint(None))
 
-        memory = self._memory({"id": "c1", "endpoint_id": "ep-1"})
-        tokens = await resolve_context_window_tokens(memory, endpoint_manager, "c1", self.DEFAULT)
+        repository = self._repository({"id": "c1", "endpoint_id": "ep-1"})
+        tokens = await resolve_context_window_tokens(
+            repository, endpoint_manager, "c1", self.DEFAULT
+        )
 
         assert tokens == self.DEFAULT
 
@@ -299,8 +307,10 @@ class TestResolveContextWindowTokens:
         endpoint_manager.get_endpoint = AsyncMock(return_value=self._endpoint("32K", api_key=""))
         endpoint_manager.get_active_endpoint_model = AsyncMock()
 
-        memory = self._memory({"id": "c1", "endpoint_id": "ep-1"})
-        tokens = await resolve_context_window_tokens(memory, endpoint_manager, "c1", self.DEFAULT)
+        repository = self._repository({"id": "c1", "endpoint_id": "ep-1"})
+        tokens = await resolve_context_window_tokens(
+            repository, endpoint_manager, "c1", self.DEFAULT
+        )
 
         assert tokens == self.DEFAULT
         # 已绑定但不可用的端点不会回落到全局端点。
@@ -317,8 +327,10 @@ class TestResolveContextWindowTokens:
             return_value=(self._endpoint("64K", endpoint_id="ep-active"), "gpt-4o")
         )
 
-        memory = self._memory({"id": "c1"})
-        tokens = await resolve_context_window_tokens(memory, endpoint_manager, "c1", self.DEFAULT)
+        repository = self._repository({"id": "c1"})
+        tokens = await resolve_context_window_tokens(
+            repository, endpoint_manager, "c1", self.DEFAULT
+        )
 
         assert tokens == 64_000
 
@@ -333,8 +345,10 @@ class TestResolveContextWindowTokens:
             return_value=(self._endpoint(None, endpoint_id="ep-active"), "gpt-4o")
         )
 
-        memory = self._memory({"id": "c1"})
-        tokens = await resolve_context_window_tokens(memory, endpoint_manager, "c1", self.DEFAULT)
+        repository = self._repository({"id": "c1"})
+        tokens = await resolve_context_window_tokens(
+            repository, endpoint_manager, "c1", self.DEFAULT
+        )
 
         assert tokens == self.DEFAULT
 
@@ -347,8 +361,10 @@ class TestResolveContextWindowTokens:
         endpoint_manager = MagicMock()
         endpoint_manager.get_active_endpoint_model = AsyncMock(return_value=None)
 
-        memory = self._memory({"id": "c1"})
-        tokens = await resolve_context_window_tokens(memory, endpoint_manager, "c1", self.DEFAULT)
+        repository = self._repository({"id": "c1"})
+        tokens = await resolve_context_window_tokens(
+            repository, endpoint_manager, "c1", self.DEFAULT
+        )
 
         assert tokens == self.DEFAULT
 
@@ -358,13 +374,13 @@ class TestResolveContextWindowTokens:
 
         from thumbelina.api.routes.chat import resolve_context_window_tokens
 
-        memory = self._memory({"id": "c1"})
+        repository = self._repository({"id": "c1"})
         endpoint_manager = MagicMock()
         endpoint_manager.get_active_endpoint_model = AsyncMock()
 
         assert await resolve_context_window_tokens(None, endpoint_manager, "c1", 999) == 999
-        assert await resolve_context_window_tokens(memory, None, "c1", 999) == 999
-        assert await resolve_context_window_tokens(memory, endpoint_manager, None, 999) == 999
+        assert await resolve_context_window_tokens(repository, None, "c1", 999) == 999
+        assert await resolve_context_window_tokens(repository, endpoint_manager, None, 999) == 999
 
     @pytest.mark.asyncio
     async def test_lookup_error_returns_default(self):
@@ -372,11 +388,13 @@ class TestResolveContextWindowTokens:
 
         from thumbelina.api.routes.chat import resolve_context_window_tokens
 
-        memory = MagicMock()
-        memory.get_conversation = AsyncMock(side_effect=RuntimeError("db down"))
+        repository = MagicMock()
+        repository.get_conversation = AsyncMock(side_effect=RuntimeError("db down"))
         endpoint_manager = MagicMock()
 
-        tokens = await resolve_context_window_tokens(memory, endpoint_manager, "c1", self.DEFAULT)
+        tokens = await resolve_context_window_tokens(
+            repository, endpoint_manager, "c1", self.DEFAULT
+        )
 
         assert tokens == self.DEFAULT
 

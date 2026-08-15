@@ -10,7 +10,7 @@ from typing import Any
 
 from sqlalchemy import func, select
 
-from thumbelina.memory.models import FeedbackRecord
+from thumbelina.repository.models import FeedbackRecord
 
 
 @dataclass
@@ -54,7 +54,7 @@ class FeedbackRepository:
     """
 
     def __init__(self, db_url: str = "sqlite:///thumbelina.db") -> None:
-        from thumbelina.memory.db import create_db_engine, init_db
+        from thumbelina.repository.db import create_db_engine, init_db
 
         self.engine = create_db_engine(db_url)
         self.SessionLocal = init_db(self.engine)

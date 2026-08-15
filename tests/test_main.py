@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from thumbelina.config.models import AppConfig, LLMConfig, MemoryConfig
+from thumbelina.config.models import AppConfig, LLMConfig, RepositoryConfig
 
 
 def test_health_endpoint():
@@ -13,17 +13,17 @@ def test_health_endpoint():
 
     config = AppConfig(
         llm=LLMConfig(provider="openai", model="test", api_key="test-key"),
-        memory=MemoryConfig(database_url="sqlite:///:memory:"),
+        repository=RepositoryConfig(database_url="sqlite:///:memory:"),
     )
 
-    # Mock MemoryManager and its repository
-    mock_memory = MagicMock()
-    mock_memory.repository = MagicMock()
-    mock_memory.repository.ping = AsyncMock(return_value=True)
-    mock_memory.close = MagicMock()
+    # Mock RepositoryManager and its repository
+    mock_repository = MagicMock()
+    mock_repository.conversation_repository = MagicMock()
+    mock_repository.conversation_repository.ping = AsyncMock(return_value=True)
+    mock_repository.close = MagicMock()
 
     with (
-        patch("thumbelina.api.app.MemoryManager", return_value=mock_memory),
+        patch("thumbelina.api.app.RepositoryManager", return_value=mock_repository),
         patch("thumbelina.api.app.create_provider", return_value=MagicMock()),
         patch("thumbelina.api.app.ThumbelinaAgent", return_value=MagicMock()),
     ):
@@ -40,11 +40,11 @@ def test_create_app_returns_fastapi():
 
     config = AppConfig(
         llm=LLMConfig(provider="openai", model="test", api_key="test-key"),
-        memory=MemoryConfig(database_url="sqlite:///:memory:"),
+        repository=RepositoryConfig(database_url="sqlite:///:memory:"),
     )
 
     with (
-        patch("thumbelina.api.app.MemoryManager"),
+        patch("thumbelina.api.app.RepositoryManager"),
         patch("thumbelina.api.app.create_provider"),
         patch("thumbelina.api.app.ThumbelinaAgent"),
     ):
