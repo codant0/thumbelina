@@ -6,22 +6,27 @@
 >
 > 自 v0.2 起部署改为**单容器**：前端构建产物由后端 uvicorn 直接托管（FastAPI `StaticFiles`），不再使用 nginx。
 
+> **⚠️ 升级提醒（存储配置节重命名）**：近期存储配置节已由 `memory` 更名为 `repository`（见 `src/thumbelina/config/models.py`），对应的环境变量从 `THUMBELINA_MEMORY__DATABASE_URL` 改为 **`THUMBELINA_REPOSITORY__DATABASE_URL`**（见 [4.2](#42-compose-注入的环境变量)）。旧变量名会被**静默忽略**，若沿用会导致数据库写入容器内 `/app`（不在持久卷里），**重建容器即丢数据**。从旧版本升级时务必同步修改 compose。
+>
+> 同时新增了「可配置数据文件存放路径」能力（见 [4.3](#43-指定数据文件存放路径)）：默认命名卷，也可用 `THUMBELINA_DATA_DIR` 指定宿主机目录。
+
 ---
 
 ## 1. 部署架构
 
 ```
-                        ┌─────────────────────────────────────────┐
- 浏览器                  │  docker compose 网络                     │
- ────────►  :8000 ────► │  thumbelina (python:3.11-slim)          │
-                        │   ├─ uvicorn 0.0.0.0:8000               │
-                        │   │    ├─ /api/v1/*、/ws/chat   (FastAPI)│
-                        │   │    └─ / (静态文件，前端 dist)         │
-                        │   ├─ /app/thumbelina.yaml（只读挂载）     │
-                        │   └─ /app/data ◄── 命名卷                 │
-                        │        ├─ thumbelina.db   (SQLite)       │
-                        │        └─ chroma/         (向量库)        │
-                        └─────────────────────────────────────────┘
+                        ┌────────────────────────────────────────────┐
+ 浏览器                  │  docker compose 网络                      │
+ ────────►  :8000 ────► │  thumbelina (python:3.11-slim)             │
+                        │   ├─ uvicorn 0.0.0.0:8000                  │
+                        │   │    ├─ /api/v1/*、/ws/chat  (FastAPI)   │
+                        │   │    └─ / (静态文件，前端 dist)          │
+                        │   ├─ /app/thumbelina.yaml（只读挂载）      │
+                        │   └─ /app/data ◄── 卷/bind mount           │
+                        │        ├─ thumbelina.db  (SQLite+ckpt)     │
+                        │        ├─ chroma/        (向量库)          │
+                        │        └─ TODO/          (待办/随手记)     │
+                        └────────────────────────────────────────────┘
 ```
 
 | 容器 | 镜像 | 宿主机端口 | 说明 |
@@ -29,7 +34,7 @@
 | `thumbelina` | `node:22-alpine` 构建前端 + `python:3.11-slim` 自建 | `8000 → 8000` | FastAPI + LangGraph，同时托管前端静态文件 |
 
 - 浏览器只需访问 **8000 端口**；前端代码统一使用相对路径（`/api/v1/*`、`/ws/chat`），由同一进程内的 uvicorn 处理，无需反向代理。
-- 所有运行期数据都在命名卷 `thumbelina-data` 中，重建容器不丢失。
+- 所有运行期数据都在持久数据目录中（默认命名卷 `thumbelina-data`，也可用 `THUMBELINA_DATA_DIR` 指定宿主机目录，见 [4.3](#43-指定数据文件存放路径)），重建容器不丢失。
 
 ## 2. 文件清单
 
@@ -65,8 +70,8 @@ llm:
   base_url: ''                     # 自定义 OpenAI 兼容端点时填写
   streaming_enabled: true
 
-memory:
-  database_url: sqlite:///thumbelina.db   # 容器内会被环境变量覆盖，见 4.2
+repository:
+  database_url: sqlite:///thumbelina.db   # 容器内会被环境变量覆盖，见 4.2（旧节名 memory 已废弃）
 
 auth:
   secret_key: ''                   # 生产环境务必设置（≥32 字节随机串），启用 JWT 鉴权
@@ -92,11 +97,39 @@ yaml 中支持 `${VAR}` 环境变量占位，例如 `api_key: ${OPENAI_API_KEY}`
 | 变量 | 值 | 作用 |
 |---|---|---|
 | `THUMBELINA_LLM__API_KEY` | 取自宿主机同名变量 | LLM 密钥，避免写死在 yaml 里 |
-| `THUMBELINA_MEMORY__DATABASE_URL` | `sqlite:////app/data/thumbelina.db` | **把 SQLite 放进持久卷**（注意是 4 个斜杠，表示绝对路径）；环境变量优先级高于 yaml，无需改 yaml |
+| `THUMBELINA_REPOSITORY__DATABASE_URL` | `sqlite:////app/data/thumbelina.db` | **把 SQLite 放进持久数据目录**（注意是 4 个斜杠，表示绝对路径）。存储配置节已由 `memory` 更名为 `repository`；**旧变量名 `THUMBELINA_MEMORY__DATABASE_URL` 已失效且被静默忽略**（数据会落容器内 `/app`，重建即丢）。SQLite 与 LangGraph checkpoint 上下文表**共用此文件**，持久化它即同时保住全部会话上下文 |
+| `THUMBELINA_TODO__DIRECTORY` | `/app/data/TODO` | 待办/随手记（本地 Markdown）默认目录相对工作目录（`/app/TODO`，不在卷里）；改到持久数据目录内，随数据一起备份 |
 | `HF_ENDPOINT` | 默认 `https://hf-mirror.com` | RAG 嵌入模型下载走国内镜像（huggingface.co 不可达）；海外环境可 `export HF_ENDPOINT=https://huggingface.co` 覆盖 |
-| `HF_HOME` | `/app/data/huggingface` | 模型缓存放进持久卷，重建容器无需重新下载 |
+| `HF_HOME` | `/app/data/huggingface` | 模型缓存放进持久数据目录，重建容器无需重新下载 |
 
 命名规则：`THUMBELINA_` 前缀 + 双下划线 `__` 表示嵌套，如 `THUMBELINA_LLM__PROVIDER` 对应 `llm.provider`。
+
+### 4.3 指定数据文件存放路径
+
+容器内数据挂载点固定为 `/app/data`；**宿主机一侧的存放位置通过 `THUMBELINA_DATA_DIR` 配置**，两种方式二选一：
+
+| 方式 | 配置 | 数据落在哪 |
+|---|---|---|
+| **命名卷（默认，零配置）** | 不设置 `THUMBELINA_DATA_DIR` | Docker 卷目录内（`docker volume ls` 可查到 `thumbelina-data`） |
+| **宿主机目录（bind mount）** | `THUMBELINA_DATA_DIR=<宿主机/路径>` | 直接落到你指定的目录，方便查看、备份、迁移 |
+
+使用宿主机目录时，推荐在项目根目录建 `.env` 文件长期生效（`.env` 会被 `docker compose` 自动读取）：
+
+```bash
+# .env
+THUMBELINA_DATA_DIR=/volume1/thumbelina/data   # NAS 存储盘（如绿联 /volume1）
+# THUMBELINA_DATA_DIR=./data                    # 或项目内的相对目录
+```
+
+也可命令行临时指定：
+
+```bash
+THUMBELINA_DATA_DIR=/data/thumbelina docker compose up -d --build
+```
+
+**落在该数据目录里的内容**：SQLite 数据库（`thumbelina.db`，含 LangGraph checkpoint）、ChromaDB 向量库（`chroma/`）、HF 嵌入模型缓存（`huggingface/`）、待办/随手记 Markdown（`TODO/`）。
+
+> 从命名卷切换到宿主机目录后，旧数据不会自动搬过去 —— 迁移方法见 [6.3](#63-备份与恢复)。
 
 ## 5. 首次部署
 
@@ -118,7 +151,7 @@ curl -s http://localhost:8000/health
 # http://localhost:8000
 ```
 
-首次构建约 5～15 分钟（取决于网络；需安装 langgraph / chromadb / llama-index 等较重的后端依赖，并完成一次前端 `vite build`）。
+首次构建约 5～15 分钟（取决于网络；需安装后端依赖——**含 `[rag]` 可选组**（llama-index 嵌入/LLM、pymupdf、sqlite-vec、beautifulsoup4 等；应用启动时无条件导入 rag 路由，缺了会直接崩）——并完成一次前端 `vite build`）。
 
 ## 6. 数据持久化与迁移
 
@@ -126,11 +159,13 @@ curl -s http://localhost:8000/health
 
 | 数据 | 容器内路径 | 持久化方式 |
 |---|---|---|
-| SQLite 数据库 | `/app/data/thumbelina.db` | 命名卷 `thumbelina-data` |
-| ChromaDB 向量库 | `/app/data/chroma` | 命名卷 `thumbelina-data` |
+| SQLite 数据库（**含 LangGraph checkpoint 上下文**） | `/app/data/thumbelina.db` | 命名卷 `thumbelina-data` 或 `THUMBELINA_DATA_DIR` 指定的宿主机目录 |
+| ChromaDB 向量库 | `/app/data/chroma` | 同上 |
+| HF 嵌入模型缓存 | `/app/data/huggingface` | 同上 |
+| 待办/随手记（Markdown） | `/app/data/TODO` | 同上 |
 | 应用配置 | `/app/thumbelina.yaml` | 宿主机文件只读挂载 |
 
-`docker compose down` 不会删除数据卷；只有 `docker compose down -v` 才会清空数据。
+`docker compose down` 不会删除数据；命名卷只有 `docker compose down -v` 才会清空，`THUMBELINA_DATA_DIR` 指向的宿主机目录则不受 `-v` 影响。
 
 ### 6.2 迁移本地已有数据库
 
@@ -158,6 +193,18 @@ docker run --rm \
   -v thumbelina_thumbelina-data:/data \
   -v "$PWD":/backup \
   alpine tar xzf /backup/thumbelina-data-2026-08-06.tar.gz -C /data
+```
+
+如果数据放在 `THUMBELINA_DATA_DIR` 指定的宿主机目录（bind mount），备份/恢复更直接，无需进卷：
+
+```bash
+# 备份（直接打包宿主机目录）
+tar czf thumbelina-data-$(date +%F).tar.gz -C /volume1/thumbelina/data .
+
+# 恢复
+mkdir -p /volume1/thumbelina/data
+tar xzf /backup/thumbelina-data-2026-08-16.tar.gz -C /volume1/thumbelina/data
+docker compose restart thumbelina
 ```
 
 ## 7. 代码修改后的快速更新
@@ -257,7 +304,7 @@ NAS 无法直连 registry 或不想搭私有仓库时，把镜像导出为 tar �
 **1) PC 端构建并导出**
 
 ```bash
-./deploy/offline/export-image.sh                 # 默认 amd64，tag=latest
+sh ./deploy/offline/export-image.sh                 # 默认 amd64，tag=latest
 # ARCH=arm64 ./deploy/offline/export-image.sh    # 绿联 DH 系列（ARM）
 # ARCH=arm64 TAG=v1.2 ./deploy/offline/export-image.sh
 ```
@@ -274,6 +321,8 @@ U 盘 / SMB 共享 / SCP 均可，无需联网。
 cd /path/to/thumbelina
 ./deploy/offline/load-and-run.sh thumbelina-arm64-latest.tar
 ```
+
+> NAS 上建议把数据放到存储盘而非 Docker 卷目录：启动前 `export THUMBELINA_DATA_DIR=/volume1/thumbelina/data`（或写入项目根 `.env`），再执行 `load-and-run.sh` / `docker compose up -d`，见 [4.3](#43-指定数据文件存放路径)。
 
 > 先确认 NAS 架构：绿联 DXP 系列是 x86（amd64），DH 系列是 ARM（arm64）。导出的架构必须与 NAS 一致（多平台镜像无法离线 `docker save`）。
 
@@ -329,7 +378,7 @@ docker compose build --build-arg NPM_REGISTRY=https://registry.npmjs.org
 
 ### Q4. 容器重启后历史对话没了？
 
-确认 `docker-compose.yml` 中 `THUMBELINA_MEMORY__DATABASE_URL=sqlite:////app/data/thumbelina.db` 仍然存在（4 个斜杠）。若曾被删掉，数据库会落在容器内 `/app`，重建即丢。
+确认 `docker-compose.yml` 中 `THUMBELINA_REPOSITORY__DATABASE_URL=sqlite:////app/data/thumbelina.db` 仍然存在（4 个斜杠）。若它被删掉、或被误用已失效的旧变量名 `THUMBELINA_MEMORY__DATABASE_URL`（会被静默忽略），数据库会落在容器内 `/app`，重建即丢。注意 SQLite 与 LangGraph checkpoint 共用此文件：它既存对话记录，也存会话上下文，一并丢失时表现为"历史对话和上下文全没了"。
 
 ### Q5. 容器一直 unhealthy？
 
@@ -374,7 +423,7 @@ docker compose logs thumbelina
        listen 443 ssl;
        server_name thumbelina.example.com;
        # ssl_certificate ...;
-
+   
        location / {
            proxy_pass http://127.0.0.1:8000;
            proxy_set_header Host $host;

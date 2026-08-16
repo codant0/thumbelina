@@ -115,7 +115,7 @@ docker compose up -d --build
 # Web 界面 + API：http://localhost:8000
 ```
 
-单个容器同时运行 FastAPI 后端与构建后的 React 前端（uvicorn 直接托管静态文件，无需 nginx）。前端使用相对路径（`/api/v1/*`、`/ws/chat`），因此通过 8000 端口即可完整访问。`thumbelina.yaml` 以只读方式挂载进容器；SQLite 数据库（`sqlite:////app/data/thumbelina.db`）和 ChromaDB 数据（`/app/data/chroma`）存放在命名卷 `thumbelina-data` 中，重建容器不会丢失。
+单个容器同时运行 FastAPI 后端与构建后的 React 前端（uvicorn 直接托管静态文件，无需 nginx）。前端使用相对路径（`/api/v1/*`、`/ws/chat`），因此通过 8000 端口即可完整访问。`thumbelina.yaml` 以只读方式挂载进容器；SQLite 数据库（`sqlite:////app/data/thumbelina.db`，同时保存 LangGraph checkpoint 会话上下文）、ChromaDB 数据（`/app/data/chroma`）、HF 模型缓存与待办/随手记 Markdown 都位于 `/app/data`，默认由命名卷 `thumbelina-data` 持久化，重建容器不丢失。如需把数据存到宿主机指定目录，设置 `THUMBELINA_DATA_DIR`（如 `THUMBELINA_DATA_DIR=./data docker compose up -d --build`）即可，详见 [docs/docker-deployment.md](docs/docker-deployment.md)。
 
 修改代码后，重建并重启：
 

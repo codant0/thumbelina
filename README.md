@@ -119,9 +119,13 @@ A single container runs both the FastAPI backend and the built React frontend
 (uvicorn serves the static files directly — no nginx). The frontend uses
 relative paths (`/api/v1/*`, `/ws/chat`), so everything is reachable through
 port 8000. `thumbelina.yaml` is mounted read-only into the container; the
-SQLite database (`sqlite:////app/data/thumbelina.db`) and ChromaDB data
-(`/app/data/chroma`) live in the named volume `thumbelina-data` and survive
-rebuilds.
+SQLite database (`sqlite:////app/data/thumbelina.db`, which also holds the
+LangGraph checkpoint context), ChromaDB data (`/app/data/chroma`), the HF model
+cache, and the TODO/notes markdown all live under `/app/data`, backed by the
+named volume `thumbelina-data` by default and surviving rebuilds. To store data
+in a host directory instead, set `THUMBELINA_DATA_DIR` (e.g.
+`THUMBELINA_DATA_DIR=./data docker compose up -d --build`) — see
+[docs/docker-deployment.md](docs/docker-deployment.md).
 
 After code changes, rebuild and restart:
 

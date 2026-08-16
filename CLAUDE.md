@@ -159,6 +159,6 @@ React 19 + TypeScript + Vite 8. Pages: Chat, Tasks, Memory, Dream, Settings, Plu
 
 ## Configuration
 
-Example config in `thumbelina.yaml.example`. Copy to `thumbelina.yaml` and edit with your settings. LLM provider defaults to `openai/gpt-4o`. Memory defaults to `sqlite:///thumbelina.db`. API key resolved from `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` env vars.
+Example config in `thumbelina.yaml.example`. Copy to `thumbelina.yaml` and edit with your settings. LLM provider defaults to `openai/gpt-4o`. The repository database (`repository.database_url`) defaults to `sqlite:///thumbelina.db`. API key resolved from `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` env vars.
 
 Channel configuration: `channels.qq` (qq-botpy SDK) and `channels.wechat` (weixin-bot protocol) are disabled by default. Enable by setting `enabled: true` and providing required credentials. WeChat channel follows the [weixin-bot protocol specification](https://github.com/epiral/weixin-bot/blob/main/docs/protocol-spec.md).

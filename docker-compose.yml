@@ -9,15 +9,27 @@ services:
       - "8000:8000"
     volumes:
       - ./thumbelina.yaml:/app/thumbelina.yaml:ro
-      - thumbelina-data:/app/data
+      # 数据文件存放路径：
+      #   默认不设置 THUMBELINA_DATA_DIR → 命名卷 thumbelina-data（数据在 Docker 卷目录内，零配置）
+      #   指定 THUMBELINA_DATA_DIR=<宿主机路径> → bind mount，数据直接落到宿主机目录
+      #   例：THUMBELINA_DATA_DIR=./data docker compose up -d
+      #       THUMBELINA_DATA_DIR=/volume1/thumbelina/data docker compose up -d   # NAS 存储盘
+      # 也可写入项目根目录 .env 文件（THUMBELINA_DATA_DIR=/path）长期生效。
+      # 容器内挂载点固定为 /app/data（见下方环境变量），只有宿主机一侧位置可配置。
+      - ${THUMBELINA_DATA_DIR:-thumbelina-data}:/app/data
     environment:
       # LLM/auth 配置不再是启动必需项：不设置也能正常启动，
       # LLM 端点/模型可在启动后通过 Web UI Settings（配置数据库）管理。
       # 此变量仅作为可选的启动期覆盖。
       - THUMBELINA_LLM__API_KEY=${THUMBELINA_LLM__API_KEY:-}
-      # Put the SQLite database inside the persistent volume so data
-      # survives container rebuilds (env vars override thumbelina.yaml)
-      - THUMBELINA_MEMORY__DATABASE_URL=sqlite:////app/data/thumbelina.db
+      # 存储配置节已由 memory 更名为 repository（src/thumbelina/config/models.py）。
+      # SQLite 数据库与 LangGraph checkpoint 上下文表共用同一文件，都放进持久卷，
+      # 重建容器不丢数据（4 个斜杠 = 容器内绝对路径）。
+      # ⚠️ 旧变量名 THUMBELINA_MEMORY__DATABASE_URL 已失效，会被静默忽略，
+      #    数据库会落到容器内 /app（不在卷里），重建即丢 —— 请务必改成本行名称。
+      - THUMBELINA_REPOSITORY__DATABASE_URL=sqlite:////app/data/thumbelina.db
+      # 待办/随手记（本地 Markdown，默认目录相对工作目录）改到持久卷内，随数据一起备份
+      - THUMBELINA_TODO__DIRECTORY=/app/data/TODO
       # Embedding model download via hf-mirror (huggingface.co unreachable
       # from CN); override with host HF_ENDPOINT if needed
       - HF_ENDPOINT=${HF_ENDPOINT:-https://hf-mirror.com}

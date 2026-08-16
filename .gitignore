@@ -58,6 +58,9 @@ logs/
 
 # docker image
 thumbelina-*.tar
+
+# NAS 部署用的本地 compose 配置（数据路径等因人而异，不入库）
+/docker-compose.nas.yml
 node_modules/.vite/vitest/*/results.json
 .qoder/scheduled_tasks.json
 .qoder/scheduled_tasks.lock
