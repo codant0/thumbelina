@@ -2,13 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from typing import Any
-from weakref import WeakValueDictionary
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
@@ -16,10 +12,11 @@ from pydantic import ValidationError
 from thumbelina.agent.graph import ThumbelinaAgent
 from thumbelina.api.routes.chat import (
     _apply_conversation_endpoint,
-    _apply_conversation_role,
-    resolve_context_window_tokens,
+    apply_conversation_runtime,
+    resolve_run_window,
 )
 from thumbelina.api.schemas import WebSocketMessage
+from thumbelina.concurrency import per_conversation_lock
 
 logger = logging.getLogger(__name__)
 
@@ -30,39 +27,6 @@ MAX_MESSAGE_SIZE = 1024 * 1024
 
 # Connected chat WebSocket clients (used for cross-channel message broadcast)
 _chat_ws_clients: set[WebSocket] = set()
-
-# 按会话加锁，串行化跨连接的轮次。多个 WebSocket 连接（以及 HTTP
-# chat 路由）可能同时指向同一会话；同一线程的 LangGraph 检查点更新
-# 绝不能交错，因此每轮都持有该会话的锁。条目是弱引用：锁只在至少
-# 有一轮持有它时存活，因此会话在连接关闭后绝不会泄漏锁。
-_conversation_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
-_conversation_locks_guard = asyncio.Lock()
-
-
-async def _conversation_lock_for(cid: str) -> asyncio.Lock:
-    """返回 *cid* 的共享锁，首次使用时创建。"""
-    async with _conversation_locks_guard:
-        lock = _conversation_locks.get(cid)
-        if lock is None:
-            lock = asyncio.Lock()
-            _conversation_locks[cid] = lock
-        return lock
-
-
-@asynccontextmanager
-async def _per_conversation_lock(cid: str | None) -> AsyncIterator[None]:
-    """跨连接串行化单个会话的轮次。
-
-    ``cid=None``（无会话、临时 thread id —— 没有可冲突的对象）时
-    立即 yield。锁在退出时释放；一旦没有轮次持有它，
-    注册表条目即因弱引用而消亡。
-    """
-    if cid is None:
-        yield
-        return
-    lock = await _conversation_lock_for(cid)
-    async with lock:
-        yield
 
 
 async def broadcast_chat_message(message: dict[str, Any]) -> None:
@@ -161,23 +125,16 @@ async def websocket_chat(websocket: WebSocket) -> None:
             # 按会话跨连接串行化轮次：多个 WebSocket 连接可能指向
             # 同一会话，同一线程的检查点更新绝不能交错。
             # cid=None（无 repository manager）直接放行。
-            async with _per_conversation_lock(cid):
+            async with per_conversation_lock(cid):
                 if cid:
                     agent.current_conversation_id = cid
-                    # Apply per-conversation model selection when configured
-                    await _apply_conversation_endpoint(websocket, agent, cid)
-                    # Apply per-conversation role override when configured
-                    await _apply_conversation_role(agent, cid)
+                    # 应用会话的端点与角色（与 HTTP / 通道共用同一套逻辑）
+                    await apply_conversation_runtime(websocket, agent, cid)
 
                 # 解析会话的上下文窗口（会话端点 → 全局活跃端点 →
                 # llm.context_window），供压缩阶段使用。会话没有端点或
                 # 未配置窗口时回退到默认窗口。
-                window_tokens = await resolve_context_window_tokens(
-                    agent.repository_manager,
-                    getattr(websocket.app.state, "endpoint_manager", None),
-                    cid,
-                    websocket.app.state.config.llm.context_window_tokens,
-                )
+                window_tokens = await resolve_run_window(websocket, agent, cid)
 
                 # Check if this is the WeChat conversation using the cached ID
                 wechat_cid = getattr(websocket.app.state, "wechat_conversation_id", None)
@@ -217,14 +174,16 @@ async def websocket_chat(websocket: WebSocket) -> None:
                                     await websocket.send_json(
                                         {"chunk": text, "conversation_id": cid}
                                     )
-                        except Exception:
-                            # Fallback to non-streaming if streaming fails
-                            full_response = await agent.run(
-                                parsed.message, context_window_tokens=window_tokens
-                            )
+                        except Exception as exc:
+                            # 流式失败时不再用同一线程重跑：用户消息已在
+                            # agent.stream() 开头持久化并写入检查点，重跑会
+                            # 重复写入消息与状态。直接向客户端报告错误，
+                            # 已保留的消息让用户可重发。
+                            logger.warning("Streaming failed for conversation %s: %s", cid, exc)
                             await websocket.send_json(
-                                {"response": full_response, "conversation_id": cid}
+                                {"error": f"Streaming failed: {exc}", "conversation_id": cid}
                             )
+                            continue
                     else:
                         full_response = await agent.run(
                             parsed.message, context_window_tokens=window_tokens

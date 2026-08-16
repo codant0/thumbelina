@@ -427,9 +427,28 @@ class ThumbelinaAgent:
         """
         self.llm_provider = new_provider
         self._llm = new_provider.chat_model
+        self._redirect_compressor(new_provider)
+
+    def apply_conversation_provider(self, provider: LLMProvider | None) -> None:
+        """把会话绑定的 provider 应用到 agent 与摘要压缩器。
+
+        ``provider=None`` 时回退到共享默认 provider（``llm_provider``），
+        使会话不再绑定任何端点。与 ``llm`` 属性只切底层 chat model
+        不同，这里同步重定向压缩器的 summarizer —— 否则摘要由默认模型
+        而非会话端点模型生成（#7）。
+        """
+        if provider is None:
+            self._llm = None
+            self._redirect_compressor(self.llm_provider)
+            return
+        self._llm = provider.chat_model
+        self._redirect_compressor(provider)
+
+    def _redirect_compressor(self, provider: LLMProvider | None) -> None:
+        """重定向摘要类压缩器的 summarizer provider（若有）。"""
         compressor = getattr(self, "_compressor", None)
         if compressor is not None and hasattr(compressor, "llm_provider"):
-            compressor.llm_provider = new_provider
+            compressor.llm_provider = provider
 
     @property
     def llm(self) -> BaseChatModel:

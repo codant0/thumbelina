@@ -159,28 +159,28 @@ def test_websocket_passes_context_window_to_run_when_not_streaming(client):
 @pytest.mark.asyncio
 async def test_conversation_lock_is_shared_and_does_not_leak():
     """一个会话对应一把锁；条目在被解除引用后消亡。"""
-    from thumbelina.api import websocket as ws
+    from thumbelina.concurrency import _conversation_locks, conversation_lock_for
 
-    lock_a = await ws._conversation_lock_for("cid-a")
-    lock_a2 = await ws._conversation_lock_for("cid-a")
-    lock_b = await ws._conversation_lock_for("cid-b")
+    lock_a = await conversation_lock_for("cid-a")
+    lock_a2 = await conversation_lock_for("cid-a")
+    lock_b = await conversation_lock_for("cid-b")
     assert lock_a is lock_a2
     assert lock_a is not lock_b
 
     del lock_a, lock_a2, lock_b
     # 不再有任何轮次持有锁，因此弱引用注册表丢弃了这些条目。
-    assert "cid-a" not in ws._conversation_locks
-    assert "cid-b" not in ws._conversation_locks
+    assert "cid-a" not in _conversation_locks
+    assert "cid-b" not in _conversation_locks
 
 
 @pytest.mark.asyncio
 async def test_per_conversation_lock_none_cid_passes_through():
     """cid=None（无会话）时绝不能分配任何锁。"""
-    from thumbelina.api import websocket as ws
+    from thumbelina.concurrency import _conversation_locks, per_conversation_lock
 
-    async with ws._per_conversation_lock(None):
+    async with per_conversation_lock(None):
         pass
-    assert len(ws._conversation_locks) == 0
+    assert len(_conversation_locks) == 0
 
 
 @pytest.mark.asyncio

@@ -118,7 +118,7 @@ async def test_apply_endpoint_default_provider_gets_thinking():
         base_url="https://api.deepseek.com/v1",
         reasoning_effort="high",
     )
-    assert agent.llm is provider.chat_model
+    agent.apply_conversation_provider.assert_called_once_with(provider)
 
 
 @pytest.mark.asyncio
@@ -145,7 +145,7 @@ async def test_apply_endpoint_default_provider_no_thinking():
         await _apply_conversation_endpoint(request, agent, "c1")
 
     mock_create.assert_not_called()
-    assert agent.llm is None
+    agent.apply_conversation_provider.assert_called_once_with(None)
 
 
 @pytest.mark.asyncio

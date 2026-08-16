@@ -26,6 +26,7 @@ from langchain_core.messages import (
 )
 
 from thumbelina.agent.compression.base import (
+    leading_system_unit_count,
     message_text,
     strip_thinking_blocks,
     truncate_text_to_tokens,
@@ -89,6 +90,64 @@ def resolve_input_cap(window_tokens: int, default: int = DEFAULT_MAX_INPUT_TOKEN
     为输出预留空间，避免小窗口模型上的摘要调用直接溢出。
     """
     return min(default, max(1, int(window_tokens * INPUT_CAP_WINDOW_RATIO)))
+
+
+def is_summary_message(message: BaseMessage) -> bool:
+    """该消息是否为压缩策略产出的摘要 ``SystemMessage``。
+
+    供策略层区分"受保护的会话头部"（角色提示词 + 首轮用户画像）与
+    "浓缩历史的摘要"：摘要只标记一次，之后必须能重新进入摘要区域，
+    而不是像会话头部那样永久稳定。
+    """
+    return isinstance(message, SystemMessage) and message_text(message).startswith(
+        SUMMARY_MESSAGE_PREFIX
+    )
+
+
+def split_turns(units: list[list[BaseMessage]]) -> list[list[list[BaseMessage]]]:
+    """把原子单元切分为会话轮次。
+
+    一轮从包含 ``HumanMessage`` 的单元开始，延伸到下一个这样的单元。
+    紧贴在 human 单元之前的 ``SystemMessage`` 单元序列（该轮的
+    RAG/skill 注入）属于这一轮。第一个 human 单元之前的单元
+    （此处不存在 —— 会话头部已被调用方剥离）构成前导"轮次"。
+    """
+    human_positions = [
+        index for index, unit in enumerate(units) if any(isinstance(m, HumanMessage) for m in unit)
+    ]
+    if not human_positions:
+        return [units]
+    starts: list[int] = []
+    for position in human_positions:
+        start = position
+        previous = starts[-1] if starts else 0
+        while start > previous and all(isinstance(m, SystemMessage) for m in units[start - 1]):
+            start -= 1
+        starts.append(start)
+    turns: list[list[list[BaseMessage]]] = []
+    for index, start in enumerate(starts):
+        end = starts[index + 1] if index + 1 < len(starts) else len(units)
+        turns.append(units[start:end])
+    return turns
+
+
+def flatten_turns(turns: list[list[list[BaseMessage]]]) -> list[BaseMessage]:
+    """把轮次（原子单元的列表）展平为单条消息序列。"""
+    return [message for turn in turns for unit in turn for message in unit]
+
+
+def leading_protected_head_count(units: list[list[BaseMessage]]) -> int:
+    """受保护会话头部的前导单元数（排除摘要消息）。
+
+    ``leading_system_unit_count`` 会把压缩产出的摘要 ``SystemMessage``
+    一并计入头部：它紧跟会话头部之后，下一轮会被当作 head 保护起来，
+    导致头部每轮膨胀、摘要永远不会被重新摘要。这里把摘要消息从头部
+    剔除 —— 头部只保留真正稳定的会话头部（角色提示词 + 首轮用户画像）。
+    """
+    count = leading_system_unit_count(units)
+    while count > 0 and is_summary_message(units[count - 1][0]):
+        count -= 1
+    return count
 
 
 def build_summary_message(

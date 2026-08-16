@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from thumbelina.api.deps import get_repository_manager
 from thumbelina.api.schemas import ConversationDetailSchema, ConversationSchema, MessageSchema
+from thumbelina.concurrency import per_conversation_lock
 from thumbelina.prompts.roles import list_roles
 from thumbelina.repository.manager import RepositoryManager
 
@@ -309,14 +310,17 @@ async def clear_conversation_messages(
 
     Used by the frontend "clear context" action.
     """
-    cleared = await repository.clear_messages(conversation_id)
+    # 持同一把 per-conversation 锁：避免清空消息时与在途轮次交错，
+    # 也避免 in-flight 轮次的最终写入复活即将被清除的检查点。
+    async with per_conversation_lock(conversation_id):
+        cleared = await repository.clear_messages(conversation_id)
 
-    if not cleared:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+        if not cleared:
+            raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # LangGraph 检查点保存着与 LLM 上下文相同的历史；丢弃它，
-    # 让清空后的会话以全新的上下文工作区重新开始。
-    await _clear_checkpoint(request, conversation_id)
+        # LangGraph 检查点保存着与 LLM 上下文相同的历史；丢弃它，
+        # 让清空后的会话以全新的上下文工作区重新开始。
+        await _clear_checkpoint(request, conversation_id)
 
     return {"cleared": True}
 
@@ -328,13 +332,16 @@ async def delete_conversation(
     repository: RepositoryManager = Depends(get_repository_manager),
 ) -> dict[str, bool]:
     """Delete a conversation."""
-    deleted = await repository.delete_conversation(conversation_id)
+    # 持同一把 per-conversation 锁：避免与在途轮次交错，防止轮次的
+    # 最终写入复活即将被删除的检查点线程。
+    async with per_conversation_lock(conversation_id):
+        deleted = await repository.delete_conversation(conversation_id)
 
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # 移除会话的检查点线程，避免以相同 id 重新创建的会话
-    # 复活旧上下文。
-    await _clear_checkpoint(request, conversation_id)
+        # 移除会话的检查点线程，避免以相同 id 重新创建的会话
+        # 复活旧上下文。
+        await _clear_checkpoint(request, conversation_id)
 
     return {"deleted": True}

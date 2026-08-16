@@ -205,6 +205,22 @@ class TestFullSummary:
         result = await FullSummaryCompressor(_provider()).compress(messages, 1000)
         assert result == messages
 
+    @pytest.mark.asyncio
+    async def test_current_turn_system_injections_are_preserved(self):
+        """当前轮的 RAG/技能系统消息注入不得被子摘要掉。"""
+        rag = SystemMessage(content="retrieved chunk for the current question")
+        messages = [
+            SystemMessage(content="role"),
+            HumanMessage(content="t1q"),
+            AIMessage(content="t1a"),
+            rag,
+            HumanMessage(content="t2 now"),
+        ]
+        result = await FullSummaryCompressor(_provider()).compress(messages, 100_000)
+        assert any(m is rag for m in result)  # 注入随当前轮保留
+        assert any(m is messages[4] for m in result)  # 当前轮输入保留
+        assert not any(m is messages[1] for m in result)  # 旧轮被摘要
+
 
 class TestSummaryRecent:
     """策略 3：汇总旧轮次，原样保留最近 K 轮。"""
@@ -386,6 +402,21 @@ class TestSummaryStrategiesThroughAgent:
         assert agent._compressor.llm_provider is new_provider
         assert agent._compressor.llm_provider is not original
 
+    @pytest.mark.asyncio
+    async def test_apply_conversation_provider_repoints_compressor_summarizer(self):
+        """会话端点切换时，压缩器 summarizer 必须随端点 provider 一起重定向（#7）。"""
+        agent = _agent_with_summary_strategy()
+        assert isinstance(agent._compressor, SummaryRecentCompressor)
+        new_provider = MagicMock()
+        new_provider.chat_model = AsyncMock()
+        agent.apply_conversation_provider(new_provider)
+        assert agent._compressor.llm_provider is new_provider
+        assert agent.llm is new_provider.chat_model
+        # 重置回默认 provider 时压缩器也随之恢复，而不是停留在端点模型上。
+        agent.apply_conversation_provider(None)
+        assert agent._compressor.llm_provider is agent.llm_provider
+        assert agent.llm is agent.llm_provider.chat_model
+
 
 def _agent_with_summary_strategy():
     from langgraph.checkpoint.memory import MemorySaver
@@ -403,6 +434,89 @@ def _agent_with_summary_strategy():
         context_config=ContextConfig(compress=ContextCompressConfig(strategy="summary_recent")),
         context_window_tokens=1000,
     )
+
+
+class TestHeadBoundary:
+    """摘要 SystemMessage 不得计入受保护会话头部（#2 重算 head 边界）。"""
+
+    @pytest.mark.asyncio
+    async def test_previous_summary_not_counted_as_head(self):
+        from thumbelina.agent.compression.base import group_atomic_units
+        from thumbelina.agent.compression.summarizer_context import (
+            leading_protected_head_count,
+        )
+
+        messages = [
+            SystemMessage(content="role"),
+            SystemMessage(content="【对话历史摘要】\n旧历史要点"),
+            HumanMessage(content="t1q"),
+            AIMessage(content="t1a"),
+            HumanMessage(content="t2 now"),
+        ]
+        units = group_atomic_units(messages)
+        # 只保留会话头部 role，摘要不得进入受保护头部。
+        assert leading_protected_head_count(units) == 1
+
+    @pytest.mark.asyncio
+    async def test_summary_recent_resummarizes_previous_summary(self):
+        compressor = SummaryRecentCompressor(recent_turns=1, llm_provider=_provider())
+        messages = [
+            SystemMessage(content="role"),
+            SystemMessage(content="【对话历史摘要】\n旧历史要点"),
+            HumanMessage(content="t1q"),
+            AIMessage(content="t1a"),
+            HumanMessage(content="t2 now"),
+        ]
+        result = await compressor.compress(messages, 100_000)
+        assert result[0] is messages[0]  # 会话头部受保护
+        # 旧摘要被重新摘要（连同更旧的历史），不再原样留在头部。
+        assert not any("旧历史要点" in str(m.content) for m in result)
+        summaries = [m for m in result if isinstance(m, SystemMessage)]
+        assert summaries[1].content.startswith("【对话历史摘要】")
+
+    @pytest.mark.asyncio
+    async def test_head_stays_bounded_across_cycles(self):
+        from thumbelina.agent.compression.base import group_atomic_units
+        from thumbelina.agent.compression.summarizer_context import (
+            leading_protected_head_count,
+        )
+
+        compressor = SummaryRecentCompressor(recent_turns=2, llm_provider=_provider())
+        messages = [
+            SystemMessage(content="role"),
+            HumanMessage(content="t1q"),
+            AIMessage(content="t1a"),
+            HumanMessage(content="t2q"),
+            AIMessage(content="t2a"),
+            HumanMessage(content="t3q"),
+            AIMessage(content="t3a"),
+            HumanMessage(content="t4 now"),
+        ]
+        head_counts = []
+        for index in range(5):
+            result = await compressor.compress(messages, 100_000)
+            messages = result + [
+                HumanMessage(content=f"next{index + 5}q"),
+                AIMessage(content=f"next{index + 5}a"),
+            ]
+            head_counts.append(leading_protected_head_count(group_atomic_units(messages)))
+        assert len(set(head_counts)) == 1  # 头部尺寸恒定，不随压缩轮次膨胀
+
+    @pytest.mark.asyncio
+    async def test_full_summary_resummarizes_previous_summary(self):
+        compressor = FullSummaryCompressor(_provider())
+        messages = [
+            SystemMessage(content="role"),
+            SystemMessage(content="【对话历史摘要】\n旧历史要点"),
+            HumanMessage(content="x" * 4000),
+            AIMessage(content="y" * 4000),
+            HumanMessage(content="now"),
+        ]
+        result = await compressor.compress(messages, 1000)
+        assert result[0] is messages[0]  # 会话头部受保护
+        assert not any("旧历史要点" in str(m.content) for m in result)
+        summaries = [m for m in result if isinstance(m, SystemMessage)]
+        assert summaries[1].content.startswith("【对话历史摘要】")
 
 
 class TestWindowLinkedInputCap:
@@ -434,7 +548,12 @@ class TestWindowLinkedInputCap:
         chat = AsyncMock(return_value=SUMMARY)
         compressor = FullSummaryCompressor()
         compressor.llm_provider = _provider(chat)
-        messages = [HumanMessage(content="x" * 500), AIMessage(content="y" * 500)]
+        # 最后一个轮次（当前输入）始终受保护；更旧的轮次进入 middle。
+        messages = [
+            HumanMessage(content="x" * 500),
+            AIMessage(content="y" * 500),
+            HumanMessage(content="now"),
+        ]
         result = await compressor.compress(messages, window_tokens=100)
         assert result is not None
         sent = chat.call_args[0][0][1]["content"]

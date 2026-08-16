@@ -203,6 +203,68 @@ class TestLoadConfig:
         assert cfg.llm.model == "llama3"
 
 
+class TestMemoryMigration:
+    """Legacy 'memory' config must migrate to 'repository' instead of being dropped."""
+
+    def test_yaml_memory_block_migrates_and_rewrites_file(self, tmp_path):
+        from thumbelina.config.loader import load_config
+
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(
+            "llm:\n  provider: openai\nmemory:\n  database_url: sqlite:///custom.db\n",
+            encoding="utf-8",
+        )
+
+        cfg = load_config(str(config_file))
+        assert cfg.repository.database_url == "sqlite:///custom.db"
+        # 文件已原地写回，memory 键被改名为 repository
+        rewritten = config_file.read_text(encoding="utf-8")
+        assert "repository:" in rewritten
+        assert "memory:" not in rewritten
+
+    def test_yaml_memory_preserves_comments_and_other_keys(self, tmp_path):
+        from thumbelina.config.loader import load_config
+
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(
+            "# top comment\nmemory:\n  database_url: sqlite:///custom.db\n# trailing\n",
+            encoding="utf-8",
+        )
+
+        load_config(str(config_file))
+        rewritten = config_file.read_text(encoding="utf-8")
+        assert "# top comment" in rewritten
+        assert "# trailing" in rewritten
+        assert rewritten.startswith("# top comment")
+
+    def test_memory_env_var_maps_to_repository(self):
+        from thumbelina.config.loader import load_config
+
+        env = {"THUMBELINA_MEMORY__DATABASE_URL": "sqlite:///env.db"}
+        with (
+            patch.dict(os.environ, env, clear=False),
+            patch("thumbelina.config.loader._discover_config_file", _no_discovery),
+        ):
+            cfg = load_config()
+        assert cfg.repository.database_url == "sqlite:///env.db"
+
+    def test_both_keys_present_repository_wins(self, tmp_path):
+        from thumbelina.config.loader import load_config
+
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(
+            "repository:\n  database_url: sqlite:///new.db\nmemory:\n  database_url: sqlite:///old.db\n",
+            encoding="utf-8",
+        )
+
+        cfg = load_config(str(config_file))
+        assert cfg.repository.database_url == "sqlite:///new.db"
+        # 文件不应被改写（避免把 repository 顶掉）
+        rewritten = config_file.read_text(encoding="utf-8")
+        assert "repository:" in rewritten
+        assert "memory:" in rewritten
+
+
 class TestExampleConfigFile:
     """The shipped example config must not require llm credentials/auth at startup."""
 

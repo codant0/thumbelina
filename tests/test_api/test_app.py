@@ -202,3 +202,33 @@ class TestBootWithoutLLMAndAuth:
                 assert client.get("/health").status_code == 200
                 # Protected route rejects unauthenticated requests
                 assert client.get("/api/v1/config").status_code == 401
+
+
+def test_delete_all_data_requires_confirm(client):
+    """DELETE /data/all 不带 confirm=true 时必须拒绝。"""
+    response = client.delete("/api/v1/data/all")
+    assert response.status_code == 400
+    assert "confirm" in response.json()["detail"]
+
+
+def test_delete_all_data_clears_checkpoints(client):
+    """DELETE /data/all?confirm=true 应清除每个会话的检查点线程。"""
+    from unittest.mock import AsyncMock, MagicMock
+
+    saver = MagicMock()
+    saver.adelete_thread = AsyncMock()
+    client.app.state.checkpointer = saver
+
+    response = client.delete("/api/v1/data/all?confirm=true")
+    assert response.status_code == 200
+    assert response.json()["deleted"] == 1
+    saver.adelete_thread.assert_awaited_once_with("test-conv-id")
+
+
+def test_delete_all_data_without_checkpointer(client):
+    """缺少 saver（降级模式）时绝不能破坏批量删除。"""
+    client.app.state.checkpointer = None
+
+    response = client.delete("/api/v1/data/all?confirm=true")
+    assert response.status_code == 200
+    assert response.json()["deleted"] == 1

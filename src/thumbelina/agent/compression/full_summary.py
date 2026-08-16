@@ -2,13 +2,14 @@
 
 行为依据设计文档 四.5.3：受保护边界之间的全部内容交给
 :class:`~thumbelina.agent.compression.summarizer_context.ContextSummarizer`，
-并替换为单条摘要 ``SystemMessage``。边界与
-:class:`~thumbelina.agent.compression.sliding_window.SlidingWindowCompressor`
-一致：
+并替换为单条摘要 ``SystemMessage``。边界：
 
 - 前导的 ``SystemMessage`` 单元序列（会话头部：角色提示词 +
   首轮用户画像）原样保留；
-- 最后一个原子单元（当前轮的输入）原样保留。
+- 最后一个轮次（当前轮的输入及其 RAG/技能系统消息注入）
+  原样保留 —— 与
+  :func:`~thumbelina.agent.compression.summarizer_context.split_turns`
+  的划分一致。
 
 当摘要失败（LLM 错误、结果为空、或没有给摘要留下预算）时，
 该策略降级为纯删除，压缩永远不会阻塞会话。
@@ -27,13 +28,15 @@ from thumbelina.agent.compression.base import (
     estimate_messages_tokens,
     flatten_units,
     group_atomic_units,
-    leading_system_unit_count,
 )
 from thumbelina.agent.compression.sliding_window import SlidingWindowCompressor
 from thumbelina.agent.compression.summarizer_context import (
     ContextSummarizer,
     build_summary_message,
+    flatten_turns,
+    leading_protected_head_count,
     resolve_input_cap,
+    split_turns,
 )
 from thumbelina.llm.base import LLMProvider
 
@@ -60,18 +63,29 @@ class FullSummaryCompressor(ContextCompressor):
     async def compress(
         self, messages: Sequence[BaseMessage], window_tokens: int
     ) -> list[BaseMessage]:
-        """把 *messages* 中可丢弃的中间部分汇总为一条消息。"""
+        """把 *messages* 中可丢弃的历史汇总为一条消息。
+
+        保护会话头部与最后一个轮次（当前轮的输入及其 RAG/技能系统消息
+        注入）原样保留；两者之间的历史进入摘要区域。
+        """
         target = max(1, int(window_tokens * LOW_WATERMARK))
         units = group_atomic_units(messages)
-        head_count = leading_system_unit_count(units)
+        head_count = leading_protected_head_count(units)
 
-        # 最后一个单元承载当前轮的输入，必须保留。
-        # 若头部与尾部之间没有内容，则无可压缩。
-        if len(units) <= head_count + 1:
-            return list(messages)
         head = flatten_units(units[:head_count])
-        tail = flatten_units([units[-1]])
-        middle = flatten_units(units[head_count:-1])
+        work = units[head_count:]
+        if not work:
+            return list(messages)
+
+        # 按轮次划分并保护最后一个轮次：当前轮的输入连同其 RAG/技能
+        # 系统消息注入都位于该轮内，绝不能被子摘要掉 —— 否则 agent
+        # 回答当前问题时拿不到刚检索到的内容。
+        turns = split_turns(work)
+        tail = flatten_turns([turns[-1]])
+        middle = flatten_turns(turns[:-1])
+        if not middle:
+            # 只有当前轮：没有可压缩的历史。
+            return list(messages)
 
         # 单次摘要调用的输入上限与模型窗口联动（50%，封顶 12K），
         # 小窗口模型也能安全完成摘要。

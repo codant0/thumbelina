@@ -23,6 +23,7 @@ from thumbelina.agent.graph import ThumbelinaAgent
 from thumbelina.channels.base import Channel
 from thumbelina.channels.config import WeChatChannelConfig
 from thumbelina.channels.wechat_qrcode import ILinkSessionExpiredError
+from thumbelina.concurrency import per_conversation_lock
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +52,11 @@ class WeChatChannel(Channel):
         agent: ThumbelinaAgent,
         on_message_callback: Callable[[str, str, str, str], Coroutine[Any, Any, None]]
         | None = None,
+        runtime: Any | None = None,
     ) -> None:
         self._config = config
         self._agent = agent
+        self._runtime = runtime
         self._ilink: Any = None  # ILinkClient, imported lazily
         self._poll_task: asyncio.Task[None] | None = None
         self._sync_buffer: str = ""
@@ -304,12 +307,34 @@ class WeChatChannel(Channel):
             return f"[{msg_type} message received -- currently only text is supported]"
 
         try:
+            cid = self._agent.current_conversation_id or None
             logger.debug(
                 "Calling agent.run() for user %s (conv=%s)",
                 user_id,
-                self._agent.current_conversation_id,
+                cid,
             )
-            response = await self._agent.run(text)
+            # 与 WebSocket/HTTP 入口共享 per-conversation 锁：同一会话的
+            # 并发轮次会交错读改写同一检查点线程，必须串行化。
+            async with per_conversation_lock(cid):
+                # 应用会话的端点/角色并解析上下文窗口，与 HTTP/WebSocket
+                # 共用同一套逻辑（惰性导入避免 channels → api 循环依赖）。
+                window_tokens = None
+                if self._runtime is not None and cid:
+                    try:
+                        from thumbelina.api.routes.chat import (
+                            apply_conversation_runtime,
+                            resolve_run_window,
+                        )
+
+                        await apply_conversation_runtime(self._runtime, self._agent, cid)
+                        window_tokens = await resolve_run_window(self._runtime, self._agent, cid)
+                    except Exception:
+                        logger.warning("Failed to apply WeChat conversation runtime", exc_info=True)
+                        window_tokens = None
+                if window_tokens is not None:
+                    response = await self._agent.run(text, context_window_tokens=window_tokens)
+                else:
+                    response = await self._agent.run(text)
             logger.debug("Agent returned %d chars for user %s", len(response), user_id)
 
             # Notify connected WebSocket clients (only for WeChat messages, not frontend)

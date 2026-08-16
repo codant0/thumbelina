@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from thumbelina.agent.graph import ThumbelinaAgent
 from thumbelina.api.deps import get_agent, get_repository_manager
 from thumbelina.api.schemas import ChatRequest, ChatResponse
+from thumbelina.concurrency import per_conversation_lock
 from thumbelina.llm.endpoint_manager import EndpointManager
 from thumbelina.llm.factory import create_provider
 from thumbelina.prompts.roles import get_role_prompt
@@ -103,22 +104,19 @@ async def chat(
     isolated_agent = agent.clone()
     isolated_agent.current_conversation_id = conversation_id
 
-    # Apply per-conversation model selection when configured
-    await _apply_conversation_endpoint(http_request, isolated_agent, conversation_id)
-
-    # Apply per-conversation role override when configured
-    await _apply_conversation_role(isolated_agent, conversation_id)
+    # 应用会话的端点与角色（HTTP / WebSocket / 通道共用）
+    await apply_conversation_runtime(http_request, isolated_agent, conversation_id)
 
     # 解析会话的上下文窗口（会话端点 → 全局活跃端点 →
     # llm.context_window），供压缩阶段使用。
-    window_tokens = await resolve_context_window_tokens(
-        repository,
-        getattr(http_request.app.state, "endpoint_manager", None),
-        conversation_id,
-        http_request.app.state.config.llm.context_window_tokens,
-    )
+    window_tokens = await resolve_run_window(http_request, isolated_agent, conversation_id)
 
-    response_text = await isolated_agent.run(request.message, context_window_tokens=window_tokens)
+    # 与 WebSocket/通道入口共享 per-conversation 锁：同一会话的并发轮次
+    # 会交错读改写同一检查点线程，必须串行化。
+    async with per_conversation_lock(conversation_id):
+        response_text = await isolated_agent.run(
+            request.message, context_window_tokens=window_tokens
+        )
 
     return ChatResponse(response=response_text, conversation_id=conversation_id)
 
@@ -134,7 +132,7 @@ async def _apply_default_provider_thinking(
     """
     config = getattr(http_request.app.state, "config", None)
     if config is None:
-        agent.llm = None
+        agent.apply_conversation_provider(None)
         return
     kwargs: dict[str, Any] = {"model": config.llm.model}
     if config.llm.api_key:
@@ -144,9 +142,9 @@ async def _apply_default_provider_thinking(
     kwargs.update(_thinking_kwargs(config.llm.provider, True, effort))
     try:
         provider = create_provider(config.llm.provider, **kwargs)
-        agent.llm = provider.chat_model
+        agent.apply_conversation_provider(provider)
     except Exception:
-        agent.llm = None
+        agent.apply_conversation_provider(None)
 
 
 async def _apply_conversation_endpoint(
@@ -179,7 +177,7 @@ async def _apply_conversation_endpoint(
             if thinking_enabled:
                 await _apply_default_provider_thinking(http_request, agent, effort)
             else:
-                agent.llm = None
+                agent.apply_conversation_provider(None)
             return
         endpoint, active_model = active
         model = active_model
@@ -202,12 +200,12 @@ async def _apply_conversation_endpoint(
     kwargs.update(_thinking_kwargs(endpoint.provider, thinking_enabled, effort))
     try:
         provider = create_provider(endpoint.provider, **kwargs)
-        # Swap only the underlying chat model so the shared default
-        # ``llm_provider`` is preserved for conversations without an endpoint.
-        agent.llm = provider.chat_model
+        # Swap the conversation provider（chat model + 摘要压缩器），
+        # 共享默认 ``llm_provider`` 仍为无端点的会话保留。
+        agent.apply_conversation_provider(provider)
     except Exception:
         # Fall back to the default provider if the endpoint is unusable.
-        agent.llm = None
+        agent.apply_conversation_provider(None)
 
 
 async def _apply_conversation_role(agent: ThumbelinaAgent, conversation_id: str) -> None:
@@ -240,3 +238,27 @@ async def _apply_conversation_role(agent: ThumbelinaAgent, conversation_id: str)
         return
     agent.role = role
     agent.role_prompt = role_prompt
+
+
+async def apply_conversation_runtime(
+    context: Any, agent: ThumbelinaAgent, conversation_id: str
+) -> None:
+    """应用会话的端点与角色（HTTP / WebSocket / 通道共用）。
+
+    ``context`` 只需暴露 ``app.state``（``Request``、``WebSocket`` 或
+    指向 ``app.state`` 的轻量 shim 均可）。
+    """
+    await _apply_conversation_endpoint(context, agent, conversation_id)
+    await _apply_conversation_role(agent, conversation_id)
+
+
+async def resolve_run_window(
+    context: Any, agent: ThumbelinaAgent, conversation_id: str | None
+) -> int:
+    """解析会话的有效上下文窗口（HTTP / WebSocket / 通道共用）。"""
+    return await resolve_context_window_tokens(
+        agent.repository_manager,
+        getattr(context.app.state, "endpoint_manager", None),
+        conversation_id,
+        context.app.state.config.llm.context_window_tokens,
+    )

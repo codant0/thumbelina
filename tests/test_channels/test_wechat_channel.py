@@ -261,6 +261,39 @@ class TestWeChatChannelIncoming:
         assert result == "Agent response"
 
     @pytest.mark.asyncio
+    async def test_handle_message_passes_context_window_tokens(self, mock_agent):
+        """微信消息路径应像 HTTP/WebSocket 一样解析并传入上下文窗口（#8）。"""
+        from types import SimpleNamespace
+
+        endpoint_manager = MagicMock()
+        endpoint_manager.get_active_endpoint_model = AsyncMock(return_value=None)
+        state = SimpleNamespace(
+            endpoint_manager=endpoint_manager,
+            config=SimpleNamespace(llm=SimpleNamespace(context_window_tokens=64_000)),
+        )
+        runtime = SimpleNamespace(app=SimpleNamespace(state=state))
+
+        mock_agent.current_conversation_id = "conv-wechat-123"
+        mock_agent.repository_manager.get_conversation = AsyncMock(
+            return_value={"id": "conv-wechat-123", "endpoint_id": None}
+        )
+        ch = WeChatChannel(
+            config=WeChatChannelConfig(
+                enabled=True,
+                bot_token="test-token",
+                ilink_bot_id="bot@id",
+                ilink_user_id="user@id",
+                ilink_base_url="https://ilinkai.weixin.qq.com",
+            ),
+            agent=mock_agent,
+            runtime=runtime,
+        )
+
+        await ch.handle_incoming("wxid_user1", "Hello!")
+
+        mock_agent.run.assert_awaited_once_with("Hello!", context_window_tokens=64_000)
+
+    @pytest.mark.asyncio
     async def test_handle_multiple_messages_calls_agent_each_time(
         self, channel: WeChatChannel, mock_agent: MagicMock
     ) -> None:

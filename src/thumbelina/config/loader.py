@@ -99,6 +99,13 @@ def _env_overrides() -> dict[str, Any]:
         rest = key[len(prefix) :].lower()
         parts = rest.split("__")
 
+        # 兼容旧名：memory 已改名为 repository
+        if parts[0] == "memory":
+            logger.warning(
+                "Legacy env var %s detected — mapping THUMBELINA_MEMORY__* to repository", key
+            )
+            parts[0] = "repository"
+
         # Build nested dict
         current = overrides
         for part in parts[:-1]:
@@ -106,6 +113,48 @@ def _env_overrides() -> dict[str, Any]:
         current[parts[-1]] = value
 
     return overrides
+
+
+def _rewrite_yaml_top_level_key(path: str, old_key: str, new_key: str) -> None:
+    """原地重命名 YAML 顶层键，保留格式与注释。
+
+    只匹配列首（第 0 列）的键，因此同名的嵌套键不会被误改。
+    """
+    content = Path(path).read_text(encoding="utf-8")
+    pattern = re.compile(rf"^{re.escape(old_key)}(?=\s*:)", re.MULTILINE)
+    updated, count = pattern.subn(new_key, content, count=1)
+    if count:
+        Path(path).write_text(updated, encoding="utf-8")
+
+
+def _migrate_memory_config(config: dict[str, Any], config_path: str | None) -> dict[str, Any]:
+    """把旧版顶层 ``memory`` 配置迁移为 ``repository``。
+
+    ``memory`` 已改名为 ``repository``。此处把旧键映射到新键，使现有配置
+    继续生效，并把 YAML 文件写回，使迁移永久生效。
+    """
+    if "memory" not in config:
+        return config
+
+    if "repository" in config:
+        logger.warning(
+            "Config contains both 'memory' (legacy) and 'repository'; "
+            "ignoring the legacy 'memory' block"
+        )
+        return config
+
+    config["repository"] = config.pop("memory")
+    logger.warning("Migrated legacy 'memory' config block to 'repository'")
+    if config_path is not None:
+        try:
+            _rewrite_yaml_top_level_key(config_path, "memory", "repository")
+        except OSError as exc:
+            logger.warning(
+                "Migrated 'memory' in memory but failed to rewrite %s: %s",
+                config_path,
+                exc,
+            )
+    return config
 
 
 def _resolve_api_key(config: dict[str, Any]) -> dict[str, Any]:
@@ -173,6 +222,8 @@ def load_config(config_path: str | None = None) -> AppConfig:
     if config_path is not None:
         file_config = _load_yaml_file(config_path)
         file_config = _process_env_vars(file_config)
+        # 迁移旧名 memory 配置（yaml 文件）到 repository，并写回文件
+        file_config = _migrate_memory_config(file_config, config_path)
         config = _deep_merge(config, file_config)
 
     # Apply environment variable overrides

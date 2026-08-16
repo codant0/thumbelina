@@ -16,6 +16,7 @@ import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import AsyncExitStack, asynccontextmanager
+from types import SimpleNamespace
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -602,6 +603,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 config=config.channels.wechat,
                 agent=agent,
                 on_message_callback=_on_wechat_message,
+                # 惰性引用 app.state：让微信消息路径能像 HTTP/WebSocket
+                # 一样解析会话端点与上下文窗口（#8）。
+                runtime=SimpleNamespace(app=app),
             )
             await wechat_channel.start()
             app.state.wechat_channel = wechat_channel

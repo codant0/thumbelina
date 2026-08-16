@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from thumbelina.analysis.profiler import UserProfiler
 from thumbelina.api.deps import get_feedback_repo, get_repository_manager, get_user_profiler
+from thumbelina.api.routes.conversations import _clear_checkpoint
+from thumbelina.concurrency import per_conversation_lock
 from thumbelina.repository.feedback_repo import Feedback, FeedbackRepository
 from thumbelina.repository.manager import RepositoryManager
 
@@ -63,6 +65,7 @@ async def export_data(
 
 @router.delete("/data/all")
 async def delete_all_data(
+    request: Request,
     confirm: bool = False,
     repository: RepositoryManager = Depends(get_repository_manager),
 ) -> dict:
@@ -77,7 +80,13 @@ async def delete_all_data(
         )
     conversations = await repository.get_conversations()
     for conv in conversations:
-        await repository.delete_conversation(conv["id"])
+        cid = conv["id"]
+        # 与单条删除路由一致：同时清除 LangGraph 检查点线程，避免线程
+        # 无界增长，也避免以相同 id 重建的会话复活旧上下文。持同一把
+        # per-conversation 锁，防止在途轮次的最终写入复活线程。
+        async with per_conversation_lock(cid):
+            await repository.delete_conversation(cid)
+            await _clear_checkpoint(request, cid)
     return {"deleted": len(conversations)}
 
 
