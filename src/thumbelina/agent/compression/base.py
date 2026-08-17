@@ -104,6 +104,96 @@ def group_atomic_units(messages: Sequence[BaseMessage]) -> list[list[BaseMessage
     return units
 
 
+#: 悬空 tool_calls 修复时注入的占位 ``ToolMessage`` 内容。
+#: 被中断的轮次可能在检查点里留下没有任何工具响应的 assistant 工具调用；
+#: OpenAI 兼容端点会以 400 拒绝这种序列（``insufficient tool messages``）。
+INTERRUPTED_TOOL_PLACEHOLDER = "[工具调用被中断，未返回结果]"
+
+
+def _tool_call_ids(message: AIMessage) -> list[str]:
+    """收集一条 assistant 消息声明的全部 ``tool_call_id``（去重、保序）。
+
+    同时涵盖 ``tool_calls``、``invalid_tool_calls`` 与
+    ``additional_kwargs["tool_calls"]`` —— 某些 OpenAI 兼容端点流式返回的
+    工具调用可能只落在后者里，但发送时仍会被当作 ``tool_calls`` 带上，
+    因此修复配对时必须一并计入。
+    """
+    ids: list[str] = []
+
+    def _collect(calls: object) -> None:
+        if isinstance(calls, list):
+            for call in calls:
+                cid = call.get("id") if isinstance(call, dict) else None
+                if cid and cid not in ids:
+                    ids.append(cid)
+
+    _collect(getattr(message, "tool_calls", None))
+    _collect(getattr(message, "invalid_tool_calls", None))
+    additional = getattr(message, "additional_kwargs", None)
+    if isinstance(additional, dict):
+        _collect(additional.get("tool_calls"))
+    return ids
+
+
+def ensure_tool_pairing(messages: list[BaseMessage]) -> list[BaseMessage]:
+    """修复序列中的 ``tool_calls``/``ToolMessage`` 配对不变量。
+
+    OpenAI 兼容端点要求：携带 ``tool_calls`` 的 assistant 消息之后必须紧跟
+    能覆盖**每一个** ``tool_call_id`` 的 tool 消息；否则以 400 拒绝。
+    流式轮次若在 assistant 产出 ``tool_calls`` 之后、tools 节点执行之前被
+    中断，检查点里就会留下悬空状态，且之后每一轮都会原样重放
+    （用户重发也无法自愈）。本函数在每轮 LLM 调用前无条件执行：
+
+    - 为缺失响应的 ``tool_call_id`` 注入占位 ``ToolMessage`` —— 保留
+      assistant 的工具调用意图，同时满足端点配对要求；
+    - 丢弃孤儿 ``ToolMessage`` —— 前面没有声明对应 ``tool_call_id`` 的
+      assistant 消息，或与紧随其前的 ``tool_calls`` 不匹配。
+
+    无需修复时返回**原列表对象**（调用方用 ``is`` 判断零改动），以便
+    保留纯追加前缀（provider 前缀缓存）；有修复时返回新列表。保留的
+    消息沿用原对象（从而保留 id），使状态更新可以是最小的增删。
+    """
+    result: list[BaseMessage] = []
+    changed = False
+    index = 0
+    total = len(messages)
+    while index < total:
+        message = messages[index]
+        if isinstance(message, AIMessage):
+            call_ids = _tool_call_ids(message)
+            if call_ids:
+                result.append(message)
+                index += 1
+                answered: set[str] = set()
+                call_ids_set = set(call_ids)
+                # 收集紧随其后的 ToolMessage 响应；不匹配的属于孤儿，丢弃。
+                while index < total:
+                    candidate = messages[index]
+                    if not isinstance(candidate, ToolMessage):
+                        break
+                    if candidate.tool_call_id in call_ids_set:
+                        result.append(candidate)
+                        answered.add(candidate.tool_call_id)
+                    else:
+                        changed = True
+                    index += 1
+                # 为缺失的 tool_call_id 补占位响应。
+                for cid in call_ids:
+                    if cid not in answered:
+                        result.append(
+                            ToolMessage(content=INTERRUPTED_TOOL_PLACEHOLDER, tool_call_id=cid)
+                        )
+                        changed = True
+                continue
+        if isinstance(message, ToolMessage):  # 孤儿：无 owner assistant。
+            changed = True
+            index += 1
+            continue
+        result.append(message)
+        index += 1
+    return messages if not changed else result
+
+
 def strip_thinking_blocks(message: AIMessage) -> AIMessage:
     """返回移除了 thinking/reasoning 内容块的 *message*。
 

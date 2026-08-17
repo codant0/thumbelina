@@ -26,6 +26,7 @@ from thumbelina.agent.compression import (
     SlidingWindowCompressor,
     compression_stats,
     create_compressor,
+    ensure_tool_pairing,
     estimate_messages_tokens,
     strip_first_assistant_thinking,
 )
@@ -513,55 +514,79 @@ class ThumbelinaAgent:
         return self._context_window_tokens
 
     async def _compress_node(self, state: AgentState, config: RunnableConfig) -> dict[str, Any]:
-        """当用量接近窗口时压缩检查点历史。
+        """在每轮 LLM 调用前修复配对不变量，并在用量接近窗口时压缩历史。
 
-        每轮在 LLM 调用之前运行一次（entry → compress → agent）。
-        用量通过共享的 RAG token 估算器估算；低于
-        ``window × context.compress.threshold`` 时状态零改动放行。
-        触发后，配置的策略向 50% 低水位压缩；失败的策略（例如 T6
-        占位实现）降级为纯删除，压缩永远不会阻塞会话。压缩后的序列
-        写回状态，因此检查点存储器会把它固定下来供后续轮次使用。
+        每轮在 LLM 调用之前运行一次（entry → compress → agent）。做两件事：
+
+        1. **无条件**修复 ``tool_calls``/``ToolMessage`` 配对（见
+           :func:`ensure_tool_pairing`）：流式轮次若在 assistant 产出
+           ``tool_calls`` 后、tools 节点执行前被中断，检查点会留下悬空
+           ``tool_calls``，原样发给 OpenAI 兼容端点会被 400 拒绝，且之后
+           每轮重放、无法自愈。修复在每轮 LLM 调用前完成，因此无论是否
+           触发压缩，发往 provider 的序列都满足配对不变量。
+        2. 用量达到 ``window × context.compress.threshold`` 时，按配置策略
+           向 50% 低水位压缩；失败的策略降级为纯删除，压缩永远不会阻塞
+           会话。
+
+        修复与压缩后的序列写回状态，检查点存储器会把它固定下来供后续轮次
+        使用。两者都未改动状态（无需修复且低于阈值）时返回空更新，保留
+        纯追加前缀（provider 前缀缓存）。
         """
         messages = state["messages"]
         if not messages:
             return {}
-        window = self._resolve_context_window(config)
-        if window is None:
-            return {}
 
-        compress_config = self._context_config.compress
-        used = estimate_messages_tokens(messages)
-        if used < window * compress_config.threshold:
-            return {}
-
-        logger.info(
-            "Context usage %d tokens reached %.0f%% of window %d; compressing with %r",
-            used,
-            compress_config.threshold * 100,
-            window,
-            getattr(self._compressor, "name", self._compressor.__class__.__name__),
-        )
-        try:
-            compressed = await self._compressor.compress(messages, window)
-        except Exception:
+        # 1) 无条件修复配对不变量 —— 无需修复时返回原列表（``is`` 可判断）。
+        repaired = ensure_tool_pairing(messages)
+        if repaired is not messages:
             logger.warning(
-                "Compression strategy %r failed; falling back to sliding_window",
-                getattr(self._compressor, "name", self._compressor.__class__.__name__),
-                exc_info=True,
+                "Repaired broken tool_calls pairing in checkpoint "
+                "(interrupted turn left dangling tool_calls / orphaned tool messages)"
             )
-            try:
-                compressed = await SlidingWindowCompressor().compress(messages, window)
-            except Exception:
-                logger.warning(
-                    "Fallback compression failed; keeping state unchanged", exc_info=True
+
+        # 2) 低于阈值时压缩为 no-op —— 但仍可能因修复而需要写回。
+        window = self._resolve_context_window(config)
+        compressed = repaired
+        did_compress = False
+        if window is not None:
+            compress_config = self._context_config.compress
+            used = estimate_messages_tokens(repaired)
+            if used >= window * compress_config.threshold:
+                logger.info(
+                    "Context usage %d tokens reached %.0f%% of window %d; compressing with %r",
+                    used,
+                    compress_config.threshold * 100,
+                    window,
+                    getattr(self._compressor, "name", self._compressor.__class__.__name__),
                 )
-                return {}
+                did_compress = True
+                try:
+                    compressed = await self._compressor.compress(repaired, window)
+                except Exception:
+                    logger.warning(
+                        "Compression strategy %r failed; falling back to sliding_window",
+                        getattr(self._compressor, "name", self._compressor.__class__.__name__),
+                        exc_info=True,
+                    )
+                    try:
+                        compressed = await SlidingWindowCompressor().compress(repaired, window)
+                    except Exception:
+                        logger.warning(
+                            "Fallback compression failed; keeping state unchanged", exc_info=True
+                        )
+                        compressed = repaired
+                        did_compress = False
+
+        # 既未修复也未压缩：零改动放行，保留纯追加前缀。
+        if not did_compress and repaired is messages:
+            return {}
 
         # Anthropic 边界：被提升到头部的前导 assistant 轮次可能携带
-        # 无法再重放的 thinking 块（HTTP 400）。
-        compressed = strip_first_assistant_thinking(list(compressed))
+        # 无法再重放的 thinking 块（HTTP 400）。仅压缩会提升头部。
+        if did_compress:
+            compressed = strip_first_assistant_thinking(list(compressed))
         update = _messages_state_update(messages, compressed)
-        if update:
+        if update and did_compress:
             stats = compression_stats(messages, compressed)
             logger.info(
                 "Context compressed: %d -> %d estimated tokens (%d message(s) kept)",
