@@ -20,11 +20,13 @@ from thumbelina.agent.compression import (
     SlidingWindowCompressor,
     available_strategies,
     create_compressor,
+    ensure_tool_pairing,
     estimate_messages_tokens,
     group_atomic_units,
     register_compressor,
     strip_first_assistant_thinking,
 )
+from thumbelina.agent.compression.base import INTERRUPTED_TOOL_PLACEHOLDER
 from thumbelina.agent.graph import ThumbelinaAgent, _messages_state_update
 
 
@@ -172,6 +174,81 @@ class TestGroupDeletionUnits:
         foreign = ToolMessage(content="stale", tool_call_id="call_other")
         units = group_atomic_units([ai, foreign])
         assert [len(unit) for unit in units] == [1, 1]
+
+
+class TestEnsureToolPairing:
+    """配对不变量修复：悬空 tool_calls 补占位，孤儿 ToolMessage 剔除。"""
+
+    def test_well_formed_returns_same_object(self):
+        ai = _ai_with_tool_call("c1")
+        tool = ToolMessage(content="ok", tool_call_id="c1")
+        messages = [HumanMessage(content="hi"), ai, tool]
+        assert ensure_tool_pairing(messages) is messages  # 零改动，保留附加前缀
+
+    def test_dangling_tool_call_gets_placeholder_response(self):
+        ai = _ai_with_tool_call("c1")
+        human = HumanMessage(content="now")
+        # c1 之后没有紧跟任何 ToolMessage —— c1 悬空。
+        repaired = ensure_tool_pairing([human, ai])
+        assert len(repaired) == 3  # 原 2 条 + 1 条占位
+        assert repaired != [human, ai]
+        assert isinstance(repaired[-1], ToolMessage)
+        assert repaired[-1].tool_call_id == "c1"
+        assert repaired[-1].content == INTERRUPTED_TOOL_PLACEHOLDER
+        # 其他消息原样保留（沿用对象）。
+        assert repaired[0] is human
+        assert repaired[1] is ai
+
+    def test_partial_responses_filled_in_order(self):
+        ai = AIMessage(
+            content="",
+            tool_calls=[
+                {"id": "c1", "name": "echo", "args": {}},
+                {"id": "c2", "name": "echo", "args": {}},
+                {"id": "c3", "name": "echo", "args": {}},
+            ],
+        )
+        tool1 = ToolMessage(content="r1", tool_call_id="c1")
+        tool3 = ToolMessage(content="r3", tool_call_id="c3")
+        repaired = ensure_tool_pairing([ai, tool1, tool3])
+        tool_ids = [m.tool_call_id for m in repaired if isinstance(m, ToolMessage)]
+        assert tool_ids == ["c1", "c3", "c2"]  # c2 按声明顺序补在已响应之后
+        assert repaired[-1].content == INTERRUPTED_TOOL_PLACEHOLDER
+
+    def test_orphaned_tool_message_dropped(self):
+        tool = ToolMessage(content="stale", tool_call_id="c9")
+        human = HumanMessage(content="hi")
+        repaired = ensure_tool_pairing([tool, human])
+        assert repaired == [human]
+
+    def test_mismatched_tool_message_after_ai_dropped(self):
+        ai = _ai_with_tool_call("c1")
+        foreign = ToolMessage(content="foreign", tool_call_id="c_other")
+        repaired = ensure_tool_pairing([ai, foreign])
+        # foreign 不与 c1 匹配 → 丢弃；c1 本身缺响应 → 补占位。
+        assert [m.tool_call_id for m in repaired if isinstance(m, ToolMessage)] == ["c1"]
+
+    def test_additional_kwargs_tool_calls_counted(self):
+        ai = AIMessage(content="")
+        ai.additional_kwargs["tool_calls"] = [{"id": "c9", "name": "echo", "arguments": "{}"}]
+        repaired = ensure_tool_pairing([ai])
+        assert repaired != [ai]
+        assert repaired[-1].tool_call_id == "c9"
+        assert repaired[-1].content == INTERRUPTED_TOOL_PLACEHOLDER
+
+    def test_consecutive_tool_rounds_repaired_independently(self):
+        ai1 = _ai_with_tool_call("c1")
+        tool1 = ToolMessage(content="r1", tool_call_id="c1")
+        ai2 = _ai_with_tool_call("c2")  # 悬空
+        messages = [ai1, tool1, ai2]
+        repaired = ensure_tool_pairing(messages)
+        assert [m.tool_call_id for m in repaired if isinstance(m, ToolMessage)] == ["c1", "c2"]
+        assert repaired[-1].content == INTERRUPTED_TOOL_PLACEHOLDER
+
+    def test_idempotent_after_repair(self):
+        ai = _ai_with_tool_call("c1")
+        once = ensure_tool_pairing([ai])
+        assert ensure_tool_pairing(once) is once  # 补占位后再修复 → 零改动
 
 
 class TestSlidingWindow:
@@ -341,6 +418,44 @@ class TestCompressNode:
         state = {"messages": [dropped, kept_ai, kept_human]}
         update = await agent._compress_node(state, {"configurable": {}})
         assert update == {"messages": [RemoveMessage(id="h1")]}
+
+    @pytest.mark.asyncio
+    async def test_direct_node_repairs_dangling_tool_calls_below_threshold(self):
+        """低于压缩阈值时也要修复悬空 tool_calls（中断轮次遗留的畸形状态）。"""
+        agent, _ = _make_agent(default_window=1_000_000)  # 永不触发压缩
+        ai = AIMessage(
+            content="",
+            tool_calls=[
+                {"id": "c1", "name": "echo", "args": {}},
+                {"id": "c2", "name": "echo", "args": {}},
+            ],
+            id="ai1",
+        )
+        tool1 = ToolMessage(content="r1", tool_call_id="c1", id="t1")
+        current = HumanMessage(content="now", id="h1")
+        state = {"messages": [ai, tool1, current]}
+        update = await agent._compress_node(state, {"configurable": {}})
+        # 修复写回了状态更新（不再 no-op）。
+        assert update
+        # 应用更新后（RemoveMessages + 追加）序列应满足配对不变量。
+        from langgraph.graph.message import add_messages
+
+        applied = add_messages(state["messages"], update["messages"])
+        tool_ids = [m.tool_call_id for m in applied if isinstance(m, ToolMessage)]
+        assert tool_ids == ["c1", "c2"]
+        assert applied[-2].content == INTERRUPTED_TOOL_PLACEHOLDER
+
+    @pytest.mark.asyncio
+    async def test_direct_node_clean_state_below_threshold_is_noop(self):
+        """无畸形且低于阈值：零改动放行，保留纯追加前缀。"""
+        agent, _ = _make_agent(default_window=1_000_000)
+        messages = [
+            HumanMessage(content="a", id="h1"),
+            AIMessage(content="b", id="a1"),
+            HumanMessage(content="c", id="h2"),
+        ]
+        state = {"messages": messages}
+        assert await agent._compress_node(state, {"configurable": {}}) == {}
 
     @pytest.mark.asyncio
     async def test_direct_node_without_window_is_noop(self):
