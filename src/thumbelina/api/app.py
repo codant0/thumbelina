@@ -31,6 +31,7 @@ from thumbelina.api.routes import (
     chat,
     conversations,
     data,
+    memory,
     plugins,
     qq,
     rag,
@@ -410,20 +411,36 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         logger.debug("Scheduler not initialized", exc_info=True)
 
-    # Initialize user profiler
-    user_profiler = None
-    try:
-        from thumbelina.analysis.profiler import UserProfiler
-        from thumbelina.repository.user_profile_repo import UserProfileRepository
+    # Initialize Markdown分层记忆子系统(阶段三 §9.3 优雅降级)。
+    # 失败或 disabled 时 app.state.memory_service = None,路由 503,
+    # Agent 注入/抽取整体禁用,服务照常启动。
+    memory_service = None
+    if config.memory.enabled:
+        try:
+            from pathlib import Path
 
-        profile_repo = UserProfileRepository(db_url=config.repository.database_url)
-        user_profiler = UserProfiler(
-            llm_provider=llm_provider,
-            profile_repo=profile_repo,
-        )
-        app.state.user_profiler = user_profiler
-    except Exception:
-        logger.debug("User profiler not initialized", exc_info=True)
+            from thumbelina.memory.service import MemoryService
+
+            memory_directory = Path(config.memory.directory)
+            memory_service = MemoryService(
+                directory=memory_directory,
+                categories=config.memory.categories,
+                max_full_tokens=config.memory.max_full_tokens,
+                max_entries=config.memory.max_entries,
+                max_total_bytes=config.memory.max_total_bytes,
+            )
+            await memory_service.init()
+            app.state.memory_service = memory_service
+            logger.info(
+                "Memory module initialized at %s (categories=%s)",
+                memory_directory,
+                config.memory.categories,
+            )
+        except Exception:
+            logger.warning("Memory module not initialized", exc_info=True)
+            app.state.memory_service = None
+    else:
+        app.state.memory_service = None
 
     # Initialize conversation auto-namer (shares the active LLM provider)
     from thumbelina.analysis.namer import ConversationNamer
@@ -461,14 +478,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         subagent_manager=subagent_manager,
         scheduler=scheduler,
         composition_engine=composition_engine,
-        user_profiler=user_profiler,
         conversation_namer=conversation_namer,
         role=config.llm.role,
         checkpointer=checkpointer,
         context_config=config.context,
         context_window_tokens=config.llm.context_window_tokens,
+        memory_service=getattr(app.state, "memory_service", None),
+        memory_config=config.memory,
     )
     app.state.agent = agent
+    # 暴露 memory_extractor 引用给热切换路径(§9.3);agent 自身的
+    # memory_extractor 由 swap_provider 同步,此处仅作冗余入口。
+    app.state.memory_extractor = getattr(agent, "memory_extractor", None)
 
     # Inject RAG components into agent
     if rag_store_manager is not None:
@@ -528,7 +549,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         skill_engine=getattr(app.state, "skill_engine", None),
         composition_engine=getattr(app.state, "composition_engine", None),
         subagent_manager=getattr(app.state, "subagent_manager", None),
-        user_profiler=getattr(app.state, "user_profiler", None),
+        memory_extractor=getattr(app.state, "memory_extractor", None),
     )
     app.state.preset_manager = preset_manager
     try:
@@ -558,8 +579,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     app.state.composition_engine.llm_provider = restored_provider
                 if getattr(app.state, "subagent_manager", None) is not None:
                     app.state.subagent_manager.llm_provider = restored_provider
-                if getattr(app.state, "user_profiler", None) is not None:
-                    app.state.user_profiler.llm_provider = restored_provider
                 if getattr(app.state, "conversation_namer", None) is not None:
                     app.state.conversation_namer.llm_provider = restored_provider
                 config.llm.provider = default_endpoint.provider
@@ -660,8 +679,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         skill_repo.close()
     if composition_engine:
         composition_engine.composition_repo.close()
-    if user_profiler:
-        user_profiler.profile_repo.close()
     if config_repo:
         config_repo.close()
 
@@ -723,6 +740,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             window_seconds=config.rate_limit.window_seconds,
         )
         app.add_middleware(_RateLimitMiddleware, limiter=limiter)
+        # 同时暴露给路由层,供 search/read 等端点做路由级限流
+        # (与全局 middleware 同一实例,按客户端 IP 计数)。
+        app.state.rate_limiter = limiter
 
     # Add auth middleware when a secret key is configured.
     # An invalid secret (e.g. too short) degrades gracefully: the service
@@ -786,6 +806,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(qq.router, prefix="/api/v1")
     app.include_router(rag.router, prefix="/api/v1")
     app.include_router(todo.router, prefix="/api/v1")
+    app.include_router(memory.router, prefix="/api/v1")
     app.include_router(ws_router)
 
     return app

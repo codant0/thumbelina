@@ -64,7 +64,7 @@ class RuntimeConfigManager:
         skill_engine: SkillApplicationEngine | None = None,
         composition_engine: CompositionEngine | None = None,
         subagent_manager: SubagentManager | None = None,
-        user_profiler: Any = None,
+        memory_extractor: Any = None,
     ) -> None:
         """Create a new LLM provider and atomically swap all references.
 
@@ -96,8 +96,10 @@ class RuntimeConfigManager:
                 composition_engine.llm_provider = new_llm
             if subagent_manager is not None:
                 subagent_manager.llm_provider = new_llm
-            if user_profiler is not None:
-                user_profiler.llm_provider = new_llm
+            # 记忆抽取器 LLM 重定向(§9.3);agent.swap_provider 已自行
+            # 重定向 agent.memory_extractor,这里为独立持有的引用兜底。
+            if memory_extractor is not None and hasattr(memory_extractor, "update_llm"):
+                memory_extractor.update_llm(new_llm)
 
             # Update in-memory config
             self._config.llm.provider = new_provider

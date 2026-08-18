@@ -16,30 +16,6 @@ describe('SettingsPanel', () => {
     vi.restoreAllMocks()
     vi.spyOn(globalThis, 'fetch').mockImplementation((url: string | URL | Request) => {
       const urlString = typeof url === 'string' ? url : url.toString()
-      if (urlString.includes('/api/v1/user/profile')) {
-        return Promise.resolve(
-          new Response(
-            JSON.stringify({
-              profile: {
-                id: '1',
-                user_id: 'default',
-                communication_style: 'casual',
-                expertise_level: 'intermediate',
-              },
-              preferences: [
-                {
-                  id: 'p1',
-                  category: 'theme',
-                  key: 'color',
-                  value: 'dark',
-                  confidence_score: 0.9,
-                },
-              ],
-            }),
-            { status: 200 },
-          ),
-        )
-      }
       if (urlString.includes('/config/llm/endpoints')) {
         return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
       }
@@ -50,29 +26,6 @@ describe('SettingsPanel', () => {
   it('should render settings panel', () => {
     renderWithProvider()
     expect(screen.getByTestId('settings-panel')).toBeInTheDocument()
-  })
-
-  it('should render user profile card', () => {
-    renderWithProvider()
-    expect(screen.getByTestId('user-profile-card')).toBeInTheDocument()
-  })
-
-  it('should display user profile data after loading', async () => {
-    renderWithProvider()
-    await waitFor(() => {
-      expect(screen.getByText('casual')).toBeInTheDocument()
-      expect(screen.getByText('intermediate')).toBeInTheDocument()
-    })
-  })
-
-  it('should display preferences with confidence scores', async () => {
-    renderWithProvider()
-    await waitFor(() => {
-      expect(screen.getByTestId('preference-item')).toBeInTheDocument()
-      expect(screen.getByText('theme/color:')).toBeInTheDocument()
-      expect(screen.getByText('dark')).toBeInTheDocument()
-      expect(screen.getByText('(90%)')).toBeInTheDocument()
-    })
   })
 
   it('should render data management card', () => {

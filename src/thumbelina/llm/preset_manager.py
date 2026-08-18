@@ -58,7 +58,7 @@ class PresetManager:
         skill_engine: Any | None = None,
         composition_engine: Any | None = None,
         subagent_manager: Any | None = None,
-        user_profiler: Any | None = None,
+        memory_extractor: Any | None = None,
     ) -> None:
         self._repo = config_repo
         self._runtime_manager = runtime_manager
@@ -66,7 +66,7 @@ class PresetManager:
         self._skill_engine = skill_engine
         self._composition_engine = composition_engine
         self._subagent_manager = subagent_manager
-        self._user_profiler = user_profiler
+        self._memory_extractor = memory_extractor
 
     async def _load_index(self) -> list[str]:
         raw = await self._repo.get(_INDEX_KEY)
@@ -221,7 +221,7 @@ class PresetManager:
             skill_engine=self._skill_engine,
             composition_engine=self._composition_engine,
             subagent_manager=self._subagent_manager,
-            user_profiler=self._user_profiler,
+            memory_extractor=self._memory_extractor,
         )
 
         await self._clear_active_flag()

@@ -177,6 +177,80 @@ class ContextConfig(BaseModel):
     compress: ContextCompressConfig = Field(default_factory=ContextCompressConfig)
 
 
+class MemoryExtractConfig(BaseModel):
+    """后台 LLM 抽取/改写配置（见设计文档 §10 extract 段）。"""
+
+    enabled: bool = Field(default=True, description="启用后台 LLM 抽取/改写")
+    on_user_message: bool = Field(
+        default=True,
+        description="仅对用户消息触发抽取,关闭则对所有消息触发",
+    )
+    max_input_tokens: int = Field(
+        default=8000,
+        ge=256,
+        description="单次抽取输入 token 预算,超限时先截断全文再截断历史",
+    )
+
+
+class MemoryToolsConfig(BaseModel):
+    """记忆工具暴露配置(见设计文档 §10 tools 段)。"""
+
+    enabled: bool = Field(
+        default=True,
+        description="暴露 search_memory/read_memory/remember 工具给 Agent",
+    )
+
+
+class MemoryConfig(BaseModel):
+    """基于 Markdown 文件系统的分层记忆配置(见设计文档 §10)。
+
+    记忆以 Markdown 存于 ``directory`` 目录,索引为派生产物,
+    分层按需加载(L0 摘要/L1 概览/L2 全文)省 token。本期单用户,
+    ``user_id`` 固定 ``"default"``。
+    """
+
+    enabled: bool = Field(default=True, description="关闭后路由与注入整体禁用")
+    directory: str = Field(
+        default="MEMORY",
+        description="Markdown 记忆目录,相对路径基于工作目录",
+    )
+    categories: list[str] = Field(
+        default_factory=lambda: ["user", "project", "decision", "topic"],
+        description="分类白名单,索引按此顺序分组;白名单外分类被忽略",
+    )
+    inject_index: bool = Field(
+        default=True,
+        description="每轮注入索引摘要(L0 triage)",
+    )
+    inject_top_k: int = Field(
+        default=8,
+        ge=1,
+        description="索引超过 token 阈值时按相关性注入前 K 条",
+    )
+    index_token_cap: int = Field(
+        default=600,
+        ge=32,
+        description="索引摘要全量注入的 token 上限(estimate_tokens 口径)",
+    )
+    max_full_tokens: int = Field(
+        default=4000,
+        ge=128,
+        description="read_full 单条全文注入上限,超限截断",
+    )
+    max_entries: int = Field(
+        default=200,
+        ge=1,
+        description="记忆条目总量护栏",
+    )
+    max_total_bytes: int = Field(
+        default=5_000_000,
+        ge=1024,
+        description="记忆目录总字节护栏",
+    )
+    extract: MemoryExtractConfig = Field(default_factory=MemoryExtractConfig)
+    tools: MemoryToolsConfig = Field(default_factory=MemoryToolsConfig)
+
+
 class AppConfig(BaseModel):
     """Top-level application configuration."""
 
@@ -188,6 +262,7 @@ class AppConfig(BaseModel):
     todo: TodoConfig = Field(default_factory=TodoConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     context: ContextConfig = Field(default_factory=ContextConfig)
+    memory: MemoryConfig = Field(default_factory=MemoryConfig)
     cors_origins: list[str] = Field(
         default_factory=lambda: ["*"],
         description="Allowed CORS origins. Use ['*'] for development only.",

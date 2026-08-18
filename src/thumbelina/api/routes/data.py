@@ -2,15 +2,23 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from thumbelina.analysis.profiler import UserProfiler
-from thumbelina.api.deps import get_feedback_repo, get_repository_manager, get_user_profiler
+from thumbelina.api.deps import (
+    get_feedback_repo,
+    get_memory_service,
+    get_repository_manager,
+)
 from thumbelina.api.routes.conversations import _clear_checkpoint
 from thumbelina.concurrency import per_conversation_lock
+from thumbelina.memory.service import MemoryService
 from thumbelina.repository.feedback_repo import Feedback, FeedbackRepository
 from thumbelina.repository.manager import RepositoryManager
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["data"])
 
@@ -57,10 +65,22 @@ def _feedback_to_response(fb: Feedback) -> FeedbackResponse:
 @router.get("/data/export")
 async def export_data(
     repository: RepositoryManager = Depends(get_repository_manager),
+    memory_service: MemoryService | None = Depends(get_memory_service),
 ) -> dict:
-    """Export all user data as JSON."""
+    """Export all user data as JSON.
+
+    纳入 Markdown 分层记忆(§9.5):memory_service 可用时返回
+    ``{"entries": [...], "index": ...}``,否则空占位。
+    """
     conversations = await repository.get_all_conversations_with_messages()
-    return {"conversations": conversations}
+    if memory_service is not None:
+        try:
+            memory_data = await memory_service.export_all()
+        except Exception:
+            memory_data = {"entries": [], "index": ""}
+    else:
+        memory_data = {"entries": [], "index": ""}
+    return {"conversations": conversations, "memory": memory_data}
 
 
 @router.delete("/data/all")
@@ -68,10 +88,12 @@ async def delete_all_data(
     request: Request,
     confirm: bool = False,
     repository: RepositoryManager = Depends(get_repository_manager),
+    memory_service: MemoryService | None = Depends(get_memory_service),
 ) -> dict:
     """Delete all user data.
 
     Requires ``?confirm=true`` query parameter to prevent accidental deletion.
+    删完对话后顺带清空 Markdown 记忆(§9.5)。
     """
     if not confirm:
         raise HTTPException(
@@ -87,38 +109,17 @@ async def delete_all_data(
         async with per_conversation_lock(cid):
             await repository.delete_conversation(cid)
             await _clear_checkpoint(request, cid)
-    return {"deleted": len(conversations)}
-
-
-@router.get("/user/profile")
-async def get_user_profile(
-    user_id: str = "default",
-    profiler: UserProfiler | None = Depends(get_user_profiler),
-) -> dict:
-    """Get user profile and preferences."""
-    if profiler is None:
-        raise HTTPException(
-            status_code=503,
-            detail="User profiler is not configured",
-        )
-
-    profile = await profiler.profile_repo.get_profile(user_id)
-    if profile is None:
-        # Return a default empty profile rather than 404
-        return {
-            "profile": None,
-            "preferences": [],
-            "context": None,
-        }
-
-    preferences = await profiler.profile_repo.get_preferences(user_id)
-    context = await profiler.get_user_context(user_id)
-
-    return {
-        "profile": profile,
-        "preferences": preferences,
-        "context": context,
-    }
+    deleted_memory = 0
+    if memory_service is not None:
+        try:
+            # clear_all 重建空 index.md;返回前统计被删条目数便于回执。
+            before = await memory_service.list_entries()
+            deleted_memory = len(before)
+            await memory_service.clear_all()
+        except Exception:
+            # 记忆清理失败不阻断主删除流程,仅记日志
+            logger.warning("Memory clear_all during data wipe failed", exc_info=True)
+    return {"deleted": len(conversations), "memory_deleted": deleted_memory}
 
 
 # -- Feedback endpoints --

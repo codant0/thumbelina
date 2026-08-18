@@ -1,52 +1,18 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import { EndpointManager } from './EndpointManager'
 import { useTranslation } from '../../i18n'
 import { Toast } from './Toast'
-import { Globe, User, Database, Download, Trash2, Loader2 } from 'lucide-react'
-
-interface UserProfile {
-  id: string
-  user_id: string
-  communication_style: string
-  expertise_level: string
-}
-
-interface UserPreference {
-  id: string
-  category: string
-  key: string
-  value: string
-  confidence_score: number
-}
+import { Globe, Database, Download, Trash2, Loader2 } from 'lucide-react'
 
 export function SettingsPanel() {
   const { t, locale, setLocale } = useTranslation()
   const [message, setMessage] = useState('')
   const [isError, setIsError] = useState(false)
 
-  // User profile state
-  const [profile, setProfile] = useState<UserProfile | null>(null)
-  const [preferences, setPreferences] = useState<UserPreference[]>([])
-  const [profileLoading, setProfileLoading] = useState(true)
-
   // Data management state
   const [exporting, setExporting] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
-
-  // Fetch user profile
-  useEffect(() => {
-    fetch('/api/v1/user/profile')
-      .then(res => { if (res.ok) return res.json(); return null })
-      .then(data => {
-        if (data) {
-          setProfile(data.profile ?? null)
-          setPreferences(data.preferences ?? [])
-        }
-      })
-      .catch(() => {})
-      .finally(() => setProfileLoading(false))
-  }, [])
 
   const handleExport = useCallback(async () => {
     setExporting(true)
@@ -119,40 +85,6 @@ export function SettingsPanel() {
 
       {/* LLM Configuration */}
       <EndpointManager onMessage={(msg, err) => { setMessage(msg); setIsError(err) }} />
-
-      {/* User Profile */}
-      <div className="card" data-testid="user-profile-card">
-        <div className="card-title"><User size={14} />{t('settings.userProfile')}</div>
-        {profileLoading ? (
-          <p className="settings-empty-hint">{t('common.loading')}</p>
-        ) : profile ? (
-          <div className="settings-profile-list">
-            <div className="settings-profile-item">
-              <strong>{t('profile.communicationStyle')}:</strong>&nbsp;{profile.communication_style || t('profile.notSet')}
-            </div>
-            <div className="settings-profile-item">
-              <strong>{t('profile.expertiseLevel')}:</strong>&nbsp;{profile.expertise_level || t('profile.notSet')}
-            </div>
-            {preferences.length > 0 && (
-              <div className="settings-profile-item">
-                <div>
-                  <strong>{t('profile.preferences')}:</strong>
-                  <ul className="settings-preference-list">
-                    {preferences.map(p => (
-                      <li key={p.id} data-testid="preference-item" className="settings-preference-li">
-                        <span className="settings-preference-key">{p.category}/{p.key}:</span> {p.value}
-                        <span className="settings-preference-score"> ({Math.round(p.confidence_score * 100)}%)</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-            )}
-          </div>
-        ) : (
-          <p className="settings-empty-hint">{t('profile.noData')}</p>
-        )}
-      </div>
 
       {/* Data Management */}
       <div className="card" data-testid="data-management-card">

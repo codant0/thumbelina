@@ -1379,45 +1379,6 @@
   flex-wrap: wrap;
 }
 
-.settings-profile-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-  font-size: var(--fs-base);
-}
-
-.settings-profile-item {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--sp-2);
-  font-size: var(--fs-base);
-  color: var(--text-primary);
-}
-
-.settings-preference-list {
-  margin: var(--sp-1) 0 0 var(--sp-4);
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.settings-preference-li {
-  font-size: var(--fs-sm);
-  color: var(--text-primary);
-}
-
-.settings-preference-key {
-  color: var(--text-secondary);
-}
-
-.settings-preference-score {
-  margin-left: 6px;
-  font-size: var(--fs-xs);
-  color: var(--text-secondary);
-}
-
 .settings-empty-hint {
   font-size: var(--fs-sm);
   color: var(--text-secondary);
