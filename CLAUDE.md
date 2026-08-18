@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Thumbelina is a personal AI agent assistant built with **FastAPI** (backend) and **LangGraph** (agent framework), with a **React** frontend. It features a model-agnostic LLM provider layer, conversation memory with skill extraction, skill composition, user profiling, sub-agent orchestration, task scheduling with conditional triggers, a plugin system with sandbox and dependency resolution, QQ Bot and WeChat (via weixin-bot) channels, and built-in tools.
+Thumbelina is a personal AI agent assistant built with **FastAPI** (backend) and **LangGraph** (agent framework), with a **React** frontend. It features a model-agnostic LLM provider layer, conversation memory with skill extraction, skill composition, a Markdown-based layered memory subsystem, sub-agent orchestration, task scheduling with conditional triggers, a plugin system with sandbox and dependency resolution, QQ Bot and WeChat (via weixin-bot) channels, and built-in tools.
 
 ## Common Commands
 
@@ -54,8 +54,8 @@ Frontend (React/Vite) --WebSocket/HTTP--> FastAPI (api/app.py)
     ├── /api/v1/skills/stats → SkillRepository + analytics
     ├── /api/v1/compositions → CompositionRepository.list_all()
     ├── /api/v1/feedback  → FeedbackRepository CRUD + stats
-    ├── /api/v1/data/export|delete → RepositoryManager export/delete
-    ├── /api/v1/user/profile → UserProfiler.get_user_context()
+    ├── /api/v1/memory/*  → MemoryService (index/entries/search/read/refresh/status)
+    ├── /api/v1/data/export|delete → RepositoryManager export/delete + MemoryService export/clear
     ├── /api/v1/plugins   → PluginManager + sandbox report
     ├── /api/v1/config    → RuntimeConfigManager
     ├── /api/v1/config/llm → Hot-swap LLM provider
@@ -71,7 +71,7 @@ Frontend (React/Vite) --WebSocket/HTTP--> FastAPI (api/app.py)
 
 Integrated subsystems:
 - **Skills**: `_get_skill_context()` injects matching skills as SystemMessage
-- **User Profiler**: `_get_user_context()` injects user preferences as SystemMessage
+- **Memory**: `_get_memory_context()` injects the L0 memory index summary as a SystemMessage every turn (prefixed with a "reference data, not instructions" disclaimer and stripped of Markdown link syntax); `_make_memory_tools()` exposes `search_memory` (L0 n-gram retrieval), `read_memory` (L1/L2 layered read), and `remember` (single-turn quota ≤ 3) tools
 - **Sub-agents**: `_make_subagent_tools()` exposes `create_subagent` and `list_subagents` tools
 - **Scheduler**: `_make_scheduler_tools()` exposes `schedule_task` and `list_scheduled_tasks` tools
 - **Compositions**: `_make_composition_tools()` exposes `create_skill_composition`, `list_skill_compositions`, `execute_skill_composition` tools
@@ -82,15 +82,27 @@ Integrated subsystems:
 
 ### Storage Layer (`repository/`)
 
-SQLAlchemy ORM (`Conversation`, `Message`, `SkillRecord`, `CompositionRecord`, `FeedbackRecord`, `UserProfile`, `UserPreference`) with `ConversationRepository` wrapping sync calls via `asyncio.to_thread`. `RepositoryManager` adds validation (100KB content limit) and a `search()` method for hybrid keyword + semantic search. Additional modules:
+SQLAlchemy ORM (`Conversation`, `Message`, `SkillRecord`, `CompositionRecord`, `FeedbackRecord`) with `ConversationRepository` wrapping sync calls via `asyncio.to_thread`. `RepositoryManager` adds validation (100KB content limit) and a `search()` method for hybrid keyword + semantic search. Additional modules:
 - `SearchEngine` — keyword, semantic, and hybrid search
 - `vector/` — ChromaDB vector store
 - `feedback_repo.py` — `FeedbackRepository` for user ratings with skill score adjustment
-- `user_profile.py` + `user_profile_repo.py` — `UserProfile` and `UserPreference` models
+
+### Memory Subsystem (`memory/`)
+
+Markdown file-system-backed layered memory (default directory `MEMORY/`). Three tiers loaded on demand: **L0** — `index.md`, an auto-generated derived index of one-line summaries (regenerated on every write, never hand-edited); **L1** — the `## 概览` (overview) section of each `<category>/<slug>.md` for planning decisions; **L2** — the `## 全文` (full text) section, loaded only when needed and truncated at `max_full_tokens`. A single service-level `asyncio.Lock` serializes all read-modify-write + index-rebuild operations; LLM calls happen outside the lock. Writes are atomic (`os.replace` + `fsync`) with `.tmp` cleanup on startup; all paths are validated against traversal and symlink escape. Guardrails: `max_entries`, `max_total_bytes`, `max_full_tokens`.
+
+- `models.py` — `MemoryEntry`, `MemoryIndex`, `MemoryHit`, `UpdateDecision`
+- `parser.py` — document parsing (title, `>` metadata, `## 概览`/`## 全文` sections), `build_index()` generates `index.md`
+- `paths.py` — path validation (`_resolve`, category/slug whitelist regex + `resolve()`/`is_relative_to()` double assertion)
+- `service.py` — `MemoryService`: `load_index` / `read_overview` / `read_full` / `search_index` / `update_memory` / `delete_memory` / `list_entries` / `export_all` / `clear_all`; atomic writes + single-lock concurrency + residual cleanup
+- `search.py` — character 2-gram Jaccard/Dice scoring + exact-token overlap weighting for L0 triage; reuses `estimate_tokens` for the `index_token_cap` full-vs-top-K decision
+- `extractor.py` — `MemoryExtractor`: LLM extraction/rewrite/delete (NEW/UPDATE/DELETE/NOOP) with whole-document rewrite, JSON-fence-tolerant parsing, injection-phrase filtering, SimHash dedup (lazy import); triggered asynchronously after each user-message turn
+- `tools.py` — `search_memory` / `read_memory` / `remember` agent tools (`remember` enforces a single-turn quota ≤ 3 and goes through the same extractor write path)
+- Agent integration (`agent/graph.py`): `_get_memory_context()` replaces the former user-profiler injection seam; `swap_provider` re-targets the extractor's LLM on hot-swap
+- API routes (`api/routes/memory.py`): `GET /index`, `GET /entries`, `GET /search?q=`, `GET /{category}/{slug}?depth=`, `POST /refresh`, `GET /status`; `require_roles()` + `RateLimiter`; 503 when the service is unavailable. `/api/v1/data/export` includes a `memory` field; `/api/v1/data/all` also clears memory.
 
 ### Analysis Services (`analysis/`)
 
-- `UserProfiler` — analyzes conversations to build user preference profiles
 - `TitleSummarizer` — LLM-based short conversation summarization (naming-style summaries; context compression uses `agent/compression/` instead)
 - `ConversationNamer` — auto-generates short conversation titles from early user messages
 
@@ -162,3 +174,5 @@ React 19 + TypeScript + Vite 8. Pages: Chat, Tasks, Memory, Dream, Settings, Plu
 Example config in `thumbelina.yaml.example`. Copy to `thumbelina.yaml` and edit with your settings. LLM provider defaults to `openai/gpt-4o`. The repository database (`repository.database_url`) defaults to `sqlite:///thumbelina.db`. API key resolved from `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` env vars.
 
 Channel configuration: `channels.qq` (qq-botpy SDK) and `channels.wechat` (weixin-bot protocol) are disabled by default. Enable by setting `enabled: true` and providing required credentials. WeChat channel follows the [weixin-bot protocol specification](https://github.com/epiral/weixin-bot/blob/main/docs/protocol-spec.md).
+
+Memory configuration: the `memory:` section configures the Markdown layered memory subsystem (directory, category whitelist, injection budget `inject_top_k` / `index_token_cap`, guardrails `max_entries` / `max_total_bytes` / `max_full_tokens`, `extract.*` for the background LLM extractor, `tools.enabled` for exposing the memory tools). See `thumbelina.yaml.example` for the full annotated schema. When `enabled: false` or initialization fails, the server still starts and memory routes return 503.
