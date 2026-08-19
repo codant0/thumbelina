@@ -24,10 +24,11 @@ class TodoItemCreate(BaseModel):
 
 
 class TodoItemUpdate(BaseModel):
-    """Payload for updating a todo item (text and/or done state)."""
+    """Payload for updating a todo item (text, done state and/or remark)."""
 
     text: str | None = None
     done: bool | None = None
+    remark: str | None = None
 
 
 class NoteCreate(BaseModel):
@@ -48,6 +49,7 @@ class TodoItemOut(BaseModel):
     index: int
     text: str
     done: bool
+    remark: str = ""
 
 
 class TodoItemsOut(BaseModel):
@@ -78,7 +80,10 @@ class TodoStatusOut(BaseModel):
 
 def _items_payload(items: list[TodoItem]) -> TodoItemsOut:
     return TodoItemsOut(
-        items=[TodoItemOut(index=item.index, text=item.text, done=item.done) for item in items]
+        items=[
+            TodoItemOut(index=item.index, text=item.text, done=item.done, remark=item.remark)
+            for item in items
+        ]
     )
 
 
@@ -128,12 +133,17 @@ async def update_item(
     payload: TodoItemUpdate,
     service: TodoService = Depends(get_todo_service),
 ) -> TodoItemsOut:
-    """Update the text and/or done state of the item at ``index``."""
+    """Update the text, done state and/or remark of the item at ``index``."""
     text: str | None = None
     if payload.text is not None:
         text = _require_non_blank(payload.text, "text")
+    remark: str | None = None
+    if payload.remark is not None:
+        remark = payload.remark.strip()
     try:
-        return _items_payload(await service.update_item(index, text=text, done=payload.done))
+        return _items_payload(
+            await service.update_item(index, text=text, done=payload.done, remark=remark)
+        )
     except IndexError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

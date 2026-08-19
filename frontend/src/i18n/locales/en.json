@@ -254,7 +254,9 @@
     "noActive": "All done!",
     "noCompleted": "Nothing completed yet",
     "today": "Today",
-    "yesterday": "Yesterday"
+    "yesterday": "Yesterday",
+    "remark": "Remark",
+    "remarkPlaceholder": "Add a remark…"
   },
   "memory": {
     "title": "Memory",

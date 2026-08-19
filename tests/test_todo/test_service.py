@@ -84,6 +84,33 @@ class TestItems:
         with pytest.raises(IndexError):
             await service.update_item(-1, done=True)
 
+    async def test_update_item_remark(self, tmp_path: Path) -> None:
+        service = await make_service(tmp_path)
+        await service.add_item("买牛奶")
+        await service.add_item("写周报")
+
+        updated = await service.update_item(0, remark="记得买**脱脂**的")
+        assert [item.remark for item in updated] == ["记得买**脱脂**的", ""]
+        # Text and done state are untouched by a remark-only update.
+        assert [item.text for item in updated] == ["买牛奶", "写周报"]
+        assert updated[0].done is False
+
+        # A remark can span multiple lines and persist to disk as blockquotes.
+        revised = await service.update_item(0, remark="第一行\n第二行")
+        assert revised[0].remark == "第一行\n第二行"
+        file_text = (tmp_path / "TODO" / "todolist.md").read_text(encoding="utf-8")
+        assert "> 第一行" in file_text
+        assert "> 第二行" in file_text
+
+        # Clearing a remark (empty string) removes the blockquote lines.
+        cleared = await service.update_item(0, remark="")
+        assert cleared[0].remark == ""
+        file_text = (tmp_path / "TODO" / "todolist.md").read_text(encoding="utf-8")
+        assert "> " not in file_text
+
+        with pytest.raises(IndexError):
+            await service.update_item(5, remark="越界")
+
     async def test_delete_item(self, tmp_path: Path) -> None:
         service = await make_service(tmp_path)
         await service.add_item("a")

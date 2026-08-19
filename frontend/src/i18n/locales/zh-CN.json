@@ -254,7 +254,9 @@
     "noActive": "全部完成！",
     "noCompleted": "还没有已完成项",
     "today": "今天",
-    "yesterday": "昨天"
+    "yesterday": "昨天",
+    "remark": "备注",
+    "remarkPlaceholder": "添加备注说明…"
   },
   "memory": {
     "title": "记忆",

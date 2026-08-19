@@ -17,6 +17,9 @@ from thumbelina.todo.models import Note, RawLine, TodoItem
 
 CHECKBOX_RE = re.compile(r"^- \[( |x|X)\] (.*)$")
 NOTE_HEADER_RE = re.compile(r"^## (\d{4}-\d{2}-\d{2} \d{2}:\d{2})\s*$")
+# A remark is stored as one or more blockquote lines immediately after a
+# checkbox item, so it can carry arbitrary Markdown (multi-line included).
+REMARK_LINE_RE = re.compile(r"^> ?(.*)$")
 
 
 def parse_todolist(text: str) -> list[TodoItem | RawLine]:
@@ -24,16 +27,31 @@ def parse_todolist(text: str) -> list[TodoItem | RawLine]:
 
     Checkbox lines become :class:`TodoItem` (index counts only checkbox
     lines, starting at 0); every other line becomes a :class:`RawLine`.
+    Blockquote (``> ``) lines directly following a checkbox are collected as
+    that item's Markdown ``remark`` rather than standalone raw lines.
     """
     segments: list[TodoItem | RawLine] = []
     index = 0
+    pending: TodoItem | None = None
     for line in text.splitlines():
         match = CHECKBOX_RE.match(line)
         if match:
-            segments.append(TodoItem(index=index, text=match.group(2), done=match.group(1) != " "))
+            pending = TodoItem(
+                index=index,
+                text=match.group(2),
+                done=match.group(1) != " ",
+            )
+            segments.append(pending)
             index += 1
-        else:
-            segments.append(RawLine(text=line))
+            continue
+        if pending is not None:
+            remark = REMARK_LINE_RE.match(line)
+            if remark:
+                content = remark.group(1)
+                pending.remark = f"{pending.remark}\n{content}" if pending.remark else content
+                continue
+        pending = None
+        segments.append(RawLine(text=line))
     return segments
 
 
@@ -50,6 +68,8 @@ def serialize_todolist(segments: list[TodoItem | RawLine]) -> str:
         if isinstance(segment, TodoItem):
             mark = "x" if segment.done else " "
             lines.append(f"- [{mark}] {segment.text}")
+            if segment.remark:
+                lines.extend(f"> {remark_line}" for remark_line in segment.remark.splitlines())
         else:
             lines.append(segment.text)
     return "\n".join(lines) + "\n"

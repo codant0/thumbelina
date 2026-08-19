@@ -2,6 +2,7 @@ export interface TodoItem {
   index: number
   text: string
   done: boolean
+  remark: string
 }
 
 export interface TodoNote {
@@ -51,7 +52,7 @@ export async function addTodoItem(text: string): Promise<TodoItem[]> {
 
 export async function updateTodoItem(
   index: number,
-  patch: { text?: string; done?: boolean },
+  patch: { text?: string; done?: boolean; remark?: string },
 ): Promise<TodoItem[]> {
   const data = await request<TodoListResponse>(`/todo/items/${index}`, {
     method: 'PATCH',

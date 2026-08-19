@@ -13,8 +13,8 @@ import {
 import type { TodoItem, TodoNote } from './todo'
 
 const TODO_ITEMS: TodoItem[] = [
-  { index: 0, text: 'buy milk', done: false },
-  { index: 1, text: 'write tests', done: true },
+  { index: 0, text: 'buy milk', done: false, remark: '' },
+  { index: 1, text: 'write tests', done: true, remark: '' },
 ]
 
 const TODO_NOTES: TodoNote[] = [
@@ -46,7 +46,7 @@ describe('todo API', () => {
     )
     const items = await fetchTodoItems()
     expect(items).toHaveLength(2)
-    expect(items[0]).toEqual({ index: 0, text: 'buy milk', done: false })
+    expect(items[0]).toEqual({ index: 0, text: 'buy milk', done: false, remark: '' })
     expect(items[1].done).toBe(true)
     expect(fetchSpy.mock.calls[0][0]).toBe('/api/v1/todo/items')
   })

@@ -24,6 +24,7 @@ import {
   deleteNote,
 } from '../../api/todo'
 import type { TodoItem, TodoNote } from '../../api/todo'
+import { MarkdownContent } from '../Chat/MarkdownContent'
 
 interface TodoStatsBarProps {
   items: TodoItem[]
@@ -130,6 +131,7 @@ interface TodoListPanelProps {
   onToggle: (item: TodoItem) => void
   onDelete: (index: number) => void
   onSaveText: (index: number, text: string) => void
+  onSaveRemark: (index: number, remark: string) => void
 }
 
 function TodoListPanel({
@@ -142,11 +144,14 @@ function TodoListPanel({
   onToggle,
   onDelete,
   onSaveText,
+  onSaveRemark,
 }: TodoListPanelProps) {
   const { t } = useTranslation()
   const [newText, setNewText] = useState('')
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [editText, setEditText] = useState('')
+  const [remarkIndex, setRemarkIndex] = useState<number | null>(null)
+  const [editRemark, setEditRemark] = useState('')
 
   const submitNew = useCallback(() => {
     const text = newText.trim()
@@ -165,6 +170,16 @@ function TodoListPanel({
     setEditText('')
   }, [])
 
+  const startRemark = useCallback((item: TodoItem) => {
+    setRemarkIndex(item.index)
+    setEditRemark(item.remark)
+  }, [])
+
+  const cancelRemark = useCallback(() => {
+    setRemarkIndex(null)
+    setEditRemark('')
+  }, [])
+
   // Reset editing state whenever the list changes (e.g. another action
   // re-indexed items server-side), so a draft can never be saved onto a
   // different item that shifted into the edited position. Reference
@@ -174,8 +189,9 @@ function TodoListPanel({
     if (itemsRef.current !== items) {
       itemsRef.current = items
       cancelEdit()
+      cancelRemark()
     }
-  }, [items, cancelEdit])
+  }, [items, cancelEdit, cancelRemark])
 
   const saveEdit = useCallback(() => {
     const text = editText.trim()
@@ -184,6 +200,14 @@ function TodoListPanel({
     setEditingIndex(null)
     setEditText('')
   }, [editingIndex, editText, busy, onSaveText])
+
+  const saveRemark = useCallback(() => {
+    if (remarkIndex === null) return
+    const remark = editRemark.trim()
+    onSaveRemark(remarkIndex, remark)
+    setRemarkIndex(null)
+    setEditRemark('')
+  }, [remarkIndex, editRemark, onSaveRemark])
 
   const doneCount = allItems.filter(item => item.done).length
   const counts = { all: allItems.length, active: allItems.length - doneCount, done: doneCount }
@@ -271,37 +295,79 @@ function TodoListPanel({
                   </button>
                 </div>
               ) : (
-                <>
-                  <input
-                    className="todo-item__checkbox"
-                    type="checkbox"
-                    checked={item.done}
-                    disabled={busy}
-                    aria-label={item.text}
-                    onChange={() => onToggle(item)}
-                  />
-                  <span className="todo-item__text">{item.text}</span>
-                  <div className="todo-item__actions">
-                    <button
-                      className="todo-item__action"
-                      aria-label={t('todo.edit')}
-                      title={t('todo.edit')}
+                <div className="todo-item__body">
+                  <div className="todo-item__row">
+                    <input
+                      className="todo-item__checkbox"
+                      type="checkbox"
+                      checked={item.done}
                       disabled={busy}
-                      onClick={() => startEdit(item)}
-                    >
-                      <Pencil size={14} />
-                    </button>
-                    <button
-                      className="todo-item__action todo-item__action--danger"
-                      aria-label={t('todo.delete')}
-                      title={t('todo.delete')}
-                      disabled={busy}
-                      onClick={() => onDelete(item.index)}
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                      aria-label={item.text}
+                      onChange={() => onToggle(item)}
+                    />
+                    <span className="todo-item__text">{item.text}</span>
+                    <div className="todo-item__actions">
+                      <button
+                        className="todo-item__action"
+                        aria-label={t('todo.remark')}
+                        title={t('todo.remark')}
+                        disabled={busy}
+                        onClick={() => startRemark(item)}
+                      >
+                        <StickyNote size={14} />
+                      </button>
+                      <button
+                        className="todo-item__action"
+                        aria-label={t('todo.edit')}
+                        title={t('todo.edit')}
+                        disabled={busy}
+                        onClick={() => startEdit(item)}
+                      >
+                        <Pencil size={14} />
+                      </button>
+                      <button
+                        className="todo-item__action todo-item__action--danger"
+                        aria-label={t('todo.delete')}
+                        title={t('todo.delete')}
+                        disabled={busy}
+                        onClick={() => onDelete(item.index)}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   </div>
-                </>
+                  {remarkIndex === item.index ? (
+                    <div className="todo-item__remark-edit">
+                      <textarea
+                        className="todo-item__remark-textarea form-input"
+                        value={editRemark}
+                        aria-label={t('todo.remark')}
+                        rows={3}
+                        autoFocus
+                        disabled={busy}
+                        onChange={e => setEditRemark(e.target.value)}
+                      />
+                      <div className="todo-item__remark-edit-actions">
+                        <button
+                          className="btn btn-primary btn-sm"
+                          disabled={busy}
+                          onClick={saveRemark}
+                        >
+                          <Check size={14} />
+                          {t('todo.save')}
+                        </button>
+                        <button className="btn btn-ghost btn-sm" disabled={busy} onClick={cancelRemark}>
+                          <X size={14} />
+                          {t('todo.cancel')}
+                        </button>
+                      </div>
+                    </div>
+                  ) : item.remark ? (
+                    <div className="todo-item__remark">
+                      <MarkdownContent content={item.remark} />
+                    </div>
+                  ) : null}
+                </div>
               )}
             </div>
           ))}
@@ -601,6 +667,10 @@ export function TodoPage() {
     (index: number, text: string) => void writeItems(() => updateTodoItem(index, { text })),
     [writeItems],
   )
+  const handleSaveItemRemark = useCallback(
+    (index: number, remark: string) => void writeItems(() => updateTodoItem(index, { remark })),
+    [writeItems],
+  )
   const handleAddNote = useCallback(
     (content: string) => void writeNotes(() => addNote(content)),
     [writeNotes],
@@ -677,6 +747,7 @@ export function TodoPage() {
             onToggle={handleToggleItem}
             onDelete={handleDeleteItem}
             onSaveText={handleSaveItemText}
+            onSaveRemark={handleSaveItemRemark}
           />
         </section>
         <section className="todo-page__panel card" data-testid="todo-notes-panel">

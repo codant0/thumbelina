@@ -18,13 +18,13 @@ function mockFetch(handler: FetchHandler) {
   )
 }
 
-const SAMPLE_ITEMS = [{ index: 0, text: 'buy milk', done: false }]
+const SAMPLE_ITEMS = [{ index: 0, text: 'buy milk', done: false, remark: '' }]
 const SAMPLE_NOTES = [
   { index: 0, timestamp: '2026-08-14 10:00', content: 'remember the milk' },
 ]
 const FILTER_ITEMS = [
-  { index: 0, text: 'active task', done: false },
-  { index: 1, text: 'finished task', done: true },
+  { index: 0, text: 'active task', done: false, remark: '' },
+  { index: 1, text: 'finished task', done: true, remark: '' },
 ]
 
 /** Enabled handler with two items (one active, one done) for the filter tests. */
@@ -598,6 +598,115 @@ describe('TodoPage', () => {
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
     expect(screen.getByText('Save')).toBeInTheDocument()
     expect(screen.getByText('Cancel')).toBeInTheDocument()
+  })
+
+  it('renders a remark under the item as Markdown', async () => {
+    mockFetch(enabledHandler((url, init) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/v1/todo/items' && method === 'GET') {
+        return jsonResponse({
+          items: [{ index: 0, text: 'pick up groceries', done: false, remark: 'buy **oat** milk' }],
+        })
+      }
+      return undefined
+    }))
+    render(<TodoPage />)
+    await screen.findByText('pick up groceries')
+
+    const row = screen.getByTestId('todo-item')
+    // react-markdown renders **oat** as a <strong> element.
+    expect(within(row).getByText('oat').tagName).toBe('STRONG')
+  })
+
+  it('adds/edits a remark via the remark button with a PATCH remark body', async () => {
+    const fetchSpy = mockFetch(enabledHandler((url, init) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/v1/todo/items' && method === 'GET') {
+        return jsonResponse({
+          items: [{ index: 0, text: 'buy milk', done: false, remark: '' }],
+        })
+      }
+      if (url === '/api/v1/todo/items/0' && method === 'PATCH') {
+        const body = JSON.parse(String(init?.body)) as { remark?: string }
+        return jsonResponse({
+          items: [{ index: 0, text: 'buy milk', done: false, remark: body.remark ?? '' }],
+        })
+      }
+      return undefined
+    }))
+    const user = userEvent.setup()
+    render(<TodoPage />)
+    await screen.findByText('buy milk')
+
+    const row = screen.getByTestId('todo-item')
+    await user.click(within(row).getByLabelText('Remark'))
+
+    const textarea = row.querySelector('textarea')
+    expect(textarea).not.toBeNull()
+    await user.type(textarea as HTMLTextAreaElement, '**oat** milk')
+    await user.click(within(row).getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => {
+      const patch = fetchSpy.mock.calls.find(
+        ([url, init]) => String(url) === '/api/v1/todo/items/0' && init?.method === 'PATCH',
+      )
+      expect(patch).toBeDefined()
+      expect(JSON.parse(String(patch?.[1]?.body))).toEqual({ remark: '**oat** milk' })
+    })
+    // After save the remark renders as Markdown.
+    await waitFor(() => {
+      const renderedRow = screen.getByTestId('todo-item')
+      expect(within(renderedRow).getByText('oat').tagName).toBe('STRONG')
+    })
+  })
+
+  it('clears a remark and hides the remark block', async () => {
+    const fetchSpy = mockFetch(enabledHandler((url, init) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/v1/todo/items' && method === 'GET') {
+        return jsonResponse({
+          items: [{ index: 0, text: 'buy milk', done: false, remark: 'some remark' }],
+        })
+      }
+      if (url === '/api/v1/todo/items/0' && method === 'PATCH') {
+        return jsonResponse({
+          items: [{ index: 0, text: 'buy milk', done: false, remark: '' }],
+        })
+      }
+      return undefined
+    }))
+    const user = userEvent.setup()
+    render(<TodoPage />)
+    await screen.findByText('buy milk')
+    expect(within(screen.getByTestId('todo-item')).getByText('some remark')).toBeInTheDocument()
+
+    const row = screen.getByTestId('todo-item')
+    await user.click(within(row).getByLabelText('Remark'))
+    const textarea = row.querySelector('textarea')
+    expect(textarea).not.toBeNull()
+    await user.clear(textarea as HTMLTextAreaElement)
+    await user.click(within(row).getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => {
+      const patch = fetchSpy.mock.calls.find(
+        ([url, init]) => String(url) === '/api/v1/todo/items/0' && init?.method === 'PATCH',
+      )
+      expect(JSON.parse(String(patch?.[1]?.body))).toEqual({ remark: '' })
+    })
+    await waitFor(() => {
+      expect(screen.queryByText('some remark')).not.toBeInTheDocument()
+    })
+  })
+
+  it('item remark button has an accessible label', async () => {
+    mockFetch(enabledHandler())
+    render(<TodoPage />)
+    await screen.findByText('buy milk')
+
+    const row = screen.getByTestId('todo-item')
+    const remarkButton = within(row).getByLabelText('Remark')
+    expect(remarkButton.tagName).toBe('BUTTON')
+    expect(remarkButton).not.toBeDisabled()
   })
 
   it('notes grouped by day', async () => {

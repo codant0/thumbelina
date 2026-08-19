@@ -21,7 +21,7 @@
 - **Markdown 分层记忆** — 基于 Markdown 文件系统的分层记忆，存于 `MEMORY/` 目录，人类可读、可手工编辑、可 git 审计。三层按需加载（L0 自动生成的索引摘要 / L1 概览 / L2 全文）；`MemoryExtractor` 在每轮用户消息后后台异步抽取/改写/删除记忆（NEW/UPDATE/DELETE/NOOP）；Agent 每轮注入 L0 索引摘要（视为参考数据、绝非指令），并提供 `search_memory` / `read_memory` / `remember` 三个工具；零 embedding/向量依赖；通过 `/api/v1/memory/*` 路由提供浏览、搜索与状态查询
 - **子代理系统** — 并行任务执行，支持监控/工作代理、代理间消息传递和共享状态
 - **任务调度器** — 自然语言时间解析（中英文），支持条件触发和通知广播
-- **待办清单与随手记** — 基于本地 Markdown 文件的待办清单与随手记（`TODO/todolist.md` + `TODO/notes.md`），可在 Web 界面管理
+- **待办清单与随手记** — 基于本地 Markdown 文件的待办清单与随手记（`TODO/todolist.md` + `TODO/notes.md`），提供每项待办独立的 Markdown 备注（块引用格式），可在 Web 界面管理
 - **插件系统** — 注册和管理工具、技能、渠道、提供商，支持沙箱验证和依赖解析
 - **QQ Bot 频道** — 通过 QQ 官方 Bot SDK（`qq-botpy`）接入，支持频道、群聊和私聊
 - **微信频道** — 通过 [weixin-bot](https://github.com/epiral/weixin-bot) 协议接入个人微信号，支持扫码登录

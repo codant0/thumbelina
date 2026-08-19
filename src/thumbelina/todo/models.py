@@ -7,11 +7,16 @@ from dataclasses import dataclass
 
 @dataclass
 class TodoItem:
-    """A single checkbox item parsed from ``todolist.md``."""
+    """A single checkbox item parsed from ``todolist.md``.
+
+    ``remark`` is free-form Markdown (the per-item note) stored as blockquote
+    lines immediately following the checkbox in the file; empty when absent.
+    """
 
     index: int
     text: str
     done: bool
+    remark: str = ""
 
 
 @dataclass

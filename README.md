@@ -21,7 +21,7 @@ An AI-powered personal assistant built with [FastAPI](https://fastapi.tiangolo.c
 - **Markdown Layered Memory** — File-system-backed memory stored as human-auditable Markdown under `MEMORY/`. Three-tier on-demand loading (L0 auto-generated index of one-line summaries / L1 overview / L2 full text); `MemoryExtractor` runs in the background after each user turn to extract/rewrite/delete memories (NEW/UPDATE/DELETE/NOOP); the agent injects the L0 index summary every turn (treated as reference data, never instructions) and exposes `search_memory` / `read_memory` / `remember` tools; zero embedding/vector dependency; CRUD + search via `/api/v1/memory/*` routes
 - **Sub-Agent System** — Parallel task execution with monitor/worker agents, inter-agent messaging and shared state
 - **Task Scheduler** — Natural language time parsing (Chinese & English) with conditional triggers and notification broadcast
-- **TODO List & Quick Notes** — Local Markdown-based todo list and quick notes (`TODO/todolist.md` + `TODO/notes.md`), manageable from the Web UI
+- **TODO List & Quick Notes** — Local Markdown-based todo list and quick notes (`TODO/todolist.md` + `TODO/notes.md`), with per-item Markdown remarks (stored as blockquotes), manageable from the Web UI
 - **Plugin System** — Register and manage tools, skills, channels, and providers with sandbox validation and dependency resolution
 - **QQ Bot Channel** — Connect via QQ official bot SDK (`qq-botpy`), supports guild, group, and private messages
 - **WeChat Channel** — iLink long-polling integration for personal WeChat account via [weixin-bot](https://github.com/epiral/weixin-bot), with QR code login

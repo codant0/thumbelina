@@ -57,11 +57,13 @@ class TodoService:
         async with self._lock:
             return self._items(await self._read_todolist())
 
-    async def add_item(self, text: str) -> list[TodoItem]:
+    async def add_item(self, text: str, remark: str = "") -> list[TodoItem]:
         """Append a new pending item at the end of the file."""
         async with self._lock:
             segments = await self._read_todolist()
-            segments.append(TodoItem(index=len(self._items(segments)), text=text, done=False))
+            segments.append(
+                TodoItem(index=len(self._items(segments)), text=text, done=False, remark=remark)
+            )
             await self._write_atomic(self._todolist_path, serialize_todolist(segments))
             return self._items(segments)
 
@@ -71,8 +73,9 @@ class TodoService:
         *,
         text: str | None = None,
         done: bool | None = None,
+        remark: str | None = None,
     ) -> list[TodoItem]:
-        """Update the text and/or done state of the item at ``index``."""
+        """Update the text, done state and/or remark of the item at ``index``."""
         async with self._lock:
             segments = await self._read_todolist()
             item = self._item_at(segments, index)
@@ -80,6 +83,8 @@ class TodoService:
                 item.text = text
             if done is not None:
                 item.done = done
+            if remark is not None:
+                item.remark = remark
             await self._write_atomic(self._todolist_path, serialize_todolist(segments))
             return self._items(segments)
 

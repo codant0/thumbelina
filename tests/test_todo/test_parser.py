@@ -85,6 +85,45 @@ class TestParseTodolist:
         assert second.text == "b"
         assert second.done is True
 
+    def test_parse_remark_single_line(self):
+        """A blockquote line after a checkbox becomes the item's remark."""
+        segments = parse_todolist("- [ ] 买牛奶\n> 记得买**脱脂**的\n- [ ] 写周报\n")
+
+        assert len(segments) == 2
+        first, second = segments
+        assert isinstance(first, TodoItem)
+        assert first.text == "买牛奶"
+        assert first.remark == "记得买**脱脂**的"
+        assert isinstance(second, TodoItem)
+        assert second.remark == ""
+
+    def test_parse_remark_multi_line(self):
+        """Consecutive blockquote lines join into a multi-line remark."""
+        segments = parse_todolist("- [ ] 买牛奶\n> 第一行说明\n> 第二行说明\n- [ ] 写周报\n")
+
+        assert len(segments) == 2
+        first, _ = segments
+        assert isinstance(first, TodoItem)
+        assert first.remark == "第一行说明\n第二行说明"
+
+    def test_parse_remark_stops_at_non_blockquote(self):
+        """A plain (non-blockquote) line ends the remark and becomes a raw line."""
+        segments = parse_todolist("- [ ] 买牛奶\n> 说明\n一段普通文字\n- [ ] 写周报\n")
+
+        assert len(segments) == 3
+        assert isinstance(segments[0], TodoItem)
+        assert segments[0].remark == "说明"
+        assert isinstance(segments[1], RawLine)
+        assert segments[1].text == "一段普通文字"
+
+    def test_serialize_remark_round_trip(self):
+        """A remark round-trips through serialize/parse identically."""
+        original = "- [ ] 买牛奶\n> 第一行\n> 第二行\n- [x] 写周报\n"
+
+        segments = parse_todolist(original)
+
+        assert serialize_todolist(segments) == original
+
 
 class TestParseNotes:
     """Tests for ``parse_notes`` / ``serialize_notes``."""

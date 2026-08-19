@@ -77,17 +77,23 @@ def test_items_crud(todo_client: TestClient) -> None:
     # Add an item; the full list is returned.
     response = todo_client.post("/api/v1/todo/items", json={"text": "买牛奶"})
     assert response.status_code == 200
-    assert response.json() == {"items": [{"index": 0, "text": "买牛奶", "done": False}]}
+    assert response.json() == {
+        "items": [{"index": 0, "text": "买牛奶", "done": False, "remark": ""}]
+    }
 
     # Toggle done.
     response = todo_client.patch("/api/v1/todo/items/0", json={"done": True})
     assert response.status_code == 200
-    assert response.json() == {"items": [{"index": 0, "text": "买牛奶", "done": True}]}
+    assert response.json() == {
+        "items": [{"index": 0, "text": "买牛奶", "done": True, "remark": ""}]
+    }
 
     # Change the text (done state is preserved).
     response = todo_client.patch("/api/v1/todo/items/0", json={"text": "买脱脂牛奶"})
     assert response.status_code == 200
-    assert response.json() == {"items": [{"index": 0, "text": "买脱脂牛奶", "done": True}]}
+    assert response.json() == {
+        "items": [{"index": 0, "text": "买脱脂牛奶", "done": True, "remark": ""}]
+    }
 
     # Delete; list is empty again.
     response = todo_client.delete("/api/v1/todo/items/0")
@@ -107,6 +113,29 @@ def test_patch_invalid_index_404(todo_client: TestClient) -> None:
 
 def test_patch_negative_index_404(todo_client: TestClient) -> None:
     response = todo_client.patch("/api/v1/todo/items/-1", json={"done": True})
+    assert response.status_code == 404
+
+
+def test_patch_item_remark(todo_client: TestClient) -> None:
+    todo_client.post("/api/v1/todo/items", json={"text": "买牛奶"})
+
+    # Set a Markdown remark; it is returned in the full list.
+    response = todo_client.patch("/api/v1/todo/items/0", json={"remark": "记得买**脱脂**的"})
+    assert response.status_code == 200
+    assert response.json()["items"][0]["remark"] == "记得买**脱脂**的"
+    assert response.json()["items"][0]["done"] is False
+
+    # The remark persists across reads.
+    response = todo_client.get("/api/v1/todo/items")
+    assert response.json()["items"][0]["remark"] == "记得买**脱脂**的"
+
+    # A remark can be cleared (whitespace collapses to empty-ish string).
+    response = todo_client.patch("/api/v1/todo/items/0", json={"remark": " "})
+    assert response.status_code == 200
+    assert response.json()["items"][0]["remark"] == ""
+
+    # An invalid index still 404s.
+    response = todo_client.patch("/api/v1/todo/items/99", json={"remark": "x"})
     assert response.status_code == 404
 
 
