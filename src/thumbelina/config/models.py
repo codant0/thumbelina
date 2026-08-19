@@ -228,7 +228,7 @@ class MemoryConfig(BaseModel):
         description="索引超过 token 阈值时按相关性注入前 K 条",
     )
     index_token_cap: int = Field(
-        default=600,
+        default=3000,
         ge=32,
         description="索引摘要全量注入的 token 上限(estimate_tokens 口径)",
     )

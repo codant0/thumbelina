@@ -125,7 +125,7 @@ def search_entries(
 def select_for_injection(
     entries: list[MemoryEntry],
     query: str,
-    index_token_cap: int = 600,
+    index_token_cap: int = 3000,
     top_k: int = 8,
 ) -> list[MemoryEntry]:
     """L0 注入选择:``estimate_tokens(全量索引) <= cap`` 时全量,否则 top-K。

@@ -467,7 +467,7 @@ memory:
   categories: [user, project, decision, topic]  # Category whitelist; entries outside are ignored
   inject_index: true          # Inject the L0 index summary every agent turn
   inject_top_k: 8             # When the index exceeds index_token_cap, inject only the top-K relevant entries
-  index_token_cap: 600        # Token budget under which the whole index is injected (estimate_tokens basis)
+  index_token_cap: 3000        # Token budget under which the whole index is injected (estimate_tokens basis)
   max_full_tokens: 4000       # Upper bound for read_full (L2); truncated beyond this
   max_entries: 200            # Total entry count guardrail
   max_total_bytes: 5_000_000  # Total memory directory byte guardrail

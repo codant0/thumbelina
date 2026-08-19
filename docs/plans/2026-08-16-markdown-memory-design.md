@@ -353,7 +353,7 @@ memory:
   categories: [user, project, decision, topic]  # 分类白名单
   inject_index: true          # 每轮注入索引摘要
   inject_top_k: 8             # 索引超过阈值时按相关性注入前 K 条
-  index_token_cap: 600        # 索引摘要全量注入的 token 上限（estimate_tokens 口径）
+  index_token_cap: 3000        # 索引摘要全量注入的 token 上限（estimate_tokens 口径）
   max_full_tokens: 4000       # read_full 单条全文注入上限，超限截断
   max_entries: 200            # 记忆条目总量护栏
   max_total_bytes: 5_000_000  # 记忆目录总字节护栏
