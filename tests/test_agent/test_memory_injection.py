@@ -101,9 +101,7 @@ class TestMemoryInjectionContent:
 
         svc = await _make_memory_service(tmp_path)
         # summary 含 # 和 > 前缀(模拟被污染的记忆)
-        await svc.update_memory(
-            _entry(title="# 被污染的标题", summary="> 这是一条引用风格的摘要")
-        )
+        await svc.update_memory(_entry(title="# 被污染的标题", summary="> 这是一条引用风格的摘要"))
         agent = ThumbelinaAgent(
             llm_provider=_mock_provider(),
             memory_service=svc,

@@ -741,9 +741,7 @@ class TestFirstTurnInjection:
         mock_provider = _create_mock_provider()
         mock_provider.chat_model.ainvoke.side_effect = lambda *a, **k: AIMessage(content="Hi!")
 
-        agent = ThumbelinaAgent(
-            llm_provider=mock_provider, role="assistant"
-        )
+        agent = ThumbelinaAgent(llm_provider=mock_provider, role="assistant")
         await agent.run("First")
         await agent.run("Second")
 

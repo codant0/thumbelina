@@ -249,9 +249,7 @@ class TestReadEntry:
         client, app = memory_app
         svc: MemoryService = app.state.memory_service
         await svc.update_memory(_entry())
-        resp = client.get(
-            "/api/v1/memory/user/programming-preference", params={"depth": "bogus"}
-        )
+        resp = client.get("/api/v1/memory/user/programming-preference", params={"depth": "bogus"})
         assert resp.status_code == 422
 
     async def test_illegal_category_returns_400(self, memory_app) -> None:

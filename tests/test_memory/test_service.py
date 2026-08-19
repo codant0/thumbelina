@@ -180,9 +180,7 @@ class TestConcurrency:
                 )
             )
 
-        await asyncio.gather(
-            *(write_one(cats[i % 4], i) for i in range(12))
-        )
+        await asyncio.gather(*(write_one(cats[i % 4], i) for i in range(12)))
 
         entries = await svc.list_entries()
         assert len(entries) == 12
