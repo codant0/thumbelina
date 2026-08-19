@@ -87,14 +87,20 @@ SQLAlchemy ORM (`Conversation`, `Message`, `SkillRecord`, `CompositionRecord`, `
 - `vector/` — ChromaDB vector store
 - `feedback_repo.py` — `FeedbackRepository` for user ratings with skill score adjustment
 
+### Shared File Store (`filestore/`)
+
+Reusable file-backed storage primitives shared by `todo/`, `memory/`, and any future Markdown-file service.
+- `atomic.py` — `write_text_atomic` (temp file + best-effort `fsync` + `os.replace`, `.tmp` cleanup on failure), `read_text` (missing → empty), `safe_unlink`, `cleanup_tmp`, `ensure_dir`
+- `locks.py` — `FileLocks`: a per-key (file path) `asyncio.Lock` table with `locked(*keys)` acquiring multiple keys in stable sorted order (deadlock-safe), so each file locks independently while composite operations hold a fixed extra key
+
 ### Memory Subsystem (`memory/`)
 
-Markdown file-system-backed layered memory (default directory `MEMORY/`). Three tiers loaded on demand: **L0** — `index.md`, an auto-generated derived index of one-line summaries (regenerated on every write, never hand-edited); **L1** — the `## 概览` (overview) section of each `<category>/<slug>.md` for planning decisions; **L2** — the `## 全文` (full text) section, loaded only when needed and truncated at `max_full_tokens`. A single service-level `asyncio.Lock` serializes all read-modify-write + index-rebuild operations; LLM calls happen outside the lock. Writes are atomic (`os.replace` + `fsync`) with `.tmp` cleanup on startup; all paths are validated against traversal and symlink escape. Guardrails: `max_entries`, `max_total_bytes`, `max_full_tokens`.
+Markdown file-system-backed layered memory (default directory `MEMORY/`). Three tiers loaded on demand: **L0** — `index.md`, an auto-generated derived index of one-line summaries (regenerated on every write, never hand-edited); **L1** — the `## 概览` (overview) section of each `<category>/<slug>.md` for planning decisions; **L2** — the `## 全文` (full text) section, loaded only when needed and truncated at `max_full_tokens`. Concurrency is handled by the shared `filestore.FileLocks` gate: single-entry reads lock their `<category>/<slug>.md`, while scan/index-maintaining operations lock the fixed `index.md` key; composite writes (entry + index rebuild) take both in stable order. LLM calls happen outside the lock. Writes go through the shared `filestore.write_text_atomic` (`os.replace` + best-effort `fsync`) with `.tmp` cleanup on startup; all paths are validated against traversal and symlink escape. Guardrails: `max_entries`, `max_total_bytes`, `max_full_tokens`.
 
 - `models.py` — `MemoryEntry`, `MemoryIndex`, `MemoryHit`, `UpdateDecision`
 - `parser.py` — document parsing (title, `>` metadata, `## 概览`/`## 全文` sections), `build_index()` generates `index.md`
 - `paths.py` — path validation (`_resolve`, category/slug whitelist regex + `resolve()`/`is_relative_to()` double assertion)
-- `service.py` — `MemoryService`: `load_index` / `read_overview` / `read_full` / `search_index` / `update_memory` / `delete_memory` / `list_entries` / `export_all` / `clear_all`; atomic writes + single-lock concurrency + residual cleanup
+- `service.py` — `MemoryService`: `load_index` / `read_overview` / `read_full` / `search_index` / `update_memory` / `delete_memory` / `list_entries` / `export_all` / `clear_all`; per-file + fixed-index locking + residual cleanup
 - `search.py` — character 2-gram Jaccard/Dice scoring + exact-token overlap weighting for L0 triage; reuses `estimate_tokens` for the `index_token_cap` full-vs-top-K decision
 - `extractor.py` — `MemoryExtractor`: LLM extraction/rewrite/delete (NEW/UPDATE/DELETE/NOOP) with whole-document rewrite, JSON-fence-tolerant parsing, injection-phrase filtering, SimHash dedup (lazy import); triggered asynchronously after each user-message turn
 - `tools.py` — `search_memory` / `read_memory` / `remember` agent tools (`remember` enforces a single-turn quota ≤ 3 and goes through the same extractor write path)

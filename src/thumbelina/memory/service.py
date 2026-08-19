@@ -1,14 +1,12 @@
 """记忆存储服务(见设计文档 §8)。
 
 核心约定:
-  - **单服务级 ``asyncio.Lock``**:串行化所有"读-改-写 + 索引重建";
-    ``load_index``/``read_*`` 也走锁(读后续可升级读写锁)。
-  - **原子写 + fsync(best-effort)**:复用 ``todo/service.py`` 的
-    "临时文件 + ``os.replace``"范式,叠加 ``fsync``;临时文件失败时
-    ``unlink(missing_ok=True)``。
-  - **"写文档 + 重建索引"同一临界区**:先原子写 ``<category>/<slug>.md``,
-    再在同一 ``async with self._lock:`` 内重建并原子写 ``index.md``,
-    顺序固定(先数据、后索引)。
+  - **原子写 + fsync(best-effort)**:复用公共 :mod:`thumbelina.filestore`
+    "临时文件 + ``os.replace``"范式;临时文件失败时 ``unlink(missing_ok=True)``。
+  - **按文件 + 固定索引锁**:单文件读写走对应 ``<category>/<slug>.md``
+    的锁;扫描目录 / 重建 ``index.md`` 的复合操作走 ``index.md`` 的
+    固定锁,并用公共锁表 :class:`FileLocks` 按稳定顺序同时占用"条目
+    锁 + 索引锁"(先数据、后索引,顺序固定)。
   - **残留清理**:启动时 ``init()`` 清理 ``*.tmp``。
   - **不缓存**:每次重读磁盘(对齐 ``todo/service.py``),手工编辑即时可见。
   - ``user_id`` 参数签名预留(默认 ``"default"``,本期忽略)。
@@ -18,10 +16,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import re
 from pathlib import Path
 
+from thumbelina.filestore import (
+    FileLocks,
+    cleanup_tmp,
+    ensure_dir,
+    read_text,
+    safe_unlink,
+    write_text_atomic,
+)
 from thumbelina.memory.exceptions import MemoryEntryNotFoundError, MemoryServiceError
 from thumbelina.memory.models import MemoryEntry, MemoryIndex
 from thumbelina.memory.parser import (
@@ -29,7 +34,7 @@ from thumbelina.memory.parser import (
     parse_overview_only,
     scan_entries,
 )
-from thumbelina.memory.paths import TMP_SUFFIX, _resolve, resolve_index
+from thumbelina.memory.paths import _resolve, resolve_index
 from thumbelina.rag.retrieval.context_formatter import estimate_tokens
 
 logger = logging.getLogger(__name__)
@@ -75,22 +80,17 @@ class MemoryService:
         self._max_full_tokens = max_full_tokens
         self._max_entries = max_entries
         self._max_total_bytes = max_total_bytes
-        self._lock = asyncio.Lock()
+        self._locks = FileLocks()
+
+    @property
+    def _index_path(self) -> Path:
+        """固定的 ``index.md`` 路径,兼作"扫描/重建索引"域的锁 key。"""
+        return resolve_index(self._base)
 
     async def init(self) -> None:
         """创建记忆目录(含父级)并清理 ``*.tmp`` 残留。不触碰其它文件。"""
-        await asyncio.to_thread(self._base.mkdir, parents=True, exist_ok=True)
-        await asyncio.to_thread(self._cleanup_tmp)
-
-    def _cleanup_tmp(self) -> None:
-        """清理记忆目录下所有 ``.tmp`` 残留(见设计文档 §8.4)。"""
-        if not self._base.is_dir():
-            return
-        for p in self._base.rglob(f"*{TMP_SUFFIX}"):
-            try:
-                p.unlink(missing_ok=True)
-            except OSError as exc:
-                logger.warning("清理残留 .tmp 失败: %s (%s)", p, exc)
+        await asyncio.to_thread(ensure_dir, self._base)
+        await asyncio.to_thread(cleanup_tmp, self._base)
 
     # ------------------------------------------------------------------
     # 读路径
@@ -103,7 +103,7 @@ class MemoryService:
         真相源是各记忆文档);``updated`` 取索引头部声明的时间。
         """
         del user_id  # 本期忽略,签名预留
-        async with self._lock:
+        async with self._locks.locked(self._index_path):
             entries = await asyncio.to_thread(scan_entries, self._base, self._categories)
             updated = await asyncio.to_thread(self._read_index_updated)
             return MemoryIndex(entries=entries, updated=updated)
@@ -111,7 +111,7 @@ class MemoryService:
     async def load_index_text(self, *, user_id: str = DEFAULT_USER_ID) -> str:
         """L0:返回 ``index.md`` 全文(供 Agent 注入或 token 估算)。"""
         del user_id
-        async with self._lock:
+        async with self._locks.locked(self._index_path):
             entries = await asyncio.to_thread(scan_entries, self._base, self._categories)
             return await asyncio.to_thread(build_index, entries, self._categories)
 
@@ -124,8 +124,8 @@ class MemoryService:
     ) -> MemoryEntry:
         """L1:读取记忆文档概览区间(止于 ``## 全文``),``full_text`` 置空。"""
         del user_id
-        async with self._lock:
-            path = await asyncio.to_thread(_resolve, self._base, category, slug)
+        path = await asyncio.to_thread(_resolve, self._base, category, slug)
+        async with self._locks.locked(path):
             text = await asyncio.to_thread(self._read_text, path)
             entry = parse_overview_only(text)
             if entry is None:
@@ -145,8 +145,8 @@ class MemoryService:
         读前 ``os.stat`` 检查大小,超限时截断并附"…(已截断,共 N 字符)"。
         """
         del user_id
-        async with self._lock:
-            path = await asyncio.to_thread(_resolve, self._base, category, slug)
+        path = await asyncio.to_thread(_resolve, self._base, category, slug)
+        async with self._locks.locked(path):
             text = await asyncio.to_thread(self._read_text_with_stat, path)
             if text is None:
                 raise MemoryEntryNotFoundError(f"记忆条目不存在: {category}/{slug}")
@@ -162,7 +162,7 @@ class MemoryService:
     async def list_entries(self, *, user_id: str = DEFAULT_USER_ID) -> list[MemoryEntry]:
         """列出白名单分类内的全部条目(跳过白名单外分类)。"""
         del user_id
-        async with self._lock:
+        async with self._locks.locked(self._index_path):
             return await asyncio.to_thread(scan_entries, self._base, self._categories)
 
     async def get_entry(
@@ -191,11 +191,11 @@ class MemoryService:
         原子写 ``index.md``,顺序固定。护栏检查在写之前。
         """
         del user_id
-        async with self._lock:
+        path = await asyncio.to_thread(_resolve, self._base, entry.category, entry.slug)
+        async with self._locks.locked(path, self._index_path):
             await asyncio.to_thread(self._check_guardrails, entry)
-            path = await asyncio.to_thread(_resolve, self._base, entry.category, entry.slug)
             text = self._serialize_entry(entry)
-            await asyncio.to_thread(self._write_atomic, path, text)
+            await asyncio.to_thread(write_text_atomic, path, text)
             await asyncio.to_thread(self._rebuild_index)
             return entry
 
@@ -208,9 +208,9 @@ class MemoryService:
     ) -> None:
         """删除一条记忆并重建索引。条目不存在时静默成功(idempotent)。"""
         del user_id
-        async with self._lock:
-            path = await asyncio.to_thread(_resolve, self._base, category, slug)
-            await asyncio.to_thread(self._safe_unlink, path)
+        path = await asyncio.to_thread(_resolve, self._base, category, slug)
+        async with self._locks.locked(path, self._index_path):
+            await asyncio.to_thread(safe_unlink, path)
             await asyncio.to_thread(self._rebuild_index)
 
     async def export_all(self, *, user_id: str = DEFAULT_USER_ID) -> dict[str, object]:
@@ -219,7 +219,7 @@ class MemoryService:
         返回 ``{"entries": [entry_dict, ...], "index": index_text}``。
         """
         del user_id
-        async with self._lock:
+        async with self._locks.locked(self._index_path):
             entries = await asyncio.to_thread(scan_entries, self._base, self._categories)
             index_text = await asyncio.to_thread(build_index, entries, self._categories)
             return {
@@ -234,7 +234,7 @@ class MemoryService:
         不删除目录本身与 ``index.md`` 之外的其它文件。
         """
         del user_id
-        async with self._lock:
+        async with self._locks.locked(self._index_path):
             await asyncio.to_thread(self._clear_entries)
             await asyncio.to_thread(self._rebuild_index)
 
@@ -294,15 +294,11 @@ class MemoryService:
         entries = scan_entries(self._base, self._categories)
         text = build_index(entries, self._categories)
         index_path = resolve_index(self._base)
-        self._write_atomic(index_path, text)
+        write_text_atomic(index_path, text)
 
     def _read_index_updated(self) -> str:
         """读取 ``index.md`` 头部声明的更新时间(解析 ``> 更新:xxx``)。"""
-        index_path = resolve_index(self._base)
-        try:
-            text = index_path.read_text(encoding="utf-8", errors="replace")
-        except (OSError, UnicodeDecodeError):
-            return ""
+        text = read_text(self._index_path)
         for line in text.splitlines():
             if line.startswith(">"):
                 # 形如 "> 更新:2026-08-16"
@@ -316,13 +312,7 @@ class MemoryService:
     # ------------------------------------------------------------------
 
     def _read_text(self, path: Path) -> str:
-        try:
-            return path.read_text(encoding="utf-8", errors="replace")
-        except FileNotFoundError:
-            return ""
-        except (OSError, UnicodeDecodeError) as exc:
-            logger.warning("记忆文档读取失败: %s (%s)", path, exc)
-            return ""
+        return read_text(path)
 
     def _read_text_with_stat(self, path: Path) -> str | None:
         """读前 ``os.stat`` 检查大小,文件不存在返回 ``None``。"""
@@ -333,7 +323,7 @@ class MemoryService:
         except OSError as exc:
             logger.warning("记忆文档 stat 失败: %s (%s)", path, exc)
             return None
-        return self._read_text(path)
+        return read_text(path)
 
     def _extract_full(self, text: str) -> str:
         """提取 ``## 全文`` 区间内容(到文件末尾)。"""
@@ -364,35 +354,6 @@ class MemoryService:
         cutoff = max(1, int(len(full_text) * ratio))
         return full_text[:cutoff].rstrip() + f"\n\n…(已截断,共 {len(full_text)} 字符)"
 
-    def _write_atomic(self, path: Path, text: str) -> None:
-        """原子写:临时文件 + ``fsync`` + ``os.replace``(见 §8.4)。
-
-        临时文件失败时 ``unlink(missing_ok=True)``;``fsync`` 为
-        best-effort(Windows/网络盘可能不支持,异常吞掉只记 warning)。
-        """
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = path.with_name(path.name + TMP_SUFFIX)
-        try:
-            with open(tmp_path, "w", encoding="utf-8", newline="\n") as handle:
-                handle.write(text)
-                handle.flush()
-                try:
-                    os.fsync(handle.fileno())
-                except OSError as exc:
-                    # fsync best-effort:Windows/网络盘可能不支持
-                    logger.debug("fsync 跳过: %s (%s)", path, exc)
-            os.replace(tmp_path, path)
-        except BaseException:
-            tmp_path.unlink(missing_ok=True)
-            raise
-
-    def _safe_unlink(self, path: Path) -> None:
-        """删除文件,不存在时静默(idempotent)。"""
-        try:
-            path.unlink(missing_ok=True)
-        except OSError as exc:
-            logger.warning("删除记忆文档失败: %s (%s)", path, exc)
-
     def _clear_entries(self) -> None:
         """删除白名单分类目录下所有 ``.md`` 文件(不删目录)。"""
         cat_set = set(self._categories)
@@ -402,7 +363,7 @@ class MemoryService:
             if not child.is_dir() or child.name not in cat_set:
                 continue
             for md_path in child.glob("*.md"):
-                self._safe_unlink(md_path)
+                safe_unlink(md_path)
 
     # ------------------------------------------------------------------
     # internals: 护栏

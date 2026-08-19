@@ -12,11 +12,14 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from thumbelina.filestore import TMP_SUFFIX
+
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,127}$")
 _CAT_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 INDEX_FILENAME = "index.md"
-TMP_SUFFIX = ".tmp"
+
+__all__ = ["INDEX_FILENAME", "TMP_SUFFIX", "_resolve", "resolve_index"]
 
 
 def _resolve(base: Path, category: str, slug: str) -> Path:

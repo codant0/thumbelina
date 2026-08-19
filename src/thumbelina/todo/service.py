@@ -1,19 +1,20 @@
 """File-backed read/write service for the TODO module.
 
 Every operation re-reads the Markdown files from disk, so manual edits made
-with an external editor are picked up immediately. Writes go through a
-temporary file plus atomic :func:`os.replace`, and a single
-:class:`asyncio.Lock` serializes all read-modify-write cycles so concurrent
-requests never clobber each other. Missing files are treated as empty.
+with an external editor are picked up immediately. Writes go through the
+public :mod:`thumbelina.filestore` atomic layer (temp file + ``os.replace``),
+and a per-file :class:`FileLocks` gate serializes the read-modify-write
+cycles of each file, so concurrent requests never clobber one another.
+Missing files are treated as empty.
 """
 
 from __future__ import annotations
 
 import asyncio
-import os
 from datetime import datetime
 from pathlib import Path
 
+from thumbelina.filestore import FileLocks, read_text, write_text_atomic
 from thumbelina.todo.models import Note, RawLine, TodoItem
 from thumbelina.todo.parser import (
     parse_notes,
@@ -25,24 +26,22 @@ from thumbelina.todo.parser import (
 TODO_LIST_FILENAME = "todolist.md"
 NOTES_FILENAME = "notes.md"
 TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M"
-TMP_SUFFIX = ".tmp"
 
 
 class TodoService:
-    """Async CRUD service over ``todolist.md`` and ``notes.md`` in a directory."""
+    """Async CRUD service over ``todolist.md`` and ``notes.md`` in a directory.
+
+    Locks are keyed per file (``todolist.md`` and ``notes.md`` get independent
+    locks), so touching one file never blocks the other. Create one service
+    per directory; two services pointing at the same directory do not share
+    locks.
+    """
 
     def __init__(self, directory: str | Path) -> None:
-        """Bind the service to ``directory`` (created by :meth:`init`).
-
-        The write lock is **instance-level**: create exactly one
-        ``TodoService`` per directory. Two instances pointing at the same
-        directory do not mutually exclude each other and can interleave
-        read-modify-write cycles.
-        """
         self._directory = Path(directory)
         self._todolist_path = self._directory / TODO_LIST_FILENAME
         self._notes_path = self._directory / NOTES_FILENAME
-        self._lock = asyncio.Lock()
+        self._locks = FileLocks()
 
     async def init(self) -> None:
         """Create the storage directory (and parents); never touches files."""
@@ -54,17 +53,17 @@ class TodoService:
 
     async def list_items(self) -> list[TodoItem]:
         """Return all checkbox items in file order."""
-        async with self._lock:
+        async with self._locks.locked(self._todolist_path):
             return self._items(await self._read_todolist())
 
     async def add_item(self, text: str, remark: str = "") -> list[TodoItem]:
         """Append a new pending item at the end of the file."""
-        async with self._lock:
+        async with self._locks.locked(self._todolist_path):
             segments = await self._read_todolist()
             segments.append(
                 TodoItem(index=len(self._items(segments)), text=text, done=False, remark=remark)
             )
-            await self._write_atomic(self._todolist_path, serialize_todolist(segments))
+            await self._write(self._todolist_path, serialize_todolist(segments))
             return self._items(segments)
 
     async def update_item(
@@ -76,7 +75,7 @@ class TodoService:
         remark: str | None = None,
     ) -> list[TodoItem]:
         """Update the text, done state and/or remark of the item at ``index``."""
-        async with self._lock:
+        async with self._locks.locked(self._todolist_path):
             segments = await self._read_todolist()
             item = self._item_at(segments, index)
             if text is not None:
@@ -85,17 +84,17 @@ class TodoService:
                 item.done = done
             if remark is not None:
                 item.remark = remark
-            await self._write_atomic(self._todolist_path, serialize_todolist(segments))
+            await self._write(self._todolist_path, serialize_todolist(segments))
             return self._items(segments)
 
     async def delete_item(self, index: int) -> list[TodoItem]:
         """Delete the item at ``index``; remaining items are renumbered."""
-        async with self._lock:
+        async with self._locks.locked(self._todolist_path):
             segments = await self._read_todolist()
             position, _ = self._locate_item(segments, index)
             del segments[position]
             self._renumber_items(segments)
-            await self._write_atomic(self._todolist_path, serialize_todolist(segments))
+            await self._write(self._todolist_path, serialize_todolist(segments))
             return self._items(segments)
 
     # ------------------------------------------------------------------
@@ -104,37 +103,37 @@ class TodoService:
 
     async def list_notes(self) -> list[Note]:
         """Return all notes in file order (newest first by convention)."""
-        async with self._lock:
+        async with self._locks.locked(self._notes_path):
             _, notes = await self._read_notes()
             return notes
 
     async def add_note(self, content: str) -> list[Note]:
         """Insert a new note stamped with the current time at the top."""
-        async with self._lock:
+        async with self._locks.locked(self._notes_path):
             preamble, notes = await self._read_notes()
             timestamp = datetime.now().strftime(TIMESTAMP_FORMAT)
             notes.insert(0, Note(index=0, timestamp=timestamp, content=content))
             self._renumber_notes(notes)
-            await self._write_atomic(self._notes_path, serialize_notes(preamble, notes))
+            await self._write(self._notes_path, serialize_notes(preamble, notes))
             return notes
 
     async def update_note(self, index: int, content: str) -> list[Note]:
         """Replace the content of the note at ``index``; timestamp is kept."""
-        async with self._lock:
+        async with self._locks.locked(self._notes_path):
             preamble, notes = await self._read_notes()
             self._require_index(len(notes), index, "note")
             notes[index].content = content
-            await self._write_atomic(self._notes_path, serialize_notes(preamble, notes))
+            await self._write(self._notes_path, serialize_notes(preamble, notes))
             return notes
 
     async def delete_note(self, index: int) -> list[Note]:
         """Delete the note at ``index``; remaining notes are renumbered."""
-        async with self._lock:
+        async with self._locks.locked(self._notes_path):
             preamble, notes = await self._read_notes()
             self._require_index(len(notes), index, "note")
             del notes[index]
             self._renumber_notes(notes)
-            await self._write_atomic(self._notes_path, serialize_notes(preamble, notes))
+            await self._write(self._notes_path, serialize_notes(preamble, notes))
             return notes
 
     # ------------------------------------------------------------------
@@ -142,34 +141,20 @@ class TodoService:
     # ------------------------------------------------------------------
 
     async def _read_todolist(self) -> list[TodoItem | RawLine]:
-        text = await self._read_text(self._todolist_path)
+        text = await self._read(self._todolist_path)
         return parse_todolist(text)
 
     async def _read_notes(self) -> tuple[str, list[Note]]:
-        text = await self._read_text(self._notes_path)
+        text = await self._read(self._notes_path)
         return parse_notes(text)
 
-    async def _read_text(self, path: Path) -> str:
-        def _read() -> str:
-            try:
-                return path.read_text(encoding="utf-8")
-            except FileNotFoundError:
-                return ""
+    @staticmethod
+    async def _read(path: Path) -> str:
+        return await asyncio.to_thread(read_text, path)
 
-        return await asyncio.to_thread(_read)
-
-    async def _write_atomic(self, path: Path, text: str) -> None:
-        def _write() -> None:
-            tmp_path = path.with_name(path.name + TMP_SUFFIX)
-            try:
-                with open(tmp_path, "w", encoding="utf-8", newline="\n") as handle:
-                    handle.write(text)
-                os.replace(tmp_path, path)
-            except BaseException:
-                tmp_path.unlink(missing_ok=True)
-                raise
-
-        await asyncio.to_thread(_write)
+    @staticmethod
+    async def _write(path: Path, text: str) -> None:
+        await asyncio.to_thread(write_text_atomic, path, text)
 
     @staticmethod
     def _items(segments: list[TodoItem | RawLine]) -> list[TodoItem]:
