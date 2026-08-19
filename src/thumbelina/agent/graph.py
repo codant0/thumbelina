@@ -948,6 +948,18 @@ class ThumbelinaAgent:
             return
         if self.memory_config.extract.on_user_message and not user_input.strip():
             return
+        # 信号预筛(策略1):消息过短视为无信息量(如"好的/谢谢"),跳过
+        # 高频语气词,避免每轮浪费一次 LLM 抽取调用。
+        if (
+            self.memory_config.extract.min_message_chars
+            and len(user_input.strip()) < self.memory_config.extract.min_message_chars
+        ):
+            logger.debug(
+                "Memory extraction skipped: message too short (%d < %d bytes)",
+                len(user_input.strip()),
+                self.memory_config.extract.min_message_chars,
+            )
+            return
         # 跳过惰性 provider:解析 chat_model 会抛 RuntimeError 即视为未就绪。
         try:
             _ = self.llm  # noqa: F841 - 触发惰性解析

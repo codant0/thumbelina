@@ -807,3 +807,49 @@ class TestContextWindowPassThrough:
                 pass
 
         mock_config.assert_called_once_with(8000)
+
+
+class TestMemoryExtractionSignalPrefilter:
+    """策略1 信号预筛:过短消息不触发后台 LLM 抽取(避免高频语气词浪费)。
+
+    直接调用 ``_maybe_extract_memory`` 并用 mock extractor 断言触发与否,
+    避免依赖真实 MemoryExtractor/MemoryService。
+    """
+
+    @staticmethod
+    def _make_agent() -> tuple:
+        from thumbelina.agent.graph import ThumbelinaAgent
+        from thumbelina.config.models import MemoryConfig
+
+        mock_extractor = AsyncMock()
+        agent = ThumbelinaAgent(
+            llm_provider=_create_mock_provider(),
+            memory_config=MemoryConfig(),
+        )
+        agent.memory_extractor = mock_extractor
+        return agent, mock_extractor
+
+    @pytest.mark.asyncio
+    async def test_short_message_skips_extraction(self) -> None:
+        agent, mock_extractor = self._make_agent()
+        await agent._maybe_extract_memory("好的")
+        mock_extractor.extract_from_messages.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_filler_message_skips_extraction(self) -> None:
+        agent, mock_extractor = self._make_agent()
+        await agent._maybe_extract_memory("谢谢！")
+        mock_extractor.extract_from_messages.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_empty_message_skips_extraction(self) -> None:
+        agent, mock_extractor = self._make_agent()
+        await agent._maybe_extract_memory("   ")
+        mock_extractor.extract_from_messages.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_informative_message_triggers_extraction(self) -> None:
+        agent, mock_extractor = self._make_agent()
+        # 超过 min_message_chars(默认 16) 的实质消息应触发抽取
+        await agent._maybe_extract_memory("我习惯每天早上喝一杯黑咖啡提神，周末喜欢去公园慢跑")
+        mock_extractor.extract_from_messages.assert_awaited_once()
