@@ -18,7 +18,7 @@ An AI-powered personal assistant built with [FastAPI](https://fastapi.tiangolo.c
 - **Semantic Search** — Vector-based semantic search via ChromaDB, with hybrid keyword + semantic fallback
 - **Skill Extraction & Integration** — Automatically extracts reusable skills from conversations and applies them in the agent loop
 - **Skill Composition** — Chain multiple skills into workflows, with LLM-assisted suggestion
-- **User Profiler** — Analyzes conversation patterns to build user preference profiles for personalized responses
+- **Markdown Layered Memory** — File-system-backed memory stored as human-auditable Markdown under `MEMORY/`. Three-tier on-demand loading (L0 auto-generated index of one-line summaries / L1 overview / L2 full text); `MemoryExtractor` runs in the background after each user turn to extract/rewrite/delete memories (NEW/UPDATE/DELETE/NOOP); the agent injects the L0 index summary every turn (treated as reference data, never instructions) and exposes `search_memory` / `read_memory` / `remember` tools; zero embedding/vector dependency; CRUD + search via `/api/v1/memory/*` routes
 - **Sub-Agent System** — Parallel task execution with monitor/worker agents, inter-agent messaging and shared state
 - **Task Scheduler** — Natural language time parsing (Chinese & English) with conditional triggers and notification broadcast
 - **TODO List & Quick Notes** — Local Markdown-based todo list and quick notes (`TODO/todolist.md` + `TODO/notes.md`), manageable from the Web UI
@@ -173,9 +173,9 @@ For the full deployment guide (updates, backups, data migration, FAQ, production
 │  │         │ │         │ │           │ │  data)   │         │
 │  └─────────┘ └─────────┘ └───────────┘ └──────────┘         │
 │  ┌──────────────┐ ┌──────────────────┐                       │
-│  │ User Profiler│ │ Skill Context    │                       │
-│  │ (preferences)│ │ (injected as     │                       │
-│  │              │ │  SystemMessage)  │                       │
+│  │ Memory       │ │ Skill Context    │                       │
+│  │ (L0 index    │ │ (injected as     │                       │
+│  │  injected)   │ │  SystemMessage)  │                       │
 │  └──────────────┘ └──────────────────┘                       │
 └───────────────────────────┬──────────────────────────────────┘
                             │
@@ -203,8 +203,9 @@ thumbelina/
 │   ├── cli/                 # Click CLI with prompt_toolkit chat session
 │   ├── config/              # YAML + env var config loader, Pydantic models
 │   ├── llm/                 # LLM provider abstraction (OpenAI, Anthropic, Ollama)
-│   ├── repository/          # Conversation persistence, search, vector store, feedback, user profiles
-│   ├── analysis/            # LLM analysis services: user profiler, title summarizer, conversation namer
+│   ├── repository/          # Conversation persistence, search, vector store, feedback
+│   ├── analysis/            # LLM analysis services: title summarizer, conversation namer
+│   ├── memory/              # Markdown layered memory (L0/L1/L2, extractor, search, tools)
 │   ├── notifications.py     # WebSocket notification broadcast
 │   ├── plugins/             # Plugin system (register, sandbox, dependency resolution)
 │   ├── rag/                 # RAG: document ingestion, chunking, embedding, retrieval, indexing pipeline
@@ -268,9 +269,14 @@ thumbelina/
 | POST | `/api/v1/feedback` | Submit user feedback (rating 1-5) |
 | GET | `/api/v1/feedback` | List feedback records |
 | GET | `/api/v1/feedback/stats` | Feedback statistics |
-| GET | `/api/v1/data/export` | Export all user data |
-| DELETE | `/api/v1/data/all` | Delete all user data |
-| GET | `/api/v1/user/profile` | Get user profile and preferences |
+| GET | `/api/v1/data/export` | Export all user data (conversations + memory) |
+| DELETE | `/api/v1/data/all` | Delete all user data (conversations + memory) |
+| GET | `/api/v1/memory/index` | View the L0 memory index (auto-generated summaries) |
+| GET | `/api/v1/memory/entries` | List all memory entries grouped by category |
+| GET | `/api/v1/memory/search?q=` | n-gram search over memory summaries (L0 triage) |
+| GET | `/api/v1/memory/{category}/{slug}?depth=` | Read a memory entry at `overview` (L1) or `full` (L2) depth |
+| POST | `/api/v1/memory/refresh` | Rebuild the memory index from disk |
+| GET | `/api/v1/memory/status` | Memory subsystem status (enabled, counts, bytes) |
 | GET | `/api/v1/plugins` | List loaded plugins with sandbox status |
 | GET | `/api/v1/plugins/sandbox-report` | Plugin sandbox validation report |
 | GET | `/api/v1/plugins/dependencies` | Plugin dependency graph |
@@ -448,6 +454,30 @@ The following sections are optional — uncomment in `thumbelina.yaml` to enable
 #     ilink_user_id: ""         # iLink user ID
 #     ilink_base_url: "https://ilinkai.weixin.qq.com"
 #     webhook_secret: ""
+```
+
+### Markdown Memory
+
+The `memory:` section in `thumbelina.yaml` configures the layered Markdown memory subsystem (see `thumbelina.yaml.example` for full annotations). Key fields:
+
+```yaml
+memory:
+  enabled: true               # Disable to turn off routes + agent injection entirely (routes return 503)
+  directory: MEMORY           # Memory directory (relative to the working dir); holds index.md + <category>/<slug>.md
+  categories: [user, project, decision, topic]  # Category whitelist; entries outside are ignored
+  inject_index: true          # Inject the L0 index summary every agent turn
+  inject_top_k: 8             # When the index exceeds index_token_cap, inject only the top-K relevant entries
+  index_token_cap: 3000        # Token budget under which the whole index is injected (estimate_tokens basis)
+  max_full_tokens: 4000       # Upper bound for read_full (L2); truncated beyond this
+  max_entries: 200            # Total entry count guardrail
+  max_total_bytes: 5_000_000  # Total memory directory byte guardrail
+  extract:
+    enabled: true             # Background LLM extraction/rewrite after each user turn
+    on_user_message: true     # Only trigger extraction on user messages
+    min_message_chars: 16     # Skip extraction below this message length (filters "ok/thanks"-style filler)
+    max_input_tokens: 8000    # Per-extraction input token budget
+  tools:
+    enabled: true             # Expose search_memory / read_memory / remember to the agent
 ```
 
 ### Role Prompts

@@ -18,7 +18,7 @@
 - **语义搜索** — 基于 ChromaDB 的向量语义搜索，支持关键词 + 语义混合回退
 - **技能提取与集成** — 从成功对话中自动提取可复用技能，并在代理循环中应用
 - **技能组合** — 将多个技能串联为工作流，支持 LLM 辅助建议
-- **用户建模** — 分析对话模式，构建用户偏好画像，实现个性化响应
+- **Markdown 分层记忆** — 基于 Markdown 文件系统的分层记忆，存于 `MEMORY/` 目录，人类可读、可手工编辑、可 git 审计。三层按需加载（L0 自动生成的索引摘要 / L1 概览 / L2 全文）；`MemoryExtractor` 在每轮用户消息后后台异步抽取/改写/删除记忆（NEW/UPDATE/DELETE/NOOP）；Agent 每轮注入 L0 索引摘要（视为参考数据、绝非指令），并提供 `search_memory` / `read_memory` / `remember` 三个工具；零 embedding/向量依赖；通过 `/api/v1/memory/*` 路由提供浏览、搜索与状态查询
 - **子代理系统** — 并行任务执行，支持监控/工作代理、代理间消息传递和共享状态
 - **任务调度器** — 自然语言时间解析（中英文），支持条件触发和通知广播
 - **待办清单与随手记** — 基于本地 Markdown 文件的待办清单与随手记（`TODO/todolist.md` + `TODO/notes.md`），可在 Web 界面管理
@@ -162,9 +162,9 @@ docker compose up -d --build
 │  │         │ │         │ │           │ │  数据)   │         │
 │  └─────────┘ └─────────┘ └───────────┘ └──────────┘         │
 │  ┌──────────────┐ ┌──────────────────┐                       │
-│  │ 用户建模器   │ │ 技能上下文       │                       │
-│  │ (偏好画像)   │ │ (注入为          │                       │
-│  │              │ │  SystemMessage)  │                       │
+│  │ 记忆         │ │ 技能上下文       │                       │
+│  │ (L0 索引     │ │ (注入为          │                       │
+│  │  注入)       │ │  SystemMessage)  │                       │
 │  └──────────────┘ └──────────────────┘                       │
 └───────────────────────────┬──────────────────────────────────┘
                             │
@@ -192,8 +192,9 @@ thumbelina/
 │   ├── cli/                 # Click CLI + prompt_toolkit 聊天会话
 │   ├── config/              # YAML + 环境变量配置加载、Pydantic 模型
 │   ├── llm/                 # LLM 提供商抽象层（OpenAI, Anthropic, Ollama）
-│   ├── repository/          # 对话持久化、搜索、向量存储、反馈、用户画像
-│   ├── analysis/            # LLM 分析服务：用户建模、标题摘要、对话命名
+│   ├── repository/          # 对话持久化、搜索、向量存储、反馈
+│   ├── analysis/            # LLM 分析服务：标题摘要、对话命名
+│   ├── memory/              # Markdown 分层记忆（L0/L1/L2、抽取器、检索、工具）
 │   ├── notifications.py     # WebSocket 通知广播
 │   ├── plugins/             # 插件系统（注册、沙箱验证、依赖解析）
 │   ├── rag/                 # RAG：文档加载、分块、嵌入、检索、索引流水线
@@ -255,9 +256,14 @@ thumbelina/
 | POST | `/api/v1/feedback` | 提交用户反馈（评分 1-5） |
 | GET | `/api/v1/feedback` | 列出反馈记录 |
 | GET | `/api/v1/feedback/stats` | 反馈统计 |
-| GET | `/api/v1/data/export` | 导出所有用户数据 |
-| DELETE | `/api/v1/data/all` | 删除所有用户数据 |
-| GET | `/api/v1/user/profile` | 获取用户画像和偏好 |
+| GET | `/api/v1/data/export` | 导出所有用户数据（对话 + 记忆） |
+| DELETE | `/api/v1/data/all` | 删除所有用户数据（对话 + 记忆） |
+| GET | `/api/v1/memory/index` | 查看 L0 记忆索引（自动生成的摘要清单） |
+| GET | `/api/v1/memory/entries` | 按分类列出全部记忆条目 |
+| GET | `/api/v1/memory/search?q=` | 基于字符 n-gram 的记忆摘要检索（L0 triage） |
+| GET | `/api/v1/memory/{category}/{slug}?depth=` | 分层读取单条记忆：`overview`（L1）或 `full`（L2） |
+| POST | `/api/v1/memory/refresh` | 从磁盘重建记忆索引 |
+| GET | `/api/v1/memory/status` | 记忆子系统状态（是否启用、条目数、字节量） |
 | GET | `/api/v1/plugins` | 列出已加载插件（含沙箱状态） |
 | GET | `/api/v1/plugins/sandbox-report` | 插件沙箱验证报告 |
 | GET | `/api/v1/plugins/dependencies` | 插件依赖图 |
@@ -435,6 +441,30 @@ todo:
 #     ilink_user_id: ""         # iLink 用户 ID
 #     ilink_base_url: "https://ilinkai.weixin.qq.com"
 #     webhook_secret: ""
+```
+
+### Markdown 记忆
+
+`thumbelina.yaml` 中的 `memory:` 段配置分层 Markdown 记忆子系统（完整字段注释见 `thumbelina.yaml.example`）。关键字段：
+
+```yaml
+memory:
+  enabled: true               # 关闭后路由与注入整体禁用（路由返回 503）
+  directory: MEMORY           # 记忆目录（相对工作目录）；存放 index.md + <category>/<slug>.md
+  categories: [user, project, decision, topic]  # 分类白名单；白名单外目录被忽略
+  inject_index: true          # 每轮注入 L0 索引摘要
+  inject_top_k: 8             # 索引超过 index_token_cap 时仅注入相关性前 K 条
+  index_token_cap: 3000        # 索引摘要全量注入的 token 上限（estimate_tokens 口径）
+  max_full_tokens: 4000       # read_full（L2）单条注入上限，超限截断
+  max_entries: 200            # 记忆条目总量护栏
+  max_total_bytes: 5_000_000  # 记忆目录总字节护栏
+  extract:
+    enabled: true             # 后台 LLM 抽取/改写（每轮用户消息后异步触发）
+    on_user_message: true     # 仅对用户消息触发抽取
+    min_message_chars: 16     # 消息低于该字符数不触发抽取（排除"好的/谢谢"等语气词）
+    max_input_tokens: 8000    # 单次抽取输入 token 预算
+  tools:
+    enabled: true             # 向 Agent 暴露 search_memory / read_memory / remember
 ```
 
 ### 角色提示词

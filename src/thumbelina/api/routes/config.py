@@ -237,10 +237,10 @@ async def swap_llm(body: LLMSwapRequest, request: Request) -> LLMSwapResponse:
             skill_engine=getattr(request.app.state, "skill_engine", None),
             composition_engine=getattr(request.app.state, "composition_engine", None),
             subagent_manager=getattr(request.app.state, "subagent_manager", None),
-            user_profiler=getattr(request.app.state, "user_profiler", None),
+            memory_extractor=getattr(request.app.state, "memory_extractor", None),
         )
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     # Keep the conversation auto-namer on the active provider.
     namer = getattr(request.app.state, "conversation_namer", None)
@@ -569,13 +569,13 @@ async def activate_endpoint_model(
                 skill_engine=getattr(request.app.state, "skill_engine", None),
                 composition_engine=getattr(request.app.state, "composition_engine", None),
                 subagent_manager=getattr(request.app.state, "subagent_manager", None),
-                user_profiler=getattr(request.app.state, "user_profiler", None),
+                memory_extractor=getattr(request.app.state, "memory_extractor", None),
             )
             namer = getattr(request.app.state, "conversation_namer", None)
             if namer is not None:
                 namer.llm_provider = agent.llm_provider
         except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc))
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     return _to_response(endpoint)
 

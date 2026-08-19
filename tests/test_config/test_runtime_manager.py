@@ -38,7 +38,6 @@ class TestSwapLLMProvider:
         agent = _make_mock_agent()
         skill_engine = MagicMock()
         subagent_manager = MagicMock()
-        user_profiler = MagicMock()
         composition_engine = MagicMock()
 
         new_provider = _make_mock_provider()
@@ -56,7 +55,6 @@ class TestSwapLLMProvider:
                 skill_engine=skill_engine,
                 composition_engine=composition_engine,
                 subagent_manager=subagent_manager,
-                user_profiler=user_profiler,
             )
 
         mock_create.assert_called_once_with("anthropic", model="claude-3", api_key="sk-new")
@@ -64,7 +62,6 @@ class TestSwapLLMProvider:
         assert skill_engine.llm_provider is new_provider
         assert subagent_manager.llm_provider is new_provider
         assert composition_engine.llm_provider is new_provider
-        assert user_profiler.llm_provider is new_provider
 
         # Config updated
         assert config.llm.provider == "anthropic"
@@ -194,7 +191,6 @@ class TestSwapLLMProvider:
                 skill_engine=None,
                 composition_engine=None,
                 subagent_manager=None,
-                user_profiler=None,
             )
 
 

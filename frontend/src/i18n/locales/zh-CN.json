@@ -41,7 +41,6 @@
     "apiKey": "API 密钥",
     "switchModel": "切换模型",
     "switching": "切换中…",
-    "userProfile": "用户画像",
     "dataManagement": "数据管理",
     "exportAll": "导出全部数据",
     "deleteAll": "删除全部数据",
@@ -299,13 +298,6 @@
     "sandboxOk": "沙箱正常",
     "violationsCount": "{count} 项违规",
     "line": "（第{number}行）"
-  },
-  "profile": {
-    "communicationStyle": "沟通风格",
-    "expertiseLevel": "专业水平",
-    "preferences": "偏好设置",
-    "notSet": "未设置",
-    "noData": "暂无画像数据。代理将在聊天过程中建立您的用户画像。"
   },
   "knowledgeBase": {
     "title": "个人知识库",

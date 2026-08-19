@@ -663,7 +663,7 @@ class TestFirstTurnInjection:
     """会话级上下文每个检查点线程只注入一次（T4）。"""
 
     @staticmethod
-    def _make_agent(role=None, profile=None, skill_context=None):
+    def _make_agent(role=None, skill_context=None):
         from langgraph.checkpoint.memory import MemorySaver
 
         from thumbelina.agent.graph import ThumbelinaAgent
@@ -679,11 +679,6 @@ class TestFirstTurnInjection:
         mock_repository.add_message = AsyncMock()
         mock_repository.get_conversation.return_value = {"knowledge_base_id": None}
 
-        profiler = None
-        if profile is not None:
-            profiler = MagicMock()
-            profiler.get_user_context = AsyncMock(return_value=profile)
-
         skill_engine = None
         if skill_context is not None:
             skill_engine = MagicMock()
@@ -693,7 +688,6 @@ class TestFirstTurnInjection:
         agent = ThumbelinaAgent(
             llm_provider=mock_provider,
             repository_manager=mock_repository,
-            user_profiler=profiler,
             skill_engine=skill_engine,
             role=role,
             checkpointer=MemorySaver(),
@@ -701,13 +695,13 @@ class TestFirstTurnInjection:
         return agent, mock_provider
 
     @pytest.mark.asyncio
-    async def test_role_and_profile_injected_only_on_first_turn(self):
-        """角色提示词 + 画像恰好出现一次，位于序列头部。"""
+    async def test_role_injected_only_on_first_turn(self):
+        """角色提示词恰好出现一次，位于序列头部。"""
         from langchain_core.messages import SystemMessage
 
         from thumbelina.prompts.roles import get_role_prompt
 
-        agent, _ = self._make_agent(role="assistant", profile="User likes tea")
+        agent, _ = self._make_agent(role="assistant")
         await agent.run("First")
         await agent.run("Second")
 
@@ -715,22 +709,12 @@ class TestFirstTurnInjection:
         messages = snapshot.values["messages"]
 
         system_contents = [m.content for m in messages if isinstance(m, SystemMessage)]
-        assert system_contents == [get_role_prompt("assistant"), "User likes tea"]
-        # 角色提示词位于序列头部，画像紧随其后。
+        assert system_contents == [get_role_prompt("assistant")]
+        # 角色提示词位于序列头部。
         assert messages[0].content == get_role_prompt("assistant")
-        assert messages[1].content == "User likes tea"
 
         human_contents = [m.content for m in messages if isinstance(m, HumanMessage)]
         assert human_contents == ["First", "Second"]
-
-    @pytest.mark.asyncio
-    async def test_profile_fetched_only_on_first_turn(self):
-        """每个线程只查询一次 profiler，而不是每轮都查。"""
-        agent, _ = self._make_agent(profile="User likes tea")
-        await agent.run("First")
-        await agent.run("Second")
-
-        assert agent.user_profiler.get_user_context.await_count == 1
 
     @pytest.mark.asyncio
     async def test_ephemeral_skill_context_appended_every_turn(self):
@@ -756,19 +740,14 @@ class TestFirstTurnInjection:
 
         mock_provider = _create_mock_provider()
         mock_provider.chat_model.ainvoke.side_effect = lambda *a, **k: AIMessage(content="Hi!")
-        profiler = MagicMock()
-        profiler.get_user_context = AsyncMock(return_value="User likes tea")
 
-        agent = ThumbelinaAgent(
-            llm_provider=mock_provider, user_profiler=profiler, role="assistant"
-        )
+        agent = ThumbelinaAgent(llm_provider=mock_provider, role="assistant")
         await agent.run("First")
         await agent.run("Second")
 
-        assert profiler.get_user_context.await_count == 2
-        # 第二轮仍携带角色提示词 + 画像（状态没有被持久化）。
+        # 第二轮仍携带角色提示词（状态没有被持久化）。
         sent = mock_provider.chat_model.ainvoke.call_args[0][0]
-        assert len(sent) == 3
+        assert len(sent) == 2
 
 
 class TestContextWindowPassThrough:
@@ -828,3 +807,49 @@ class TestContextWindowPassThrough:
                 pass
 
         mock_config.assert_called_once_with(8000)
+
+
+class TestMemoryExtractionSignalPrefilter:
+    """策略1 信号预筛:过短消息不触发后台 LLM 抽取(避免高频语气词浪费)。
+
+    直接调用 ``_maybe_extract_memory`` 并用 mock extractor 断言触发与否,
+    避免依赖真实 MemoryExtractor/MemoryService。
+    """
+
+    @staticmethod
+    def _make_agent() -> tuple:
+        from thumbelina.agent.graph import ThumbelinaAgent
+        from thumbelina.config.models import MemoryConfig
+
+        mock_extractor = AsyncMock()
+        agent = ThumbelinaAgent(
+            llm_provider=_create_mock_provider(),
+            memory_config=MemoryConfig(),
+        )
+        agent.memory_extractor = mock_extractor
+        return agent, mock_extractor
+
+    @pytest.mark.asyncio
+    async def test_short_message_skips_extraction(self) -> None:
+        agent, mock_extractor = self._make_agent()
+        await agent._maybe_extract_memory("好的")
+        mock_extractor.extract_from_messages.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_filler_message_skips_extraction(self) -> None:
+        agent, mock_extractor = self._make_agent()
+        await agent._maybe_extract_memory("谢谢！")
+        mock_extractor.extract_from_messages.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_empty_message_skips_extraction(self) -> None:
+        agent, mock_extractor = self._make_agent()
+        await agent._maybe_extract_memory("   ")
+        mock_extractor.extract_from_messages.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_informative_message_triggers_extraction(self) -> None:
+        agent, mock_extractor = self._make_agent()
+        # 超过 min_message_chars(默认 16) 的实质消息应触发抽取
+        await agent._maybe_extract_memory("我习惯每天早上喝一杯黑咖啡提神，周末喜欢去公园慢跑")
+        mock_extractor.extract_from_messages.assert_awaited_once()

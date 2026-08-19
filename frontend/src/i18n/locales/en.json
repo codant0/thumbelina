@@ -41,7 +41,6 @@
     "apiKey": "API Key",
     "switchModel": "Switch Model",
     "switching": "Switching…",
-    "userProfile": "User Profile",
     "dataManagement": "Data Management",
     "exportAll": "Export All Data",
     "deleteAll": "Delete All Data",
@@ -299,13 +298,6 @@
     "sandboxOk": "sandbox ok",
     "violationsCount": "{count} violations",
     "line": "(line {number})"
-  },
-  "profile": {
-    "communicationStyle": "Communication Style",
-    "expertiseLevel": "Expertise Level",
-    "preferences": "Preferences",
-    "notSet": "Not set",
-    "noData": "No profile data yet. The agent will build your profile as you chat."
   },
   "knowledgeBase": {
     "title": "Personal Knowledge Base",

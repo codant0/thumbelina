@@ -1,7 +1,8 @@
 # 基于 Markdown 文件系统的分层记忆能力设计
 
 - **日期**：2026-08-16
-- **状态**：待评审（已过三轮子 agent 审核：一致性 / 安全健壮性 / 完整性）
+- **状态**：已实现
+- **实现**：2026-08-18 于 `feat/markdown-memory` 分支完成阶段零–四（§13 任务 1–15;含 `tests/test_memory/*` 测试与 API 路由）。后续阶段（§13 阶段五）见任务 16–18。
 - **分支**：`feat/markdown-memory`
 
 ## 1. 需求概述
@@ -352,7 +353,7 @@ memory:
   categories: [user, project, decision, topic]  # 分类白名单
   inject_index: true          # 每轮注入索引摘要
   inject_top_k: 8             # 索引超过阈值时按相关性注入前 K 条
-  index_token_cap: 600        # 索引摘要全量注入的 token 上限（estimate_tokens 口径）
+  index_token_cap: 3000        # 索引摘要全量注入的 token 上限（estimate_tokens 口径）
   max_full_tokens: 4000       # read_full 单条全文注入上限，超限截断
   max_entries: 200            # 记忆条目总量护栏
   max_total_bytes: 5_000_000  # 记忆目录总字节护栏

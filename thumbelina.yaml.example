@@ -33,6 +33,27 @@ todo:
   enabled: true
   directory: TODO
 
+# Memory module: Markdown file-system backed layered memory (L0/L1/L2).
+# 索引 index.md 为自动生成的派生产物,请勿手工编辑;直接改各分类下
+# 的记忆文档,索引会在写入时重建。本期单用户(user_id 固定 "default")。
+memory:
+  enabled: true               # 关闭后路由与注入整体禁用
+  directory: MEMORY           # Markdown 记忆目录,相对路径基于工作目录
+  categories: [user, project, decision, topic]  # 分类白名单(索引分组顺序)
+  inject_index: true          # 每轮注入索引摘要(L0 triage)
+  inject_top_k: 8             # 索引超过阈值时按相关性注入前 K 条
+  index_token_cap: 3000        # 索引摘要全量注入的 token 上限(estimate_tokens 口径)
+  max_full_tokens: 4000       # read_full 单条全文注入上限,超限截断
+  max_entries: 200            # 记忆条目总量护栏
+  max_total_bytes: 5_000_000  # 记忆目录总字节护栏
+  extract:
+    enabled: true             # 后台 LLM 抽取/改写(阶段二接线)
+    on_user_message: true     # 仅对用户消息触发抽取
+    min_message_chars: 16     # 消息低于该字符数不触发抽取(排除"好的/谢谢"等语气词)
+    max_input_tokens: 8000    # 单次抽取输入 token 预算
+  tools:
+    enabled: true             # 暴露 search_memory/read_memory/remember
+
 # Default context window of the active LLM model. Individual endpoints can
 # override this via their own context_window field (Web UI "Settings").
 # Supports K (thousand) / M (million) token suffixes, case-insensitive.
