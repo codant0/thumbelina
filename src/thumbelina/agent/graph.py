@@ -668,6 +668,113 @@ class ThumbelinaAgent:
             )
         return update
 
+    async def compress_conversation(
+        self, conversation_id: str, context_window_tokens: int | None = None
+    ) -> dict[str, Any]:
+        """手动压缩 *conversation_id* 的检查点历史（HTTP 端点调用）。
+
+        与 :meth:`_compress_node` 不同，它**无条件**调用压缩器 —— 不过
+        阈值判断。流程：读检查点状态 → 取 ``messages`` → 压缩 → 用
+        :func:`_messages_state_update` 生成 ``add_messages`` 更新 →
+        ``graph.aupdate_state`` 写回检查点。窗口由 ``context_window_tokens``
+        决定（放入 ``configurable``），缺失时复用
+        :meth:`_resolve_context_window` 的兜底解析。
+
+        会话不存在、无消息、消息太少、压缩器抛异常、provider 不可用、
+        写回失败均优雅降级，绝不崩溃。返回
+        ``{"compressed", "tokens_before", "tokens_after", "kept", "reason"}``
+        统计。
+        """
+
+        def _result(
+            compressed: bool,
+            before: int,
+            after: int,
+            kept: int,
+            reason: str,
+        ) -> dict[str, Any]:
+            return {
+                "compressed": compressed,
+                "tokens_before": before,
+                "tokens_after": after,
+                "kept": kept,
+                "reason": reason,
+            }
+
+        if self._checkpointer is None:
+            return _result(False, 0, 0, 0, "no_checkpointer")
+
+        configurable: dict[str, Any] = {"thread_id": conversation_id}
+        if context_window_tokens is not None:
+            configurable["context_window_tokens"] = context_window_tokens
+        config: RunnableConfig = {"configurable": configurable}
+
+        try:
+            snapshot = await self.graph.aget_state(config)
+        except Exception:
+            logger.warning(
+                "Manual compress: checkpoint lookup failed for %s",
+                conversation_id,
+                exc_info=True,
+            )
+            return _result(False, 0, 0, 0, "state_lookup_failed")
+
+        messages = list(snapshot.values.get("messages") or []) if snapshot is not None else []
+        tokens_before = estimate_messages_tokens(messages)
+        if not messages:
+            return _result(False, tokens_before, tokens_before, 0, "no_messages")
+        if len(messages) < 2:
+            return _result(False, tokens_before, tokens_before, len(messages), "too_few_messages")
+
+        # 复用 _compress_node 的窗口解析（configurable → agent 级兜底）。
+        window = self._resolve_context_window(config)
+        if window is None:
+            return _result(False, tokens_before, tokens_before, len(messages), "no_window")
+
+        try:
+            compressed = await self._compressor.compress(messages, window)
+        except Exception:
+            # 摘要类压缩器依赖 LLM（provider 不可用时会抛异常）；
+            # 降级为纯删除策略，压缩绝不会崩溃。
+            logger.warning(
+                "Manual compress strategy failed; falling back to sliding_window", exc_info=True
+            )
+            try:
+                compressed = await SlidingWindowCompressor().compress(messages, window)
+            except Exception:
+                logger.warning(
+                    "Manual compress fallback failed; keeping state unchanged", exc_info=True
+                )
+                return _result(
+                    False, tokens_before, tokens_before, len(messages), "compression_failed"
+                )
+
+        compressed = strip_first_assistant_thinking(list(compressed))
+        tokens_after = estimate_messages_tokens(compressed)
+        # 唯一改动点。未产生删除/就地修改时返回空更新（保留纯追加前缀）。
+        update = _messages_state_update(messages, compressed)
+        if not update:
+            return _result(False, tokens_before, tokens_after, len(compressed), "no_change")
+
+        try:
+            await self.graph.aupdate_state(config, update)
+        except Exception:
+            logger.warning(
+                "Manual compress: state write-back failed for %s",
+                conversation_id,
+                exc_info=True,
+            )
+            return _result(False, tokens_before, tokens_after, len(compressed), "write_failed")
+
+        logger.info(
+            "Manual context compress %s: %d -> %d estimated tokens (%d message(s) kept)",
+            conversation_id,
+            tokens_before,
+            tokens_after,
+            len(compressed),
+        )
+        return _result(True, tokens_before, tokens_after, len(compressed), "ok")
+
     async def _call_model_node(self, state: AgentState) -> dict[str, list[AIMessage]]:
         """Node wrapper for calling the LLM."""
         model = self.llm

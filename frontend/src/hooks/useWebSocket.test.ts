@@ -398,4 +398,123 @@ describe('useWebSocket', () => {
     // A's late response must not overwrite the view of B.
     expect(result.current.messages.map(m => m.content)).toEqual(['B history'])
   })
+
+  it('stopGeneration sends { stop: true } with the active conversation id', async () => {
+    const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-1'))
+
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    })
+
+    act(() => {
+      result.current.stopGeneration()
+    })
+
+    const sent = JSON.parse(MockWebSocket.instances[0].sentMessages[0])
+    expect(sent.stop).toBe(true)
+    expect(sent.conversation_id).toBe('conv-1')
+  })
+
+  it('stopGeneration omits conversation_id when there is no active conversation', async () => {
+    const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat'))
+
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    })
+
+    act(() => {
+      result.current.stopGeneration()
+    })
+
+    const sent = JSON.parse(MockWebSocket.instances[0].sentMessages[0])
+    expect(sent.stop).toBe(true)
+    expect(sent.conversation_id).toBeUndefined()
+  })
+
+  it('finalizes the partial reply as a completed message when stopped', async () => {
+    vi.useFakeTimers()
+    const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-1'))
+
+    await act(async () => {
+      vi.advanceTimersByTime(10)
+    })
+
+    act(() => {
+      result.current.sendMessage('hello', 'conv-1')
+    })
+    act(() => {
+      MockWebSocket.instances[0].simulateMessage(
+        JSON.stringify({ chunk: 'partial ', conversation_id: 'conv-1' }),
+      )
+    })
+    act(() => {
+      MockWebSocket.instances[0].simulateMessage(
+        JSON.stringify({ chunk: 'answer', conversation_id: 'conv-1' }),
+      )
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(500)
+    })
+    // All buffered content revealed, stream still active.
+    expect(result.current.isStreaming).toBe(true)
+
+    // User presses stop → backend replies with { stopped: true }.
+    act(() => {
+      MockWebSocket.instances[0].simulateMessage(
+        JSON.stringify({ stopped: true, conversation_id: 'conv-1' }),
+      )
+    })
+
+    expect(result.current.isStreaming).toBe(false)
+    const assistant = result.current.messages.find(m => m.role === 'assistant')
+    expect(assistant?.content).toBe('partial answer')
+    expect(assistant?.id).not.toMatch(/^stream-/)
+  })
+
+  it('backs off awaitingMoreContent when the typewriter drains before done', async () => {
+    vi.useFakeTimers()
+    const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-1'))
+
+    await act(async () => {
+      vi.advanceTimersByTime(10)
+    })
+
+    act(() => {
+      result.current.sendMessage('hello', 'conv-1')
+    })
+    act(() => {
+      MockWebSocket.instances[0].simulateMessage(
+        JSON.stringify({ chunk: 'short', conversation_id: 'conv-1' }),
+      )
+    })
+    // Drain the typewriter completely; not done yet → awaiting more content.
+    await act(async () => {
+      vi.advanceTimersByTime(500)
+    })
+    expect(result.current.awaitingMoreContent).toBe(true)
+
+    // A new chunk arrives → new content, indicator backs off.
+    act(() => {
+      MockWebSocket.instances[0].simulateMessage(
+        JSON.stringify({ chunk: ' more', conversation_id: 'conv-1' }),
+      )
+    })
+    expect(result.current.awaitingMoreContent).toBe(false)
+
+    // Drains again and still not done → awaiting again.
+    await act(async () => {
+      vi.advanceTimersByTime(500)
+    })
+    expect(result.current.awaitingMoreContent).toBe(true)
+
+    // Done → awaiting clears and streaming ends.
+    act(() => {
+      MockWebSocket.instances[0].simulateMessage(JSON.stringify({ done: true, conversation_id: 'conv-1' }))
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(500)
+    })
+    expect(result.current.awaitingMoreContent).toBe(false)
+    expect(result.current.isStreaming).toBe(false)
+  })
 })

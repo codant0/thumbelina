@@ -8,6 +8,9 @@ interface MessageListProps {
   messages: Message[]
   waitingForReply?: boolean
   isStreaming?: boolean
+  /** Stream is active but has no *new* text to reveal (e.g. waiting for the
+   *  next chunk or the model to finish) — drives the "generating…" pulse. */
+  awaitingMoreContent?: boolean
 }
 
 interface ThinkingBlockProps {
@@ -55,7 +58,7 @@ function ThinkingBlock({ thinking, active }: ThinkingBlockProps) {
   )
 }
 
-export function MessageList({ messages, waitingForReply, isStreaming }: MessageListProps) {
+export function MessageList({ messages, waitingForReply, isStreaming, awaitingMoreContent }: MessageListProps) {
   const listRef = useRef<HTMLDivElement>(null)
   // Whether to keep following new content. False once the user scrolls up to read.
   const stickToBottomRef = useRef(true)
@@ -137,6 +140,17 @@ export function MessageList({ messages, waitingForReply, isStreaming }: MessageL
             <span className="typing-dot" />
             <span className="typing-dot" />
           </div>
+        </div>
+      )}
+      {isStreaming && awaitingMoreContent && !waitingForReply && (
+        <div className="message assistant generating-indicator" data-testid="generating-indicator">
+          <span className="msg-role">{t('chat.roleAssistant')}</span>
+          <div className="generating-dots" aria-hidden="true">
+            <span className="generating-dot" />
+            <span className="generating-dot" />
+            <span className="generating-dot" />
+          </div>
+          <span className="generating-label">{t('chat.generating')}</span>
         </div>
       )}
     </div>

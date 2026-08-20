@@ -224,7 +224,16 @@
     "thinkingProcess": "Thinking process",
     "defaultRole": "Default role",
     "chooseRole": "Choose a role for this conversation",
-    "noRoles": "No roles available"
+    "noRoles": "No roles available",
+    "compress": "Compress",
+    "compressTitle": "Compress conversation context",
+    "compressInProgress": "Compressing…",
+    "compressSuccess": "Context compressed",
+    "compressSkipped": "Nothing to compress",
+    "compressFailed": "Failed to compress context",
+    "stop": "Stop",
+    "stopTitle": "Stop generating",
+    "generating": "Generating…"
   },
   "taskManager": {
     "title": "Task Manager",

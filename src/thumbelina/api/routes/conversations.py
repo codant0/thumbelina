@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import logging
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from thumbelina.api.deps import get_repository_manager
+from thumbelina.api.deps import get_agent, get_repository_manager
 from thumbelina.api.schemas import ConversationDetailSchema, ConversationSchema, MessageSchema
 from thumbelina.concurrency import per_conversation_lock
 from thumbelina.prompts.roles import list_roles
@@ -94,6 +94,18 @@ class SetConversationThinkingRequest(BaseModel):
     effort: Literal["low", "medium", "high"] = Field(
         default="medium",
         description="Thinking intensity level",
+    )
+
+
+class CompressConversationRequest(BaseModel):
+    """Request body for manually compressing a conversation's context."""
+
+    context_window_tokens: int | None = Field(
+        default=None,
+        description=(
+            "Optional context window (tokens) to compress down to; when omitted the "
+            "conversation's resolved window (endpoint → active → llm.context_window) is used"
+        ),
     )
 
 
@@ -298,6 +310,32 @@ async def set_conversation_thinking(
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return ConversationSchema(**conv)
+
+
+@router.post("/conversations/{conversation_id}/compress")
+async def compress_conversation(
+    conversation_id: str,
+    request: Request,
+    body: CompressConversationRequest | None = None,
+    repository: RepositoryManager = Depends(get_repository_manager),
+) -> dict[str, Any]:
+    """手动压缩指定会话的 LangGraph 检查点历史。
+
+    无条件调用压缩器（不等阈值），并把压缩后的序列经 ``add_messages``
+    更新写回检查点。会话可能被 HTTP ``/chat`` 或 WebSocket 并发访问，
+    因此持同一把 per-conversation 锁串行化，避免与在途轮次交错。
+    """
+    conv = await repository.get_conversation(conversation_id)
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    agent = get_agent(request)
+    window_tokens = body.context_window_tokens if body is not None else None
+
+    async with per_conversation_lock(conversation_id):
+        return await agent.compress_conversation(
+            conversation_id, context_window_tokens=window_tokens
+        )
 
 
 @router.delete("/conversations/{conversation_id}/messages")

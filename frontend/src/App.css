@@ -3360,6 +3360,118 @@
   cursor: default;
 }
 
+/* ===== Compress context button (chat status bar) ===== */
+/* Reuses .clear-context-btn layout; only the icon/label differ. */
+.compress-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-med);
+  color: var(--text-secondary);
+  background: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  padding: 3px var(--sp-3);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+  font-family: inherit;
+}
+
+.compress-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
+.compress-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ===== Stop generating button (chat status bar) ===== */
+.stop-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-med);
+  color: var(--error);
+  background: none;
+  border: 1px solid var(--error-muted);
+  border-radius: var(--radius-full);
+  padding: 3px var(--sp-3);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+  font-family: inherit;
+}
+
+.stop-btn:hover {
+  background: var(--error-muted);
+}
+
+.stop-btn svg {
+  fill: currentColor;
+}
+
+/* ===== Generating indicator (streaming but no new text yet) ===== */
+.generating-indicator {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--sp-2);
+  opacity: 0.75;
+}
+
+.generating-indicator .msg-role {
+  margin-bottom: 0;
+}
+
+.generating-dots {
+  display: flex;
+  gap: 4px;
+  padding: 4px 0;
+}
+
+.generating-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: generating-pulse 1.2s ease-in-out infinite;
+}
+
+.generating-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.generating-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes generating-pulse {
+  0%, 100% {
+    opacity: 0.35;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.generating-label {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .generating-dot {
+    animation: none;
+    opacity: 0.5;
+  }
+}
+
 /* ── Responsive: tablet ── */
 @media (max-width: 1023px) {
   .kb-sidebar {

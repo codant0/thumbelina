@@ -187,6 +187,56 @@ describe('MessageList', () => {
     expect(geometry.top).toBe(100)
   })
 
+  it('shows the generating indicator when streaming but awaiting more content', () => {
+    const streamed: Message = {
+      id: 'stream-1',
+      role: 'assistant',
+      content: 'revealed',
+      timestamp: '2024-01-01T00:00:01Z',
+    }
+    render(
+      <MessageList
+        messages={[streamed]}
+        isStreaming
+        awaitingMoreContent
+        waitingForReply={false}
+      />,
+    )
+    expect(screen.getByTestId('generating-indicator')).toBeInTheDocument()
+  })
+
+  it('hides the generating indicator while new content is being revealed', () => {
+    const streamed: Message = {
+      id: 'stream-1',
+      role: 'assistant',
+      content: 'revealed',
+      timestamp: '2024-01-01T00:00:01Z',
+    }
+    render(
+      <MessageList
+        messages={[streamed]}
+        isStreaming
+        awaitingMoreContent={false}
+        waitingForReply={false}
+      />,
+    )
+    expect(screen.queryByTestId('generating-indicator')).not.toBeInTheDocument()
+  })
+
+  it('prefers the typing indicator when still waiting for the first reply', () => {
+    const userMsg: Message = { id: '1', role: 'user', content: 'hi', timestamp: '2024-01-01T00:00:00Z' }
+    render(
+      <MessageList
+        messages={[userMsg]}
+        isStreaming
+        awaitingMoreContent
+        waitingForReply
+      />,
+    )
+    expect(screen.getByTestId('typing-indicator')).toBeInTheDocument()
+    expect(screen.queryByTestId('generating-indicator')).not.toBeInTheDocument()
+  })
+
   it('should resume following when the user sends a new message', () => {
     const userMsg: Message = { id: '1', role: 'user', content: 'hi', timestamp: '2024-01-01T00:00:00Z' }
     const reply: Message = { id: '2', role: 'assistant', content: 'reply', timestamp: '2024-01-01T00:00:01Z' }

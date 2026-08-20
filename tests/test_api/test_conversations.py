@@ -464,3 +464,143 @@ async def test_clear_messages_prevents_context_revival():
 
     await agent.run("Second message")
     assert await _checkpoint_message_contents(agent, cid) == ["Second message", "reply"]
+
+
+@pytest.mark.asyncio
+async def test_compress_conversation_compresses_and_persists():
+    """手动压缩应无条件调用压缩器并把结果写回检查点。"""
+    from thumbelina.agent.compression.sliding_window import SlidingWindowCompressor
+
+    cid = "cid-compress"
+    agent, mock_repository, saver = _make_checkpointed_agent(cid)
+    await agent.run("First message")
+    await agent.run("Second message")
+    before = await _checkpoint_message_contents(agent, cid)
+    assert len(before) >= 4  # 两个 user + 两个 assistant 回复
+
+    # 用纯删除的滑动窗口策略 + 极小窗口，保证真正发生裁剪。
+    agent._compressor = SlidingWindowCompressor()
+    stats = await agent.compress_conversation(cid, context_window_tokens=1)
+
+    assert stats["compressed"] is True
+    assert stats["reason"] == "ok"
+    assert stats["tokens_before"] > stats["tokens_after"]
+    assert stats["kept"] > 0
+
+    # 压缩结果已通过检查点持久化，能被后续读取到。
+    after = await _checkpoint_message_contents(agent, cid)
+    assert len(after) == stats["kept"]
+    assert len(after) < len(before)
+
+
+@pytest.mark.asyncio
+async def test_compress_conversation_empty_thread_is_noop():
+    """没有消息的线程手动压缩应优雅返回、不崩溃。"""
+    from thumbelina.agent.compression.sliding_window import SlidingWindowCompressor
+
+    cid = "cid-compress-empty"
+    agent, mock_repository, saver = _make_checkpointed_agent(cid)
+    agent._compressor = SlidingWindowCompressor()
+
+    stats = await agent.compress_conversation(cid, context_window_tokens=1)
+    assert stats["compressed"] is False
+    assert stats["reason"] == "no_messages"
+
+
+@pytest.mark.asyncio
+async def test_compress_conversation_single_message_is_noop():
+    """单条消息（太少）手动压缩应优雅返回、不崩溃。"""
+    from langchain_core.messages import HumanMessage
+
+    from thumbelina.agent.compression.sliding_window import SlidingWindowCompressor
+
+    cid = "cid-compress-single"
+    agent, mock_repository, saver = _make_checkpointed_agent(cid)
+    agent._compressor = SlidingWindowCompressor()
+    # 只写入一条消息，模拟检查点里只有单个消息的线程。
+    await agent.graph.aupdate_state(
+        {"configurable": {"thread_id": cid}},
+        {"messages": [HumanMessage(content="Only")]},
+    )
+
+    stats = await agent.compress_conversation(cid, context_window_tokens=1)
+    assert stats["compressed"] is False
+    assert stats["reason"] == "too_few_messages"
+
+
+@pytest.mark.asyncio
+async def test_compress_conversation_without_checkpointer():
+    """缺少检查点存储器（降级模式）时手动压缩应返回 no_checkpointer。"""
+    from thumbelina.agent.graph import ThumbelinaAgent
+
+    mock_provider = MagicMock()
+    agent = ThumbelinaAgent(llm_provider=mock_provider, checkpointer=None)
+    stats = await agent.compress_conversation("cid", context_window_tokens=1)
+    assert stats["compressed"] is False
+    assert stats["reason"] == "no_checkpointer"
+
+
+@pytest.mark.asyncio
+async def test_compress_conversation_compressor_exception_degrades():
+    """压缩器抛异常时应降级为滑动窗口，而不是崩溃。"""
+    cid = "cid-compress-degrade"
+    agent, mock_repository, saver = _make_checkpointed_agent(cid)
+    await agent.run("First message")
+    await agent.run("Second message")
+
+    class Boom:
+        async def compress(self, messages, window_tokens):
+            raise RuntimeError("provider unavailable")
+
+    agent._compressor = Boom()  # type: ignore[assignment]
+    stats = await agent.compress_conversation(cid, context_window_tokens=1)
+
+    # 数据不足时降级窗口也无事可做 → 优雅返回未压缩。
+    assert stats["compressed"] in (True, False)
+    assert stats["reason"] in ("ok", "no_change")
+
+
+def test_compress_api_endpoint_calls_agent_with_lock(client, conversation_id):
+    """POST /compress 应调用 agent 的 compress_conversation 并返回统计。"""
+    agent = client.app.state.agent
+    agent.compress_conversation = AsyncMock(
+        return_value={
+            "compressed": True,
+            "tokens_before": 100,
+            "tokens_after": 40,
+            "kept": 5,
+            "reason": "ok",
+        }
+    )
+
+    response = client.post(f"/api/v1/conversations/{conversation_id}/compress")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["compressed"] is True
+    assert data["kept"] == 5
+    agent.compress_conversation.assert_awaited_once_with(
+        conversation_id, context_window_tokens=None
+    )
+
+
+def test_compress_api_endpoint_nonexistent_conversation(client):
+    """POST /compress 对不存在的会话应返回 404。"""
+    response = client.post("/api/v1/conversations/nonexistent-id/compress")
+    assert response.status_code == 404
+
+
+def test_compress_api_endpoint_accepts_context_window(client, conversation_id):
+    """POST /compress 应透传 context_window_tokens 给 agent。"""
+    agent = client.app.state.agent
+    agent.compress_conversation = AsyncMock(
+        return_value={"compressed": False, "reason": "no_change"}
+    )
+
+    response = client.post(
+        f"/api/v1/conversations/{conversation_id}/compress",
+        json={"context_window_tokens": 8000},
+    )
+    assert response.status_code == 200
+    agent.compress_conversation.assert_awaited_once_with(
+        conversation_id, context_window_tokens=8000
+    )

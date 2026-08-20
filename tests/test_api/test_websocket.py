@@ -185,7 +185,12 @@ async def test_per_conversation_lock_none_cid_passes_through():
 
 @pytest.mark.asyncio
 async def test_websocket_serializes_same_conversation_turns():
-    """指向同一会话的两个连接必须串行执行各轮。"""
+    """指向同一会话的两个连接必须串行执行各轮。
+
+    生成现在跑在独立任务中，连接保持打开（与真实前端一致）；两个连接
+    指向同一会话时，第二个必须停在 per-conversation 锁上等待第一个
+    结束。第一个连接在完成后才断开。
+    """
     from thumbelina.api import websocket as ws
 
     order = []
@@ -218,26 +223,39 @@ async def test_websocket_serializes_same_conversation_turns():
             self.app = SimpleNamespace(state=state)
             self.sent: list[dict] = []
             self._message: str | None = message
+            self.disconnect = asyncio.Event()
 
         async def accept(self) -> None:
             pass
 
         async def receive_text(self) -> str:
-            if self._message is None:
-                raise WebSocketDisconnect()
-            message, self._message = self._message, None
-            return json.dumps({"message": message, "conversation_id": "cid-lock"})
+            # 先投递一条消息，然后保持连接打开，直到被要求断开。
+            if self._message is not None:
+                message, self._message = self._message, None
+                return json.dumps({"message": message, "conversation_id": "cid-lock"})
+            await self.disconnect.wait()
+            raise WebSocketDisconnect()
 
         async def send_json(self, payload: dict) -> None:
             self.sent.append(payload)
 
-    first = asyncio.create_task(ws.websocket_chat(FakeWS("first")))
+    first_ws = FakeWS("first")
+    second_ws = FakeWS("second")
+    first = asyncio.create_task(ws.websocket_chat(first_ws))
     await first_started.wait()
-    second = asyncio.create_task(ws.websocket_chat(FakeWS("second")))
+    second = asyncio.create_task(ws.websocket_chat(second_ws))
     # 第二个轮次必须停在会话锁上等待。
     await asyncio.sleep(0.05)
     assert order == [("start", "first")]
     gate.set()
+    # 等两个轮次都完成。
+    for _ in range(200):
+        if len(order) >= 4:
+            break
+        await asyncio.sleep(0.01)
+    # 断开两个连接，让 websocket_chat 协程退出。
+    first_ws.disconnect.set()
+    second_ws.disconnect.set()
     await asyncio.gather(first, second)
     assert order == [
         ("start", "first"),
@@ -245,3 +263,64 @@ async def test_websocket_serializes_same_conversation_turns():
         ("start", "second"),
         ("end", "second"),
     ]
+
+
+def test_websocket_stop_without_running_task(client):
+    """stop 消息在没有进行中任务时应幂等返回 stopped。"""
+    with client.websocket_connect("/ws/chat") as ws:
+        ws.send_json({"stop": True})
+        msg = ws.receive_json()
+        assert msg.get("stopped") is True
+        assert "conversation_id" in msg
+
+
+def test_websocket_stop_cancels_inflight_generation(client):
+    """流式进行中收到 stop 应取消生成并返回 stopped。"""
+    import asyncio as _asyncio
+
+    async def _stream(message, context_window_tokens=None):
+        yield {"type": "content", "text": "partial"}
+        # 保持生成进行中，等待 stop 打断。
+        await _asyncio.sleep(30)
+
+    client.app.state.agent.stream = _stream
+
+    with client.websocket_connect("/ws/chat") as ws:
+        ws.send_json({"message": "Hello"})
+        # 先读到第一块 partial，确认生成已在进行中。
+        chunk = ws.receive_json()
+        assert chunk.get("chunk") == "partial"
+
+        # 发送 stop，应取消进行中的生成。
+        ws.send_json({"stop": True, "conversation_id": "test-conv-id"})
+        stopped = ws.receive_json()
+        assert stopped.get("stopped") is True
+        assert stopped.get("conversation_id") == "test-conv-id"
+
+
+def test_websocket_recovers_after_stop(client):
+    """被 stop 打断后连接应能继续处理下一条普通消息。"""
+    import asyncio as _asyncio
+
+    async def _stream(message, context_window_tokens=None):
+        if message == "first":
+            yield {"type": "content", "text": "partial"}
+            await _asyncio.sleep(30)
+        yield {"type": "content", "text": "second reply"}
+
+    client.app.state.agent.stream = _stream
+
+    with client.websocket_connect("/ws/chat") as ws:
+        # 第一条消息启动生成后立即 stop。
+        ws.send_json({"message": "first"})
+        chunk = ws.receive_json()
+        assert chunk.get("chunk") == "partial"
+        ws.send_json({"stop": True})
+        stopped = ws.receive_json()
+        assert stopped.get("stopped") is True
+
+        # 第二条普通消息应正常处理并收到 done。
+        ws.send_json({"message": "second"})
+        msgs = _collect_ws_messages(ws)
+        assert any(m.get("chunk") == "second reply" for m in msgs)
+        assert any(m.get("done") for m in msgs)

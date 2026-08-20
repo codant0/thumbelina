@@ -578,7 +578,7 @@ export function TodoPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  const [filter, setFilter] = useState<TodoFilter>('all')
+  const [filter, setFilter] = useState<TodoFilter>('active')
   // Synchronous mutex: guards against duplicate requests from rapid clicks
   // before the busy state re-render takes effect.
   const busyRef = useRef(false)

@@ -7,10 +7,11 @@ import { KnowledgeBaseSelector } from './KnowledgeBaseSelector'
 import { RoleSelector } from './RoleSelector'
 import { ThinkingSelector } from './ThinkingSelector'
 import { ContextUsageItem } from '../StatusBar/ContextUsageItem'
-import { Mail, Eraser } from 'lucide-react'
+import { Toast } from '../Settings/Toast'
+import { Mail, Eraser, Shrink, Square } from 'lucide-react'
 import type { Conversation, ThinkingEffort } from '../../types/chat'
 import { useTranslation } from '../../i18n'
-import { clearConversationMessages } from '../../api/conversations'
+import { clearConversationMessages, compressConversation } from '../../api/conversations'
 
 interface ChatWindowProps {
   conversationId?: string
@@ -29,10 +30,13 @@ export function ChatWindow({ conversationId, conversations, onConversationCreate
     return `${wsProtocol}//${window.location.host}/ws/chat`
   }, [])
 
-  const { messages, isConnected, isStreaming, streamingMode: wsStreamingMode, waitingForReply, newConversationId, clearNewConversation, sendMessage, clearMessages, switchConversation, loadHistory } = useWebSocket(wsUrl, conversationId)
+  const { messages, isConnected, isStreaming, streamingMode: wsStreamingMode, waitingForReply, awaitingMoreContent, newConversationId, clearNewConversation, sendMessage, stopGeneration, clearMessages, switchConversation, loadHistory } = useWebSocket(wsUrl, conversationId)
   const [streamingMode, setStreamingMode] = useState(true)
   const [toggling, setToggling] = useState(false)
   const [clearing, setClearing] = useState(false)
+  const [compressing, setCompressing] = useState(false)
+  // Local inline feedback for the compress action (quiet success/failure hint).
+  const [compressNotice, setCompressNotice] = useState<{ message: string; isError: boolean } | null>(null)
   const { t } = useTranslation()
 
   // Sync from WebSocket when backend reports mode
@@ -84,6 +88,32 @@ export function ChatWindow({ conversationId, conversations, onConversationCreate
       setClearing(false)
     }
   }, [conversationId, clearing, clearMessages, t])
+
+  const handleCompress = useCallback(async () => {
+    if (!conversationId || compressing) return
+    setCompressing(true)
+    setCompressNotice(null)
+    try {
+      const result = await compressConversation(conversationId)
+      if (result.compressed) {
+        setCompressNotice({ message: t('chat.compressSuccess'), isError: false })
+      } else {
+        // Backend reported it was not needed/unavailable — quiet, non-blocking notice.
+        setCompressNotice({ message: result.reason ?? t('chat.compressSkipped'), isError: false })
+      }
+    } catch {
+      setCompressNotice({ message: t('chat.compressFailed'), isError: true })
+    } finally {
+      setCompressing(false)
+    }
+  }, [conversationId, compressing, t])
+
+  const handleStop = useCallback(() => {
+    // Fire-and-forget over WS; the backend cancels the reply and replies with
+    // { stopped: true }, at which point the hook clears isStreaming and this
+    // button disappears.
+    stopGeneration()
+  }, [stopGeneration])
 
   const toggleStreaming = useCallback(async () => {
     const next = !streamingMode
@@ -156,7 +186,39 @@ export function ChatWindow({ conversationId, conversations, onConversationCreate
             <span>{t('chat.clearContext')}</span>
           </button>
         )}
+        {conversationId && (
+          <button
+            type="button"
+            className="clear-context-btn compress-btn"
+            data-testid="compress-context"
+            title={t('chat.compressTitle')}
+            aria-label={t('chat.compressTitle')}
+            onClick={() => void handleCompress()}
+            disabled={compressing || isStreaming || messages.length === 0}
+          >
+            <Shrink size={14} />
+            <span>{compressing ? t('chat.compressInProgress') : t('chat.compress')}</span>
+          </button>
+        )}
+        {isStreaming && (
+          <button
+            type="button"
+            className="stop-btn"
+            data-testid="stop-generation"
+            title={t('chat.stopTitle')}
+            aria-label={t('chat.stopTitle')}
+            onClick={handleStop}
+          >
+            <Square size={14} />
+            <span>{t('chat.stop')}</span>
+          </button>
+        )}
       </div>
+      <Toast
+        message={compressNotice?.message ?? ''}
+        isError={compressNotice?.isError}
+        onClose={() => setCompressNotice(null)}
+      />
       {messages.length === 0 ? (
         <div className="empty-state">
           <div className="empty-icon"><Mail size={24} /></div>
@@ -164,11 +226,11 @@ export function ChatWindow({ conversationId, conversations, onConversationCreate
           <p className="empty-hint">{t('chat.startHint')}</p>
         </div>
       ) : (
-        <MessageList messages={messages} waitingForReply={waitingForReply} isStreaming={isStreaming} />
+        <MessageList messages={messages} waitingForReply={waitingForReply} isStreaming={isStreaming} awaitingMoreContent={awaitingMoreContent} />
       )}
       <InputBox
         onSend={handleSend}
-        disabled={!isConnected || isStreaming}
+        disabled={!isConnected}
         toolbar={
           conversationId ? (
             <>

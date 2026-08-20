@@ -316,7 +316,9 @@ describe('TodoPage', () => {
       expect(patch?.[0]).toBe('/api/v1/todo/items/0')
       expect(JSON.parse(String(patch?.[1]?.body))).toEqual({ done: true })
     })
-    await waitFor(() => expect(checkbox.checked).toBe(true))
+    // The server replaces `items` with the done item; under the default active
+    // filter it drops out of view.
+    await waitFor(() => expect(screen.queryByText('buy milk')).not.toBeInTheDocument())
   })
 
   it('deletes a note via the note card delete button', async () => {
@@ -443,6 +445,11 @@ describe('TodoPage', () => {
     const user = userEvent.setup()
     render(<TodoPage />)
     await screen.findByText('active task')
+    // Default filter is 'active': the done item starts hidden.
+    expect(screen.queryByText('finished task')).not.toBeInTheDocument()
+
+    await user.click(getFilterTab('All'))
+    expect(screen.getByText('active task')).toBeInTheDocument()
     expect(screen.getByText('finished task')).toBeInTheDocument()
 
     await user.click(getFilterTab('Active'))
@@ -464,13 +471,14 @@ describe('TodoPage', () => {
     render(<TodoPage />)
     await screen.findByText('active task')
 
-    expect(getFilterTab('All')).toHaveAttribute('aria-pressed', 'true')
-    expect(getFilterTab('Active')).toHaveAttribute('aria-pressed', 'false')
-    expect(getFilterTab('Done')).toHaveAttribute('aria-pressed', 'false')
-
-    await user.click(getFilterTab('Active'))
+    // Default filter is 'active'.
     expect(getFilterTab('All')).toHaveAttribute('aria-pressed', 'false')
     expect(getFilterTab('Active')).toHaveAttribute('aria-pressed', 'true')
+    expect(getFilterTab('Done')).toHaveAttribute('aria-pressed', 'false')
+
+    await user.click(getFilterTab('All'))
+    expect(getFilterTab('All')).toHaveAttribute('aria-pressed', 'true')
+    expect(getFilterTab('Active')).toHaveAttribute('aria-pressed', 'false')
     expect(getFilterTab('Done')).toHaveAttribute('aria-pressed', 'false')
 
     await user.click(getFilterTab('Done'))
@@ -489,6 +497,11 @@ describe('TodoPage', () => {
     }))
     const user = userEvent.setup()
     render(<TodoPage />)
+    await screen.findByTestId('todo-page')
+
+    // On initial load the default active filter hides the done item.
+    expect(screen.queryByText('finished task')).not.toBeInTheDocument()
+    await user.click(getFilterTab('All'))
     await screen.findByText('finished task')
 
     await user.click(getFilterTab('Active'))
@@ -513,8 +526,8 @@ describe('TodoPage', () => {
     await screen.findByTestId('todo-page')
 
     expect(readFilterTabs(container)).toEqual([
-      { label: 'All', count: '2', pressed: true },
-      { label: 'Active', count: '1', pressed: false },
+      { label: 'All', count: '2', pressed: false },
+      { label: 'Active', count: '1', pressed: true },
       { label: 'Done', count: '1', pressed: false },
     ])
   })

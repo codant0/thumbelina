@@ -100,3 +100,22 @@ export async function clearConversationMessages(id: string): Promise<void> {
     throw new Error(data.detail || `HTTP ${res.status}`)
   }
 }
+
+export interface CompressResult {
+  compressed: boolean
+  tokens_before?: number
+  tokens_after?: number
+  kept?: number
+  reason?: string
+}
+
+export async function compressConversation(id: string): Promise<CompressResult> {
+  const res = await fetch(`${API_BASE}/conversations/${id}/compress`, {
+    method: 'POST',
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.detail || `HTTP ${res.status}`)
+  }
+  return res.json() as Promise<CompressResult>
+}

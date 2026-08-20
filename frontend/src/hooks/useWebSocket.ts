@@ -6,6 +6,8 @@ interface WsIncoming {
   chunk_type?: 'reasoning' | string
   response?: string
   done?: boolean
+  /** Backend finished cancelling a streaming reply after the user pressed stop. */
+  stopped?: boolean
   conversation_id?: string
   error?: string
   streaming_mode?: boolean
@@ -62,6 +64,18 @@ export function useWebSocket(url: string, activeConversationId?: string) {
   const completedContentRef = useRef<{ convId: string; content: string; reasoning: string } | null>(null)
   // Monotonic sequence guarding loadHistory against out-of-order responses.
   const historyFetchRef = useRef(0)
+  // Whether a stream is active but has no *new* text to show yet (either the
+  // first chunk has not arrived, or the typewriter already revealed everything
+  // buffered so far and the model has not finished). Drives the "generating…"
+  // indicator in the message list. State mirror guarded by `awaitingMoreRef`.
+  const [awaitingMoreContent, setAwaitingMoreContent] = useState(false)
+  const awaitingMoreRef = useRef(false)
+  const setAwaitingMore = useCallback((value: boolean) => {
+    if (awaitingMoreRef.current !== value) {
+      awaitingMoreRef.current = value
+      setAwaitingMoreContent(value)
+    }
+  }, [])
 
   // Keep the active conversation ref in sync with the prop
   useEffect(() => {
@@ -90,6 +104,7 @@ export function useWebSocket(url: string, activeConversationId?: string) {
     const msgId = twMsgIdRef.current
     twMsgIdRef.current = null
     streamDoneRef.current = false
+    if (awaitingMoreRef.current) setAwaitingMore(false)
     if (msgId) {
       const content = bufferRef.current
       if (finalId) bufferRef.current = ''
@@ -104,7 +119,7 @@ export function useWebSocket(url: string, activeConversationId?: string) {
     }
     setIsStreaming(false)
     setStreamingConvId(null)
-  }, [])
+  }, [setAwaitingMore])
 
   const startTypewriter = useCallback(() => {
     if (twTimerRef.current) clearInterval(twTimerRef.current)
@@ -113,11 +128,17 @@ export function useWebSocket(url: string, activeConversationId?: string) {
       if (displayedRef.current >= total) {
         if (streamDoneRef.current) {
           stopTypewriter(String(msgIdRef.current++))
+        } else {
+          // Everything buffered so far is on screen, but the reply has not
+          // finished — flag "waiting for more content" so the UI can show a
+          // generating indicator instead of dead air.
+          setAwaitingMore(true)
         }
         return
       }
       // Reveal characters
       displayedRef.current = Math.min(displayedRef.current + CHARS_PER_TICK, total)
+      setAwaitingMore(false)
       const displayed = bufferRef.current.slice(0, displayedRef.current)
       setMessages(prev => {
         const idx = prev.findIndex(m => m.id === twMsgIdRef.current)
@@ -142,7 +163,7 @@ export function useWebSocket(url: string, activeConversationId?: string) {
         return updated
       })
     }, TICK_INTERVAL)
-  }, [stopTypewriter])
+  }, [stopTypewriter, setAwaitingMore])
 
   const startReplyTimer = useCallback(() => {
     clearReplyTimer()
@@ -320,6 +341,7 @@ export function useWebSocket(url: string, activeConversationId?: string) {
         setIsStreaming(true)
         if (conv) setStreamingConvId(conv)
         streamDoneRef.current = false
+        setAwaitingMore(false)
         const isReasoning = data.chunk_type === 'reasoning'
         if (isReasoning) {
           reasoningBufferRef.current += data.chunk
@@ -359,6 +381,29 @@ export function useWebSocket(url: string, activeConversationId?: string) {
             return updated
           })
         }
+        return
+      }
+
+      // Stream stopped (user pressed stop) — the backend cancelled the reply.
+      // Finalize whatever was typed as a completed assistant message (with the
+      // streaming id replaced by a real one), then clear all stream state. An
+      // empty buffer simply ends cleanly.
+      if (data.stopped) {
+        const conv = data.conversation_id ?? null
+        if (conv) {
+          setLastConversationId(conv)
+          if (!knownConversationsRef.current.has(conv)) {
+            knownConversationsRef.current.add(conv)
+            setNewConversationId(conv)
+          }
+          clearWaitingFor(conv)
+        }
+        sessionConvRef.current = null
+        // Stop the typewriter and finalize the partial content immediately.
+        stopTypewriter(String(msgIdRef.current++))
+        bufferRef.current = ''
+        reasoningBufferRef.current = ''
+        displayedRef.current = 0
         return
       }
 
@@ -443,6 +488,7 @@ export function useWebSocket(url: string, activeConversationId?: string) {
       sessionConvRef.current = null
       setStreamingConvId(null)
       setWaitingConvIds([])
+      setAwaitingMore(false)
     }
 
     ws.onerror = () => {
@@ -452,6 +498,7 @@ export function useWebSocket(url: string, activeConversationId?: string) {
       sessionConvRef.current = null
       setStreamingConvId(null)
       setWaitingConvIds([])
+      setAwaitingMore(false)
     }
 
     return () => {
@@ -513,6 +560,16 @@ export function useWebSocket(url: string, activeConversationId?: string) {
       }
     }
   }, [stopTypewriter, startReplyTimer, clearReplyTimer])
+
+  const stopGeneration = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      const payload: Record<string, string | boolean> = { stop: true }
+      if (activeConversationRef.current) {
+        payload.conversation_id = activeConversationRef.current
+      }
+      wsRef.current.send(JSON.stringify(payload))
+    }
+  }, [])
 
   const switchConversation = useCallback((conversationId: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -613,5 +670,5 @@ export function useWebSocket(url: string, activeConversationId?: string) {
     (activeConversationId && waitingConvIds.includes(activeConversationId)) ||
     (!activeConversationId && waitingConvIds.includes('@pending')) || false
 
-  return { messages, isConnected, isStreaming: isStreamingActive, streamingMode, waitingForReply, lastConversationId, newConversationId, clearNewConversation, sendMessage, clearMessages, switchConversation, loadHistory }
+  return { messages, isConnected, isStreaming: isStreamingActive, streamingMode, waitingForReply, awaitingMoreContent, lastConversationId, newConversationId, clearNewConversation, sendMessage, stopGeneration, clearMessages, switchConversation, loadHistory }
 }

@@ -65,3 +65,5 @@ thumbelina-*.tar
 node_modules/.vite/vitest/*/results.json
 .qoder/scheduled_tasks.json
 .qoder/scheduled_tasks.lock
+
+thumbelina.db.*
