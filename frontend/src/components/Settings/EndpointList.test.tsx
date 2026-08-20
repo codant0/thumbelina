@@ -8,7 +8,10 @@ const sampleEndpoint = {
   provider: 'openai' as const,
   name: 'Mimo',
   base_url: 'https://api.openai.com/v1',
-  models: ['gpt-4o', 'gpt-4o-mini'],
+  models: [
+    { name: 'gpt-4o', context_window: '128K', multimodal: true },
+    { name: 'gpt-4o-mini', context_window: null, multimodal: false },
+  ],
   active_model: 'gpt-4o',
   api_key_set: true,
   is_default: true,
@@ -88,24 +91,23 @@ describe('EndpointList', () => {
     expect(onActivate).toHaveBeenCalledWith('1', 'gpt-4o-mini')
   })
 
-  it('renders the context window badge when configured', () => {
-    render(
-      <LocaleProvider>
-        <EndpointList
-          {...defaultProps}
-          endpoints={[{ ...sampleEndpoint, context_window: '128K' }]}
-        />
-      </LocaleProvider>,
-    )
-    expect(screen.getByTestId('endpoint-context-window-1')).toHaveTextContent('128K')
-  })
-
-  it('omits the context window badge for legacy endpoints', () => {
+  it('renders each model own context window badge', () => {
     render(
       <LocaleProvider>
         <EndpointList {...defaultProps} />
       </LocaleProvider>,
     )
-    expect(screen.queryByTestId('endpoint-context-window-1')).not.toBeInTheDocument()
+    expect(screen.getByTestId('endpoint-model-ctx-1-gpt-4o')).toHaveTextContent('128K')
+    expect(screen.queryByTestId('endpoint-model-ctx-1-gpt-4o-mini')).not.toBeInTheDocument()
+  })
+
+  it('renders the multimodal badge only for multimodal models', () => {
+    render(
+      <LocaleProvider>
+        <EndpointList {...defaultProps} />
+      </LocaleProvider>,
+    )
+    expect(screen.getByTestId('endpoint-model-multimodal-1-gpt-4o')).toBeInTheDocument()
+    expect(screen.queryByTestId('endpoint-model-multimodal-1-gpt-4o-mini')).not.toBeInTheDocument()
   })
 })

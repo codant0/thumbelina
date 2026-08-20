@@ -11,6 +11,7 @@ import {
 import { useTranslation } from '../../i18n'
 import { EndpointList } from './EndpointList'
 import { EndpointForm } from './EndpointForm'
+import { Modal } from './Modal'
 import { Plus, Cpu } from 'lucide-react'
 
 interface EndpointManagerProps {
@@ -129,10 +130,14 @@ export function EndpointManager({ onMessage }: EndpointManagerProps) {
         {t('endpoint.add')}
       </button>
       {showForm && (
-        <EndpointForm onSubmit={handleCreate} onCancel={() => setShowForm(false)} />
+        <Modal title={t('endpoint.addTitle')} onClose={() => setShowForm(false)}>
+          <EndpointForm onSubmit={handleCreate} onCancel={() => setShowForm(false)} />
+        </Modal>
       )}
       {editing && (
-        <EndpointForm initialValues={editing} onSubmit={handleUpdate} onCancel={() => setEditing(null)} />
+        <Modal title={t('endpoint.editTitle')} onClose={() => setEditing(null)}>
+          <EndpointForm initialValues={editing} onSubmit={handleUpdate} onCancel={() => setEditing(null)} />
+        </Modal>
       )}
       {endpoints.length === 0 && !showForm ? (
         <p className="settings-empty-hint">{t('endpoint.noEndpoints')}</p>

@@ -1,8 +1,8 @@
 import { useState, type FormEvent } from 'react'
-import type { EndpointFormData, LLMEndpoint, ModelList } from '../../api/llmConfig'
+import type { EndpointFormData, LLMEndpoint, LLMModelConfig, ModelList } from '../../api/llmConfig'
 import { useTranslation } from '../../i18n'
 import { ConnectionTestButton } from './ConnectionTestButton'
-import { Cpu, Tag, Server, KeyRound, Box, Star, Save, Download, X, Loader2, Check, Gauge } from 'lucide-react'
+import { Cpu, Tag, Server, KeyRound, Box, Star, Save, Download, X, Loader2, Gauge, Images, Plus } from 'lucide-react'
 
 interface EndpointFormProps {
   initialValues?: LLMEndpoint
@@ -10,14 +10,18 @@ interface EndpointFormProps {
   onCancel: () => void
 }
 
+/** Create a model config from a bare name (context window + multimodal unset). */
+function toModel(name: string): LLMModelConfig {
+  return { name, context_window: null, multimodal: false }
+}
+
 export function EndpointForm({ initialValues, onSubmit, onCancel }: EndpointFormProps) {
   const { t } = useTranslation()
   const [provider, setProvider] = useState<'openai' | 'ollama' | 'anthropic'>(initialValues?.provider ?? 'openai')
   const [name, setName] = useState(initialValues?.name ?? '')
   const [baseUrl, setBaseUrl] = useState(initialValues?.base_url ?? '')
-  const [models, setModels] = useState<string[]>(initialValues?.models ?? [])
+  const [models, setModels] = useState<LLMModelConfig[]>(initialValues?.models ?? [])
   const [apiKey, setApiKey] = useState('')
-  const [contextWindow, setContextWindow] = useState(initialValues?.context_window ?? '')
   const [isDefault, setIsDefault] = useState(initialValues?.is_default ?? false)
   const [error, setError] = useState('')
   const [availableModels, setAvailableModels] = useState<string[]>([])
@@ -44,15 +48,21 @@ export function EndpointForm({ initialValues, onSubmit, onCancel }: EndpointForm
     }
   }
 
-  const toggleModel = (m: string) => {
-    setModels(prev => prev.includes(m) ? prev.filter(x => x !== m) : [...prev, m])
+  const addModel = (m: string) => {
+    setModels(prev => (prev.some(x => x.name === m) ? prev : [...prev, toModel(m)]))
+  }
+
+  const removeModel = (m: string) => {
+    setModels(prev => prev.filter(x => x.name !== m))
+  }
+
+  const updateModel = (m: string, patch: Partial<LLMModelConfig>) => {
+    setModels(prev => prev.map(x => (x.name === m ? { ...x, ...patch } : x)))
   }
 
   const addManualModel = () => {
     const m = manualModel.trim()
-    if (m && !models.includes(m)) {
-      setModels(prev => [...prev, m])
-    }
+    if (m) addModel(m)
     setManualModel('')
   }
 
@@ -77,16 +87,20 @@ export function EndpointForm({ initialValues, onSubmit, onCancel }: EndpointForm
       provider,
       name: name.trim(),
       base_url: baseUrl.trim(),
-      models,
+      models: models.map(m => ({
+        name: m.name,
+        context_window: m.context_window?.trim() || null,
+        multimodal: m.multimodal,
+      })),
       api_key: apiKey,
       is_default: isDefault,
-      context_window: contextWindow.trim(),
     })
   }
 
+  const addableModels = availableModels.filter(m => !models.some(x => x.name === m))
+
   return (
-    <form onSubmit={handleSubmit} className="card" data-testid="endpoint-form">
-      <div className="card-title">{initialValues ? t('endpoint.editTitle') : t('endpoint.addTitle')}</div>
+    <form onSubmit={handleSubmit} className="endpoint-form" data-testid="endpoint-form">
       <div className="form-group">
         <label className="form-label"><Cpu size={14} />{t('settings.provider')}</label>
         <select
@@ -150,38 +164,78 @@ export function EndpointForm({ initialValues, onSubmit, onCancel }: EndpointForm
         <p className="form-hint" style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0 8px' }}>
           {t('endpoint.modelsHint')}
         </p>
-        {/* Unified model list: selected first (green), then unselected fetched (neutral) */}
-        {(() => {
-          const allModels = Array.from(new Set([...models, ...availableModels]))
-          const selected = allModels.filter(m => models.includes(m))
-          const unselected = allModels.filter(m => !models.includes(m))
-          const ordered = [...selected, ...unselected]
-          if (ordered.length === 0) {
-            return <span className="form-hint" style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('endpoint.noModels')}</span>
-          }
-          return (
-            <div data-testid="model-unified-list" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-              {ordered.map(m => {
-                const checked = models.includes(m)
-                return (
+
+        {/* Selected models: one editable card per model (context window + multimodal). */}
+        {models.length === 0 ? (
+          <span className="form-hint" style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('endpoint.noModels')}</span>
+        ) : (
+          <div className="model-config__list" data-testid="model-config-list">
+            {models.map(m => (
+              <div className="model-config__card" key={m.name} data-testid={`model-card-${m.name}`}>
+                <div className="model-config__card-head">
+                  <span className="model-config__card-name">{m.name}</span>
                   <button
                     type="button"
-                    key={m}
-                    className={`badge ${checked ? 'badge-success' : 'badge-neutral'}`}
-                    data-testid={checked ? `model-chip-${m}` : `model-toggle-${m}`}
-                    onClick={() => toggleModel(m)}
-                    style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                    role="switch"
+                    aria-checked={m.multimodal}
+                    aria-label={t('endpoint.multimodal')}
+                    className={`model-config__multimodal${m.multimodal ? ' is-on' : ''}`}
+                    data-testid={`model-multimodal-${m.name}`}
+                    onClick={() => updateModel(m.name, { multimodal: !m.multimodal })}
+                    title={t('endpoint.multimodal')}
                   >
-                    {checked && <Check size={11} />}
-                    {m}
-                    {checked && <X size={11} />}
+                    <Images size={14} aria-hidden="true" />
                   </button>
-                )
-              })}
-            </div>
-          )
-        })()}
-        <div className="model-manual-add" style={{ display: 'flex', gap: 6 }}>
+                  <button
+                    type="button"
+                    className="model-config__remove"
+                    data-testid={`model-remove-${m.name}`}
+                    onClick={() => removeModel(m.name)}
+                    title={t('common.delete')}
+                    aria-label={t('common.delete')}
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+                <div className="model-config__field">
+                  <span className="model-config__field-label">{t('endpoint.modelContextWindow')}</span>
+                  <div className="model-config__ctx">
+                    <Gauge size={13} className="model-config__ctx-icon" aria-hidden="true" />
+                    <input
+                      className="form-input model-config__ctx-input"
+                      data-testid={`model-context-window-${m.name}`}
+                      value={m.context_window ?? ''}
+                      onChange={e => updateModel(m.name, { context_window: e.target.value })}
+                      placeholder={t('endpoint.modelContextWindowPlaceholder')}
+                      aria-label={t('endpoint.modelContextWindow')}
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Fetched models that are not yet selected, one click to add. */}
+        {addableModels.length > 0 && (
+          <div className="model-config__available">
+            {addableModels.map(m => (
+              <button
+                type="button"
+                key={m}
+                className="badge badge-neutral"
+                data-testid={`model-add-${m}`}
+                onClick={() => addModel(m)}
+                title={t('endpoint.add')}
+              >
+                <Plus size={11} />
+                {m}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="model-config__add">
           <input
             className="form-input"
             data-testid="manual-model-input"
@@ -191,29 +245,17 @@ export function EndpointForm({ initialValues, onSubmit, onCancel }: EndpointForm
             placeholder={t('endpoint.addModelPlaceholder')}
           />
           <button type="button" className="btn btn-ghost btn-sm" onClick={addManualModel} data-testid="add-manual-model">
+            <Plus size={14} />
             {t('endpoint.addModelManually')}
           </button>
         </div>
-      </div>
-      <div className="form-group">
-        <label className="form-label"><Gauge size={14} />{t('endpoint.contextWindow')}</label>
-        <input
-          className="form-input"
-          data-testid="endpoint-context-window-input"
-          value={contextWindow}
-          onChange={e => setContextWindow(e.target.value)}
-          placeholder={t('endpoint.contextWindowPlaceholder')}
-        />
-        <p className="form-hint" style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0 0' }}>
-          {t('endpoint.contextWindowHint')}
-        </p>
       </div>
       <div className="form-group">
         <ConnectionTestButton
           provider={provider}
           base_url={baseUrl}
           api_key={apiKey}
-          model={models[0]}
+          model={models[0]?.name}
           endpointId={initialValues?.id}
         />
       </div>

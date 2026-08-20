@@ -56,7 +56,9 @@ function ContextUsageItemInner({ messages, endpointId }: ContextUsageItemProps) 
           (endpointId && eps.find(ep => ep.id === endpointId)) ||
           eps.find(ep => ep.is_default) ||
           eps[0]
-        setContextWindow(match?.context_window ?? null)
+        const activeModel = match?.models?.find(m => m.name === match.active_model)
+        const firstModel = match?.models?.[0]
+        setContextWindow(activeModel?.context_window ?? firstModel?.context_window ?? null)
       })
       .catch(() => {
         if (!cancelled) setContextWindow(null)

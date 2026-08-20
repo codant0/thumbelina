@@ -8,7 +8,7 @@ import { RoleSelector } from './RoleSelector'
 import { ThinkingSelector } from './ThinkingSelector'
 import { ContextUsageItem } from '../StatusBar/ContextUsageItem'
 import { Toast } from '../Settings/Toast'
-import { Mail, Eraser, Shrink, Square } from 'lucide-react'
+import { Mail, Eraser, Shrink } from 'lucide-react'
 import type { Conversation, ThinkingEffort } from '../../types/chat'
 import { useTranslation } from '../../i18n'
 import { clearConversationMessages, compressConversation } from '../../api/conversations'
@@ -200,19 +200,6 @@ export function ChatWindow({ conversationId, conversations, onConversationCreate
             <span>{compressing ? t('chat.compressInProgress') : t('chat.compress')}</span>
           </button>
         )}
-        {isStreaming && (
-          <button
-            type="button"
-            className="stop-btn"
-            data-testid="stop-generation"
-            title={t('chat.stopTitle')}
-            aria-label={t('chat.stopTitle')}
-            onClick={handleStop}
-          >
-            <Square size={14} />
-            <span>{t('chat.stop')}</span>
-          </button>
-        )}
       </div>
       <Toast
         message={compressNotice?.message ?? ''}
@@ -231,6 +218,8 @@ export function ChatWindow({ conversationId, conversations, onConversationCreate
       <InputBox
         onSend={handleSend}
         disabled={!isConnected}
+        isStreaming={isStreaming}
+        onStop={handleStop}
         toolbar={
           conversationId ? (
             <>

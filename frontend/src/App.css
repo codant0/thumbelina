@@ -775,6 +775,34 @@
   cursor: not-allowed;
 }
 
+/* Stop button: replaces the send button in the same slot while streaming. */
+.input-box .stop-send-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--error);
+  color: #fff;
+  border: none;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semi);
+  padding: 0 var(--sp-4);
+  height: 40px;
+  border-radius: var(--radius);
+  transition: filter var(--dur-fast) var(--ease-out),
+    opacity var(--dur-fast) var(--ease-out);
+  flex-shrink: 0;
+}
+
+.input-box .stop-send-btn svg {
+  width: var(--icon-md);
+  height: var(--icon-md);
+  fill: currentColor;
+}
+
+.input-box .stop-send-btn:hover {
+  filter: brightness(1.08);
+}
+
 /* ===== Page Containers ===== */
 .page-container {
   flex: 1;
@@ -836,6 +864,89 @@
   width: var(--icon-sm);
   height: var(--icon-sm);
   color: var(--accent);
+}
+
+/* ===== Modal dialog ===== */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: var(--sp-6) var(--sp-4);
+  background: rgba(0, 0, 0, 0.5);
+  animation: modal-fade-in var(--dur-fast) var(--ease-out);
+}
+
+.modal {
+  display: flex;
+  flex-direction: column;
+  width: min(760px, 100%);
+  max-height: 85vh;
+  margin-top: var(--sp-6);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  animation: modal-pop-in var(--dur-base) var(--ease-out);
+}
+
+.modal:focus {
+  outline: none;
+}
+
+.modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5) 0;
+}
+
+.modal__title {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semi);
+  color: var(--text-primary);
+}
+
+.modal__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin: -4px -4px 0 0;
+  border-radius: var(--radius-full);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.modal__close:hover {
+  color: var(--text-primary);
+  background: var(--bg-active);
+}
+
+.modal__close svg {
+  width: var(--icon-md);
+  height: var(--icon-md);
+}
+
+.modal__body {
+  padding: var(--sp-4) var(--sp-5) var(--sp-5);
+  overflow-y: auto;
+}
+
+@keyframes modal-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modal-pop-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to { opacity: 1; transform: none; }
 }
 
 /* ===== Buttons ===== */
@@ -1572,16 +1683,10 @@
 
 /* ===== Endpoint (LLM Model) Cards ===== */
 .endpoint-list {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: var(--sp-3);
   margin-top: var(--sp-3);
-}
-
-.endpoint-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
 }
 
 .endpoint-card {
@@ -1812,8 +1917,212 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  margin-top: auto;
   padding-top: var(--sp-1);
   border-top: 1px solid var(--border-subtle);
+}
+
+/* ===== Endpoint form: per-model config ===== */
+.model-config__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+
+.model-config__card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+
+.model-config__card:hover {
+  border-color: var(--text-secondary);
+}
+
+.model-config__card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.model-config__card-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semi);
+  color: var(--text-primary);
+}
+
+.model-config__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.model-config__field-label {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+
+/* Context window field: input with a muted inline prefix icon. */
+.model-config__ctx {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.model-config__ctx-icon {
+  position: absolute;
+  left: var(--sp-2);
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  color: var(--text-muted);
+  pointer-events: none;
+  flex-shrink: 0;
+}
+
+.model-config__ctx-input {
+  width: 100%;
+  min-height: 28px;
+  padding: 4px var(--sp-2) 4px var(--sp-6);
+  font-size: var(--fs-xs);
+}
+
+/* Multimodal: modern pill chip toggle (orange tinted when on). */
+.model-config__multimodal {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--dur-base) var(--ease-out),
+    color var(--dur-base) var(--ease-out),
+    border-color var(--dur-base) var(--ease-out);
+}
+
+.model-config__multimodal:hover {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
+.model-config__multimodal:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+
+.model-config__multimodal.is-on {
+  color: var(--accent-secondary);
+  background: var(--accent-secondary-muted);
+  border-color: var(--accent-secondary-border);
+}
+
+.model-config__multimodal svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  flex-shrink: 0;
+}
+
+.model-config__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: var(--radius-full);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.model-config__remove:hover {
+  color: var(--error);
+  background: var(--error-muted);
+}
+
+.model-config__remove svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+
+.model-config__available {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: var(--sp-2);
+}
+
+.model-config__available .badge {
+  cursor: pointer;
+  border: 1px solid var(--border);
+  transition: background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.model-config__available .badge:hover {
+  background: var(--accent-muted);
+  color: var(--accent);
+  border-color: var(--accent-border);
+}
+
+.model-config__add {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.model-config__add .form-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.model-config__add .btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* Per-model badges inside endpoint chips. */
+.endpoint-model-chip__ctx {
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--fs-xs);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  background: var(--bg-elevated);
+}
+
+.endpoint-model-chip__multimodal {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent-secondary);
+  background: var(--accent-secondary-muted);
+  border-radius: var(--radius-full);
+  padding: 1px 5px;
+}
+
+.endpoint-model-chip__multimodal svg {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
 }
 
 /* ===== Connection Test Result ===== */
@@ -3386,33 +3695,6 @@
 .compress-btn:disabled {
   opacity: 0.5;
   cursor: default;
-}
-
-/* ===== Stop generating button (chat status bar) ===== */
-.stop-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-med);
-  color: var(--error);
-  background: none;
-  border: 1px solid var(--error-muted);
-  border-radius: var(--radius-full);
-  padding: 3px var(--sp-3);
-  cursor: pointer;
-  transition: border-color var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out);
-  font-family: inherit;
-}
-
-.stop-btn:hover {
-  background: var(--error-muted);
-}
-
-.stop-btn svg {
-  fill: currentColor;
 }
 
 /* ===== Generating indicator (streaming but no new text yet) ===== */

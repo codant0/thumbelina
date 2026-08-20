@@ -3,7 +3,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { EndpointManager } from './EndpointManager'
 
 const mockEndpoints = [
-  { id: '1', provider: 'openai', name: 'Default', base_url: 'https://api.openai.com/v1', models: ['gpt-4o'], active_model: 'gpt-4o', api_key_set: true, is_default: true },
+  { id: '1', provider: 'openai', name: 'Default', base_url: 'https://api.openai.com/v1', models: [{ name: 'gpt-4o', context_window: null, multimodal: false }], active_model: 'gpt-4o', api_key_set: true, is_default: true },
 ]
 
 describe('EndpointManager', () => {

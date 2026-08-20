@@ -54,8 +54,8 @@ memory:
   tools:
     enabled: true             # 暴露 search_memory/read_memory/remember
 
-# Default context window of the active LLM model. Individual endpoints can
-# override this via their own context_window field (Web UI "Settings").
+# Default context window of the active LLM model. Individual models (Web UI
+# "Settings" → endpoint) can override this via their own context_window field.
 # Supports K (thousand) / M (million) token suffixes, case-insensitive.
 llm:
   context_window: "128K"

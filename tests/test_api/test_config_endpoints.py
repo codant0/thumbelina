@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from thumbelina.api.app import create_app
 from thumbelina.config.models import AppConfig, LLMConfig, RepositoryConfig
 from thumbelina.llm.base import ConnectionTestDetails, ConnectionTestResult, ConnectionTestStep
-from thumbelina.llm.endpoint_manager import EndpointManager, LLMEndpoint
+from thumbelina.llm.endpoint_manager import EndpointManager, LLMEndpoint, LLMModelConfig
 from thumbelina.llm.preset_manager import PresetManager
 from thumbelina.llm.preset_models import LLMPresetResponse
 
@@ -60,14 +60,14 @@ def test_create_endpoint(client):
     assert data["api_key_set"] is True
 
 
-def test_create_endpoint_response_includes_context_window(client):
+def test_create_endpoint_response_includes_model_context_window(client):
     endpoint = LLMEndpoint(
         id="e1",
         provider="openai",
         name="Default",
         base_url="https://api.openai.com/v1",
         api_key_set=True,
-        context_window="128K",
+        models=[LLMModelConfig(name="gpt-4o", context_window="128K")],
         created_at="2026-07-02T00:00:00Z",
         updated_at="2026-07-02T00:00:00Z",
     )
@@ -78,11 +78,12 @@ def test_create_endpoint_response_includes_context_window(client):
             "provider": "openai",
             "name": "Default",
             "base_url": "https://api.openai.com/v1",
-            "context_window": "128K",
+            "models": [{"name": "gpt-4o", "context_window": "128K"}],
         },
     )
     assert response.status_code == 201
-    assert response.json()["context_window"] == "128K"
+    data = response.json()
+    assert data["models"] == [{"name": "gpt-4o", "context_window": "128K", "multimodal": False}]
 
     # 没有该字段的历史端点会把它序列化为 null。
     legacy = LLMEndpoint(
@@ -97,7 +98,34 @@ def test_create_endpoint_response_includes_context_window(client):
     client.app.state.endpoint_manager.list_endpoints = AsyncMock(return_value=[legacy])
     response = client.get("/api/v1/config/llm/endpoints")
     assert response.status_code == 200
-    assert response.json()[0]["context_window"] is None
+    assert response.json()[0]["models"] == []
+
+
+def test_create_endpoint_response_includes_multimodal(client):
+    endpoint = LLMEndpoint(
+        id="e1",
+        provider="openai",
+        name="Default",
+        base_url="https://api.openai.com/v1",
+        api_key_set=True,
+        models=[LLMModelConfig(name="gpt-4o", multimodal=True)],
+        created_at="2026-07-02T00:00:00Z",
+        updated_at="2026-07-02T00:00:00Z",
+    )
+    client.app.state.endpoint_manager.create_endpoint = AsyncMock(return_value=endpoint)
+    response = client.post(
+        "/api/v1/config/llm/endpoints",
+        json={
+            "provider": "openai",
+            "name": "Default",
+            "base_url": "https://api.openai.com/v1",
+            "models": [{"name": "gpt-4o", "multimodal": True}],
+        },
+    )
+    assert response.status_code == 201
+    data = response.json()
+    assert data["models"][0]["multimodal"] is True
+    assert data["models"][0]["context_window"] is None
 
 
 def test_create_endpoint_rejects_invalid_context_window(client):
@@ -108,7 +136,7 @@ def test_create_endpoint_rejects_invalid_context_window(client):
             "provider": "openai",
             "name": "Default",
             "base_url": "https://api.openai.com/v1",
-            "context_window": "12X",
+            "models": [{"name": "gpt-4o", "context_window": "12X"}],
         },
     )
     assert response.status_code == 422
@@ -229,7 +257,10 @@ def test_activate_endpoint_model(client):
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["models"] == ["gpt-4o", "gpt-4o-mini"]
+    assert data["models"] == [
+        {"name": "gpt-4o", "context_window": None, "multimodal": False},
+        {"name": "gpt-4o-mini", "context_window": None, "multimodal": False},
+    ]
     assert data["active_model"] == "gpt-4o-mini"
     assert data["is_default"] is True
     client.app.state.endpoint_manager.activate_model.assert_awaited_once_with("e1", "gpt-4o-mini")

@@ -33,9 +33,9 @@ describe('ContextUsageItem', () => {
     mockedFetch.mockReset()
   })
 
-  it('按会话 endpoint 的 context_window 估算并展示百分比', async () => {
+  it('按会话 endpoint 激活模型的 context_window 估算并展示百分比', async () => {
     mockedFetch.mockResolvedValue([
-      { id: 'ep1', is_default: false, context_window: '200' },
+      { id: 'ep1', is_default: false, active_model: 'gpt-4o', models: [{ name: 'gpt-4o', context_window: '200', multimodal: false }] },
     ] as never)
     // 2 个 CJK 字符 = 4 tokens;200 窗口 → 2%
     render(<ContextUsageItem messages={[msg('你好')]} endpointId="ep1" />)
@@ -45,16 +45,34 @@ describe('ContextUsageItem', () => {
 
   it('endpointId 未匹配时回落到默认端点', async () => {
     mockedFetch.mockResolvedValue([
-      { id: 'ep-default', is_default: true, context_window: '100' },
-      { id: 'ep-other', is_default: false, context_window: '999999' },
+      { id: 'ep-default', is_default: true, active_model: 'm', models: [{ name: 'm', context_window: '100', multimodal: false }] },
+      { id: 'ep-other', is_default: false, active_model: 'x', models: [{ name: 'x', context_window: '999999', multimodal: false }] },
     ] as never)
     render(<ContextUsageItem messages={[msg('你好')]} endpointId="no-such" />)
     const item = await statusItem('4%') // 4/100
     expect(item).toHaveClass('statusbar__item--ok')
   })
 
+  it('优先使用激活模型的 context_window，而非首个模型', async () => {
+    mockedFetch.mockResolvedValue([
+      {
+        id: 'ep1',
+        is_default: true,
+        active_model: 'b',
+        models: [
+          { name: 'a', context_window: '999999', multimodal: false },
+          { name: 'b', context_window: '100', multimodal: false },
+        ],
+      },
+    ] as never)
+    // 4/100（激活模型 b 的窗口），而不是 4/999999
+    render(<ContextUsageItem messages={[msg('你好')]} endpointId="ep1" />)
+    const item = await statusItem('4%')
+    expect(item).toHaveClass('statusbar__item--ok')
+  })
+
   it('超过 60% 时警告高亮', async () => {
-    mockedFetch.mockResolvedValue([{ id: 'ep1', is_default: true, context_window: '100' }] as never)
+    mockedFetch.mockResolvedValue([{ id: 'ep1', is_default: true, active_model: 'm', models: [{ name: 'm', context_window: '100', multimodal: false }] }] as never)
     // 35 CJK = 70 tokens → 70%
     render(<ContextUsageItem messages={[msg(cjk(35))]} endpointId="ep1" />)
     const item = await statusItem('70%')
@@ -62,7 +80,7 @@ describe('ContextUsageItem', () => {
   })
 
   it('超过 85% 时错误高亮', async () => {
-    mockedFetch.mockResolvedValue([{ id: 'ep1', is_default: true, context_window: '100' }] as never)
+    mockedFetch.mockResolvedValue([{ id: 'ep1', is_default: true, active_model: 'm', models: [{ name: 'm', context_window: '100', multimodal: false }] }] as never)
     // 45 CJK = 90 tokens → 90%
     render(<ContextUsageItem messages={[msg(cjk(45))]} endpointId="ep1" />)
     const item = await statusItem('90%')
@@ -70,7 +88,7 @@ describe('ContextUsageItem', () => {
   })
 
   it('窗口上限未设置时展示占位而非百分比', async () => {
-    mockedFetch.mockResolvedValue([{ id: 'ep1', is_default: true, context_window: null }] as never)
+    mockedFetch.mockResolvedValue([{ id: 'ep1', is_default: true, active_model: 'm', models: [{ name: 'm', context_window: null, multimodal: false }] }] as never)
     render(<ContextUsageItem messages={[msg('你好')]} endpointId="ep1" />)
     const item = await statusItem('—')
     expect(item).toHaveClass('statusbar__item--idle')

@@ -225,7 +225,7 @@ async def set_conversation_endpoint(
         endpoint = await endpoint_manager.get_endpoint(body.endpoint_id)
         if endpoint is None:
             raise HTTPException(status_code=404, detail="Endpoint not found")
-        if body.model is not None and body.model not in endpoint.models:
+        if body.model is not None and not endpoint.has_model(body.model):
             raise HTTPException(
                 status_code=422,
                 detail=f"Model '{body.model}' is not configured on this endpoint",

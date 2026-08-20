@@ -69,4 +69,30 @@ describe('InputBox', () => {
     expect(screen.getByPlaceholderText(/Type a message/i)).toBeDisabled()
     expect(screen.getByRole('button', { name: /Send/i })).toBeDisabled()
   })
+
+  it('renders a stop button while streaming and stops on click', async () => {
+    const onSend = vi.fn()
+    const onStop = vi.fn()
+    const user = userEvent.setup()
+
+    render(<InputBox onSend={onSend} isStreaming onStop={onStop} />)
+
+    expect(screen.queryByRole('button', { name: /Send/i })).not.toBeInTheDocument()
+    const stop = screen.getByTestId('stop-generation')
+    await user.click(stop)
+    expect(onStop).toHaveBeenCalled()
+    expect(onSend).not.toHaveBeenCalled()
+  })
+
+  it('does not send on Enter while streaming', async () => {
+    const onSend = vi.fn()
+    const user = userEvent.setup()
+
+    render(<InputBox onSend={onSend} isStreaming />)
+
+    const input = screen.getByPlaceholderText(/Type a message/i)
+    await user.type(input, 'Hello{enter}')
+
+    expect(onSend).not.toHaveBeenCalled()
+  })
 })

@@ -11,7 +11,7 @@ from thumbelina.agent.graph import ThumbelinaAgent
 from thumbelina.api.deps import get_agent, get_repository_manager
 from thumbelina.api.schemas import ChatRequest, ChatResponse
 from thumbelina.concurrency import per_conversation_lock
-from thumbelina.llm.endpoint_manager import EndpointManager
+from thumbelina.llm.endpoint_manager import EndpointManager, LLMEndpoint
 from thumbelina.llm.factory import create_provider
 from thumbelina.prompts.roles import get_role_prompt
 from thumbelina.repository.manager import RepositoryManager
@@ -39,6 +39,15 @@ def _thinking_kwargs(provider: str, enabled: bool, effort: str) -> dict[str, Any
     return {}
 
 
+def _resolve_active_model(endpoint: LLMEndpoint, conv_model: str | None) -> str | None:
+    """解析会话实际使用的模型名（与 ``_apply_conversation_endpoint`` 同口径）。"""
+    return (
+        conv_model
+        or endpoint.active_model
+        or (endpoint.models[0].name if endpoint.models else None)
+    )
+
+
 async def resolve_context_window_tokens(
     repository: RepositoryManager | None,
     endpoint_manager: EndpointManager | None,
@@ -48,8 +57,8 @@ async def resolve_context_window_tokens(
     """解析会话的有效上下文窗口（单位为 token）。
 
     端点选择与 :func:`_apply_conversation_endpoint` 保持一致：会话绑定
-    的端点已设置且可用时由它服务，否则使用全局活跃端点。服务端点的
-    ``context_window`` 配置后优先采用；否则链路回退到
+    的端点已设置且可用时由它服务，否则使用全局活跃端点。服务端点对应
+    模型的 ``context_window`` 配置后优先采用；否则链路回退到
     ``default_tokens``（``llm.context_window``）。
 
     解析绝不能破坏聊天请求，因此任何查询失败都回退到
@@ -60,6 +69,7 @@ async def resolve_context_window_tokens(
     try:
         conv = await repository.get_conversation(conversation_id)
         endpoint = None
+        model_name = None
         if conv is not None:
             endpoint_id = conv.get("endpoint_id")
             if endpoint_id:
@@ -69,12 +79,16 @@ async def resolve_context_window_tokens(
                 # 并采用默认窗口。
                 if candidate is not None and candidate.api_key:
                     endpoint = candidate
+                    model_name = _resolve_active_model(endpoint, conv.get("model"))
             else:
                 active = await endpoint_manager.get_active_endpoint_model()
                 if active is not None and active[0].api_key:
                     endpoint = active[0]
-        if endpoint is not None and endpoint.context_window_tokens is not None:
-            return endpoint.context_window_tokens
+                    model_name = active[1]
+        if endpoint is not None:
+            tokens = endpoint.resolve_context_window(model_name)
+            if tokens is not None:
+                return tokens
     except Exception:
         logger.warning("Context window resolution failed", exc_info=True)
     return default_tokens
@@ -188,7 +202,7 @@ async def _apply_conversation_endpoint(
         model = (
             conv_model
             or endpoint.active_model
-            or (endpoint.models[0] if endpoint.models else None)
+            or (endpoint.models[0].name if endpoint.models else None)
             or "gpt-4o"
         )
     kwargs: dict[str, Any] = {

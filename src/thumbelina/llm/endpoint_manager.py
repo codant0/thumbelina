@@ -6,7 +6,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 from thumbelina.config.config_repo import ConfigRepository
 from thumbelina.config.models import parse_context_window
@@ -32,25 +32,24 @@ def _normalize_context_window(value: Any) -> str | None:
     return str(value).strip()
 
 
-class LLMEndpoint(BaseModel):
-    """Persisted LLM endpoint record."""
+class LLMModelConfig(BaseModel):
+    """Per-model configuration inside an endpoint.
 
-    id: str
-    provider: str
+    ``context_window`` moved here from the endpoint level so each model can
+    declare its own window; ``multimodal`` is metadata only for now.
+    """
+
     name: str
-    base_url: str
-    models: list[str] = []
-    active_model: str | None = None
-    api_key: str = ""
-    api_key_set: bool = False
-    is_default: bool = False
     context_window: str | None = None
-    last_latency_ms: int | None = None
-    last_total_ms: int | None = None
-    is_reachable: bool | None = None
-    last_tested_at: datetime | None = None
-    created_at: datetime
-    updated_at: datetime
+    multimodal: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_legacy_str(cls, data: Any) -> Any:
+        """兼容旧输入：``"gpt-4o"`` 字符串简写转 ``{"name": "gpt-4o"}``。"""
+        if isinstance(data, str):
+            return {"name": data}
+        return data
 
     @field_validator("context_window", mode="before")
     @classmethod
@@ -65,21 +64,87 @@ class LLMEndpoint(BaseModel):
         return parse_context_window(self.context_window)
 
 
+class LLMEndpoint(BaseModel):
+    """Persisted LLM endpoint record."""
+
+    id: str
+    provider: str
+    name: str
+    base_url: str
+    models: list[LLMModelConfig] = []
+    active_model: str | None = None
+    api_key: str = ""
+    api_key_set: bool = False
+    is_default: bool = False
+    last_latency_ms: int | None = None
+    last_total_ms: int | None = None
+    is_reachable: bool | None = None
+    last_tested_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_models(cls, data: Any) -> Any:
+        """迁移旧格式记录：``models`` 中的字符串转 ``LLMModelConfig``。
+
+        旧记录把 ``context_window`` 挂在端点级，迁移时把该值均摊给每个
+        模型（无则 ``context_window=None``）；迁移后顶层字段被移除。
+        已经迁移过（对象列表）的记录原样保留。
+        """
+        if not isinstance(data, dict):
+            return data
+        legacy_context_window = data.pop("context_window", None)
+        raw_models = data.get("models") or []
+        converted: list[Any] = []
+        for item in raw_models:
+            if isinstance(item, str):
+                converted.append(
+                    {
+                        "name": item,
+                        "context_window": legacy_context_window,
+                        "multimodal": False,
+                    }
+                )
+            else:
+                converted.append(item)
+        data["models"] = converted
+        return data
+
+    def has_model(self, name: str) -> bool:
+        """判断 ``name`` 是否为该端点已配置的模型。"""
+        return any(model.name == name for model in self.models)
+
+    def get_model(self, name: str) -> LLMModelConfig | None:
+        """按名称返回模型配置，找不到则返回 ``None``。"""
+        for model in self.models:
+            if model.name == name:
+                return model
+        return None
+
+    def resolve_context_window(self, model_name: str | None) -> int | None:
+        """解析某模型的上下文窗口（token 数）。
+
+        ``model_name`` 为空时依次回落到 ``active_model``、``models[0]``；
+        找到的模型未配置窗口时返回 ``None``，由调用方回落全局默认。
+        """
+        model = self.get_model(model_name) if model_name else None
+        if model is None and self.active_model:
+            model = self.get_model(self.active_model)
+        if model is None and self.models:
+            model = self.models[0]
+        return model.context_window_tokens if model is not None else None
+
+
 class LLMEndpointCreate(BaseModel):
     """Input for creating an endpoint."""
 
     provider: str
     name: str
     base_url: str
-    models: list[str] = []
+    models: list[LLMModelConfig] = []
     api_key: str = ""
     is_default: bool = False
-    context_window: str | None = None
-
-    @field_validator("context_window", mode="before")
-    @classmethod
-    def _validate_context_window(cls, value: Any) -> str | None:
-        return _normalize_context_window(value)
 
 
 class LLMEndpointUpdate(BaseModel):
@@ -87,15 +152,9 @@ class LLMEndpointUpdate(BaseModel):
 
     name: str | None = None
     base_url: str | None = None
-    models: list[str] | None = None
+    models: list[LLMModelConfig] | None = None
     api_key: str | None = None
     is_default: bool | None = None
-    context_window: str | None = None
-
-    @field_validator("context_window", mode="before")
-    @classmethod
-    def _validate_context_window(cls, value: Any) -> str | None:
-        return _normalize_context_window(value)
 
 
 class LLMEndpointActivate(BaseModel):
@@ -194,8 +253,7 @@ class EndpointManager:
             api_key=data.api_key,
             api_key_set=bool(data.api_key),
             is_default=data.is_default,
-            context_window=data.context_window,
-            active_model=data.models[0] if data.is_default and data.models else None,
+            active_model=data.models[0].name if data.is_default and data.models else None,
             created_at=now,
             updated_at=now,
         )
@@ -224,21 +282,18 @@ class EndpointManager:
         if data.models is not None:
             endpoint.models = list(data.models)
             # Drop an active_model that no longer exists in the list.
-            if endpoint.active_model and endpoint.active_model not in endpoint.models:
+            if endpoint.active_model and not endpoint.has_model(endpoint.active_model):
                 endpoint.active_model = None
         if data.api_key is not None:
             endpoint.api_key = data.api_key
             endpoint.api_key_set = bool(data.api_key)
-        if "context_window" in data.model_fields_set:
-            # 显式的 null/空值清除覆盖；未提供字段则保持原值。
-            endpoint.context_window = data.context_window
         if data.is_default is True:
             await self._clear_all_active()
             endpoint.is_default = True
             # Keep the current active_model if still in models, else pick the first.
             if endpoint.models:
-                if not endpoint.active_model or endpoint.active_model not in endpoint.models:
-                    endpoint.active_model = endpoint.models[0]
+                if not endpoint.active_model or not endpoint.has_model(endpoint.active_model):
+                    endpoint.active_model = endpoint.models[0].name
             else:
                 endpoint.active_model = None
         elif data.is_default is False:
@@ -269,7 +324,7 @@ class EndpointManager:
         endpoint = await self._get_raw(endpoint_id)
         if endpoint is None:
             return None
-        if model not in endpoint.models:
+        if not endpoint.has_model(model):
             raise ValueError(f"Model '{model}' is not configured on endpoint '{endpoint.name}'")
         await self._clear_all_active()
         endpoint.is_default = True
@@ -314,7 +369,9 @@ class EndpointManager:
             return None
 
         effective_model = (
-            model or endpoint.active_model or (endpoint.models[0] if endpoint.models else None)
+            model
+            or endpoint.active_model
+            or (endpoint.models[0].name if endpoint.models else None)
         )
         provider = create_provider(
             endpoint.provider,

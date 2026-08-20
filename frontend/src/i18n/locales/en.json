@@ -15,6 +15,7 @@
     "save": "Save",
     "saving": "Saving…",
     "cancel": "Cancel",
+    "close": "Close",
     "connected": "Connected",
     "disconnected": "Disconnected",
     "generating": "Generating…",
@@ -140,15 +141,16 @@
     "unreachable": "Unreachable",
     "failedToLoad": "Failed to load endpoints",
     "models": "Models",
-    "modelsHint": "Fetch the list to pick multiple, or add model names manually.",
+    "modelsHint": "Fetch the list to pick multiple, or add model names manually. Set the context window and multimodal flag per model.",
     "addModelManually": "Add model manually",
     "addModelPlaceholder": "Model name, press Enter to add",
     "activeModel": "Current model",
     "activateModel": "Activate",
     "noModels": "No models configured",
     "contextWindow": "Context window",
-    "contextWindowPlaceholder": "e.g. 128K (empty = global default)",
-    "contextWindowHint": "Optional. Supports K/M token suffixes (case-insensitive). Leave empty to fall back to the global llm.context_window."
+    "multimodal": "Multimodal",
+    "modelContextWindow": "Context window",
+    "modelContextWindowPlaceholder": "e.g. 128K (empty = global default)"
   },
   "channels": {
     "title": "Channels",

@@ -1,19 +1,24 @@
 import { useState, useRef, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
-import { Send } from 'lucide-react'
+import { Send, Square } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 
 interface InputBoxProps {
   onSend: (message: string) => void
   disabled?: boolean
   toolbar?: ReactNode
+  /** While the model is replying, the send button morphs into a stop button. */
+  isStreaming?: boolean
+  /** Called when the user stops generation (only used while isStreaming). */
+  onStop?: () => void
 }
 
-export function InputBox({ onSend, disabled, toolbar }: InputBoxProps) {
+export function InputBox({ onSend, disabled, toolbar, isStreaming, onStop }: InputBoxProps) {
   const [text, setText] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const { t } = useTranslation()
 
   const handleSend = () => {
+    if (isStreaming) return
     const trimmed = text.trim()
     if (!trimmed) return
     onSend(trimmed)
@@ -31,7 +36,7 @@ export function InputBox({ onSend, disabled, toolbar }: InputBoxProps) {
   const handleKeyDown = (e: KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      handleSend()
+      if (!isStreaming) handleSend()
     }
   }
 
@@ -57,10 +62,24 @@ export function InputBox({ onSend, disabled, toolbar }: InputBoxProps) {
           disabled={disabled}
           rows={1}
         />
-        <button type="submit" disabled={disabled}>
-          <Send size={16} />
-          {t('chat.send')}
-        </button>
+        {isStreaming ? (
+          <button
+            type="button"
+            className="stop-send-btn"
+            data-testid="stop-generation"
+            title={t('chat.stopTitle')}
+            aria-label={t('chat.stopTitle')}
+            onClick={onStop}
+          >
+            <Square size={16} />
+            {t('chat.stop')}
+          </button>
+        ) : (
+          <button type="submit" disabled={disabled}>
+            <Send size={16} />
+            {t('chat.send')}
+          </button>
+        )}
       </form>
     </div>
   )

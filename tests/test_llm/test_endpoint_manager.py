@@ -3,7 +3,12 @@ from __future__ import annotations
 import pytest
 
 from thumbelina.config.config_repo import ConfigRepository
-from thumbelina.llm.endpoint_manager import EndpointManager
+from thumbelina.llm.endpoint_manager import (
+    EndpointManager,
+    LLMEndpoint,
+    LLMEndpointUpdate,
+    LLMModelConfig,
+)
 
 
 @pytest.fixture
@@ -25,10 +30,10 @@ async def test_create_endpoint_with_models(manager):
         name="OpenAI Default",
         base_url="https://api.openai.com/v1",
         api_key="sk-test",
-        models=["gpt-4o", "gpt-4o-mini"],
+        models=[LLMModelConfig(name="gpt-4o"), LLMModelConfig(name="gpt-4o-mini")],
     )
     assert endpoint.provider == "openai"
-    assert endpoint.models == ["gpt-4o", "gpt-4o-mini"]
+    assert endpoint.models == [LLMModelConfig(name="gpt-4o"), LLMModelConfig(name="gpt-4o-mini")]
     assert endpoint.active_model is None
     assert endpoint.is_default is False
 
@@ -40,12 +45,12 @@ async def test_list_endpoints(manager):
         name="OpenAI Default",
         base_url="https://api.openai.com/v1",
         api_key="sk-test",
-        models=["gpt-4o"],
+        models=[LLMModelConfig(name="gpt-4o")],
     )
     endpoints = await manager.list_endpoints()
     assert len(endpoints) == 1
     assert endpoints[0].name == "OpenAI Default"
-    assert endpoints[0].models == ["gpt-4o"]
+    assert endpoints[0].models == [LLMModelConfig(name="gpt-4o")]
 
 
 @pytest.mark.asyncio
@@ -165,40 +170,40 @@ async def test_legacy_single_model_record_migrates_on_read(manager):
 
     loaded = await manager.get_endpoint("legacy-1")
     assert loaded is not None
-    assert loaded.models == ["gpt-3.5-turbo"]
+    assert loaded.models == [LLMModelConfig(name="gpt-3.5-turbo")]
 
 
 @pytest.mark.asyncio
-async def test_create_endpoint_with_context_window(manager):
+async def test_create_endpoint_with_per_model_context_window(manager):
     endpoint = await manager.create_endpoint(
         provider="openai",
         name="OpenAI",
         base_url="https://api.openai.com/v1",
         api_key="sk-test",
-        models=["gpt-4o"],
-        context_window="128K",
+        models=[LLMModelConfig(name="gpt-4o", context_window="128K")],
     )
-    assert endpoint.context_window == "128K"
-    assert endpoint.context_window_tokens == 128_000
+    assert endpoint.models == [LLMModelConfig(name="gpt-4o", context_window="128K")]
+    assert endpoint.models[0].context_window == "128K"
+    assert endpoint.models[0].context_window_tokens == 128_000
 
     # 经 JSON blob 持久化往返。
     loaded = await manager.get_endpoint(endpoint.id)
     assert loaded is not None
-    assert loaded.context_window == "128K"
-    assert loaded.context_window_tokens == 128_000
+    assert loaded.models[0].context_window == "128K"
+    assert loaded.models[0].context_window_tokens == 128_000
 
 
 @pytest.mark.asyncio
-async def test_create_endpoint_context_window_defaults_to_none(manager):
+async def test_create_endpoint_model_context_window_defaults_to_none(manager):
     endpoint = await manager.create_endpoint(
         provider="openai",
         name="OpenAI",
         base_url="https://api.openai.com/v1",
         api_key="sk-test",
-        models=["gpt-4o"],
+        models=[LLMModelConfig(name="gpt-4o")],
     )
-    assert endpoint.context_window is None
-    assert endpoint.context_window_tokens is None
+    assert endpoint.models[0].context_window is None
+    assert endpoint.models[0].context_window_tokens is None
 
 
 @pytest.mark.asyncio
@@ -211,65 +216,59 @@ async def test_create_endpoint_rejects_invalid_context_window(manager):
             name="OpenAI",
             base_url="https://api.openai.com/v1",
             api_key="sk-test",
-            models=["gpt-4o"],
-            context_window="12X",
+            models=[LLMModelConfig(name="gpt-4o", context_window="12X")],
         )
 
 
 @pytest.mark.asyncio
-async def test_update_endpoint_context_window_set_clear_keep(manager):
-    from thumbelina.llm.endpoint_manager import LLMEndpointUpdate
-
+async def test_update_endpoint_models_set_and_clear_context_window(manager):
     endpoint = await manager.create_endpoint(
         provider="openai",
         name="OpenAI",
         base_url="https://api.openai.com/v1",
         api_key="sk-test",
-        models=["gpt-4o"],
-        context_window="128K",
+        models=[LLMModelConfig(name="gpt-4o", context_window="128K")],
     )
 
-    # 未提供该字段时保留已存储的值。
+    # 未提供 models 字段时保留已存储的模型（及各自窗口）。
     updated = await manager.update_endpoint(endpoint.id, LLMEndpointUpdate(name="Renamed"))
     assert updated is not None
-    assert updated.context_window == "128K"
+    assert updated.models[0].context_window == "128K"
 
-    # 显式值覆盖原值（小写也接受）。
-    updated = await manager.update_endpoint(endpoint.id, LLMEndpointUpdate(context_window="1m"))
+    # 显式覆盖 models（小写也接受）。
+    updated = await manager.update_endpoint(
+        endpoint.id,
+        LLMEndpointUpdate(models=[LLMModelConfig(name="gpt-4o", context_window="1m")]),
+    )
     assert updated is not None
-    assert updated.context_window == "1m"
+    assert updated.models[0].context_window == "1m"
 
-    # 显式的 None（或空字符串）清除覆盖值。
-    updated = await manager.update_endpoint(endpoint.id, LLMEndpointUpdate(context_window=None))
+    # 未提供窗口的模型覆盖后 context_window 为 None。
+    updated = await manager.update_endpoint(
+        endpoint.id,
+        LLMEndpointUpdate(models=[LLMModelConfig(name="gpt-4o")]),
+    )
     assert updated is not None
-    assert updated.context_window is None
-
-    updated = await manager.update_endpoint(endpoint.id, LLMEndpointUpdate(context_window="256K"))
-    assert updated is not None
-    updated = await manager.update_endpoint(endpoint.id, LLMEndpointUpdate(context_window=""))
-    assert updated is not None
-    assert updated.context_window is None
+    assert updated.models[0].context_window is None
 
 
 @pytest.mark.asyncio
 async def test_update_endpoint_rejects_invalid_context_window(manager):
     from pydantic import ValidationError
 
-    from thumbelina.llm.endpoint_manager import LLMEndpointUpdate
-
     endpoint = await manager.create_endpoint(
         provider="openai",
         name="OpenAI",
         base_url="https://api.openai.com/v1",
         api_key="sk-test",
-        models=["gpt-4o"],
+        models=[LLMModelConfig(name="gpt-4o")],
     )
     with pytest.raises(ValidationError):
-        LLMEndpointUpdate(context_window="bogus!")
+        LLMEndpointUpdate(models=[LLMModelConfig(name="gpt-4o", context_window="bogus!")])
     # 已存储的记录保持不动。
     loaded = await manager.get_endpoint(endpoint.id)
     assert loaded is not None
-    assert loaded.context_window is None
+    assert loaded.models[0].context_window is None
 
 
 @pytest.mark.asyncio
@@ -301,4 +300,100 @@ async def test_legacy_record_without_context_window_loads(manager):
 
     loaded = await manager.get_endpoint("old-1")
     assert loaded is not None
-    assert loaded.context_window is None
+    assert loaded.models == [LLMModelConfig(name="gpt-4o")]
+    assert loaded.models[0].context_window is None
+
+
+@pytest.mark.asyncio
+async def test_legacy_record_with_endpoint_context_window_migrates(manager):
+    import json
+    from datetime import UTC, datetime
+
+    now_iso = datetime.now(UTC).isoformat()
+    raw = {
+        "id": "legacy-2",
+        "provider": "openai",
+        "name": "Legacy",
+        "base_url": "https://api.openai.com/v1",
+        "models": ["gpt-4o", "gpt-4o-mini"],
+        "context_window": "64K",
+        "active_model": "gpt-4o",
+        "api_key": "sk-test",
+        "api_key_set": True,
+        "is_default": True,
+        "last_latency_ms": None,
+        "last_total_ms": None,
+        "is_reachable": None,
+        "last_tested_at": None,
+        "created_at": now_iso,
+        "updated_at": now_iso,
+    }
+    await manager._repo.set(manager._record_key("legacy-2"), json.dumps(raw), "llm_endpoints")
+    index = await manager._load_index()
+    index.append("legacy-2")
+    await manager._save_index(index)
+
+    loaded = await manager.get_endpoint("legacy-2")
+    assert loaded is not None
+    assert loaded.models == [
+        LLMModelConfig(name="gpt-4o", context_window="64K"),
+        LLMModelConfig(name="gpt-4o-mini", context_window="64K"),
+    ]
+    assert loaded.models[0].context_window_tokens == 64_000
+    # 顶层 context_window 字段在迁移后被移除。
+    assert "context_window" not in loaded.model_dump()
+
+
+def test_model_config_multimodal_defaults_false():
+    model = LLMModelConfig(name="gpt-4o")
+    assert model.multimodal is False
+    assert model.context_window is None
+
+
+def test_has_model_and_get_model():
+    endpoint = LLMEndpoint(
+        id="e1",
+        provider="openai",
+        name="Default",
+        base_url="https://api.openai.com/v1",
+        models=[
+            LLMModelConfig(name="gpt-4o", context_window="128K"),
+            LLMModelConfig(name="gpt-4o-mini", multimodal=True),
+        ],
+        created_at="2026-07-02T00:00:00Z",
+        updated_at="2026-07-02T00:00:00Z",
+    )
+    assert endpoint.has_model("gpt-4o") is True
+    assert endpoint.has_model("claude-3") is False
+    mini = endpoint.get_model("gpt-4o-mini")
+    assert mini is not None
+    assert mini.multimodal is True
+    assert endpoint.get_model("missing") is None
+
+
+def test_resolve_context_window_fallbacks():
+    endpoint = LLMEndpoint(
+        id="e1",
+        provider="openai",
+        name="Default",
+        base_url="https://api.openai.com/v1",
+        models=[
+            LLMModelConfig(name="gpt-4o", context_window="128K"),
+            LLMModelConfig(name="gpt-4o-mini", context_window="32K"),
+        ],
+        active_model="gpt-4o-mini",
+        created_at="2026-07-02T00:00:00Z",
+        updated_at="2026-07-02T00:00:00Z",
+    )
+    assert endpoint.resolve_context_window("gpt-4o") == 128_000
+    # 空模型名回落到 active_model。
+    assert endpoint.resolve_context_window(None) == 32_000
+    # active_model 不在列表时回落到 models[0]。
+    endpoint.active_model = "missing"
+    assert endpoint.resolve_context_window(None) == 128_000
+    # 模型未配置窗口时返回 None（由调用方回落全局默认）。
+    endpoint.models = [LLMModelConfig(name="gpt-4o")]
+    assert endpoint.resolve_context_window("gpt-4o") is None
+    # 空端点返回 None。
+    endpoint.models = []
+    assert endpoint.resolve_context_window(None) is None

@@ -1,13 +1,20 @@
+export interface LLMModelConfig {
+  name: string
+  /** Context window like "128K"/"200K"; empty or null falls back to the global default. */
+  context_window?: string | null
+  /** Whether the model accepts multimodal (image) input. */
+  multimodal: boolean
+}
+
 export interface LLMEndpoint {
   id: string
   provider: 'openai' | 'ollama' | 'anthropic'
   name: string
   base_url: string
-  models: string[]
+  models: LLMModelConfig[]
   active_model?: string | null
   api_key_set: boolean
   is_default: boolean
-  context_window?: string | null
   last_latency_ms?: number
   last_total_ms?: number
   is_reachable?: boolean
@@ -18,10 +25,9 @@ export interface EndpointFormData {
   provider: 'openai' | 'ollama' | 'anthropic'
   name: string
   base_url: string
-  models: string[]
+  models: LLMModelConfig[]
   api_key: string
   is_default: boolean
-  context_window?: string | null
 }
 
 export interface SpeedTestResult {

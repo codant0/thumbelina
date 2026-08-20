@@ -4,8 +4,8 @@ import { ConversationModelSelector } from './ConversationModelSelector'
 import * as llmConfig from '../../api/llmConfig'
 
 const endpoints = [
-  { id: 'ep1', provider: 'openai' as const, name: 'Mimo', base_url: 'https://api.openai.com', models: ['gpt-4o', 'gpt-4o-mini'], api_key_set: true, is_default: true, active_model: 'gpt-4o' },
-  { id: 'ep2', provider: 'ollama' as const, name: 'Llama local', base_url: 'http://localhost:11434', models: ['llama3'], api_key_set: false, is_default: false },
+  { id: 'ep1', provider: 'openai' as const, name: 'Mimo', base_url: 'https://api.openai.com', models: [{ name: 'gpt-4o', context_window: '128K', multimodal: true }, { name: 'gpt-4o-mini', context_window: null, multimodal: false }], api_key_set: true, is_default: true, active_model: 'gpt-4o' },
+  { id: 'ep2', provider: 'ollama' as const, name: 'Llama local', base_url: 'http://localhost:11434', models: [{ name: 'llama3', context_window: null, multimodal: false }], api_key_set: false, is_default: false },
 ]
 
 describe('ConversationModelSelector', () => {

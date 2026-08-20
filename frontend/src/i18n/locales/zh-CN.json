@@ -15,6 +15,7 @@
     "save": "保存",
     "saving": "保存中…",
     "cancel": "取消",
+    "close": "关闭",
     "connected": "已连接",
     "disconnected": "已断开",
     "generating": "生成中…",
@@ -140,15 +141,16 @@
     "unreachable": "不可达",
     "failedToLoad": "加载端点失败",
     "models": "模型",
-    "modelsHint": "获取列表后可多选，也可手动添加模型名称。",
+    "modelsHint": "获取列表后可多选，也可手动添加模型名称；每个模型可单独设置上下文窗口与多模态。",
     "addModelManually": "手动添加模型",
     "addModelPlaceholder": "模型名称，回车添加",
     "activeModel": "当前模型",
     "activateModel": "激活",
     "noModels": "未配置模型",
     "contextWindow": "上下文窗口",
-    "contextWindowPlaceholder": "如 128K（留空使用全局默认值）",
-    "contextWindowHint": "可选。支持 K/M token 后缀（不区分大小写）；留空则回落到全局 llm.context_window。"
+    "multimodal": "多模态",
+    "modelContextWindow": "上下文窗口",
+    "modelContextWindowPlaceholder": "如 128K（留空回落全局默认）"
   },
   "channels": {
     "title": "频道",

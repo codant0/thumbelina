@@ -22,7 +22,7 @@ describe('EndpointForm', () => {
     expect(onSubmit).not.toHaveBeenCalled()
   })
 
-  it('submits correct payload with models array', async () => {
+  it('submits correct payload with per-model config', async () => {
     const onSubmit = vi.fn()
     renderForm({ onSubmit })
     fireEvent.change(screen.getByTestId('endpoint-name-input'), { target: { value: 'Default' } })
@@ -37,53 +37,57 @@ describe('EndpointForm', () => {
         provider: 'openai',
         name: 'Default',
         base_url: 'https://api.openai.com/v1',
-        models: ['gpt-4o'],
+        models: [{ name: 'gpt-4o', context_window: null, multimodal: false }],
         api_key: 'sk-test',
         is_default: false,
-        context_window: '',
       })
     })
   })
 
-  it('submits the context window value', async () => {
+  it('submits the per-model context window and multimodal flag', async () => {
     const onSubmit = vi.fn()
     renderForm({ onSubmit })
     fireEvent.change(screen.getByTestId('endpoint-name-input'), { target: { value: 'Default' } })
     fireEvent.change(screen.getByTestId('endpoint-base-url-input'), { target: { value: 'https://api.openai.com/v1' } })
-    fireEvent.change(screen.getByTestId('endpoint-context-window-input'), { target: { value: '128K' } })
+    fireEvent.change(screen.getByTestId('manual-model-input'), { target: { value: 'gpt-4o' } })
+    fireEvent.click(screen.getByTestId('add-manual-model'))
+    fireEvent.change(screen.getByTestId('model-context-window-gpt-4o'), { target: { value: '128K' } })
+    fireEvent.click(screen.getByTestId('model-multimodal-gpt-4o'))
     fireEvent.click(screen.getByTestId('endpoint-form-submit'))
     await waitFor(() => {
       expect(onSubmit).toHaveBeenCalledWith(
-        expect.objectContaining({ context_window: '128K' }),
+        expect.objectContaining({
+          models: [{ name: 'gpt-4o', context_window: '128K', multimodal: true }],
+        }),
       )
     })
   })
 
-  it('prefills the context window when editing', () => {
+  it('prefills the per-model context window when editing', () => {
     render(
       <LocaleProvider>
         <EndpointForm
           onSubmit={vi.fn()}
           onCancel={vi.fn()}
-          initialValues={{ id: '1', provider: 'openai', name: 'Default', base_url: 'https://api.openai.com/v1', models: ['gpt-4o'], api_key_set: true, is_default: false, context_window: '1M' }}
+          initialValues={{ id: '1', provider: 'openai', name: 'Default', base_url: 'https://api.openai.com/v1', models: [{ name: 'gpt-4o', context_window: '1M', multimodal: false }], api_key_set: true, is_default: false }}
         />
       </LocaleProvider>,
     )
-    const input = screen.getByTestId('endpoint-context-window-input') as HTMLInputElement
+    const input = screen.getByTestId('model-context-window-gpt-4o') as HTMLInputElement
     expect(input.value).toBe('1M')
   })
 
-  it('leaves the context window empty for legacy endpoints', () => {
+  it('leaves the per-model context window empty for legacy endpoints', () => {
     render(
       <LocaleProvider>
         <EndpointForm
           onSubmit={vi.fn()}
           onCancel={vi.fn()}
-          initialValues={{ id: '1', provider: 'openai', name: 'Default', base_url: 'https://api.openai.com/v1', models: ['gpt-4o'], api_key_set: true, is_default: false }}
+          initialValues={{ id: '1', provider: 'openai', name: 'Default', base_url: 'https://api.openai.com/v1', models: [{ name: 'gpt-4o', context_window: null, multimodal: false }], api_key_set: true, is_default: false }}
         />
       </LocaleProvider>,
     )
-    const input = screen.getByTestId('endpoint-context-window-input') as HTMLInputElement
+    const input = screen.getByTestId('model-context-window-gpt-4o') as HTMLInputElement
     expect(input.value).toBe('')
   })
 
@@ -93,7 +97,7 @@ describe('EndpointForm', () => {
         <EndpointForm
           onSubmit={vi.fn()}
           onCancel={vi.fn()}
-          initialValues={{ id: '1', provider: 'openai', name: 'Default', base_url: 'https://api.openai.com/v1', models: ['gpt-4o'], api_key_set: true, is_default: false }}
+          initialValues={{ id: '1', provider: 'openai', name: 'Default', base_url: 'https://api.openai.com/v1', models: [{ name: 'gpt-4o', context_window: null, multimodal: false }], api_key_set: true, is_default: false }}
         />
       </LocaleProvider>,
     )

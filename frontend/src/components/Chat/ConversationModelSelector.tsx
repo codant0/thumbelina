@@ -114,20 +114,20 @@ export function ConversationModelSelector({
                 </span>
               </div>
               {ep.models.map(m => {
-                const selected = selectedEndpointId === ep.id && selectedModel === m
+                const selected = selectedEndpointId === ep.id && selectedModel === m.name
                 return (
                   <div
-                    key={`${ep.id}-${m}`}
+                    key={`${ep.id}-${m.name}`}
                     role="option"
                     aria-selected={selected}
                     className={`conv-model-selector__option${selected ? ' selected' : ''}`}
-                    data-testid={`conv-model-option-${ep.id}-${m}`}
+                    data-testid={`conv-model-option-${ep.id}-${m.name}`}
                     onClick={() => {
-                      onChange(ep.id, m)
+                      onChange(ep.id, m.name)
                       setOpen(false)
                     }}
                   >
-                    <span className="conv-model-selector__name">{m}</span>
+                    <span className="conv-model-selector__name">{m.name}</span>
                     {selected && <Check size={14} />}
                   </div>
                 )
