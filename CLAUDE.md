@@ -147,6 +147,8 @@ Markdown file-system-backed layered memory (default directory `MEMORY/`). Three 
 React 19 + TypeScript + Vite 8. Pages: Chat, Tasks, Memory, Dream, Settings, Plugins, Channels. Three themes (dark/light/warm). i18n via `LocaleContext` (English + Chinese).
 
 - `hooks/useWebSocket.ts` — WebSocket hook for streaming chat
+- `components/StatusBar/` — 状态栏栏目协议（`StatusBarItem`）与容器/外壳；`ContextUsageItem` 在聊天输入工具栏末尾（与思考模式/默认角色/知识库同行右侧）展示上下文占用估算，只读展示、不影响对话
+- `lib/estimateTokens.ts` — 前端 token 估算（CJK≈2/字，其余≈0.25，与后端 `estimate_tokens` 同口径）+ `parseContextWindow`
 - `api/` — API client modules (`conversations.ts`, `llmConfig.ts`)
 - `types/chat.ts` — TypeScript interfaces
 - `i18n/` — locale files in `locales/en.json` and `locales/zh-CN.json`

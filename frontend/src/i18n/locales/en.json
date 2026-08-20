@@ -51,7 +51,12 @@
     "allDataDeleted": "All data deleted",
     "failedToDelete": "Failed to delete data",
     "exporting": "Exporting…",
-    "deleting": "Deleting…"
+    "deleting": "Deleting…",
+    "statusBar": "Status bar",
+    "statusbarColumns": {
+      "context": "Context usage",
+      "contextDesc": "Show estimated context window usage in the chat toolbar"
+    }
   },
   "language": {
     "en": "English",

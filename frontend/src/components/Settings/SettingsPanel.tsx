@@ -2,12 +2,15 @@ import { useState, useCallback } from 'react'
 import { EndpointManager } from './EndpointManager'
 import { useTranslation } from '../../i18n'
 import { Toast } from './Toast'
-import { Globe, Database, Download, Trash2, Loader2 } from 'lucide-react'
+import { Gauge, Globe, Database, Download, Trash2, Loader2 } from 'lucide-react'
+import { StatusBarCardGrid } from '../StatusBar/StatusBarCardGrid'
+import { useStatusBarConfig } from '../StatusBar/useStatusBarConfig'
 
 export function SettingsPanel() {
   const { t, locale, setLocale } = useTranslation()
   const [message, setMessage] = useState('')
   const [isError, setIsError] = useState(false)
+  const { config, toggle } = useStatusBarConfig()
 
   // Data management state
   const [exporting, setExporting] = useState(false)
@@ -81,6 +84,23 @@ export function SettingsPanel() {
             <option value="zh-CN">{t('language.zhCN')}</option>
           </select>
         </div>
+      </div>
+
+      {/* Status Bar */}
+      <div className="card" data-testid="statusbar-settings-card">
+        <div className="card-title"><Gauge size={14} />{t('settings.statusBar')}</div>
+        <StatusBarCardGrid
+          cards={[
+            {
+              key: 'context',
+              label: t('settings.statusbarColumns.context'),
+              description: t('settings.statusbarColumns.contextDesc'),
+              icon: <Gauge size={18} />,
+            },
+          ]}
+          config={config}
+          onToggle={toggle}
+        />
       </div>
 
       {/* LLM Configuration */}

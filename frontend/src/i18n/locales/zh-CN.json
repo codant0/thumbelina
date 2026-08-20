@@ -51,7 +51,12 @@
     "allDataDeleted": "全部数据已删除",
     "failedToDelete": "删除数据失败",
     "exporting": "导出中…",
-    "deleting": "删除中…"
+    "deleting": "删除中…",
+    "statusBar": "状态栏",
+    "statusbarColumns": {
+      "context": "上下文占用",
+      "contextDesc": "在聊天输入栏右侧显示估算的上下文窗口占用"
+    }
   },
   "language": {
     "en": "English",

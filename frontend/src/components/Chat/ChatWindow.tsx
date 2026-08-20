@@ -6,6 +6,7 @@ import { ConversationModelSelector } from './ConversationModelSelector'
 import { KnowledgeBaseSelector } from './KnowledgeBaseSelector'
 import { RoleSelector } from './RoleSelector'
 import { ThinkingSelector } from './ThinkingSelector'
+import { ContextUsageItem } from '../StatusBar/ContextUsageItem'
 import { Mail, Eraser } from 'lucide-react'
 import type { Conversation, ThinkingEffort } from '../../types/chat'
 import { useTranslation } from '../../i18n'
@@ -193,6 +194,11 @@ export function ChatWindow({ conversationId, conversations, onConversationCreate
                   onChange={(kbId) => onSetKnowledgeBase(conversationId, kbId)}
                 />
               )}
+              {/* 上下文占用：只做展示、不影响对话；位于行尾右侧 */}
+              <ContextUsageItem
+                messages={messages}
+                endpointId={activeConversation?.endpoint_id ?? null}
+              />
             </>
           ) : undefined
         }
