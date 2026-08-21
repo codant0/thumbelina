@@ -455,18 +455,13 @@ class ThumbelinaAgent:
         # 记忆工具（§7.3）：search_memory / read_memory / remember。
         if self.memory_service is not None and self.memory_config is not None:
             if self.memory_config.enabled:
-                from thumbelina.memory.tools import RememberTool, make_memory_tools
+                from thumbelina.memory.tools import make_memory_tools
 
                 memory_tools = make_memory_tools(
                     self.memory_service,
                     enabled=self.memory_config.tools.enabled,
                     extractor=self.memory_extractor,
                 )
-                # 保存 remember 工具引用以便每轮重置配额（§8.6）。
-                for t in memory_tools:
-                    if isinstance(t, RememberTool):
-                        self._remember_tool = t
-                        break
                 self.tools.extend(memory_tools)
         # clone() re-passes the combined list, so the extends above re-add
         # generated tools; dedupe or the LLM API rejects duplicate names.
@@ -477,6 +472,14 @@ class ThumbelinaAgent:
                 seen.add(item.name)
                 unique_tools.append(item)
         self.tools = unique_tools
+        # 配额重置引用必须指向去重后真正留在工具列表里的 remember 实例:
+        # clone() 会重传父 agent 的工具列表,去重保留的是父实例,本构造新建
+        # 的实例会被去掉 —— 引用错实例会导致每轮配额重置失效(§8.6)。
+        from thumbelina.memory.tools import RememberTool
+
+        self._remember_tool = next(
+            (t for t in self.tools if isinstance(t, RememberTool)), None
+        )
 
         self.graph = self._build_graph()
 

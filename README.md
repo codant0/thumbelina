@@ -474,7 +474,7 @@ memory:
   extract:
     enabled: true             # Background LLM extraction/rewrite after each user turn
     on_user_message: true     # Only trigger extraction on user messages
-    min_message_chars: 16     # Skip extraction below this message length (filters "ok/thanks"-style filler)
+    min_message_chars: 5      # Skip extraction below this message length (filters "ok/thanks"-style filler)
     max_input_tokens: 8000    # Per-extraction input token budget
   tools:
     enabled: true             # Expose search_memory / read_memory / remember to the agent

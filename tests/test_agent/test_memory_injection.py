@@ -267,3 +267,55 @@ class TestMemoryToolsRegistration:
         assert "search_memory" in names
         assert "read_memory" in names
         assert "remember" not in names
+
+
+class TestRememberQuotaResetAfterClone:
+    """clone() 后配额重置引用必须指向去重后存活的 remember 实例(§8.6)。
+
+    回归:曾出现构造器引用新建实例、去重却保留父 agent 传入实例的错位,
+    导致每轮 ``reset_turn_quota`` 打空,计数跨会话累积,首次调用即报
+    "本轮 remember 调用已达上限"。
+    """
+
+    @pytest.mark.asyncio
+    async def test_clone_remember_reference_matches_surviving_tool(
+        self, tmp_path: Path
+    ) -> None:
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        svc = await _make_memory_service(tmp_path)
+        agent = ThumbelinaAgent(
+            llm_provider=_mock_provider(),
+            memory_service=svc,
+            memory_config=MemoryConfig(enabled=True),
+        )
+        assert agent._remember_tool is not None
+
+        cloned = agent.clone()
+        surviving = next(t for t in cloned.tools if t.name == "remember")
+        # 引用必须是工具列表中真正存活的那个实例(同一对象)
+        assert cloned._remember_tool is surviving
+
+    @pytest.mark.asyncio
+    async def test_clone_turn_reset_reaches_executed_tool(self, tmp_path: Path) -> None:
+        from thumbelina.agent.graph import ThumbelinaAgent
+        from thumbelina.memory.tools import REMEMBER_PER_TURN_LIMIT
+
+        svc = await _make_memory_service(tmp_path)
+        agent = ThumbelinaAgent(
+            llm_provider=_mock_provider(),
+            memory_service=svc,
+            memory_config=MemoryConfig(enabled=True),
+        )
+        # 模拟历史累积:存活实例计数已达上限
+        assert agent._remember_tool is not None
+        agent._remember_tool._turn_count = REMEMBER_PER_TURN_LIMIT
+
+        cloned = agent.clone()
+        surviving = next(t for t in cloned.tools if t.name == "remember")
+        assert surviving.turn_quota_used() >= REMEMBER_PER_TURN_LIMIT
+
+        # run()/stream() 每轮开始的重置必须命中该实例
+        assert cloned._remember_tool is not None
+        cloned._remember_tool.reset_turn_quota()
+        assert surviving.turn_quota_used() == 0

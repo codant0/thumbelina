@@ -850,6 +850,6 @@ class TestMemoryExtractionSignalPrefilter:
     @pytest.mark.asyncio
     async def test_informative_message_triggers_extraction(self) -> None:
         agent, mock_extractor = self._make_agent()
-        # 超过 min_message_chars(默认 16) 的实质消息应触发抽取
+        # 超过 min_message_chars(默认 5) 的实质消息应触发抽取
         await agent._maybe_extract_memory("我习惯每天早上喝一杯黑咖啡提神，周末喜欢去公园慢跑")
         mock_extractor.extract_from_messages.assert_awaited_once()

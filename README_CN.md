@@ -461,7 +461,7 @@ memory:
   extract:
     enabled: true             # 后台 LLM 抽取/改写（每轮用户消息后异步触发）
     on_user_message: true     # 仅对用户消息触发抽取
-    min_message_chars: 16     # 消息低于该字符数不触发抽取（排除"好的/谢谢"等语气词）
+    min_message_chars: 5      # 消息低于该字符数不触发抽取（排除"好的/谢谢"等语气词）
     max_input_tokens: 8000    # 单次抽取输入 token 预算
   tools:
     enabled: true             # 向 Agent 暴露 search_memory / read_memory / remember

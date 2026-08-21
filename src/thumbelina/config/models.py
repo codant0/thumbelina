@@ -191,7 +191,7 @@ class MemoryExtractConfig(BaseModel):
         description="单次抽取输入 token 预算,超限时先截断全文再截断历史",
     )
     min_message_chars: int = Field(
-        default=16,
+        default=5,
         ge=0,
         description="用户消息低于该字符数不触发后台抽取(排除'好的/谢谢'等无信息量语气词)",
     )
