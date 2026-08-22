@@ -205,7 +205,12 @@ function App() {
           />
         )
       case 'chat':
-      default:
+      default: {
+        // Only treat a selected conversation as active on the chat page when
+        // it actually exists in the chat list. A coder conversation selected
+        // on the coder page must not stay active here (no chat role, and it
+        // would be passed to the backend as an active chat session).
+        const chatActiveId = conversations.some(c => c.id === selectedId) ? selectedId : undefined
         return (
           <>
             <Sidebar
@@ -214,11 +219,11 @@ function App() {
               onNew={handleNewConversation}
               onDelete={handleDelete}
               onRename={handleRename}
-              selectedId={selectedId}
+              selectedId={chatActiveId}
             />
             <ChatWindow
               ws={chatSocket}
-              conversationId={selectedId}
+              conversationId={chatActiveId}
               conversations={conversations}
               onConversationCreated={fetchConversations}
               onDefaultConversation={handleDefaultConversation}
@@ -230,6 +235,7 @@ function App() {
             />
           </>
         )
+      }
     }
   }
 

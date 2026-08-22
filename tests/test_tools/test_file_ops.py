@@ -110,3 +110,21 @@ async def test_search_files_respects_workspace_boundary(tmp_path):
         assert "超出工作区" in result
     finally:
         set_workspace(None)
+
+
+@pytest.mark.asyncio
+async def test_search_files_skips_symlink_outside_workspace(tmp_path):
+    secret = tmp_path.parent / "secret.txt"
+    secret.write_text("TOPSECRET-LEAK")
+    link = tmp_path / "link.txt"
+    try:
+        link.symlink_to(secret)
+    except OSError:
+        pytest.skip("symlinks not supported")
+    set_workspace(str(tmp_path))
+    try:
+        result = await search_files.ainvoke({"pattern": "TOPSECRET", "path": "."})
+        assert "TOPSECRET-LEAK" not in result
+        assert result.startswith("No matches")
+    finally:
+        set_workspace(None)

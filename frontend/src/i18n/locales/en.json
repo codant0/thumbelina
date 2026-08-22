@@ -250,6 +250,7 @@
     "sidebarTitle": "Coder Sessions",
     "newConversation": "New coder conversation",
     "emptyHint": "Pick a workspace to start your first coder conversation.",
+    "selectToStart": "Select or create a coder conversation",
     "unknownWorkspace": "Unknown workspace",
     "pickWorkspaceTitle": "Choose workspace",
     "workspacePlaceholder": "Absolute path to a directory on the server",

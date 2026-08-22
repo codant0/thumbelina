@@ -250,6 +250,7 @@
     "sidebarTitle": "码农会话",
     "newConversation": "新建码农会话",
     "emptyHint": "选择一个工作区，开始第一个码农会话。",
+    "selectToStart": "请选择或新建一个码农会话",
     "unknownWorkspace": "未知工作区",
     "pickWorkspaceTitle": "选择工作区",
     "workspacePlaceholder": "输入服务器上的目录绝对路径",

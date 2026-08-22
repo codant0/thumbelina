@@ -5008,6 +5008,16 @@
   .trajectory-page { --tm-rail: 48px; --tm-line: 23px; }
 }
 /* Coder mode */
+.coder-empty-state {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted-text, #888);
+  font-size: var(--fs-sm);
+  text-align: center;
+  padding: var(--sp-6);
+}
 .coder-group__header {
   display: flex;
   align-items: center;

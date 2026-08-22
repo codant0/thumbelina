@@ -110,6 +110,10 @@ async def search_files(pattern: str, path: str = ".") -> str:
     hits: list[str] = []
     try:
         for entry in root.rglob("*"):
+            # Symlinks are untrusted: they can point outside the workspace,
+            # leaking external content through rglob. Skip them entirely.
+            if entry.is_symlink():
+                continue
             if not entry.is_file():
                 continue
             if entry.stat().st_size > _SEARCH_MAX_FILE:
