@@ -105,10 +105,34 @@ def mock_repository():
             return True
         return False
 
+    async def create_conversation(
+        name=None, pinned=False, mode="chat", workspace=None, role=None
+    ):
+        """Record a new conversation; ids increment per fixture instance."""
+        conv_id = f"test-conv-id-{len(conversations) + 1}"
+        conversations[conv_id] = {
+            "id": conv_id,
+            "name": name,
+            "pinned": pinned,
+            "mode": mode,
+            "workspace": workspace,
+            "role": role,
+            "created_at": "2026-01-01",
+            "updated_at": "2026-01-01",
+            "summary": None,
+        }
+        return conv_id
+
+    async def get_conversations(mode=None):
+        convs = list(conversations.values())
+        if mode is not None:
+            convs = [c for c in convs if c.get("mode", "chat") == mode]
+        return convs
+
     repository = MagicMock()
-    repository.create_conversation = AsyncMock(return_value="test-conv-id")
+    repository.create_conversation = AsyncMock(side_effect=create_conversation)
     repository.get_conversation = AsyncMock(side_effect=get_conversation)
-    repository.get_conversations = AsyncMock(return_value=[conv])
+    repository.get_conversations = AsyncMock(side_effect=get_conversations)
     repository.get_messages = AsyncMock(side_effect=get_messages)
     repository.delete_conversation = AsyncMock(side_effect=delete_conversation)
     repository.clear_messages = AsyncMock(side_effect=clear_messages)

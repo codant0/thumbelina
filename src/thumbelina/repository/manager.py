@@ -128,15 +128,20 @@ class RepositoryManager:
         """
         return await self.conversation_repository.get_messages(conversation_id)
 
-    async def get_conversations(self) -> list[dict[str, Any]]:
-        """Get all conversations.
+    async def get_conversations(self, mode: str | None = None) -> list[dict[str, Any]]:
+        """Get conversations, optionally filtered by mode.
+
+        Parameters
+        ----------
+        mode:
+            If given, only return conversations with this mode ('chat' or 'coder').
 
         Returns
         -------
         list[dict[str, Any]]
             List of conversation dictionaries.
         """
-        return await self.conversation_repository.get_conversations()
+        return await self.conversation_repository.get_conversations(mode=mode)
 
     async def get_all_conversations_with_messages(self) -> list[dict[str, Any]]:
         """Get all conversations with their messages."""

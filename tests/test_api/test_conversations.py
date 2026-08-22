@@ -608,3 +608,42 @@ def test_compress_api_endpoint_accepts_context_window(client, conversation_id):
     agent.compress_conversation.assert_awaited_once_with(
         conversation_id, context_window_tokens=8000
     )
+
+
+def test_create_coder_conversation_with_workspace(client, tmp_path):
+    response = client.post(
+        "/api/v1/conversations",
+        json={"mode": "coder", "workspace": str(tmp_path)},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["mode"] == "coder"
+    assert data["workspace"] == str(tmp_path.resolve())
+    assert data["role"] == "coder"
+
+
+def test_create_coder_without_workspace_rejected(client):
+    response = client.post("/api/v1/conversations", json={"mode": "coder"})
+    assert response.status_code == 422
+
+
+def test_create_coder_with_missing_workspace_rejected(client, tmp_path):
+    response = client.post(
+        "/api/v1/conversations",
+        json={"mode": "coder", "workspace": str(tmp_path / "nonexistent")},
+    )
+    assert response.status_code == 422
+
+
+def test_chat_conversation_with_workspace_rejected(client):
+    response = client.post("/api/v1/conversations", json={"workspace": "C:\\"})
+    assert response.status_code == 422
+
+
+def test_list_conversations_filters_by_mode(client, tmp_path):
+    client.post("/api/v1/conversations", json={"mode": "coder", "workspace": str(tmp_path)})
+    client.post("/api/v1/conversations", json={})
+    coder_ids = [c["id"] for c in client.get("/api/v1/conversations?mode=coder").json()]
+    chat_ids = [c["id"] for c in client.get("/api/v1/conversations?mode=chat").json()]
+    assert len(coder_ids) == 1
+    assert all(cid not in chat_ids for cid in coder_ids)
