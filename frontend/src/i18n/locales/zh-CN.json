@@ -295,6 +295,7 @@
   "trajectory": {
     "title": "轨迹",
     "selectPlaceholder": "请选择要查看的会话",
+    "emptyHint": "选择一个会话后，将按轮次倒序展示完整轨迹",
     "loadMore": "加载更多",
     "loading": "加载中…",
     "loadedAll": "已加载全部轮次",

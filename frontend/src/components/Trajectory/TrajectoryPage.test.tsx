@@ -103,6 +103,29 @@ describe('TrajectoryPage', () => {
     expect(fetchSpy).toHaveBeenCalledWith(expect.stringContaining('/trajectory/c1?page=1'))
   })
 
+  it('时间线结构：轮次轨道含节点与时间线容器', async () => {
+    mockTrajectoryFetch()
+    renderWithI18n(<TrajectoryPage />)
+    await selectConversation()
+    expect(document.querySelector('.timeline')).not.toBeNull()
+    expect(document.querySelectorAll('.turn-node').length).toBeGreaterThan(0)
+  })
+
+  it('请求未返回时展示骨架占位', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/trajectory/')) return new Promise<Response>(() => {})
+      return Promise.resolve(new Response(JSON.stringify(CONVERSATIONS), { status: 200 }))
+    })
+    renderWithI18n(<TrajectoryPage />)
+    const select = await screen.findByTestId('trajectory-select')
+    fireEvent.change(select, { target: { value: 'c1' } })
+
+    const skeleton = await screen.findByTestId('trajectory-loading')
+    expect(skeleton).toHaveAttribute('aria-busy', 'true')
+    expect(screen.queryByText('你好')).not.toBeInTheDocument()
+  })
+
   it('长文本在卡片内首尾折叠并提示查看详情', async () => {
     mockTrajectoryFetch()
     renderWithI18n(<TrajectoryPage />)

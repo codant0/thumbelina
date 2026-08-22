@@ -295,6 +295,7 @@
   "trajectory": {
     "title": "Trajectory",
     "selectPlaceholder": "Please select a conversation to view",
+    "emptyHint": "Select a conversation to view its full trajectory by turns",
     "loadMore": "Load more",
     "loading": "Loading…",
     "loadedAll": "All turns loaded",

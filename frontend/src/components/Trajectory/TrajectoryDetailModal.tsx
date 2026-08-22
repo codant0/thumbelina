@@ -108,7 +108,7 @@ function TurnMetaBody({ turn, index }: { turn: TrajectoryTurn; index: number }) 
       </div>
       <div className="trajectory-field">
         <dt>Events</dt>
-        <dd>{turn.events.length}</dd>
+        <dd><span className="trajectory-count-badge">{turn.events.length}</span></dd>
       </div>
     </dl>
   )
@@ -120,8 +120,9 @@ function EventBody({ event }: { event: TrajectoryEvent }) {
   const [showJson, setShowJson] = useState(false)
 
   if (event.event_type === 'user' || event.event_type === 'assistant') {
+    const roleClass = event.event_type === 'user' ? '--user' : '--assistant'
     return (
-      <div className="trajectory-modal__text">{String(payload.content ?? '')}</div>
+      <div className={`trajectory-modal__text trajectory-modal__text${roleClass}`}>{String(payload.content ?? '')}</div>
     )
   }
 

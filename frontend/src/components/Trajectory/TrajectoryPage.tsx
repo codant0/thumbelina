@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Loader2, RefreshCw } from 'lucide-react'
+import { Boxes, CircleAlert, Loader2, RefreshCw, Route, SearchX, Terminal, Wrench } from 'lucide-react'
 import type { Conversation } from '../../types/chat'
 import type { TrajectoryDetail, TrajectoryEvent, TrajectoryPageData, TrajectoryTurn } from '../../types/trajectory'
 import { fetchTrajectory } from '../../api/trajectory'
@@ -115,31 +115,37 @@ export function TrajectoryPage({ initialConversationId }: { initialConversationI
 
       {!selectedId && (
         <div className="trajectory-empty" data-testid="trajectory-empty">
-          {notFound ? t('trajectory.conversationNotFound') : t('trajectory.selectPlaceholder')}
+          {notFound ? <SearchX size={36} aria-hidden="true" /> : <Route size={36} aria-hidden="true" />}
+          <p className="trajectory-empty__title">
+            {notFound ? t('trajectory.conversationNotFound') : t('trajectory.selectPlaceholder')}
+          </p>
+          <p className="trajectory-empty__hint">{t('trajectory.emptyHint')}</p>
         </div>
       )}
 
       {error && (
         <div className="trajectory-error" data-testid="trajectory-error">
-          {error}
+          <span>{error}</span>
           <button type="button" data-testid="retry-button" onClick={() => selectedId && void load(selectedId, 1, false)}>
             <RefreshCw size={14} /> {t('trajectory.retry')}
           </button>
         </div>
       )}
 
-      {loading && !data && <div className="trajectory-loading">{t('trajectory.loading')}</div>}
+      {loading && !data && <TrajectorySkeleton />}
 
       {data && (
         <div className="trajectory-list" data-testid="trajectory-list" ref={listRef}>
-          {data.turns.map((turn, turnIndex) => (
-            <TurnCard
-              key={turn.turn_id}
-              turn={turn}
-              turnIndex={turnIndex}
-              onOpenDetail={openDetail}
-            />
-          ))}
+          <div className="timeline">
+            {data.turns.map((turn, turnIndex) => (
+              <TurnTrack
+                key={turn.turn_id}
+                turn={turn}
+                turnIndex={turnIndex}
+                onOpenDetail={openDetail}
+              />
+            ))}
+          </div>
           <div ref={sentinelRef} className="trajectory-sentinel" />
           {hasMore && (
             <button
@@ -163,29 +169,58 @@ export function TrajectoryPage({ initialConversationId }: { initialConversationI
   )
 }
 
-function TurnCard({ turn, turnIndex, onOpenDetail }: {
+function TrajectorySkeleton() {
+  return (
+    <div className="trajectory-loading" data-testid="trajectory-loading" aria-busy="true">
+      <div className="timeline timeline-skeleton">
+        <div className="skeleton-row">
+          <span className="skeleton-node" aria-hidden="true" />
+          <span className="skeleton-block skeleton-block--head" />
+        </div>
+        <div className="skeleton-row">
+          <span />
+          <span className="skeleton-block skeleton-block--bubble" />
+        </div>
+        <div className="skeleton-row">
+          <span />
+          <span className="skeleton-block skeleton-block--chip" />
+        </div>
+        <div className="skeleton-row">
+          <span />
+          <span className="skeleton-block skeleton-block--bubble skeleton-block--right" />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function TurnTrack({ turn, turnIndex, onOpenDetail }: {
   turn: TrajectoryTurn
   turnIndex: number
   onOpenDetail: (target: TrajectoryDetail) => void
 }) {
   const { t } = useTranslation()
+  const hasError = turn.events.some(
+    e => e.event_type === 'tool_result' && (e.payload as Record<string, unknown>).is_error === true,
+  )
   return (
-    <div className="turn-card" data-testid="turn-card">
+    <div className="turn-track" data-testid="turn-card">
+      <span className={`turn-node${hasError ? ' turn-node--error' : ''}`} aria-hidden="true" />
       <button
         type="button"
         className="turn-header turn-header-btn"
         aria-label={`${t('trajectory.turnMeta')} #${turnIndex + 1}`}
         onClick={() => onOpenDetail({ kind: 'turn-meta', turn, turnIndex })}
       >
-        <span>{t('trajectory.turn')} #{turnIndex + 1}</span>
-        <span className="turn-time">{turn.started_at}</span>
+        <span className="turn-name">{t('trajectory.turn')} #{turnIndex + 1}</span>
+        <time className="turn-time" dateTime={turn.started_at}>{turn.started_at}</time>
       </button>
       {turn.events.length === 0 ? (
         <div className="turn-events-empty">{t('trajectory.noEvents')}</div>
       ) : (
         <div className="turn-events">
           {turn.events.map(event => (
-            <EventRow
+            <EventBlock
               key={event.seq}
               event={event}
               turnIndex={turnIndex}
@@ -198,7 +233,7 @@ function TurnCard({ turn, turnIndex, onOpenDetail }: {
   )
 }
 
-function EventRow({ event, turnIndex, onOpenDetail }: {
+function EventBlock({ event, turnIndex, onOpenDetail }: {
   event: TrajectoryEvent
   turnIndex: number
   onOpenDetail: (target: TrajectoryDetail) => void
@@ -212,32 +247,40 @@ function EventRow({ event, turnIndex, onOpenDetail }: {
     return (
       <button
         type="button"
-        className={`turn-event event-row message-${event.event_type}`}
+        className={`event-block event-block--bubble event-block--${event.event_type}${preview.truncated ? ' event-block--truncated' : ''}`}
         data-testid="turn-event"
         onClick={() => onOpenDetail({ kind: 'event', event, turnIndex })}
       >
-        <span className="event-badge">{t(`trajectory.${event.event_type}`)}</span>
         <span className="event-content">{preview.text}</span>
-        <span className="event-more">{t('trajectory.viewDetails')}</span>
+        {preview.truncated && <span className="event-more">{t('trajectory.viewDetails')}</span>}
       </button>
     )
   }
 
   const isError = event.event_type === 'tool_result' && payload.is_error === true
+  const icon = event.event_type === 'context'
+    ? <Boxes size={14} aria-hidden="true" />
+    : event.event_type === 'tool_call'
+      ? <Wrench size={14} aria-hidden="true" />
+      : isError
+        ? <CircleAlert size={14} aria-hidden="true" />
+        : <Terminal size={14} aria-hidden="true" />
+
   const summary = event.event_type === 'context'
     ? t('trajectory.contextCount').replace('{n}', String(Array.isArray(payload.items) ? payload.items.length : 0))
     : event.event_type === 'tool_call'
-      ? String(payload.tool ?? '')
+      ? collapseMiddle(JSON.stringify(payload.args ?? {}), 120, 60, 40).text
       : collapseMiddle(String(payload.content ?? ''), 120, 60, 40).text || t('trajectory.noEvents')
 
   return (
     <button
       type="button"
-      className={`turn-event event-row event-tech${isError ? ' event-error' : ''}`}
+      className={`event-block event-block--chip${isError ? ' event-block--error' : ''}`}
       data-testid="turn-event"
       onClick={() => onOpenDetail({ kind: 'event', event, turnIndex })}
     >
-      <span className="event-badge">{eventLabel(t, event)}</span>
+      <span className="chip-label">{eventLabel(t, event)}</span>
+      <span className="chip-icon">{icon}</span>
       <span className="event-summary">{summary}</span>
       <span className="event-more">{t('trajectory.viewDetails')}</span>
     </button>
