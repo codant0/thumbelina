@@ -394,10 +394,11 @@ async def list_conversations(
         logger.debug("Fetched %d conversations", len(conversations))
         return [ConversationSchema(**c) for c in conversations]
     except Exception:
-        ...
+        logger.exception("Failed to list conversations")
+        return []
 ```
 
-（省略号处保留文件原有 except 逻辑不动。）若 `Query` 未导入，在 fastapi 导入行加 `Query`；确认 `from typing import Literal` 已导入（`SetConversationThinkingRequest` 已在用 Literal）。
+`Query` 当前未导入（`fastapi` 导入行只有 `APIRouter, Depends, HTTPException, Request`），需补上；`Literal` 已导入（`SetConversationThinkingRequest` 在用）。
 
 - [ ] **Step 5: 运行测试确认通过**
 
