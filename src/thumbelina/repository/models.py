@@ -250,6 +250,45 @@ class Message(Base):
         return f"<Message(id={self.id!r}, role={self.role!r})>"
 
 
+class TrajectoryEvent(Base):
+    """单条轨迹审计事件(设计文档 §3.1)。
+
+    轮次概念:一条用户消息开启一个轮次(turn_id),到该次助手最终
+    响应结束;同一轮次内 seq 从 0 递增保证回放顺序。
+    """
+
+    __tablename__ = "trajectory_events"
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+    )
+    conversation_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        index=True,
+    )
+    turn_id: Mapped[str] = mapped_column(
+        String(36),
+        index=True,
+    )
+    seq: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+    )
+    event_type: Mapped[str] = mapped_column(
+        String(20),
+    )
+    payload: Mapped[str] = mapped_column(
+        Text,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=func.now(),
+    )
+
+
 class SkillRecord(Base):
     """SQLAlchemy model for skill storage."""
 
