@@ -1,6 +1,7 @@
 {
   "nav": {
     "chat": "Chat",
+    "trajectory": "Trajectory",
     "tasks": "Tasks",
     "todo": "TODO",
     "memory": "Memory",
@@ -235,7 +236,9 @@
     "compressFailed": "Failed to compress context",
     "stop": "Stop",
     "stopTitle": "Stop generating",
-    "generating": "Generating…"
+    "generating": "Generating…",
+    "viewTrajectory": "View trajectory",
+    "viewTrajectoryTitle": "Audit this conversation in the trajectory page"
   },
   "taskManager": {
     "title": "Task Manager",

@@ -157,4 +157,11 @@ describe('ChatWindow', () => {
     renderWindow({ conversationId: 'conv-1' })
     expect(screen.getByTestId('compress-context')).toBeDisabled()
   })
+
+  it('view trajectory button navigates with current conversation', () => {
+    const onViewTrajectory = vi.fn()
+    renderWindow({ conversationId: 'conv-1', onViewTrajectory })
+    fireEvent.click(screen.getByTestId('view-trajectory'))
+    expect(onViewTrajectory).toHaveBeenCalledWith('conv-1')
+  })
 })

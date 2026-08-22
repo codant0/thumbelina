@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import App from './App'
 
 // Mock the WebSocket hook
@@ -45,5 +45,12 @@ describe('App', () => {
     expect(screen.getByTestId('nav-memory')).toBeInTheDocument()
     expect(screen.getByTestId('nav-dream')).toBeInTheDocument()
     expect(screen.getByTestId('nav-settings')).toBeInTheDocument()
+  })
+
+  it('switches to trajectory page from nav', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify([]), { status: 200 }))
+    render(<App />)
+    fireEvent.click(screen.getByTestId('nav-trajectory'))
+    expect(await screen.findByTestId('trajectory-page')).toBeInTheDocument()
   })
 })

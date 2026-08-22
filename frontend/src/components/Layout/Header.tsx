@@ -10,15 +10,17 @@ import {
   Blocks,
   Radio,
   BookOpen,
+  Footprints,
 } from 'lucide-react'
 import type { ComponentType } from 'react'
 
-export type Page = 'chat' | 'tasks' | 'todo' | 'memory' | 'dream' | 'knowledge-base' | 'settings' | 'plugins' | 'channels'
+export type Page = 'chat' | 'trajectory' | 'tasks' | 'todo' | 'memory' | 'dream' | 'knowledge-base' | 'settings' | 'plugins' | 'channels'
 
-const navKeys: Page[] = ['chat', 'tasks', 'todo', 'memory', 'dream', 'knowledge-base', 'settings', 'plugins', 'channels']
+const navKeys: Page[] = ['chat', 'trajectory', 'tasks', 'todo', 'memory', 'dream', 'knowledge-base', 'settings', 'plugins', 'channels']
 
 const NAV_ICONS: Record<Page, ComponentType<{ size?: number | string }>> = {
   chat: MessageSquare,
+  trajectory: Footprints,
   tasks: ListTodo,
   todo: ClipboardList,
   memory: Database,
@@ -36,6 +38,7 @@ interface HeaderProps {
 
 const NAV_I18N: Record<Page, string> = {
   chat: 'nav.chat',
+  trajectory: 'nav.trajectory',
   tasks: 'nav.tasks',
   todo: 'nav.todo',
   memory: 'nav.memory',

@@ -11,6 +11,7 @@ import { SettingsPanel } from './components/Settings/SettingsPanel'
 import { PluginsPage } from './components/Plugins/PluginsPage'
 import { ChannelsPage } from './components/Channels/ChannelsPage'
 import { KnowledgeBasePage } from './components/KnowledgeBase/KnowledgeBasePage'
+import { TrajectoryPage } from './components/Trajectory/TrajectoryPage'
 import { renameConversation, setConversationEndpoint, setConversationKnowledgeBase, setConversationRole, setConversationThinking } from './api/conversations'
 import type { Conversation, ThinkingEffort } from './types/chat'
 import './App.css'
@@ -19,6 +20,7 @@ function App() {
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [selectedId, setSelectedId] = useState<string | undefined>()
   const [activePage, setActivePage] = useState<Page>('chat')
+  const [trajectorySessionId, setTrajectorySessionId] = useState<string | undefined>()
 
   // The chat WebSocket lives here (not in ChatWindow) so switching to other
   // pages keeps the connection open — otherwise an in-flight LLM response
@@ -150,6 +152,11 @@ function App() {
     } catch { /* ignore */ }
   }, [updateConversationInState])
 
+  const handleViewTrajectory = useCallback(() => {
+    setTrajectorySessionId(selectedId)
+    setActivePage('trajectory')
+  }, [selectedId])
+
   const renderPage = () => {
     switch (activePage) {
       case 'tasks':
@@ -168,6 +175,8 @@ function App() {
         return <ChannelsPage />
       case 'knowledge-base':
         return <KnowledgeBasePage />
+      case 'trajectory':
+        return <TrajectoryPage initialConversationId={trajectorySessionId} />
       case 'chat':
       default:
         return (
@@ -190,6 +199,7 @@ function App() {
               onSetKnowledgeBase={handleSetKnowledgeBase}
               onSetRole={handleSetRole}
               onSetThinking={handleSetThinking}
+              onViewTrajectory={handleViewTrajectory}
             />
           </>
         )

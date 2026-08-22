@@ -29,4 +29,9 @@ describe('Header', () => {
     screen.getByTestId('nav-tasks').click()
     expect(onNavigate).toHaveBeenCalledWith('tasks')
   })
+
+  it('renders trajectory nav entry', () => {
+    render(<Header activePage="chat" onNavigate={vi.fn()} />)
+    expect(screen.getByTestId('nav-trajectory')).toBeInTheDocument()
+  })
 })
