@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
+from langchain_openai import ChatOpenAI
 
 from thumbelina.llm.base import ConnectionTestResult, SpeedTestResult
 from thumbelina.llm.openai import OpenAIProvider
@@ -332,3 +333,23 @@ def test_chat_model_plain_chunks_unchanged():
     assert generation is not None
     assert generation.message.content == "Hello"
     assert "reasoning_content" not in generation.message.additional_kwargs
+
+
+def test_chat_model_forces_stream_usage_for_custom_base_url():
+    """自定义 base_url 时流式必须请求 usage(否则 KV 缓存字段拿不到)。"""
+    provider = OpenAIProvider(
+        api_key="test-key", model="deepseek-chat", base_url="https://api.deepseek.com/v1"
+    )
+    model = provider.chat_model
+    assert isinstance(model, ChatOpenAI)
+    assert model.stream_usage is True
+
+
+def test_chat_model_stream_usage_can_be_overridden():
+    provider = OpenAIProvider(
+        api_key="test-key",
+        model="deepseek-chat",
+        base_url="https://api.deepseek.com/v1",
+        stream_usage=False,
+    )
+    assert provider.chat_model.stream_usage is False

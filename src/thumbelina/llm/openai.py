@@ -110,14 +110,18 @@ class OpenAIProvider(LLMProvider):
         if self._chat_model is None:
             chat_openai_cls = _get_reasoning_chat_openai_cls()
 
-            # 思考模式&思考强度
-            self._chat_model = chat_openai_cls(
-                api_key=self._api_key or None,
-                model=self._model_name,
-                base_url=self._base_url,
-                reasoning_effort=self.reasoning_effort,
-                **self._chat_model_kwargs,
-            )
+            # langchain-openai 对自定义 base_url 默认关闭 stream_usage(兼容
+            # 旧端点),流式响应将不带 usage(含 KV 缓存命中字段)；显式开启,
+            # 允许调用方通过 kwargs 覆盖。
+            kwargs: dict[str, Any] = {
+                "api_key": self._api_key or None,
+                "model": self._model_name,
+                "base_url": self._base_url,
+                "reasoning_effort": self.reasoning_effort,
+                "stream_usage": True,
+            }
+            kwargs.update(self._chat_model_kwargs)
+            self._chat_model = chat_openai_cls(**kwargs)
         return self._chat_model
 
     @staticmethod
