@@ -1,4 +1,5 @@
 """TrajectoryEvent 模型建表与字段测试(设计文档 §3.1)。"""
+
 from __future__ import annotations
 
 from sqlalchemy import inspect as sa_inspect

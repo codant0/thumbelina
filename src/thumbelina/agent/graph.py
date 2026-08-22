@@ -1314,9 +1314,7 @@ class ThumbelinaAgent:
             await self._persist_message(
                 "assistant", full_response, reasoning_content=full_reasoning or None
             )
-            await self.trajectory_recorder.record_assistant(
-                full_response, full_reasoning or None
-            )
+            await self.trajectory_recorder.record_assistant(full_response, full_reasoning or None)
             # Auto-name the conversation in the background so streaming is not delayed.
             asyncio.create_task(self._maybe_auto_name())
             # 异步触发记忆抽取(§8.6),仅用户消息触发;失败由回调记录。

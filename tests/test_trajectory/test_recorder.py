@@ -1,4 +1,5 @@
 """TrajectoryRecorder 单元测试(设计文档 §3.4/§3.5)。"""
+
 from __future__ import annotations
 
 import json

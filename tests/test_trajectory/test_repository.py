@@ -1,4 +1,5 @@
 """TrajectoryRepository 与 RepositoryManager 轨迹方法测试(设计文档 §3)。"""
+
 from __future__ import annotations
 
 import json

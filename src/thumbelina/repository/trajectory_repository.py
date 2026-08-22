@@ -92,11 +92,15 @@ class TrajectoryRepository:
         if not turn_ids:
             return []
         with self._get_session() as session:
-            rows = session.execute(
-                select(TrajectoryEvent)
-                .where(TrajectoryEvent.turn_id.in_(turn_ids))
-                .order_by(TrajectoryEvent.turn_id, TrajectoryEvent.seq)
-            ).scalars().all()
+            rows = (
+                session.execute(
+                    select(TrajectoryEvent)
+                    .where(TrajectoryEvent.turn_id.in_(turn_ids))
+                    .order_by(TrajectoryEvent.turn_id, TrajectoryEvent.seq)
+                )
+                .scalars()
+                .all()
+            )
         result: list[dict[str, Any]] = []
         for r in rows:
             try:

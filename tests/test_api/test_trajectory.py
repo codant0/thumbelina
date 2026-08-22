@@ -1,4 +1,5 @@
 """轨迹 API 测试(设计文档 §4)。"""
+
 from __future__ import annotations
 
 import json
