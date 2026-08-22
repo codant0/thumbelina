@@ -369,9 +369,7 @@ class EndpointManager:
             return None
 
         effective_model = (
-            model
-            or endpoint.active_model
-            or (endpoint.models[0].name if endpoint.models else None)
+            model or endpoint.active_model or (endpoint.models[0].name if endpoint.models else None)
         )
         provider = create_provider(
             endpoint.provider,

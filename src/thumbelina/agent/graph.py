@@ -477,9 +477,7 @@ class ThumbelinaAgent:
         # 的实例会被去掉 —— 引用错实例会导致每轮配额重置失效(§8.6)。
         from thumbelina.memory.tools import RememberTool
 
-        self._remember_tool = next(
-            (t for t in self.tools if isinstance(t, RememberTool)), None
-        )
+        self._remember_tool = next((t for t in self.tools if isinstance(t, RememberTool)), None)
 
         self.graph = self._build_graph()
 

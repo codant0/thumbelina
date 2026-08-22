@@ -278,9 +278,7 @@ class TestRememberQuotaResetAfterClone:
     """
 
     @pytest.mark.asyncio
-    async def test_clone_remember_reference_matches_surviving_tool(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_clone_remember_reference_matches_surviving_tool(self, tmp_path: Path) -> None:
         from thumbelina.agent.graph import ThumbelinaAgent
 
         svc = await _make_memory_service(tmp_path)
