@@ -2,6 +2,7 @@ import { useTranslation } from '../../i18n'
 import { ThemeToggle } from './ThemeToggle'
 import {
   MessageSquare,
+  Code2,
   ListTodo,
   ClipboardList,
   Database,
@@ -14,12 +15,13 @@ import {
 } from 'lucide-react'
 import type { ComponentType } from 'react'
 
-export type Page = 'chat' | 'trajectory' | 'tasks' | 'todo' | 'memory' | 'dream' | 'knowledge-base' | 'settings' | 'plugins' | 'channels'
+export type Page = 'chat' | 'coder' | 'trajectory' | 'tasks' | 'todo' | 'memory' | 'dream' | 'knowledge-base' | 'settings' | 'plugins' | 'channels'
 
-const navKeys: Page[] = ['chat', 'trajectory', 'tasks', 'todo', 'memory', 'dream', 'knowledge-base', 'settings', 'plugins', 'channels']
+const navKeys: Page[] = ['chat', 'coder', 'trajectory', 'tasks', 'todo', 'memory', 'dream', 'knowledge-base', 'settings', 'plugins', 'channels']
 
 const NAV_ICONS: Record<Page, ComponentType<{ size?: number | string }>> = {
   chat: MessageSquare,
+  coder: Code2,
   trajectory: Footprints,
   tasks: ListTodo,
   todo: ClipboardList,
@@ -38,6 +40,7 @@ interface HeaderProps {
 
 const NAV_I18N: Record<Page, string> = {
   chat: 'nav.chat',
+  coder: 'nav.coder',
   trajectory: 'nav.trajectory',
   tasks: 'nav.tasks',
   todo: 'nav.todo',

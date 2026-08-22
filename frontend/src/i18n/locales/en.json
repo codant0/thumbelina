@@ -1,6 +1,7 @@
 {
   "nav": {
     "chat": "Chat",
+    "coder": "Coder",
     "trajectory": "Trajectory",
     "tasks": "Tasks",
     "todo": "TODO",
