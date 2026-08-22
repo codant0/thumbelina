@@ -161,4 +161,25 @@ describe('TrajectoryPage', () => {
       expect(screen.getAllByTestId('turn-card')).toHaveLength(2)
     })
   })
+
+  it('轨迹接口返回 404 时清空选择并提示会话不存在', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/trajectory/')) {
+        return Promise.resolve(new Response(JSON.stringify({ detail: 'Conversation not found' }), { status: 404 }))
+      }
+      return Promise.resolve(new Response(JSON.stringify(CONVERSATIONS), { status: 200 }))
+    })
+    renderWithI18n(<TrajectoryPage />)
+    const select = await screen.findByTestId('trajectory-select')
+    fireEvent.change(select, { target: { value: 'c1' } })
+
+    // 清空选择:select 值回到空选项
+    await waitFor(() => {
+      expect((screen.getByTestId('trajectory-select') as HTMLSelectElement).value).toBe('')
+    })
+    // 空状态区域展示"会话不存在",而非通用错误(无重试按钮)
+    expect(await screen.findByText('会话不存在')).toBeInTheDocument()
+    expect(screen.queryByTestId('trajectory-error')).not.toBeInTheDocument()
+  })
 })

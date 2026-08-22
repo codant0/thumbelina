@@ -75,3 +75,18 @@ async def test_serialize_failure_falls_back():
     await recorder.record_tool_call("boom", {"arg": BadObject()}, "call-1")
     payload = json.loads(manager.events[0]["payload"])
     assert payload == {"error": "serialize_failed"}
+
+
+class RaisingManager(FakeManager):
+    async def add_trajectory_events(self, conversation_id: str, events: list[dict]) -> None:
+        raise RuntimeError("db down")
+
+
+async def test_write_failure_does_not_raise():
+    """写入失败绝不向调用方传播(设计文档 §6:"绝不破坏聊天")。"""
+    recorder = TrajectoryRecorder(RaisingManager())
+    recorder.begin_turn("conv-1")
+    await recorder.record_user("你好")  # must not raise
+    await recorder.record_assistant("好")
+    # 写入虽失败,但轮次与序列号状态仍按正常流程推进
+    assert recorder.enabled is True

@@ -299,6 +299,7 @@
     "loading": "Loading…",
     "loadFailed": "Failed to load",
     "retry": "Retry",
+    "conversationNotFound": "Conversation not found",
     "legacyNote": "Legacy record: no tool call / context data",
     "toolCall": "Tool call",
     "toolResult": "Tool result",

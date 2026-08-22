@@ -14,6 +14,7 @@ export function TrajectoryPage({ initialConversationId }: { initialConversationI
   const [data, setData] = useState<TrajectoryPageData | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [notFound, setNotFound] = useState(false)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
@@ -26,6 +27,7 @@ export function TrajectoryPage({ initialConversationId }: { initialConversationI
   const load = useCallback(async (conversationId: string, page: number, append: boolean) => {
     setLoading(true)
     setError('')
+    setNotFound(false)
     try {
       const pageData = await fetchTrajectory(conversationId, page, PAGE_SIZE)
       setData(prev => {
@@ -34,7 +36,14 @@ export function TrajectoryPage({ initialConversationId }: { initialConversationI
         }
         return pageData
       })
-    } catch {
+    } catch (err) {
+      // §5.2: 会话不存在(404)时清空选择并提示,而不是展示可重试的通用错误。
+      if ((err as { status?: number }).status === 404) {
+        setSelectedId(undefined)
+        setData(null)
+        setNotFound(true)
+        return
+      }
       setError(t('trajectory.loadFailed'))
     } finally {
       setLoading(false)
@@ -75,7 +84,11 @@ export function TrajectoryPage({ initialConversationId }: { initialConversationI
         ))}
       </select>
 
-      {!selectedId && <div className="trajectory-empty" data-testid="trajectory-empty">{t('trajectory.selectPlaceholder')}</div>}
+      {!selectedId && (
+        <div className="trajectory-empty" data-testid="trajectory-empty">
+          {notFound ? t('trajectory.conversationNotFound') : t('trajectory.selectPlaceholder')}
+        </div>
+      )}
 
       {error && (
         <div className="trajectory-error" data-testid="trajectory-error">
