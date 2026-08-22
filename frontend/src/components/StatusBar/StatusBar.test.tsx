@@ -52,3 +52,17 @@ describe('StatusBar container', () => {
     expect(getData).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('StatusBar icon passing', () => {
+  it('把 item.icon 渲染到胶囊内（图标即栏目区分）', async () => {
+    const item: StatusBarItem = {
+      key: 'demo',
+      icon: <svg data-testid="item-icon" />,
+      getData: () => ({ n: 1 }),
+      render: () => 'v',
+    }
+    render(<StatusBar items={[item]} />)
+    const el = await screen.findByRole('status')
+    expect(el.querySelector('[data-testid="item-icon"]')).not.toBeNull()
+  })
+})

@@ -257,13 +257,14 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
                   onChange={(kbId) => onSetKnowledgeBase(conversationId, kbId)}
                 />
               )}
-              {/* 上下文占用：只做展示、不影响对话；位于行尾右侧 */}
-              <ContextUsageItem
-                messages={messages}
-                endpointId={activeConversation?.endpoint_id ?? null}
-              />
-              {/* KV 缓存命中率：只读聚合端点，不触发 LLM 调用 */}
-              <CacheHitRateItem />
+              {/* 状态栏分组：上下文占用 + KV 缓存命中率（只读展示，不触发 LLM 调用） */}
+              <div className="statusbar-group">
+                <ContextUsageItem
+                  messages={messages}
+                  endpointId={activeConversation?.endpoint_id ?? null}
+                />
+                <CacheHitRateItem />
+              </div>
             </>
           ) : undefined
         }

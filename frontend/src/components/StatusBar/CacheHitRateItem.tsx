@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { Zap } from 'lucide-react'
 import { fetchCacheStats } from '../../api/trajectory'
 import { useTranslation } from '../../i18n'
 import type { StatusBarItem } from './types'
@@ -37,6 +38,7 @@ function CacheHitRateItemInner() {
 
   const item = useMemo<StatusBarItem>(() => ({
     key: 'cacheHit',
+    icon: <Zap size={13} aria-hidden="true" />,
     getData: () => fetchCacheStats(),
     render: d => {
       const rate = rateOf(d)

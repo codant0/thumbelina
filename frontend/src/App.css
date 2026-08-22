@@ -3866,11 +3866,18 @@
 }
 
 /* ===== Status Bar (context usage, inline in input toolbar) ===== */
-.statusbar {
+.statusbar-group {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-1);
   margin-left: auto;
+  flex-shrink: 0;
+}
+
+.statusbar {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
   flex-shrink: 0;
 }
 

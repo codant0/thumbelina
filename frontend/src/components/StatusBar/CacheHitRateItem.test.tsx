@@ -55,3 +55,17 @@ describe('CacheHitRateItem', () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 })
+describe('CacheHitRateItem 图标', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    localStorage.clear()
+    localStorage.setItem('thumbelina-locale', 'zh-CN')
+  })
+
+  it('胶囊内渲染 Zap 图标', async () => {
+    mockStats({ hit_tokens: 1, miss_tokens: 1, turns: 1 })
+    renderWithI18n(<CacheHitRateItem />)
+    const item = await screen.findByTestId('statusbar-item')
+    expect(item.querySelector('svg')).not.toBeNull()
+  })
+})

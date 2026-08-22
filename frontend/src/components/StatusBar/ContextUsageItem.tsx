@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Gauge } from 'lucide-react'
 import { fetchEndpoints } from '../../api/llmConfig'
 import type { Message } from '../../types/chat'
 import { estimateTokens, parseContextWindow } from '../../lib/estimateTokens'
@@ -73,6 +74,7 @@ function ContextUsageItemInner({ messages, endpointId }: ContextUsageItemProps) 
     const pct = (d: ContextData) => usageOf(d)
     return {
       key: 'context',
+      icon: <Gauge size={13} aria-hidden="true" />,
       getData: () => ({ usedTokens: countTokens(messages), limit }),
       render: d => {
         const pctVal = pct(d as ContextData)

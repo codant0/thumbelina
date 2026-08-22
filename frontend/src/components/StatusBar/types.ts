@@ -24,4 +24,6 @@ export interface StatusBarItem {
   status?: (data: StatusData) => StatusBarState
   /** 悬浮提示 / 无障碍标题（如 "缓存命中率 26%（900/3400 tokens）"） */
   title?: (data: StatusData) => string
+  /** 栏目图标（与设置页「状态栏」卡片图标一致） */
+  icon?: ReactNode
 }
