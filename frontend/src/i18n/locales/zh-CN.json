@@ -289,6 +289,21 @@
     "loaded": "已加载",
     "searchFailed": "搜索失败"
   },
+  "trajectory": {
+    "title": "轨迹",
+    "selectPlaceholder": "请选择要查看的会话",
+    "loadMore": "加载更多",
+    "loading": "加载中…",
+    "loadFailed": "加载失败",
+    "retry": "重试",
+    "legacyNote": "旧记录：无工具调用/上下文数据",
+    "toolCall": "工具调用",
+    "toolResult": "工具结果",
+    "context": "上下文",
+    "user": "用户",
+    "assistant": "助手",
+    "turn": "轮次"
+  },
   "dream": {
     "title": "梦境",
     "loading": "加载中…",

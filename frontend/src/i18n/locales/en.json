@@ -289,6 +289,21 @@
     "loaded": "Loaded",
     "searchFailed": "Search failed"
   },
+  "trajectory": {
+    "title": "Trajectory",
+    "selectPlaceholder": "Please select a conversation to view",
+    "loadMore": "Load more",
+    "loading": "Loading…",
+    "loadFailed": "Failed to load",
+    "retry": "Retry",
+    "legacyNote": "Legacy record: no tool call / context data",
+    "toolCall": "Tool call",
+    "toolResult": "Tool result",
+    "context": "Context",
+    "user": "User",
+    "assistant": "Assistant",
+    "turn": "Turn"
+  },
   "dream": {
     "title": "Dream",
     "loading": "Loading…",
