@@ -212,6 +212,8 @@ async def get_conversation(
         id=conversation["id"],
         name=conversation.get("name"),
         pinned=conversation.get("pinned", False),
+        mode=conversation.get("mode", "chat"),
+        workspace=conversation.get("workspace"),
         endpoint_id=conversation.get("endpoint_id"),
         model=conversation.get("model"),
         knowledge_base_id=conversation.get("knowledge_base_id"),

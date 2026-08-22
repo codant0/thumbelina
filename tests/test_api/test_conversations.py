@@ -647,3 +647,23 @@ def test_list_conversations_filters_by_mode(client, tmp_path):
     chat_ids = [c["id"] for c in client.get("/api/v1/conversations?mode=chat").json()]
     assert len(coder_ids) == 1
     assert all(cid not in chat_ids for cid in coder_ids)
+
+
+def test_get_coder_conversation_detail_includes_mode_and_workspace(client, tmp_path):
+    """GET 会话详情应如实返回 coder 会话的 mode 与 workspace。"""
+    created = client.post(
+        "/api/v1/conversations",
+        json={"mode": "coder", "workspace": str(tmp_path)},
+    )
+    conv_id = created.json()["id"]
+
+    detail = client.get(f"/api/v1/conversations/{conv_id}").json()
+    assert detail["mode"] == "coder"
+    assert detail["workspace"] == str(tmp_path.resolve())
+
+
+def test_get_chat_conversation_detail_defaults_mode_and_workspace(client, conversation_id):
+    """GET 普通会话详情应报告 mode='chat' 且 workspace 为 None。"""
+    detail = client.get(f"/api/v1/conversations/{conversation_id}").json()
+    assert detail["mode"] == "chat"
+    assert detail["workspace"] is None
