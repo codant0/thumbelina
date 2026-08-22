@@ -308,6 +308,7 @@ async def swap_channel(
             ilink_base_url=(
                 body.ilink_base_url if body.ilink_base_url is not None else existing.ilink_base_url
             ),
+            accounts_dir=existing.accounts_dir,
             webhook_secret=(
                 body.webhook_secret if body.webhook_secret is not None else existing.webhook_secret
             ),

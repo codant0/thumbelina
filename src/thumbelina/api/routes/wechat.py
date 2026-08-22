@@ -214,10 +214,13 @@ async def confirm_wechat_login(
     """Save credentials and enable the WeChat channel.
 
     The client calls this after receiving ``status=confirmed`` from the
-    poll endpoint. This saves the credentials to ``~/.weclaw/accounts/``
+    poll endpoint. This saves the credentials to ``CHANNEL/.weclaw/accounts/``
     and hot-enables the WeChat channel via the runtime config manager.
     """
     from thumbelina.channels.wechat_qrcode import WeChatCredentials
+
+    config = request.app.state.config
+    accounts_dir = config.channels.wechat.accounts_dir
 
     creds = WeChatCredentials(
         bot_token=body.bot_token,
@@ -228,7 +231,7 @@ async def confirm_wechat_login(
 
     manager = _get_qrcode_manager()
     try:
-        saved_path = manager.save_credentials(creds)
+        saved_path = manager.save_credentials(creds, accounts_dir)
     except OSError as exc:
         logger.exception("Failed to save credentials")
         raise HTTPException(
@@ -239,13 +242,13 @@ async def confirm_wechat_login(
     # Auto-enable and start the WeChat channel via runtime config manager
     from thumbelina.channels.config import WeChatChannelConfig
 
-    config = request.app.state.config
     new_channel_config = WeChatChannelConfig(
         enabled=True,
         bot_token=body.bot_token,
         ilink_bot_id=body.ilink_bot_id,
         ilink_user_id=body.ilink_user_id,
         ilink_base_url=body.base_url,
+        accounts_dir=accounts_dir,
         webhook_secret=config.channels.wechat.webhook_secret,
     )
 

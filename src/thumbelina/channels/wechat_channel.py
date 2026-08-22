@@ -3,7 +3,7 @@
 Connects directly to WeChat's iLink bot API to receive messages via
 long-polling and send replies, using the weixin-bot protocol.
 Credentials are obtained from the QR code login flow and stored in
-``~/.weclaw/accounts/``.
+``CHANNEL/.weclaw/accounts/``.
 
 Protocol reference: https://github.com/epiral/weixin-bot/blob/main/docs/protocol-spec.md
 
@@ -81,7 +81,7 @@ class WeChatChannel(Channel):
         from thumbelina.channels.wechat_qrcode import ILinkClient
 
         # If bot_token is empty but ilink_bot_id is set, try loading saved
-        # credentials from ~/.weclaw/accounts/{bot_id}.json.  This happens
+        # credentials from CHANNEL/.weclaw/accounts/{bot_id}.json.  This happens
         # after a restart when the YAML config has been stripped of secrets.
         if not self._config.bot_token and self._config.ilink_bot_id:
             await self._load_saved_credentials()
@@ -110,7 +110,7 @@ class WeChatChannel(Channel):
         )
 
     async def _load_saved_credentials(self) -> None:
-        """Load iLink credentials from ``~/.weclaw/accounts/{bot_id}.json``.
+        """Load iLink credentials from ``{accounts_dir}/{bot_id}.json``.
 
         Called during :meth:`start` when ``bot_token`` is empty but
         ``ilink_bot_id`` is available (typical after a restart when the
@@ -122,7 +122,7 @@ class WeChatChannel(Channel):
         )
 
         bot_id = _normalize_id(self._config.ilink_bot_id)
-        cred_path = _accounts_dir() / f"{bot_id}.json"
+        cred_path = _accounts_dir(self._config.accounts_dir) / f"{bot_id}.json"
 
         if not cred_path.exists():
             logger.warning("No saved credentials at %s", cred_path)

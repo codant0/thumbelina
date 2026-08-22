@@ -2,7 +2,7 @@
 
 Calls WeChat's public iLink endpoints to obtain a QR code and poll
 for scan status. On success the credentials are saved into
-``~/.weclaw/accounts/``.
+``CHANNEL/.weclaw/accounts/`` (relative to the working directory).
 
 Protocol reference: https://github.com/epiral/weixin-bot/blob/main/docs/protocol-spec.md
 """
@@ -167,8 +167,11 @@ class WeChatQRCodeManager:
     # ── Save credentials ─────────────────────────────────────────────
 
     @staticmethod
-    def save_credentials(creds: WeChatCredentials) -> str:
-        """Save credentials to ``~/.weclaw/accounts/{bot_id}.json``.
+    def save_credentials(creds: WeChatCredentials, accounts_dir: str = "") -> str:
+        """Save credentials to ``{accounts_dir}/{bot_id}.json``.
+
+        The directory defaults to ``CHANNEL/.weclaw/accounts`` and can be
+        overridden via *accounts_dir* (``channels.wechat.accounts_dir``).
 
         Returns the path to the saved file.
 
@@ -177,11 +180,11 @@ class WeChatQRCodeManager:
         OSError
             If the file cannot be written.
         """
-        accounts_dir = _accounts_dir()
-        accounts_dir.mkdir(parents=True, exist_ok=True)
+        accounts_dir_path = _accounts_dir(accounts_dir)
+        accounts_dir_path.mkdir(parents=True, exist_ok=True)
 
         bot_id = _normalize_id(creds.ilink_bot_id)
-        path = accounts_dir / f"{bot_id}.json"
+        path = accounts_dir_path / f"{bot_id}.json"
 
         path.write_text(
             json.dumps(
@@ -203,9 +206,16 @@ class WeChatQRCodeManager:
 # ── Helpers ──────────────────────────────────────────────────────────
 
 
-def _accounts_dir() -> Path:
-    """Return ``~/.weclaw/accounts``."""
-    return Path.home() / ".weclaw" / "accounts"
+def _accounts_dir(override: str = "") -> Path:
+    """Return the credential storage directory.
+
+    Defaults to ``CHANNEL/.weclaw/accounts`` relative to the working
+    directory (same level as the MEMORY/TODO directories); a non-empty
+    *override* (from ``channels.wechat.accounts_dir``) takes precedence.
+    """
+    if override:
+        return Path(override).expanduser()
+    return Path("CHANNEL") / ".weclaw" / "accounts"
 
 
 def _normalize_id(raw: str) -> str:

@@ -133,7 +133,7 @@ async def diagnose():
     print("5. Recommendations")
     print(f"{'=' * 60}")
     print("If you see 'Session expired' (errcode=-14):")
-    print("  1. Clear old credentials: rm ~/.weclaw/accounts/*.json")
+    print("  1. Clear old credentials: rm CHANNEL/.weclaw/accounts/*.json")
     print("  2. Restart thumbelina server")
     print("  3. Scan new QR code via /api/v1/wechat/qrcode")
     print("  4. Confirm login via /api/v1/wechat/qrcode/confirm")

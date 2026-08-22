@@ -141,7 +141,7 @@ class TestWeChatChannelLifecycle:
     async def test_start_loads_saved_credentials_when_token_empty(
         self, mock_agent: MagicMock, tmp_path
     ) -> None:
-        """start() should load credentials from ~/.weclaw/accounts/ when bot_token is empty."""
+        """start() should load credentials from the accounts dir when bot_token is empty."""
         import json
 
         config = WeChatChannelConfig(

@@ -30,6 +30,9 @@ services:
       - THUMBELINA_REPOSITORY__DATABASE_URL=sqlite:////app/data/thumbelina.db
       # 待办/随手记（本地 Markdown，默认目录相对工作目录）改到持久卷内，随数据一起备份
       - THUMBELINA_TODO__DIRECTORY=/app/data/TODO
+      # 微信扫码登录凭据（{bot_id}.json）存进持久卷，重建容器无需重新扫码。
+      # 不设置时默认工作目录下 CHANNEL/.weclaw/accounts（容器内 /app/CHANNEL，不在卷里，重建即丢）。
+      - THUMBELINA_CHANNELS__WECHAT__ACCOUNTS_DIR=/app/data/CHANNEL/.weclaw/accounts
       # Embedding model download via hf-mirror (huggingface.co unreachable
       # from CN); override with host HF_ENDPOINT if needed
       - HF_ENDPOINT=${HF_ENDPOINT:-https://hf-mirror.com}

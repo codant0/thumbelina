@@ -38,6 +38,16 @@ class WeChatChannelConfig(BaseModel):
         default="https://ilinkai.weixin.qq.com",
         description="iLink API base URL",
     )
+    accounts_dir: str = Field(
+        default="",
+        description=(
+            "Directory for saved iLink credentials ({bot_id}.json). "
+            "Empty = default CHANNEL/.weclaw/accounts (relative to the "
+            "working directory). Point this at a persistent volume "
+            "(e.g. /app/data/CHANNEL/.weclaw/accounts) in Docker so "
+            "login survives container rebuilds."
+        ),
+    )
     webhook_secret: str = Field(default="", description="Webhook signature verification secret")
 
 

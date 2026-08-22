@@ -46,6 +46,7 @@ Thumbs.db
 /uv.lock
 /TODO
 /MEMORY
+/CHANNEL
 *.skill
 /data
 
@@ -56,6 +57,7 @@ logs/
 
 # AI
 .claude
+.qoder
 
 # docker image
 thumbelina-*.tar

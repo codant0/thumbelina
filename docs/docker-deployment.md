@@ -99,6 +99,7 @@ yaml 中支持 `${VAR}` 环境变量占位，例如 `api_key: ${OPENAI_API_KEY}`
 | `THUMBELINA_LLM__API_KEY` | 取自宿主机同名变量 | LLM 密钥，避免写死在 yaml 里 |
 | `THUMBELINA_REPOSITORY__DATABASE_URL` | `sqlite:////app/data/thumbelina.db` | **把 SQLite 放进持久数据目录**（注意是 4 个斜杠，表示绝对路径）。存储配置节已由 `memory` 更名为 `repository`；**旧变量名 `THUMBELINA_MEMORY__DATABASE_URL` 已失效且被静默忽略**（数据会落容器内 `/app`，重建即丢）。SQLite 与 LangGraph checkpoint 上下文表**共用此文件**，持久化它即同时保住全部会话上下文 |
 | `THUMBELINA_TODO__DIRECTORY` | `/app/data/TODO` | 待办/随手记（本地 Markdown）默认目录相对工作目录（`/app/TODO`，不在卷里）；改到持久数据目录内，随数据一起备份 |
+| `THUMBELINA_CHANNELS__WECHAT__ACCOUNTS_DIR` | `/app/data/CHANNEL/.weclaw/accounts` | 微信扫码登录凭据（`{bot_id}.json`）默认在工作目录下 `CHANNEL/.weclaw/accounts`（容器内即 `/app/CHANNEL`，不在卷里，重建即丢）；改到持久数据目录后重建容器无需重新扫码 |
 | `HF_ENDPOINT` | 默认 `https://hf-mirror.com` | RAG 嵌入模型下载走国内镜像（huggingface.co 不可达）；海外环境可 `export HF_ENDPOINT=https://huggingface.co` 覆盖 |
 | `HF_HOME` | `/app/data/huggingface` | 模型缓存放进持久数据目录，重建容器无需重新下载 |
 
@@ -127,7 +128,7 @@ THUMBELINA_DATA_DIR=/volume1/thumbelina/data   # NAS 存储盘（如绿联 /volu
 THUMBELINA_DATA_DIR=/data/thumbelina docker compose up -d --build
 ```
 
-**落在该数据目录里的内容**：SQLite 数据库（`thumbelina.db`，含 LangGraph checkpoint）、ChromaDB 向量库（`chroma/`）、HF 嵌入模型缓存（`huggingface/`）、待办/随手记 Markdown（`TODO/`）。
+**落在该数据目录里的内容**：SQLite 数据库（`thumbelina.db`，含 LangGraph checkpoint）、ChromaDB 向量库（`chroma/`）、HF 嵌入模型缓存（`huggingface/`）、待办/随手记 Markdown（`TODO/`）、微信扫码登录凭据（`CHANNEL/.weclaw/accounts/`）。
 
 > 从命名卷切换到宿主机目录后，旧数据不会自动搬过去 —— 迁移方法见 [6.3](#63-备份与恢复)。
 
@@ -163,6 +164,7 @@ curl -s http://localhost:8000/health
 | ChromaDB 向量库 | `/app/data/chroma` | 同上 |
 | HF 嵌入模型缓存 | `/app/data/huggingface` | 同上 |
 | 待办/随手记（Markdown） | `/app/data/TODO` | 同上 |
+| 微信扫码登录凭据 | `/app/data/CHANNEL/.weclaw/accounts` | 同上 |
 | 应用配置 | `/app/thumbelina.yaml` | 宿主机文件只读挂载 |
 
 `docker compose down` 不会删除数据；命名卷只有 `docker compose down -v` 才会清空，`THUMBELINA_DATA_DIR` 指向的宿主机目录则不受 `-v` 影响。

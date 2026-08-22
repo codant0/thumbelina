@@ -31,10 +31,19 @@ class TestNormalizeID:
 
 
 class TestAccountsDir:
-    def test_returns_weclaw_accounts(self):
+    def test_default_is_channel_dir(self):
         d = _accounts_dir()
+        assert d.parts[:1] == ("CHANNEL",)
         assert ".weclaw" in str(d)
         assert "accounts" in str(d)
+        assert not d.is_absolute()
+
+    def test_override_takes_precedence(self, tmp_path):
+        custom = tmp_path / "data" / "weclaw" / "accounts"
+        assert _accounts_dir(str(custom)) == custom
+
+    def test_empty_override_falls_back_to_default(self):
+        assert _accounts_dir("") == _accounts_dir()
 
 
 class TestFetchQRCode:
@@ -204,6 +213,22 @@ class TestSaveCredentials:
             WeChatQRCodeManager.save_credentials(creds)
 
         assert accounts_dir.exists()
+
+    def test_saves_to_override_dir(self, tmp_path):
+        creds = WeChatCredentials(
+            bot_token="tok",
+            ilink_bot_id="bot-1",
+            base_url="https://example.com",
+            ilink_user_id="user-1",
+        )
+        custom_dir = tmp_path / "data" / "weclaw" / "accounts"
+
+        saved = WeChatQRCodeManager.save_credentials(creds, str(custom_dir))
+
+        assert custom_dir.exists()
+        assert saved == str(custom_dir / "bot-1.json")
+        data = json.loads((custom_dir / "bot-1.json").read_text())
+        assert data["bot_token"] == "tok"
 
 
 class TestClose:
