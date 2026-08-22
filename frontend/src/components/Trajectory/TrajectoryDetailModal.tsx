@@ -159,6 +159,40 @@ function EventBody({ event }: { event: TrajectoryEvent }) {
           {String(payload.content ?? '')}
         </div>
       )}
+      {event.event_type === 'llm_usage' && (
+        <dl className="trajectory-fields">
+          {typeof payload.model === 'string' && payload.model && (
+            <div className="trajectory-field">
+              <dt>Model</dt>
+              <dd className="mono">{payload.model}</dd>
+            </div>
+          )}
+          {typeof payload.prompt_tokens === 'number' && (
+            <div className="trajectory-field">
+              <dt>Prompt tokens</dt>
+              <dd>{payload.prompt_tokens}</dd>
+            </div>
+          )}
+          {typeof payload.completion_tokens === 'number' && (
+            <div className="trajectory-field">
+              <dt>Completion tokens</dt>
+              <dd>{payload.completion_tokens}</dd>
+            </div>
+          )}
+          {typeof payload.cache_hit_tokens === 'number' && (
+            <div className="trajectory-field">
+              <dt>Cache hit</dt>
+              <dd>{payload.cache_hit_tokens}</dd>
+            </div>
+          )}
+          {typeof payload.cache_miss_tokens === 'number' && (
+            <div className="trajectory-field">
+              <dt>Cache miss</dt>
+              <dd>{payload.cache_miss_tokens}</dd>
+            </div>
+          )}
+        </dl>
+      )}
       <button
         type="button"
         className="trajectory-json-toggle"

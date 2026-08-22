@@ -57,3 +57,36 @@ async def test_run_records_user_context_assistant_turn(manager: RepositoryManage
     assert events[1]["seq"] == 1
     assert events[2]["seq"] == 2
     assert len({e["turn_id"] for e in events}) == 1
+
+
+async def test_run_records_llm_usage_from_response_metadata(manager: RepositoryManager):
+    """run() 应从最终响应的 response_metadata 提取用量并落库 llm_usage。"""
+    conv_id = await manager.create_conversation(name="用量会话")
+    provider = _create_mock_provider()
+    provider.chat_model.ainvoke = AsyncMock(
+        return_value=AIMessage(
+            content="好",
+            response_metadata={
+                "model": "deepseek-chat",
+                "token_usage": {
+                    "prompt_tokens": 1200,
+                    "completion_tokens": 45,
+                    "prompt_cache_hit_tokens": 900,
+                    "prompt_cache_miss_tokens": 300,
+                },
+            },
+        )
+    )
+    agent = ThumbelinaAgent(llm_provider=provider, repository_manager=manager)
+    agent.current_conversation_id = conv_id
+
+    await agent.run("hi")
+
+    page = await manager.get_trajectory_page(conv_id, page=1, page_size=20)
+    events = page["turns"][0]["events"]
+    assert [e["event_type"] for e in events] == ["user", "context", "llm_usage", "assistant"]
+    payload = events[2]["payload"]
+    assert payload["cache_hit_tokens"] == 900
+    assert payload["cache_miss_tokens"] == 300
+    assert payload["prompt_tokens"] == 1200
+    assert payload["model"] == "deepseek-chat"

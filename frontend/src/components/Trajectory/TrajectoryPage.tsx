@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Boxes, CircleAlert, Loader2, RefreshCw, Route, SearchX, Terminal, Wrench } from 'lucide-react'
+import { Boxes, CircleAlert, Gauge, Loader2, RefreshCw, Route, SearchX, Terminal, Wrench } from 'lucide-react'
 import type { Conversation } from '../../types/chat'
 import type { TrajectoryDetail, TrajectoryEvent, TrajectoryPageData, TrajectoryTurn } from '../../types/trajectory'
 import { fetchTrajectory } from '../../api/trajectory'
 import { useTranslation } from '../../i18n'
 import { TrajectoryDetailModal } from './TrajectoryDetailModal'
-import { collapseMiddle, eventLabel, groupToolEvents } from './trajectoryDisplay'
+import { collapseMiddle, eventLabel, groupToolEvents, usageSummary } from './trajectoryDisplay'
 import type { ToolCallGroup } from './trajectoryDisplay'
 
 const PAGE_SIZE = 20
@@ -320,13 +320,17 @@ function EventBlock({ event, turnIndex, onOpenDetail }: {
   const isError = event.event_type === 'tool_result' && payload.is_error === true
   const icon = event.event_type === 'context'
     ? <Boxes size={14} aria-hidden="true" />
-    : isError
-      ? <CircleAlert size={14} aria-hidden="true" />
-      : <Terminal size={14} aria-hidden="true" />
+    : event.event_type === 'llm_usage'
+      ? <Gauge size={14} aria-hidden="true" />
+      : isError
+        ? <CircleAlert size={14} aria-hidden="true" />
+        : <Terminal size={14} aria-hidden="true" />
 
   const summary = event.event_type === 'context'
     ? t('trajectory.contextCount').replace('{n}', String(Array.isArray(payload.items) ? payload.items.length : 0))
-    : collapseMiddle(String(payload.content ?? ''), 120, 60, 40).text || t('trajectory.noEvents')
+    : event.event_type === 'llm_usage'
+      ? usageSummary(t, payload)
+      : collapseMiddle(String(payload.content ?? ''), 120, 60, 40).text || t('trajectory.noEvents')
 
   return (
     <button

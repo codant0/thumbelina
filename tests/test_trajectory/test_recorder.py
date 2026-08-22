@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import json
 
-from thumbelina.agent.trajectory import MAX_PAYLOAD_BYTES, TrajectoryRecorder
+from thumbelina.agent.trajectory import (
+    MAX_PAYLOAD_BYTES,
+    TrajectoryRecorder,
+    normalize_llm_usage,
+)
 
 
 class FakeManager:
@@ -90,3 +94,69 @@ async def test_write_failure_does_not_raise():
     await recorder.record_assistant("好")
     # 写入虽失败,但轮次与序列号状态仍按正常流程推进
     assert recorder.enabled is True
+
+
+async def test_record_llm_usage():
+    manager = FakeManager()
+    recorder = TrajectoryRecorder(manager)
+    recorder.begin_turn("conv-1")
+    await recorder.record_llm_usage({"model": "mock", "prompt_tokens": 10, "cache_hit_tokens": 8})
+    assert manager.events[0]["event_type"] == "llm_usage"
+    assert json.loads(manager.events[0]["payload"])["cache_hit_tokens"] == 8
+
+
+def test_normalize_llm_usage_deepseek_style():
+    usage = normalize_llm_usage(
+        {
+            "model": "deepseek-chat",
+            "token_usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "prompt_cache_hit_tokens": 80,
+                "prompt_cache_miss_tokens": 20,
+            },
+        }
+    )
+    assert usage == {
+        "model": "deepseek-chat",
+        "prompt_tokens": 100,
+        "completion_tokens": 20,
+        "cache_hit_tokens": 80,
+        "cache_miss_tokens": 20,
+    }
+
+
+def test_normalize_llm_usage_openai_details_style():
+    usage = normalize_llm_usage(
+        {
+            "token_usage": {
+                "prompt_tokens": 90,
+                "completion_tokens": 5,
+                "prompt_tokens_details": {"cached_tokens": 60},
+            }
+        }
+    )
+    assert usage == {
+        "prompt_tokens": 90,
+        "completion_tokens": 5,
+        "cache_hit_tokens": 60,
+        "cache_miss_tokens": 30,
+    }
+
+
+def test_normalize_llm_usage_anthropic_style():
+    usage = normalize_llm_usage(
+        {"usage": {"input_tokens": 200, "output_tokens": 30, "cache_read_input_tokens": 150}}
+    )
+    assert usage == {
+        "prompt_tokens": 200,
+        "completion_tokens": 30,
+        "cache_hit_tokens": 150,
+        "cache_miss_tokens": 50,
+    }
+
+
+def test_normalize_llm_usage_empty_and_garbage():
+    assert normalize_llm_usage(None) == {}
+    assert normalize_llm_usage({}) == {}
+    assert normalize_llm_usage({"token_usage": "nope"}) == {}

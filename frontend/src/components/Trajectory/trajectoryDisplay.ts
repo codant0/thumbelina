@@ -27,7 +27,30 @@ export function eventLabel(t: (key: string) => string, event: TrajectoryEvent): 
   if (event.event_type === 'tool_result') {
     return t('trajectory.toolResult')
   }
+  if (event.event_type === 'llm_usage') {
+    return t('trajectory.llmUsage')
+  }
   return t('trajectory.context')
+}
+
+/** llm_usage 事件摘要：优先展示缓存命中率，否则退回输入/输出 token 数。 */
+export function usageSummary(t: (key: string) => string, payload: Record<string, unknown>): string {
+  const hit = payload.cache_hit_tokens
+  const miss = payload.cache_miss_tokens
+  const prompt = payload.prompt_tokens
+  const completion = payload.completion_tokens
+  if (typeof hit === 'number' && (typeof miss === 'number' || typeof prompt === 'number')) {
+    const total = typeof miss === 'number' ? miss + hit : typeof prompt === 'number' ? prompt : hit
+    const pct = total > 0 ? Math.round((hit / total) * 100) : 0
+    return t('trajectory.usageCache')
+      .replace('{hit}', String(hit))
+      .replace('{total}', String(total))
+      .replace('{pct}', String(pct))
+  }
+  const parts: string[] = []
+  if (typeof prompt === 'number') parts.push(t('trajectory.usageInput').replace('{n}', String(prompt)))
+  if (typeof completion === 'number') parts.push(t('trajectory.usageCompletion').replace('{n}', String(completion)))
+  return parts.join(' · ') || t('trajectory.noEvents')
 }
 
 /** 同轮次内按 call_id 组合的调用与结果；results 为空表示无匹配结果。 */

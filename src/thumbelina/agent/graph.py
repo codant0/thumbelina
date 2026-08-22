@@ -34,7 +34,7 @@ from thumbelina.agent.compression import (
 from thumbelina.agent.edges import CONTINUE, should_continue
 from thumbelina.agent.nodes import call_model, tool_node
 from thumbelina.agent.state import AgentState
-from thumbelina.agent.trajectory import TrajectoryRecorder
+from thumbelina.agent.trajectory import TrajectoryRecorder, normalize_llm_usage
 from thumbelina.analysis.namer import AUTO_NAME_AFTER_MESSAGES, ConversationNamer
 from thumbelina.llm.base import LLMProvider
 from thumbelina.prompts.roles import get_role_prompt
@@ -1217,6 +1217,10 @@ class ThumbelinaAgent:
         last_message = result["messages"][-1]
         response = str(last_message.content)
 
+        llm_usage = normalize_llm_usage(getattr(last_message, "response_metadata", None))
+        if llm_usage:
+            await self.trajectory_recorder.record_llm_usage(llm_usage)
+
         await self._persist_message("assistant", response)
         await self.trajectory_recorder.record_assistant(response)
         # Auto-name the conversation in the background so the reply is not delayed.
@@ -1260,6 +1264,8 @@ class ThumbelinaAgent:
         batch_size = 30  # characters per batch
         flush_interval = 0.05  # seconds (50ms) - flush even if batch size not reached
         last_flush = asyncio.get_event_loop().time()
+        # 流式 chunk 的 usage 通常出现在最后一片的 response_metadata 中。
+        last_chunk_metadata: dict | None = None
 
         async for event in self.graph.astream(initial_state, stream_mode="messages", config=config):
             # event is a tuple: (message_chunk, metadata)
@@ -1281,6 +1287,9 @@ class ThumbelinaAgent:
                 message_chunk, "tool_calls", None
             ):
                 continue
+            chunk_metadata = getattr(message_chunk, "response_metadata", None)
+            if isinstance(chunk_metadata, dict) and chunk_metadata:
+                last_chunk_metadata = chunk_metadata
 
             content, reasoning = _extract_chunk_parts(message_chunk)
             if content:
@@ -1309,6 +1318,10 @@ class ThumbelinaAgent:
             yield {"type": "reasoning", "text": pending_reasoning}
         if pending_content:
             yield {"type": "content", "text": pending_content}
+
+        llm_usage = normalize_llm_usage(last_chunk_metadata)
+        if llm_usage:
+            await self.trajectory_recorder.record_llm_usage(llm_usage)
 
         if full_response:
             await self._persist_message(

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { TrajectoryPage } from './TrajectoryPage'
-import { collapseMiddle, groupToolEvents } from './trajectoryDisplay'
+import { collapseMiddle, groupToolEvents, usageSummary } from './trajectoryDisplay'
 import type { ToolCallGroup } from './trajectoryDisplay'
 import type { TrajectoryEvent } from '../../types/trajectory'
 import { LocaleProvider } from '../../i18n'
@@ -23,6 +23,7 @@ const TRAJECTORY_DATA = {
         { seq: 1, event_type: 'tool_call', payload: { tool: 'search', args: { q: 'x' }, call_id: 'c1' }, created_at: '2026-08-22T10:03:12' },
         { seq: 2, event_type: 'tool_result', payload: { call_id: 'c1', content: '结果A', is_error: false }, created_at: '2026-08-22T10:03:13' },
         { seq: 3, event_type: 'assistant', payload: { content: '好的' }, created_at: '2026-08-22T10:03:14' },
+        { seq: 4, event_type: 'llm_usage', payload: { model: 'mock-model', prompt_tokens: 1200, completion_tokens: 45, cache_hit_tokens: 900, cache_miss_tokens: 300 }, created_at: '2026-08-22T10:03:15' },
       ],
     },
     {
@@ -127,6 +128,33 @@ describe('groupToolEvents', () => {
     const assistant = ev(3, 'assistant', { content: 'ok' })
     const blocks = groupToolEvents([user, call(1, 'c1'), result(2, 'c1'), assistant])
     expect(blocks.map(b => ('call' in b ? 'group' : b.event_type))).toEqual(['user', 'group', 'assistant'])
+  })
+})
+
+describe('usageSummary', () => {
+  const stubT = (key: string) => ({
+    'trajectory.usageCache': '缓存命中 {hit}/{total}（{pct}%）',
+    'trajectory.usageInput': '输入 {n} tokens',
+    'trajectory.usageCompletion': '输出 {n} tokens',
+    'trajectory.noEvents': '无事件记录',
+  })[key] ?? key
+
+  it('有缓存命中字段时展示命中率', () => {
+    expect(usageSummary(stubT, { prompt_tokens: 1200, cache_hit_tokens: 900, cache_miss_tokens: 300 }))
+      .toBe('缓存命中 900/1200（75%）')
+  })
+
+  it('缺 miss 字段时按 prompt 推导', () => {
+    expect(usageSummary(stubT, { prompt_tokens: 90, cache_hit_tokens: 60 })).toBe('缓存命中 60/90（67%）')
+  })
+
+  it('无缓存字段时展示输入/输出 token', () => {
+    expect(usageSummary(stubT, { prompt_tokens: 120, completion_tokens: 30 }))
+      .toBe('输入 120 tokens · 输出 30 tokens')
+  })
+
+  it('全空回退到无事件文案', () => {
+    expect(usageSummary(stubT, {})).toBe('无事件记录')
   })
 })
 
@@ -270,6 +298,22 @@ describe('TrajectoryPage', () => {
     expect(screen.getByText('别的结果')).toBeInTheDocument()
     // 无匹配结果提示位于调用卡片内部
     expect(document.querySelector('.tool-call-card')).not.toBeNull()
+  })
+
+  it('LLM 用量芯片展示缓存命中摘要，弹窗展示明细', async () => {
+    mockTrajectoryFetch()
+    renderWithI18n(<TrajectoryPage />)
+    await selectConversation()
+
+    expect(screen.getByText('缓存命中 900/1200（75%）')).toBeInTheDocument()
+
+    // user(0) / 请求区(1) / 结果区(2) / assistant(3) / llm_usage(4)
+    fireEvent.click(screen.getAllByTestId('turn-event')[4])
+    const modal = await screen.findByTestId('trajectory-detail-modal')
+    expect(within(modal).getByText('LLM 用量')).toBeInTheDocument()
+    expect(within(modal).getByText('Cache hit')).toBeInTheDocument()
+    expect(within(modal).getByText('900')).toBeInTheDocument()
+    expect(within(modal).getByText('mock-model')).toBeInTheDocument()
   })
 
   it('点击轮次头打开轮次信息弹窗', async () => {
