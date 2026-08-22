@@ -395,3 +395,38 @@ class TestConversationRole:
         cid = await repo.create_conversation()
         conv = await repo.get_conversation(cid)
         assert conv["role"] is None
+
+
+def _repo(tmp_path) -> ConversationRepository:
+    return ConversationRepository(f"sqlite:///{tmp_path / 'repo.db'}")
+
+
+async def test_create_conversation_with_coder_mode_and_workspace(tmp_path):
+    repo = _repo(tmp_path)
+    conv_id = await repo.create_conversation(
+        name="coder1", mode="coder", workspace=str(tmp_path), role="coder"
+    )
+    conv = await repo.get_conversation(conv_id)
+    assert conv["mode"] == "coder"
+    assert conv["workspace"] == str(tmp_path)
+    assert conv["role"] == "coder"
+
+
+async def test_conversation_defaults_to_chat_mode(tmp_path):
+    repo = _repo(tmp_path)
+    conv_id = await repo.create_conversation()
+    conv = await repo.get_conversation(conv_id)
+    assert conv["mode"] == "chat"
+    assert conv["workspace"] is None
+
+
+async def test_get_conversations_filters_by_mode(tmp_path):
+    repo = _repo(tmp_path)
+    coder_id = await repo.create_conversation(mode="coder", workspace=str(tmp_path))
+    chat_id = await repo.create_conversation()
+    coder_ids = {c["id"] for c in await repo.get_conversations(mode="coder")}
+    chat_ids = {c["id"] for c in await repo.get_conversations(mode="chat")}
+    assert coder_id in coder_ids
+    assert chat_id in chat_ids
+    assert coder_id not in chat_ids
+    assert chat_id not in coder_ids

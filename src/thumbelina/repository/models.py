@@ -158,6 +158,17 @@ class Conversation(Base):
         default=None,
         comment="Agent persona role for this conversation; None uses the global default",
     )
+    mode: Mapped[str] = mapped_column(
+        String(20),
+        default="chat",
+        comment="Conversation mode: 'chat' (normal) or 'coder' (workspace-bound code agent)",
+    )
+    workspace: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+        default=None,
+        comment="Absolute workspace directory path for coder conversations; NULL for chat mode",
+    )
     thinking_enabled: Mapped[bool] = mapped_column(
         default=False,
         comment="Whether thinking/reasoning mode is enabled for this conversation",
