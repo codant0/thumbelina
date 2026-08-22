@@ -1,7 +1,8 @@
 """轨迹(审计)API 路由(设计文档 §4)。
 
 - 有轨迹事件的会话按轮次分页倒序返回。
-- 无轨迹事件的旧会话从 messages 表合成轮次(legacy)。
+- 无轨迹事件的会话从 messages 表合成轮次(仅 user/assistant 文本,
+  工具调用与上下文数据自然缺失不展示)。
 - conversation_id 不存在 → 404;page/page_size 越界 → 422。
 """
 
@@ -19,10 +20,10 @@ router = APIRouter(prefix="/trajectory", tags=["trajectory"])
 _PAGE_SIZE_MAX = 100
 
 
-def _synthesize_legacy_turns(
+def _synthesize_message_turns(
     messages: list[dict[str, Any]], page: int, page_size: int
 ) -> dict[str, Any]:
-    """把纯文本消息史合成为轮次(设计文档 §4.2):user 开轮、后续 assistant 归入。"""
+    """把纯文本消息史合成为轮次:user 开轮、后续 assistant 归入。"""
     turns: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
     for msg in messages:
@@ -30,9 +31,8 @@ def _synthesize_legacy_turns(
         created_at = msg.get("created_at", "")
         if role == "user":
             current = {
-                "turn_id": f"legacy-{msg['id']}",
+                "turn_id": f"msg-{msg['id']}",
                 "started_at": created_at,
-                "legacy": True,
                 "events": [
                     {
                         "seq": 0,
@@ -46,9 +46,8 @@ def _synthesize_legacy_turns(
         elif role == "assistant":
             if current is None:
                 current = {
-                    "turn_id": f"legacy-{msg['id']}",
+                    "turn_id": f"msg-{msg['id']}",
                     "started_at": created_at,
-                    "legacy": True,
                     "events": [],
                 }
                 turns.append(current)
@@ -85,16 +84,14 @@ async def get_trajectory(
         return {
             "conversation_id": conversation_id,
             "conversation_name": name,
-            "legacy": False,
             **data,
             "page": page,
             "page_size": page_size,
         }
     messages = await repository.get_messages(conversation_id)
-    data = _synthesize_legacy_turns(messages, page, page_size)
+    data = _synthesize_message_turns(messages, page, page_size)
     return {
         "conversation_id": conversation_id,
         "conversation_name": name,
-        "legacy": True,
         **data,
     }

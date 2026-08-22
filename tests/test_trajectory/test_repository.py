@@ -57,7 +57,7 @@ async def test_page_newest_first_with_pagination(manager: RepositoryManager):
     page1 = await manager.get_trajectory_page(conv_id, page=1, page_size=2)
     assert page1["total_turns"] == 3
     assert [t["turn_id"] for t in page1["turns"]] == ["t3", "t2"]
-    assert page1["turns"][0]["legacy"] is False
+    assert "legacy" not in page1["turns"][0]
     assert [e["event_type"] for e in page1["turns"][0]["events"]] == ["user", "assistant"]
     assert page1["turns"][0]["events"][0]["payload"] == {"content": "msg-2"}
 

@@ -314,7 +314,7 @@ class RepositoryManager:
         await self.trajectory_repository.add_events(conversation_id, events)
 
     async def has_trajectory(self, conversation_id: str) -> bool:
-        """该会话是否已有轨迹事件(无则走 legacy 合成,设计文档 §4.2)。"""
+        """该会话是否已有轨迹事件(无则回退到消息合成为纯文本轮次)。"""
         return await self.trajectory_repository.has_events(conversation_id)
 
     async def get_trajectory_page(
@@ -336,7 +336,6 @@ class RepositoryManager:
             {
                 "turn_id": tid,
                 "started_at": started_at.isoformat(),
-                "legacy": False,
                 "events": grouped.get(tid, []),
             }
             for tid, started_at in turns_meta

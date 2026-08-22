@@ -63,7 +63,7 @@ async def test_trajectory_pagination_newest_first(trajectory_client):
     res = client.get(f"/api/v1/trajectory/{conv_id}?page=1&page_size=2")
     assert res.status_code == 200
     data = res.json()
-    assert data["legacy"] is False
+    assert "legacy" not in data
     assert data["conversation_name"] == "会话A"
     assert data["total_turns"] == 3
     assert [t["turn_id"] for t in data["turns"]] == ["t3", "t2"]
@@ -73,7 +73,8 @@ async def test_trajectory_pagination_newest_first(trajectory_client):
     assert [t["turn_id"] for t in res2.json()["turns"]] == ["t1"]
 
 
-async def test_legacy_synthesis(trajectory_client):
+async def test_message_fallback_synthesis(trajectory_client):
+    """无轨迹事件的会话:仅合成 user/assistant 文本轮次,无 legacy 标记。"""
     client, manager = trajectory_client
     conv_id = await manager.create_conversation(name="旧会话")
     await manager.add_message(conv_id, "user", "你好")
@@ -82,9 +83,10 @@ async def test_legacy_synthesis(trajectory_client):
     res = client.get(f"/api/v1/trajectory/{conv_id}")
     assert res.status_code == 200
     data = res.json()
-    assert data["legacy"] is True
+    assert "legacy" not in data
     assert data["total_turns"] == 1
     turn = data["turns"][0]
+    assert "legacy" not in turn
     assert [e["event_type"] for e in turn["events"]] == ["user", "assistant"]
     assert turn["events"][0]["payload"] == {"content": "你好"}
 

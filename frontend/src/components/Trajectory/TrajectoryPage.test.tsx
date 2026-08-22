@@ -1,12 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { TrajectoryPage } from './TrajectoryPage'
+import { collapseMiddle } from './trajectoryDisplay'
 import { LocaleProvider } from '../../i18n'
+
+const LONG_TEXT = '长'.repeat(800)
 
 const TRAJECTORY_DATA = {
   conversation_id: 'c1',
   conversation_name: '会话1',
-  legacy: false,
   total_turns: 3,
   page: 1,
   page_size: 2,
@@ -14,7 +16,6 @@ const TRAJECTORY_DATA = {
     {
       turn_id: 't3',
       started_at: '2026-08-22T10:03:11',
-      legacy: false,
       events: [
         { seq: 0, event_type: 'user', payload: { content: '你好' }, created_at: '2026-08-22T10:03:11' },
         { seq: 1, event_type: 'tool_call', payload: { tool: 'search', args: { q: 'x' }, call_id: 'c1' }, created_at: '2026-08-22T10:03:12' },
@@ -25,9 +26,8 @@ const TRAJECTORY_DATA = {
     {
       turn_id: 't2',
       started_at: '2026-08-22T10:00:00',
-      legacy: true,
       events: [
-        { seq: 0, event_type: 'user', payload: { content: '旧消息' }, created_at: '2026-08-22T10:00:00' },
+        { seq: 0, event_type: 'user', payload: { content: LONG_TEXT }, created_at: '2026-08-22T10:00:00' },
         { seq: 1, event_type: 'assistant', payload: { content: '旧回复' }, created_at: '2026-08-22T10:00:01' },
       ],
     },
@@ -45,6 +45,42 @@ function renderWithI18n(ui: React.ReactElement) {
   return render(<LocaleProvider>{ui}</LocaleProvider>)
 }
 
+function mockTrajectoryFetch() {
+  return vi.spyOn(globalThis, 'fetch').mockImplementation((input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.includes('/trajectory/')) {
+      return Promise.resolve(new Response(JSON.stringify({ ...TRAJECTORY_DATA }), { status: 200 }))
+    }
+    return Promise.resolve(new Response(JSON.stringify(CONVERSATIONS), { status: 200 }))
+  })
+}
+
+async function selectConversation() {
+  const select = await screen.findByTestId('trajectory-select')
+  fireEvent.change(select, { target: { value: 'c1' } })
+  await waitFor(() => {
+    expect(screen.getAllByTestId('turn-card').length).toBeGreaterThan(0)
+  })
+}
+
+describe('collapseMiddle', () => {
+  it('短文本原样返回', () => {
+    expect(collapseMiddle('你好世界')).toEqual({ text: '你好世界', truncated: false })
+  })
+
+  it('长文本保留首尾并标记截断', () => {
+    const { text, truncated } = collapseMiddle('a'.repeat(600) + 'Z', 600, 200, 200)
+    expect(truncated).toBe(true)
+    expect(text.startsWith('a'.repeat(200))).toBe(true)
+    expect(text.endsWith('Z')).toBe(true)
+    expect(text).toContain('共 601 字')
+  })
+
+  it('边界长度不截断', () => {
+    expect(collapseMiddle('x'.repeat(600), 600, 200, 200).truncated).toBe(false)
+  })
+})
+
 describe('TrajectoryPage', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
@@ -60,56 +96,58 @@ describe('TrajectoryPage', () => {
   })
 
   it('选择会话后加载轨迹并展示轮次', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input: RequestInfo | URL) => {
-      const url = String(input)
-      if (url.includes('/trajectory/')) {
-        return Promise.resolve(new Response(JSON.stringify({ ...TRAJECTORY_DATA }), { status: 200 }))
-      }
-      return Promise.resolve(new Response(JSON.stringify(CONVERSATIONS), { status: 200 }))
-    })
+    const fetchSpy = mockTrajectoryFetch()
     renderWithI18n(<TrajectoryPage />)
-    const select = await screen.findByTestId('trajectory-select')
-    fireEvent.change(select, { target: { value: 'c1' } })
-
-    await waitFor(() => {
-      expect(screen.getAllByTestId('turn-card')).toHaveLength(2)
-    })
+    await selectConversation()
     expect(screen.getByText('你好')).toBeInTheDocument()
     expect(fetchSpy).toHaveBeenCalledWith(expect.stringContaining('/trajectory/c1?page=1'))
   })
 
-  it('工具调用与上下文事件默认折叠，点击展开', async () => {
-    vi.spyOn(globalThis, 'fetch').mockImplementation((input: RequestInfo | URL) => {
-      const url = String(input)
-      if (url.includes('/trajectory/')) {
-        return Promise.resolve(new Response(JSON.stringify({ ...TRAJECTORY_DATA }), { status: 200 }))
-      }
-      return Promise.resolve(new Response(JSON.stringify(CONVERSATIONS), { status: 200 }))
-    })
+  it('长文本在卡片内首尾折叠并提示查看详情', async () => {
+    mockTrajectoryFetch()
     renderWithI18n(<TrajectoryPage />)
-    const select = await screen.findByTestId('trajectory-select')
-    fireEvent.change(select, { target: { value: 'c1' } })
-
-    const toggle = await screen.findAllByTestId('event-toggle')
-    expect(toggle.length).toBeGreaterThan(0)
-    expect(screen.queryByText('结果A')).not.toBeInTheDocument()
-    // toggle[0] 为 tool_call，toggle[1] 为 tool_result（其 payload 含 结果A）
-    fireEvent.click(toggle[1])
-    expect(await screen.findByText('结果A')).toBeInTheDocument()
+    await selectConversation()
+    const preview = screen.getByText(/^长{200}…（共 800 字）…长{200}$/)
+    expect(preview).toBeInTheDocument()
+    expect(screen.getAllByText('查看详情').length).toBeGreaterThan(0)
   })
 
-  it('legacy 轮次展示旧记录提示', async () => {
-    vi.spyOn(globalThis, 'fetch').mockImplementation((input: RequestInfo | URL) => {
-      const url = String(input)
-      if (url.includes('/trajectory/')) {
-        return Promise.resolve(new Response(JSON.stringify({ ...TRAJECTORY_DATA }), { status: 200 }))
-      }
-      return Promise.resolve(new Response(JSON.stringify(CONVERSATIONS), { status: 200 }))
-    })
+  it('点击事件行打开详情弹窗展示全文', async () => {
+    mockTrajectoryFetch()
     renderWithI18n(<TrajectoryPage />)
-    const select = await screen.findByTestId('trajectory-select')
-    fireEvent.change(select, { target: { value: 'c1' } })
-    expect(await screen.findByText('旧记录：无工具调用/上下文数据')).toBeInTheDocument()
+    await selectConversation()
+
+    // 点击用户消息行 → 弹窗展示全文（长文本不被折叠）
+    const rows = screen.getAllByTestId('turn-event')
+    fireEvent.click(rows[0])
+    expect(await screen.findByTestId('trajectory-detail-modal')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('detail-close'))
+    await waitFor(() => {
+      expect(screen.queryByTestId('trajectory-detail-modal')).not.toBeInTheDocument()
+    })
+
+    // 点击工具调用行 → 弹窗标题含工具名，可展开原始 JSON
+    fireEvent.click(screen.getAllByTestId('turn-event')[1])
+    const modal = await screen.findByTestId('trajectory-detail-modal')
+    expect(within(modal).getByText('工具调用: search')).toBeInTheDocument()
+    fireEvent.click(within(modal).getByTestId('detail-json-toggle'))
+    expect(await within(modal).findByTestId('detail-json')).toBeInTheDocument()
+    expect(within(modal).getByTestId('detail-json').textContent).toContain('"tool": "search"')
+
+    // Esc 关闭
+    fireEvent.keyDown(screen.getByTestId('trajectory-detail-modal'), { key: 'Escape' })
+    await waitFor(() => {
+      expect(screen.queryByTestId('trajectory-detail-modal')).not.toBeInTheDocument()
+    })
+  })
+
+  it('点击轮次头打开轮次信息弹窗', async () => {
+    mockTrajectoryFetch()
+    renderWithI18n(<TrajectoryPage />)
+    await selectConversation()
+    fireEvent.click(screen.getByText(/^轮次 #1$/))
+    expect(await screen.findByTestId('trajectory-detail-modal')).toBeInTheDocument()
+    expect(screen.getByText('轮次信息 #1')).toBeInTheDocument()
   })
 
   it('加载更多：翻页追加', async () => {
@@ -126,9 +164,7 @@ describe('TrajectoryPage', () => {
       return Promise.resolve(new Response(JSON.stringify(CONVERSATIONS), { status: 200 }))
     })
     renderWithI18n(<TrajectoryPage />)
-    const select = await screen.findByTestId('trajectory-select')
-    fireEvent.change(select, { target: { value: 'c1' } })
-    await screen.findAllByTestId('turn-card')
+    await selectConversation()
 
     fireEvent.click(screen.getByTestId('trajectory-load-more'))
     await waitFor(() => {
@@ -158,7 +194,7 @@ describe('TrajectoryPage', () => {
     })
     fireEvent.click(screen.getByTestId('retry-button'))
     await waitFor(() => {
-      expect(screen.getAllByTestId('turn-card')).toHaveLength(2)
+      expect(screen.getAllByTestId('turn-card').length).toBeGreaterThan(0)
     })
   })
 
@@ -174,11 +210,9 @@ describe('TrajectoryPage', () => {
     const select = await screen.findByTestId('trajectory-select')
     fireEvent.change(select, { target: { value: 'c1' } })
 
-    // 清空选择:select 值回到空选项
     await waitFor(() => {
       expect((screen.getByTestId('trajectory-select') as HTMLSelectElement).value).toBe('')
     })
-    // 空状态区域展示"会话不存在",而非通用错误(无重试按钮)
     expect(await screen.findByText('会话不存在')).toBeInTheDocument()
     expect(screen.queryByTestId('trajectory-error')).not.toBeInTheDocument()
   })

@@ -8,16 +8,18 @@ export interface TrajectoryEvent {
 export interface TrajectoryTurn {
   turn_id: string
   started_at: string
-  legacy: boolean
   events: TrajectoryEvent[]
 }
 
 export interface TrajectoryPageData {
   conversation_id: string
   conversation_name?: string | null
-  legacy: boolean
   total_turns: number
   page: number
   page_size: number
   turns: TrajectoryTurn[]
 }
+
+export type TrajectoryDetail =
+  | { kind: 'event'; event: TrajectoryEvent; turnIndex: number }
+  | { kind: 'turn-meta'; turn: TrajectoryTurn; turnIndex: number }
