@@ -34,6 +34,7 @@ from thumbelina.agent.compression import (
 from thumbelina.agent.edges import CONTINUE, should_continue
 from thumbelina.agent.nodes import call_model, tool_node
 from thumbelina.agent.state import AgentState
+from thumbelina.agent.trajectory import TrajectoryRecorder, normalize_llm_usage
 from thumbelina.analysis.namer import AUTO_NAME_AFTER_MESSAGES, ConversationNamer
 from thumbelina.llm.base import LLMProvider
 from thumbelina.prompts.roles import get_role_prompt
@@ -50,6 +51,9 @@ if TYPE_CHECKING:
     from thumbelina.memory.tools import RememberTool
 
 logger = logging.getLogger(__name__)
+
+# 首次遇到"响应无 LLM 用量元数据"时打一条 WARNING 帮助诊断,后续降级为 DEBUG。
+_llm_usage_warned = False
 
 
 # 注入边界处理(§9.4):剥离 Markdown 链接语法、把 ``#``/``>`` 降级为纯文本。
@@ -436,6 +440,7 @@ class ThumbelinaAgent:
     ) -> None:
         self.llm_provider = llm_provider
         self.repository_manager = repository_manager
+        self.trajectory_recorder = TrajectoryRecorder(self.repository_manager)
         self.request_timeout = request_timeout
         self.skill_engine = skill_engine
         self.subagent_manager = subagent_manager
@@ -863,7 +868,22 @@ class ThumbelinaAgent:
 
     async def _tool_node_node(self, state: AgentState) -> dict[str, list[Any]]:
         """Node wrapper for executing tools."""
-        return await tool_node(state, self.tools)
+        calls: list[dict] = []
+        last_message = state["messages"][-1]
+        if isinstance(last_message, AIMessage):
+            calls = list(last_message.tool_calls or [])
+        for tool_call in calls:
+            await self.trajectory_recorder.record_tool_call(
+                tool_call.get("name", ""), tool_call.get("args", {}), tool_call.get("id", "")
+            )
+        result = await tool_node(state, self.tools)
+        tool_messages = result.get("messages", [])
+        for tool_call, tool_message in zip(calls, tool_messages):
+            content = str(getattr(tool_message, "content", ""))
+            await self.trajectory_recorder.record_tool_result(
+                tool_call.get("id", ""), content, is_error=content.startswith("Error")
+            )
+        return result
 
     def _run_config(self, context_window_tokens: int | None = None) -> RunnableConfig | None:
         """构建用于检查点的 LangGraph 运行配置。
@@ -927,12 +947,15 @@ class ThumbelinaAgent:
             first_turn = await self._is_first_turn(config)
 
         messages: list[Any] = []
+        traj_items: list[dict[str, str]] = []
         if first_turn:
             if self.role_prompt:
                 messages.append(SystemMessage(content=self.role_prompt))
+                traj_items.append({"kind": "role_prompt", "content": self.role_prompt})
             memory_context = await self._get_memory_context(user_input)
             if memory_context:
                 messages.append(SystemMessage(content=memory_context))
+                traj_items.append({"kind": "memory", "content": memory_context})
 
         # 若会话绑定了知识库，则注入 RAG 上下文
         rag_context = None
@@ -947,11 +970,14 @@ class ThumbelinaAgent:
                 logger.warning("Failed to get RAG context", exc_info=True)
         if rag_context:
             messages.append(SystemMessage(content=rag_context))
+            traj_items.append({"kind": "rag", "content": rag_context})
 
         skill_context = await self._get_skill_context(user_input)
         if skill_context:
             messages.append(SystemMessage(content=skill_context))
+            traj_items.append({"kind": "skill", "content": skill_context})
         messages.append(HumanMessage(content=user_input))
+        await self.trajectory_recorder.record_context(traj_items)
         return messages
 
     async def _ensure_conversation(self) -> None:
@@ -1178,7 +1204,9 @@ class ThumbelinaAgent:
             它被放入运行配置中供压缩节点使用。
         """
         await self._ensure_conversation()
+        self.trajectory_recorder.begin_turn(self.current_conversation_id)
         await self._persist_message("user", user_input)
+        await self.trajectory_recorder.record_user(user_input)
         # 每轮开始重置 RememberTool 单轮配额(§8.6)。
         if self._remember_tool is not None:
             self._remember_tool.reset_turn_quota()
@@ -1192,7 +1220,22 @@ class ThumbelinaAgent:
         last_message = result["messages"][-1]
         response = str(last_message.content)
 
+        llm_usage = normalize_llm_usage(getattr(last_message, "response_metadata", None))
+        if llm_usage:
+            logger.debug("trajectory llm_usage recorded: %s", llm_usage)
+            await self.trajectory_recorder.record_llm_usage(llm_usage)
+        else:
+            global _llm_usage_warned
+            if not _llm_usage_warned:
+                _llm_usage_warned = True
+                logger.warning(
+                    "No LLM usage metadata in non-stream response "
+                    "(response_metadata keys=%s); trajectory llm_usage skipped",
+                    list(getattr(last_message, "response_metadata", {}).keys()),
+                )
+
         await self._persist_message("assistant", response)
+        await self.trajectory_recorder.record_assistant(response)
         # Auto-name the conversation in the background so the reply is not delayed.
         asyncio.create_task(self._maybe_auto_name())
         # 异步触发记忆抽取(§8.6),仅用户消息触发;失败由回调记录。
@@ -1215,7 +1258,9 @@ class ThumbelinaAgent:
         token），由调用方解析；它被放入运行配置中供压缩节点使用。
         """
         await self._ensure_conversation()
+        self.trajectory_recorder.begin_turn(self.current_conversation_id)
         await self._persist_message("user", user_input)
+        await self.trajectory_recorder.record_user(user_input)
         # 每轮开始重置 RememberTool 单轮配额(§8.6)。
         if self._remember_tool is not None:
             self._remember_tool.reset_turn_quota()
@@ -1232,6 +1277,9 @@ class ThumbelinaAgent:
         batch_size = 30  # characters per batch
         flush_interval = 0.05  # seconds (50ms) - flush even if batch size not reached
         last_flush = asyncio.get_event_loop().time()
+        # 流式 chunk 的 usage 通常出现在最后一片的 response_metadata 中。
+        last_chunk_metadata: dict | None = None
+        chunk_meta_count = 0
 
         async for event in self.graph.astream(initial_state, stream_mode="messages", config=config):
             # event is a tuple: (message_chunk, metadata)
@@ -1253,6 +1301,15 @@ class ThumbelinaAgent:
                 message_chunk, "tool_calls", None
             ):
                 continue
+            chunk_metadata = getattr(message_chunk, "response_metadata", None)
+            if isinstance(chunk_metadata, dict) and chunk_metadata:
+                last_chunk_metadata = chunk_metadata
+                chunk_meta_count += 1
+                if "token_usage" in chunk_metadata:
+                    logger.debug(
+                        "trajectory: stream chunk carries token_usage: %r",
+                        chunk_metadata["token_usage"],
+                    )
 
             content, reasoning = _extract_chunk_parts(message_chunk)
             if content:
@@ -1282,10 +1339,27 @@ class ThumbelinaAgent:
         if pending_content:
             yield {"type": "content", "text": pending_content}
 
+        llm_usage = normalize_llm_usage(last_chunk_metadata)
+        if llm_usage:
+            logger.debug("trajectory llm_usage recorded: %s", llm_usage)
+            await self.trajectory_recorder.record_llm_usage(llm_usage)
+        else:
+            global _llm_usage_warned
+            if not _llm_usage_warned:
+                _llm_usage_warned = True
+                logger.warning(
+                    "No LLM usage metadata in streamed response "
+                    "(chunks with response_metadata=%d, last keys=%s); "
+                    "trajectory llm_usage skipped",
+                    chunk_meta_count,
+                    list((last_chunk_metadata or {}).keys()),
+                )
+
         if full_response:
             await self._persist_message(
                 "assistant", full_response, reasoning_content=full_reasoning or None
             )
+            await self.trajectory_recorder.record_assistant(full_response, full_reasoning or None)
             # Auto-name the conversation in the background so streaming is not delayed.
             asyncio.create_task(self._maybe_auto_name())
             # 异步触发记忆抽取(§8.6),仅用户消息触发;失败由回调记录。

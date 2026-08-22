@@ -22,4 +22,8 @@ export interface StatusBarItem {
   render: (data: StatusData) => ReactNode
   /** 根据数据判定整体状态（决定外壳状态点颜色） */
   status?: (data: StatusData) => StatusBarState
+  /** 悬浮提示 / 无障碍标题（如 "缓存命中率 26%（900/3400 tokens）"） */
+  title?: (data: StatusData) => string
+  /** 栏目图标（与设置页「状态栏」卡片图标一致） */
+  icon?: ReactNode
 }

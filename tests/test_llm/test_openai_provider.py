@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
+from langchain_openai import ChatOpenAI
 
 from thumbelina.llm.base import ConnectionTestResult, SpeedTestResult
 from thumbelina.llm.openai import OpenAIProvider
@@ -332,3 +333,52 @@ def test_chat_model_plain_chunks_unchanged():
     assert generation is not None
     assert generation.message.content == "Hello"
     assert "reasoning_content" not in generation.message.additional_kwargs
+
+
+def test_chat_model_forces_stream_usage_for_custom_base_url():
+    """自定义 base_url 时流式必须请求 usage(否则 KV 缓存字段拿不到)。"""
+    provider = OpenAIProvider(
+        api_key="test-key", model="deepseek-chat", base_url="https://api.deepseek.com/v1"
+    )
+    model = provider.chat_model
+    assert isinstance(model, ChatOpenAI)
+    assert model.stream_usage is True
+
+
+def test_chat_model_stream_usage_can_be_overridden():
+    provider = OpenAIProvider(
+        api_key="test-key",
+        model="deepseek-chat",
+        base_url="https://api.deepseek.com/v1",
+        stream_usage=False,
+    )
+    assert provider.chat_model.stream_usage is False
+
+
+def test_chat_model_preserves_raw_usage_in_response_metadata():
+    """独立 usage 尾块(choices 为空)必须把原始 usage 透传到 response_metadata。
+
+    langchain-openai 只保留归一化 usage_metadata,DeepSeek 的
+    prompt_cache_hit_tokens 等字段会被丢弃;子类需透传原始 usage。
+    """
+    from langchain_core.messages import AIMessageChunk
+
+    provider = OpenAIProvider(api_key="test-key", model="deepseek-chat")
+    model = provider.chat_model
+
+    raw_chunk = {
+        "id": "cmpl-3",
+        "object": "chat.completion.chunk",
+        "choices": [],
+        "usage": {
+            "prompt_tokens": 1200,
+            "completion_tokens": 45,
+            "prompt_cache_hit_tokens": 900,
+            "prompt_cache_miss_tokens": 300,
+        },
+    }
+    generation = model._convert_chunk_to_generation_chunk(raw_chunk, AIMessageChunk, None)
+    assert generation is not None
+    token_usage = generation.message.response_metadata["token_usage"]
+    assert token_usage["prompt_cache_hit_tokens"] == 900
+    assert token_usage["prompt_cache_miss_tokens"] == 300

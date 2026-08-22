@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react'
 import { EndpointManager } from './EndpointManager'
 import { useTranslation } from '../../i18n'
 import { Toast } from './Toast'
-import { Gauge, Globe, Database, Download, Trash2, Loader2 } from 'lucide-react'
+import { Gauge, Globe, Database, Download, Trash2, Loader2, Zap } from 'lucide-react'
 import { StatusBarCardGrid } from '../StatusBar/StatusBarCardGrid'
 import { useStatusBarConfig } from '../StatusBar/useStatusBarConfig'
 
@@ -96,6 +96,12 @@ export function SettingsPanel() {
               label: t('settings.statusbarColumns.context'),
               description: t('settings.statusbarColumns.contextDesc'),
               icon: <Gauge size={18} />,
+            },
+            {
+              key: 'cacheHit',
+              label: t('settings.statusbarColumns.cacheHit'),
+              description: t('settings.statusbarColumns.cacheHitDesc'),
+              icon: <Zap size={18} />,
             },
           ]}
           config={config}

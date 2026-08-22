@@ -1,6 +1,7 @@
 {
   "nav": {
     "chat": "Chat",
+    "trajectory": "Trajectory",
     "tasks": "Tasks",
     "todo": "TODO",
     "memory": "Memory",
@@ -56,8 +57,13 @@
     "statusBar": "Status bar",
     "statusbarColumns": {
       "context": "Context usage",
-      "contextDesc": "Show estimated context window usage in the chat toolbar"
+      "contextDesc": "Show estimated context window usage in the chat toolbar",
+      "cacheHit": "Cache hit rate",
+      "cacheHitDesc": "Show KV cache hit rate of the latest 100 LLM requests in the chat page"
     }
+  },
+  "statusbar": {
+    "cacheHitTitle": "Cache hit rate {pct}% ({hit}/{total} tokens · {turns} turns)"
   },
   "language": {
     "en": "English",
@@ -235,7 +241,9 @@
     "compressFailed": "Failed to compress context",
     "stop": "Stop",
     "stopTitle": "Stop generating",
-    "generating": "Generating…"
+    "generating": "Generating…",
+    "viewTrajectory": "View trajectory",
+    "viewTrajectoryTitle": "Audit this conversation in the trajectory page"
   },
   "taskManager": {
     "title": "Task Manager",
@@ -288,6 +296,34 @@
     "noCompositions": "No compositions found",
     "loaded": "Loaded",
     "searchFailed": "Search failed"
+  },
+  "trajectory": {
+    "title": "Trajectory",
+    "selectPlaceholder": "Please select a conversation to view",
+    "emptyHint": "Select a conversation to view its full trajectory by turns",
+    "loadMore": "Load more",
+    "loading": "Loading…",
+    "loadedAll": "All turns loaded",
+    "loadFailed": "Failed to load",
+    "retry": "Retry",
+    "conversationNotFound": "Conversation not found",
+    "toolCall": "Tool call",
+    "toolResult": "Tool result",
+    "noMatchingResult": "No matching result",
+    "llmUsage": "LLM usage",
+    "usageCache": "Cache hit {hit}/{total} ({pct}%)",
+    "usageInput": "Input {n} tokens",
+    "usageCompletion": "Output {n} tokens",
+    "context": "Context",
+    "contextCount": "Context ({n} items)",
+    "user": "User",
+    "assistant": "Assistant",
+    "turn": "Turn",
+    "turnMeta": "Turn info",
+    "viewDetails": "View details",
+    "closeDetail": "Close",
+    "originalJson": "Raw JSON",
+    "noEvents": "No events"
   },
   "dream": {
     "title": "Dream",

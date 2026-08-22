@@ -63,8 +63,10 @@ export function StatusBar({ items }: StatusBarProps) {
         return (
           <StatusBarItemView
             key={item.key}
+            icon={item.icon}
             state={st?.state ?? 'idle'}
             label={content}
+            title={st?.data && item.title ? item.title(st.data) : undefined}
           />
         )
       })}

@@ -64,6 +64,19 @@ export function MessageList({ messages, waitingForReply, isStreaming, awaitingMo
   const stickToBottomRef = useRef(true)
   const firstMsgIdRef = useRef<string | undefined>(undefined)
   const { t } = useTranslation()
+  const [showGenerating, setShowGenerating] = useState(Boolean(isStreaming && awaitingMoreContent))
+
+  // 流式块之间的停顿极短（毫秒级），直接跟随 awaitingMoreContent 会让"生成中"
+  // 提示随每个块高频挂载/卸载而闪烁；延迟隐藏把短暂间隙合并成连续显示。
+  useEffect(() => {
+    if (isStreaming && awaitingMoreContent) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setShowGenerating(true)
+      return
+    }
+    const timer = setTimeout(() => setShowGenerating(false), 500)
+    return () => clearTimeout(timer)
+  }, [isStreaming, awaitingMoreContent])
 
   const handleScroll = () => {
     const el = listRef.current
@@ -142,7 +155,7 @@ export function MessageList({ messages, waitingForReply, isStreaming, awaitingMo
           </div>
         </div>
       )}
-      {isStreaming && awaitingMoreContent && !waitingForReply && (
+      {showGenerating && !waitingForReply && (
         <div className="message assistant generating-indicator" data-testid="generating-indicator">
           <span className="msg-role">{t('chat.roleAssistant')}</span>
           <div className="generating-dots" aria-hidden="true">

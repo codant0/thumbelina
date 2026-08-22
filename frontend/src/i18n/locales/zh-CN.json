@@ -1,6 +1,7 @@
 {
   "nav": {
     "chat": "聊天",
+    "trajectory": "轨迹",
     "tasks": "任务",
     "todo": "待办",
     "memory": "记忆",
@@ -56,8 +57,13 @@
     "statusBar": "状态栏",
     "statusbarColumns": {
       "context": "上下文占用",
-      "contextDesc": "在聊天输入栏右侧显示估算的上下文窗口占用"
+      "contextDesc": "在聊天输入栏右侧显示估算的上下文窗口占用",
+      "cacheHit": "缓存命中率",
+      "cacheHitDesc": "在聊天页显示最近 100 轮 LLM 请求的 KV 缓存命中率"
     }
+  },
+  "statusbar": {
+    "cacheHitTitle": "缓存命中率 {pct}%（{hit}/{total} tokens · {turns} 轮）"
   },
   "language": {
     "en": "English",
@@ -235,7 +241,9 @@
     "compressFailed": "压缩上下文失败",
     "stop": "停止",
     "stopTitle": "停止生成",
-    "generating": "正在生成…"
+    "generating": "正在生成…",
+    "viewTrajectory": "查看轨迹",
+    "viewTrajectoryTitle": "在轨迹页审计该会话"
   },
   "taskManager": {
     "title": "任务管理器",
@@ -288,6 +296,34 @@
     "noCompositions": "未找到组合",
     "loaded": "已加载",
     "searchFailed": "搜索失败"
+  },
+  "trajectory": {
+    "title": "轨迹",
+    "selectPlaceholder": "请选择要查看的会话",
+    "emptyHint": "选择一个会话后，将按轮次倒序展示完整轨迹",
+    "loadMore": "加载更多",
+    "loading": "加载中…",
+    "loadedAll": "已加载全部轮次",
+    "loadFailed": "加载失败",
+    "retry": "重试",
+    "conversationNotFound": "会话不存在",
+    "toolCall": "工具调用",
+    "toolResult": "工具结果",
+    "noMatchingResult": "无匹配结果",
+    "llmUsage": "LLM 用量",
+    "usageCache": "缓存命中 {hit}/{total}（{pct}%）",
+    "usageInput": "输入 {n} tokens",
+    "usageCompletion": "输出 {n} tokens",
+    "context": "上下文",
+    "contextCount": "上下文（{n} 项）",
+    "user": "用户",
+    "assistant": "助手",
+    "turn": "轮次",
+    "turnMeta": "轮次信息",
+    "viewDetails": "查看详情",
+    "closeDetail": "关闭",
+    "originalJson": "原始 JSON",
+    "noEvents": "无事件记录"
   },
   "dream": {
     "title": "梦境",

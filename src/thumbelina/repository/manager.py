@@ -6,6 +6,7 @@ from typing import Any
 
 from thumbelina.repository.repository import ConversationRepository
 from thumbelina.repository.search import SearchEngine
+from thumbelina.repository.trajectory_repository import TrajectoryRepository
 from thumbelina.repository.vector.base import VectorStore
 
 # Maximum content length for messages (100KB)
@@ -31,6 +32,7 @@ class RepositoryManager:
         self.conversation_repository = ConversationRepository(db_url)
         self._vector_store = vector_store
         self._search_engine = SearchEngine(self.conversation_repository, vector_store)
+        self.trajectory_repository = TrajectoryRepository(self.conversation_repository)
 
     def close(self) -> None:
         """Close the repository and release resources."""
@@ -304,6 +306,45 @@ class RepositoryManager:
         return await self.conversation_repository.set_conversation_thinking(
             conversation_id, enabled, effort
         )
+
+    async def add_trajectory_events(
+        self, conversation_id: str, events: list[dict[str, Any]]
+    ) -> None:
+        """写入一批轨迹事件(设计文档 §3.4)。"""
+        await self.trajectory_repository.add_events(conversation_id, events)
+
+    async def has_trajectory(self, conversation_id: str) -> bool:
+        """该会话是否已有轨迹事件(无则回退到消息合成为纯文本轮次)。"""
+        return await self.trajectory_repository.has_events(conversation_id)
+
+    async def get_trajectory_page(
+        self, conversation_id: str, page: int, page_size: int
+    ) -> dict[str, Any]:
+        """按轮次分页返回轨迹(最新轮次在前),payload 已解析为对象。"""
+        total, turns_meta = await self.trajectory_repository.list_turns(
+            conversation_id, page, page_size
+        )
+        events = (
+            await self.trajectory_repository.get_events([t for t, _ in turns_meta])
+            if turns_meta
+            else []
+        )
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for ev in events:
+            grouped.setdefault(ev["turn_id"], []).append(ev)
+        turns = [
+            {
+                "turn_id": tid,
+                "started_at": started_at.isoformat(),
+                "events": grouped.get(tid, []),
+            }
+            for tid, started_at in turns_meta
+        ]
+        return {"total_turns": total, "turns": turns}
+
+    async def get_cache_stats(self, limit: int = 100) -> dict[str, Any]:
+        """最近 limit 条 llm_usage 事件的 KV 缓存命中汇总(跨会话)。"""
+        return await self.trajectory_repository.get_cache_stats(limit)
 
     async def search(
         self,

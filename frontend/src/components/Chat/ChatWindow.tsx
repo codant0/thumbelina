@@ -7,8 +7,9 @@ import { KnowledgeBaseSelector } from './KnowledgeBaseSelector'
 import { RoleSelector } from './RoleSelector'
 import { ThinkingSelector } from './ThinkingSelector'
 import { ContextUsageItem } from '../StatusBar/ContextUsageItem'
+import { CacheHitRateItem } from '../StatusBar/CacheHitRateItem'
 import { Toast } from '../Settings/Toast'
-import { Mail, Eraser, Shrink } from 'lucide-react'
+import { Mail, Eraser, Shrink, Route } from 'lucide-react'
 import type { Conversation, ThinkingEffort } from '../../types/chat'
 import { useTranslation } from '../../i18n'
 import { clearConversationMessages, compressConversation } from '../../api/conversations'
@@ -24,9 +25,10 @@ interface ChatWindowProps {
   onSetKnowledgeBase?: (id: string, knowledgeBaseId: string | null) => void
   onSetRole?: (id: string, role: string | null) => void
   onSetThinking?: (id: string, enabled: boolean, effort: ThinkingEffort) => void
+  onViewTrajectory?: (id: string) => void
 }
 
-export function ChatWindow({ ws, conversationId, conversations, onConversationCreated, onDefaultConversation, onSetEndpoint, onSetKnowledgeBase, onSetRole, onSetThinking }: ChatWindowProps) {
+export function ChatWindow({ ws, conversationId, conversations, onConversationCreated, onDefaultConversation, onSetEndpoint, onSetKnowledgeBase, onSetRole, onSetThinking, onViewTrajectory }: ChatWindowProps) {
   const { messages, isConnected, isStreaming, streamingMode: wsStreamingMode, waitingForReply, awaitingMoreContent, newConversationId, clearNewConversation, sendMessage, stopGeneration, clearMessages, switchConversation, loadHistory } = ws
   const [streamingMode, setStreamingMode] = useState(true)
   const [toggling, setToggling] = useState(false)
@@ -161,6 +163,19 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
           <span className={`toggle-dot ${streamingMode ? 'on' : 'off'}`} />
           <span>{t('chat.streamLabel')}</span>
         </button>
+        {conversationId && onViewTrajectory && (
+          <button
+            type="button"
+            className="clear-context-btn"
+            data-testid="view-trajectory"
+            title={t('chat.viewTrajectoryTitle')}
+            aria-label={t('chat.viewTrajectoryTitle')}
+            onClick={() => onViewTrajectory(conversationId)}
+          >
+            <Route size={14} />
+            <span>{t('chat.viewTrajectory')}</span>
+          </button>
+        )}
         {onSetEndpoint && conversationId && (
           <ConversationModelSelector
             conversationId={conversationId}
@@ -242,11 +257,14 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
                   onChange={(kbId) => onSetKnowledgeBase(conversationId, kbId)}
                 />
               )}
-              {/* 上下文占用：只做展示、不影响对话；位于行尾右侧 */}
-              <ContextUsageItem
-                messages={messages}
-                endpointId={activeConversation?.endpoint_id ?? null}
-              />
+              {/* 状态栏分组：上下文占用 + KV 缓存命中率（只读展示，不触发 LLM 调用） */}
+              <div className="statusbar-group">
+                <ContextUsageItem
+                  messages={messages}
+                  endpointId={activeConversation?.endpoint_id ?? null}
+                />
+                <CacheHitRateItem />
+              </div>
             </>
           ) : undefined
         }

@@ -39,6 +39,7 @@ from thumbelina.api.routes import (
     skills,
     tasks,
     todo,
+    trajectory,
     wechat,
 )
 from thumbelina.api.routes import (
@@ -809,6 +810,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(rag.router, prefix="/api/v1")
     app.include_router(todo.router, prefix="/api/v1")
     app.include_router(memory.router, prefix="/api/v1")
+    app.include_router(trajectory.router, prefix="/api/v1")
     app.include_router(ws_router)
 
     return app
