@@ -66,6 +66,15 @@ def _synthesize_message_turns(
     return {"total_turns": total, "page": page, "page_size": page_size, "turns": page_turns}
 
 
+@router.get("/cache-stats")
+async def get_cache_stats(
+    limit: int = Query(100, ge=1, le=1000),
+    repository: RepositoryManager = Depends(get_repository_manager),
+) -> dict[str, Any]:
+    """最近 limit 条 llm_usage 事件的 KV 缓存命中汇总(状态栏展示用)。"""
+    return await repository.get_cache_stats(limit)
+
+
 @router.get("/{conversation_id}")
 async def get_trajectory(
     conversation_id: str,

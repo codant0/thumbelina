@@ -7,6 +7,7 @@ import { KnowledgeBaseSelector } from './KnowledgeBaseSelector'
 import { RoleSelector } from './RoleSelector'
 import { ThinkingSelector } from './ThinkingSelector'
 import { ContextUsageItem } from '../StatusBar/ContextUsageItem'
+import { CacheHitRateItem } from '../StatusBar/CacheHitRateItem'
 import { Toast } from '../Settings/Toast'
 import { Mail, Eraser, Shrink, Route } from 'lucide-react'
 import type { Conversation, ThinkingEffort } from '../../types/chat'
@@ -261,6 +262,8 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
                 messages={messages}
                 endpointId={activeConversation?.endpoint_id ?? null}
               />
+              {/* KV 缓存命中率：只读聚合端点，不触发 LLM 调用 */}
+              <CacheHitRateItem />
             </>
           ) : undefined
         }

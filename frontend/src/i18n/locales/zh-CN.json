@@ -57,8 +57,13 @@
     "statusBar": "状态栏",
     "statusbarColumns": {
       "context": "上下文占用",
-      "contextDesc": "在聊天输入栏右侧显示估算的上下文窗口占用"
+      "contextDesc": "在聊天输入栏右侧显示估算的上下文窗口占用",
+      "cacheHit": "缓存命中率",
+      "cacheHitDesc": "在聊天页显示最近 100 轮 LLM 请求的 KV 缓存命中率"
     }
+  },
+  "statusbar": {
+    "cacheHitTitle": "缓存命中率 {pct}%（{hit}/{total} tokens · {turns} 轮）"
   },
   "language": {
     "en": "English",

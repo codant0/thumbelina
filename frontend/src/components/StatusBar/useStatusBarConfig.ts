@@ -5,9 +5,11 @@ const STORAGE_KEY = 'thumbelina-statusbar-items'
 export interface StatusBarConfig {
   /** 上下文占用栏目是否展示 */
   context: boolean
+  /** KV 缓存命中率栏目是否展示 */
+  cacheHit: boolean
 }
 
-const DEFAULTS: StatusBarConfig = { context: true }
+const DEFAULTS: StatusBarConfig = { context: true, cacheHit: true }
 
 function load(): StatusBarConfig {
   try {
@@ -16,6 +18,7 @@ function load(): StatusBarConfig {
     const parsed = JSON.parse(raw) as Partial<StatusBarConfig>
     return {
       context: typeof parsed.context === 'boolean' ? parsed.context : DEFAULTS.context,
+      cacheHit: typeof parsed.cacheHit === 'boolean' ? parsed.cacheHit : DEFAULTS.cacheHit,
     }
   } catch {
     return DEFAULTS

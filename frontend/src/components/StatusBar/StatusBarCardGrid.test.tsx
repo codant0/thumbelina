@@ -15,7 +15,7 @@ const cards: StatusBarCardDef<keyof StatusBarConfig>[] = [
 describe('StatusBarCardGrid', () => {
   it('渲染栏目卡片，关闭态使用 --off 且 aria-pressed=false', () => {
     render(
-      <StatusBarCardGrid cards={cards} config={{ context: false }} onToggle={vi.fn()} />,
+      <StatusBarCardGrid cards={cards} config={{ context: false, cacheHit: true }} onToggle={vi.fn()} />,
     )
     const btn = screen.getByTestId('statusbar-card-context')
     expect(btn).toHaveClass('status-card--off')
@@ -25,7 +25,7 @@ describe('StatusBarCardGrid', () => {
 
   it('开启态使用 --on 且 aria-pressed=true，展示勾选图标', () => {
     render(
-      <StatusBarCardGrid cards={cards} config={{ context: true }} onToggle={vi.fn()} />,
+      <StatusBarCardGrid cards={cards} config={{ context: true, cacheHit: true }} onToggle={vi.fn()} />,
     )
     const btn = screen.getByTestId('statusbar-card-context')
     expect(btn).toHaveClass('status-card--on')
@@ -35,14 +35,14 @@ describe('StatusBarCardGrid', () => {
 
   it('点击卡片触发 onToggle(key)', () => {
     const onToggle = vi.fn()
-    render(<StatusBarCardGrid cards={cards} config={{ context: true }} onToggle={onToggle} />)
+    render(<StatusBarCardGrid cards={cards} config={{ context: true, cacheHit: true }} onToggle={onToggle} />)
     screen.getByTestId('statusbar-card-context').click()
     expect(onToggle).toHaveBeenCalledWith('context')
   })
 
   it('cards 为空时不渲染', () => {
     const { container } = render(
-      <StatusBarCardGrid cards={[]} config={{ context: true }} onToggle={vi.fn()} />,
+      <StatusBarCardGrid cards={[]} config={{ context: true, cacheHit: true }} onToggle={vi.fn()} />,
     )
     expect(container.querySelector('[data-testid="statusbar-card-grid"]')).toBeNull()
   })

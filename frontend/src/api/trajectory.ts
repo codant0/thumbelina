@@ -20,3 +20,16 @@ export async function fetchTrajectory(conversationId: string, page = 1, pageSize
   }
   return res.json() as Promise<TrajectoryPageData>
 }
+
+/** 最近 limit 条 llm_usage 事件的 KV 缓存命中汇总（状态栏展示用）。 */
+export interface CacheStats {
+  hit_tokens: number
+  miss_tokens: number
+  turns: number
+}
+
+export async function fetchCacheStats(limit = 100): Promise<CacheStats> {
+  const res = await fetch(`${API_BASE}/trajectory/cache-stats?limit=${limit}`)
+  if (!res.ok) throw new TrajectoryApiError(`HTTP ${res.status}`, res.status)
+  return res.json() as Promise<CacheStats>
+}

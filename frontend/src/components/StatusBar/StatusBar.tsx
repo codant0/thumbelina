@@ -65,6 +65,7 @@ export function StatusBar({ items }: StatusBarProps) {
             key={item.key}
             state={st?.state ?? 'idle'}
             label={content}
+            title={st?.data && item.title ? item.title(st.data) : undefined}
           />
         )
       })}

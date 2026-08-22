@@ -57,8 +57,13 @@
     "statusBar": "Status bar",
     "statusbarColumns": {
       "context": "Context usage",
-      "contextDesc": "Show estimated context window usage in the chat toolbar"
+      "contextDesc": "Show estimated context window usage in the chat toolbar",
+      "cacheHit": "Cache hit rate",
+      "cacheHitDesc": "Show KV cache hit rate of the latest 100 LLM requests in the chat page"
     }
+  },
+  "statusbar": {
+    "cacheHitTitle": "Cache hit rate {pct}% ({hit}/{total} tokens · {turns} turns)"
   },
   "language": {
     "en": "English",

@@ -97,3 +97,35 @@ async def test_validation_errors(trajectory_client):
     assert res.status_code == 422
     res = client.get("/api/v1/trajectory/x?page_size=101")
     assert res.status_code == 422
+
+
+async def test_cache_stats_endpoint(trajectory_client):
+    """GET /trajectory/cache-stats 返回聚合的缓存命中统计。"""
+    client, manager = trajectory_client
+    conv_id = await manager.create_conversation(name="统计会话")
+    await manager.add_trajectory_events(
+        conv_id,
+        [
+            {
+                "turn_id": "t1",
+                "seq": 0,
+                "event_type": "llm_usage",
+                "payload": json.dumps({"cache_hit_tokens": 900, "cache_miss_tokens": 300}),
+                "created_at": datetime(2026, 8, 21, 10, 0, 0),
+            },
+            {
+                "turn_id": "t2",
+                "seq": 0,
+                "event_type": "llm_usage",
+                "payload": json.dumps({"cache_hit_tokens": 100, "cache_miss_tokens": 500}),
+                "created_at": datetime(2026, 8, 21, 10, 1, 0),
+            },
+        ],
+    )
+
+    resp = client.get("/api/v1/trajectory/cache-stats")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["hit_tokens"] == 1000
+    assert data["miss_tokens"] == 800
+    assert data["turns"] == 2
