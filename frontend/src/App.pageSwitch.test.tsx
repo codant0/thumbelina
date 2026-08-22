@@ -107,4 +107,12 @@ describe('App page switching', () => {
       expect(screen.getByText(/Answer: 123/)).toBeInTheDocument()
     })
   })
+
+  it('switches to the coder page and shows the coder sidebar', async () => {
+    render(<App />)
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1))
+    fireEvent.click(screen.getByTestId('nav-coder'))
+    expect(await screen.findByTestId('coder-sidebar')).toBeInTheDocument()
+    expect(screen.getByTestId('coder-sidebar-empty')).toBeInTheDocument()
+  })
 })

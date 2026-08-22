@@ -246,6 +246,19 @@
     "viewTrajectory": "查看轨迹",
     "viewTrajectoryTitle": "在轨迹页审计该会话"
   },
+  "coder": {
+    "sidebarTitle": "码农会话",
+    "newConversation": "新建码农会话",
+    "emptyHint": "选择一个工作区，开始第一个码农会话。",
+    "unknownWorkspace": "未知工作区",
+    "pickWorkspaceTitle": "选择工作区",
+    "workspacePlaceholder": "输入服务器上的目录绝对路径",
+    "workspaceRequired": "请输入工作区路径",
+    "createFailed": "创建会话失败",
+    "pickDirButton": "选择目录…",
+    "dirPickerHint": "已确认目录（名称）",
+    "confirmCreate": "创建"
+  },
   "taskManager": {
     "title": "任务管理器",
     "subagents": "子代理",

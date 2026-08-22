@@ -246,6 +246,19 @@
     "viewTrajectory": "View trajectory",
     "viewTrajectoryTitle": "Audit this conversation in the trajectory page"
   },
+  "coder": {
+    "sidebarTitle": "Coder Sessions",
+    "newConversation": "New coder conversation",
+    "emptyHint": "Pick a workspace to start your first coder conversation.",
+    "unknownWorkspace": "Unknown workspace",
+    "pickWorkspaceTitle": "Choose workspace",
+    "workspacePlaceholder": "Absolute path to a directory on the server",
+    "workspaceRequired": "Workspace path is required",
+    "createFailed": "Failed to create conversation",
+    "pickDirButton": "Choose directory…",
+    "dirPickerHint": "Directory confirmed (name)",
+    "confirmCreate": "Create"
+  },
   "taskManager": {
     "title": "Task Manager",
     "subagents": "Subagents",
