@@ -52,6 +52,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# 首次遇到"响应无 LLM 用量元数据"时打一条 WARNING 帮助诊断,后续降级为 DEBUG。
+_llm_usage_warned = False
+
 
 # 注入边界处理(§9.4):剥离 Markdown 链接语法、把 ``#``/``>`` 降级为纯文本。
 _MD_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]+\)")
@@ -1219,7 +1222,17 @@ class ThumbelinaAgent:
 
         llm_usage = normalize_llm_usage(getattr(last_message, "response_metadata", None))
         if llm_usage:
+            logger.debug("trajectory llm_usage recorded: %s", llm_usage)
             await self.trajectory_recorder.record_llm_usage(llm_usage)
+        else:
+            global _llm_usage_warned
+            if not _llm_usage_warned:
+                _llm_usage_warned = True
+                logger.warning(
+                    "No LLM usage metadata in non-stream response "
+                    "(response_metadata keys=%s); trajectory llm_usage skipped",
+                    list(getattr(last_message, "response_metadata", {}).keys()),
+                )
 
         await self._persist_message("assistant", response)
         await self.trajectory_recorder.record_assistant(response)
@@ -1266,6 +1279,7 @@ class ThumbelinaAgent:
         last_flush = asyncio.get_event_loop().time()
         # 流式 chunk 的 usage 通常出现在最后一片的 response_metadata 中。
         last_chunk_metadata: dict | None = None
+        chunk_meta_count = 0
 
         async for event in self.graph.astream(initial_state, stream_mode="messages", config=config):
             # event is a tuple: (message_chunk, metadata)
@@ -1290,6 +1304,12 @@ class ThumbelinaAgent:
             chunk_metadata = getattr(message_chunk, "response_metadata", None)
             if isinstance(chunk_metadata, dict) and chunk_metadata:
                 last_chunk_metadata = chunk_metadata
+                chunk_meta_count += 1
+                if "token_usage" in chunk_metadata:
+                    logger.debug(
+                        "trajectory: stream chunk carries token_usage: %r",
+                        chunk_metadata["token_usage"],
+                    )
 
             content, reasoning = _extract_chunk_parts(message_chunk)
             if content:
@@ -1321,7 +1341,19 @@ class ThumbelinaAgent:
 
         llm_usage = normalize_llm_usage(last_chunk_metadata)
         if llm_usage:
+            logger.debug("trajectory llm_usage recorded: %s", llm_usage)
             await self.trajectory_recorder.record_llm_usage(llm_usage)
+        else:
+            global _llm_usage_warned
+            if not _llm_usage_warned:
+                _llm_usage_warned = True
+                logger.warning(
+                    "No LLM usage metadata in streamed response "
+                    "(chunks with response_metadata=%d, last keys=%s); "
+                    "trajectory llm_usage skipped",
+                    chunk_meta_count,
+                    list((last_chunk_metadata or {}).keys()),
+                )
 
         if full_response:
             await self._persist_message(

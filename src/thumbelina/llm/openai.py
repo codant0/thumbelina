@@ -64,6 +64,16 @@ def _get_reasoning_chat_openai_cls() -> type:
                             )
                     except Exception:  # noqa: BLE001
                         logger.debug("Failed to extract reasoning_content", exc_info=True)
+                    # DeepSeek 等兼容端点把 usage(含 KV 缓存命中字段)放在独立
+                    # 尾块中；langchain-openai 只保留归一化 usage_metadata,原始
+                    # 字段被丢弃。透传原始 usage 到 response_metadata,
+                    # 供轨迹 llm_usage 记录与 KV 缓存观测使用。
+                    try:
+                        raw_usage = chunk.get("usage")
+                        if raw_usage and isinstance(raw_usage, dict):
+                            generation_chunk.message.response_metadata["token_usage"] = raw_usage
+                    except Exception:  # noqa: BLE001
+                        logger.debug("Failed to pass through usage metadata", exc_info=True)
                 return generation_chunk
 
         _REASONING_CHAT_OPENAI_CLS = ReasoningAwareChatOpenAI
