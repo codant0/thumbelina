@@ -361,8 +361,11 @@ class TestSummaryStrategiesThroughAgent:
 
         provider = MagicMock()
         provider.chat = AsyncMock(return_value="历史摘要文本")
-        provider.chat_model = AsyncMock()
-        provider.chat_model.ainvoke.side_effect = lambda *a, **k: AIMessage(content="ack")
+        provider.chat_model = MagicMock()
+        provider.chat_model.ainvoke = AsyncMock(
+            side_effect=lambda *a, **k: AIMessage(content="ack")
+        )
+        provider.chat_model.bind_tools.return_value = provider.chat_model
 
         agent = ThumbelinaAgent(
             llm_provider=provider,
@@ -426,8 +429,9 @@ def _agent_with_summary_strategy():
 
     provider = MagicMock()
     provider.chat = AsyncMock(return_value=SUMMARY)
-    provider.chat_model = AsyncMock()
-    provider.chat_model.ainvoke.side_effect = lambda *a, **k: AIMessage(content="ack")
+    provider.chat_model = MagicMock()
+    provider.chat_model.ainvoke = AsyncMock(side_effect=lambda *a, **k: AIMessage(content="ack"))
+    provider.chat_model.bind_tools.return_value = provider.chat_model
     return ThumbelinaAgent(
         llm_provider=provider,
         checkpointer=MemorySaver(),

@@ -54,6 +54,7 @@ class WeChatChannel(Channel):
         | None = None,
         runtime: Any | None = None,
     ) -> None:
+        super().__init__()
         self._config = config
         self._agent = agent
         self._runtime = runtime
@@ -65,6 +66,11 @@ class WeChatChannel(Channel):
         self._last_wechat_user_id: str | None = None  # Track last WeChat user for responses
         self._last_context_token: str = ""  # Track context_token for replies
         self._needs_authentication: bool = False
+
+    @property
+    def last_user_id(self) -> str | None:
+        """Most recent WeChat user, used as the default notify recipient."""
+        return self._last_wechat_user_id
 
     # ------------------------------------------------------------------
     # Lifecycle

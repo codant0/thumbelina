@@ -38,10 +38,12 @@ def _ai_with_tool_call(call_id: str = "call_1") -> AIMessage:
 
 def _make_mock_provider() -> MagicMock:
     provider = MagicMock()
-    provider.chat_model = AsyncMock()
+    provider.chat_model = MagicMock()
     # 每次调用都返回全新的 AIMessage：add_messages 按 id 合并，
     # 共享对象会被替换而不是追加。
-    provider.chat_model.ainvoke.side_effect = lambda *a, **k: AIMessage(content="ack")
+    provider.chat_model.ainvoke = AsyncMock(side_effect=lambda *a, **k: AIMessage(content="ack"))
+    # agent 始终携带内置通知工具，图会调用 bind_tools；返回自身保持 ainvoke 行为。
+    provider.chat_model.bind_tools.return_value = provider.chat_model
     return provider
 
 
@@ -576,8 +578,9 @@ class TestCompressNode:
             lambda *a, **k: AIMessage(content="second answer"),
         ]
         provider = MagicMock()
-        provider.chat_model = AsyncMock()
-        provider.chat_model.ainvoke.side_effect = _sequenced_side_effect(responses)
+        provider.chat_model = MagicMock()
+        provider.chat_model.ainvoke = AsyncMock(side_effect=_sequenced_side_effect(responses))
+        provider.chat_model.bind_tools.return_value = provider.chat_model
 
         agent, _ = _make_agent(provider=provider)
         await agent.run("x" * 4000, context_window_tokens=1000)

@@ -322,6 +322,60 @@ def _make_composition_tools(engine: CompositionEngine) -> list[BaseTool]:
     return [create_skill_composition, list_skill_compositions, execute_skill_composition]
 
 
+def _make_channel_tools(agent: ThumbelinaAgent) -> list[BaseTool]:
+    """Create LangChain tools that send proactive messages via IM channels.
+
+    Channels are looked up at call time from the agent's registry, so they
+    may be registered after the agent (and its compiled graph) is created.
+
+    Parameters
+    ----------
+    agent:
+        The ThumbelinaAgent whose channel registry is consulted.
+
+    Returns
+    -------
+    list[BaseTool]
+        List of tool-callable functions.
+    """
+
+    @tool
+    async def notify_user_by_channel(
+        message: str, channel: str = "wechat", user_id: str = ""
+    ) -> str:
+        """Send a proactive message to a user via an IM channel.
+
+        Use this to notify the user (task completion, reminders, follow-ups)
+        instead of only replying in the current conversation. Defaults to the
+        WeChat channel and to that channel's most recent user.
+
+        Args:
+            message: The message text to send.
+            channel: Channel name, e.g. "wechat" or "qq". Defaults to "wechat".
+            user_id: Target user ID. If empty, the channel's most recent user
+                is used.
+        """
+        ch = agent.get_channel(channel)
+        if ch is None:
+            available = ", ".join(sorted(agent.list_channels())) or "none"
+            return f"Channel '{channel}' is not registered. Available channels: {available}."
+        target = user_id.strip() or getattr(ch, "last_user_id", None)
+        if not target:
+            return f"Channel '{channel}' has no recent user to notify; provide an explicit user_id."
+        try:
+            result = await ch.send_message(target, message)
+        except Exception as exc:
+            return f"Failed to send message via '{channel}': {exc}"
+        if result is None:
+            return (
+                f"Message handed to channel '{channel}' for user '{target}'; "
+                "delivery not confirmed."
+            )
+        return f"Message sent to user '{target}' via channel '{channel}'."
+
+    return [notify_user_by_channel]
+
+
 class ThumbelinaAgent:
     """Main agent class that orchestrates the LangGraph agent loop.
 
@@ -446,12 +500,17 @@ class ThumbelinaAgent:
 
         # Build the combined tools list
         self.tools: list[BaseTool] = list(tools) if tools else []
+        # Channel registry: channels are created after the agent (see api/app.py),
+        # so they register themselves post-construction; the notify tool looks
+        # this up at call time.
+        self._channels: dict[str, Any] = {}
         if self.subagent_manager is not None:
             self.tools.extend(_make_subagent_tools(self.subagent_manager))
         if self.scheduler is not None:
             self.tools.extend(_make_scheduler_tools(self.scheduler))
         if self.composition_engine is not None:
             self.tools.extend(_make_composition_tools(self.composition_engine))
+        self.tools.extend(_make_channel_tools(self))
         # 记忆工具（§7.3）：search_memory / read_memory / remember。
         if self.memory_service is not None and self.memory_config is not None:
             if self.memory_config.enabled:
@@ -480,6 +539,22 @@ class ThumbelinaAgent:
         self._remember_tool = next((t for t in self.tools if isinstance(t, RememberTool)), None)
 
         self.graph = self._build_graph()
+
+    def register_channel(self, name: str, channel: Any) -> None:
+        """Register an IM channel so the notify tool can send via it.
+
+        Called after channel startup (channels are created after the agent),
+        e.g. from the FastAPI lifespan. Names are normalized to lowercase.
+        """
+        self._channels[name.strip().lower()] = channel
+
+    def get_channel(self, name: str) -> Any | None:
+        """Return the registered channel for ``name`` (case-insensitive), or None."""
+        return self._channels.get(name.strip().lower())
+
+    def list_channels(self) -> list[str]:
+        """Return the names of all registered channels."""
+        return list(self._channels)
 
     def swap_provider(self, new_provider: LLMProvider) -> None:
         """Hot-swap the LLM provider at runtime.
@@ -1041,6 +1116,9 @@ class ThumbelinaAgent:
         )
         cloned._rag_store_manager = self._rag_store_manager
         cloned._rag_embedding_registry = self._rag_embedding_registry
+        # Share the channel registry so the notify tool (deduped to the
+        # parent's instance) sees the same channels in clones.
+        cloned._channels = self._channels
         return cloned
 
     async def _maybe_extract_memory(self, user_input: str) -> None:

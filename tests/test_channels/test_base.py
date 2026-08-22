@@ -75,3 +75,16 @@ async def test_handler_invocation() -> None:
     ch.set_handler(handler)
     result = await ch._handler("u1", "hi")
     assert result == "response to u1: hi"
+
+
+def test_last_user_id_defaults_to_none() -> None:
+    """A fresh channel has no recent user."""
+    ch = _ConcreteChannel()
+    assert ch.last_user_id is None
+
+
+def test_last_user_id_reflects_stored_value() -> None:
+    """last_user_id exposes the recorded _last_user_id."""
+    ch = _ConcreteChannel()
+    ch._last_user_id = "user-1"
+    assert ch.last_user_id == "user-1"

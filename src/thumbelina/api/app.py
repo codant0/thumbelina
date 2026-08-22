@@ -628,6 +628,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             )
             await wechat_channel.start()
             app.state.wechat_channel = wechat_channel
+            agent.register_channel("wechat", wechat_channel)
             # Cache the WeChat conversation ID for fast lookup in the WS handler.
             # If the channel needs re-authentication, there is no active
             # conversation yet.
@@ -656,6 +657,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             )
             await qq_channel.start()
             app.state.qq_channel = qq_channel
+            agent.register_channel("qq", qq_channel)
             logger.info("QQ channel initialized")
         except Exception:
             logger.debug("QQ channel not initialized", exc_info=True)

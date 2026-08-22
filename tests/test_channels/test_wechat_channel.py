@@ -243,6 +243,31 @@ class TestWeChatChannelSend:
         mock_ilink.send_message.assert_awaited_once_with("wxid_user1", "Hello!", "")
 
 
+class TestWeChatChannelLastUser:
+    """last_user_id exposes the most recent WeChat user for the notify tool."""
+
+    def test_last_user_id_defaults_to_none(self, channel: WeChatChannel) -> None:
+        assert channel.last_user_id is None
+
+    def test_last_user_id_reflects_last_wechat_user(self, channel: WeChatChannel) -> None:
+        channel._last_wechat_user_id = "wxid_user1"
+        assert channel.last_user_id == "wxid_user1"
+
+    @pytest.mark.asyncio
+    async def test_process_message_records_last_user(self, channel: WeChatChannel) -> None:
+        msg = MagicMock()
+        msg.message_type = 1
+        msg.message_state = 2
+        msg.message_id = "m-1"
+        msg.from_user_id = "wxid_sender"
+        msg.context_token = "ctx-1"
+
+        with patch("thumbelina.channels.wechat_qrcode.extract_text", return_value="hi"):
+            await channel._process_message(msg)
+
+        assert channel.last_user_id == "wxid_sender"
+
+
 # ------------------------------------------------------------------
 # Incoming message handling tests
 # ------------------------------------------------------------------

@@ -133,6 +133,28 @@ class TestMessageHandling:
         reply_func.assert_awaited_once_with("Agent response")
 
     @pytest.mark.asyncio
+    async def test_handle_message_records_last_user(self, channel: QQChannel) -> None:
+        """Processed messages record the sender as the notify default recipient."""
+        assert channel.last_user_id is None
+        await channel._handle_message(
+            user_id="user-42",
+            content="hello",
+            reply_func=AsyncMock(),
+            source="c2c",
+        )
+        assert channel.last_user_id == "user-42"
+
+    @pytest.mark.asyncio
+    async def test_empty_message_does_not_record_last_user(self, channel: QQChannel) -> None:
+        await channel._handle_message(
+            user_id="user-1",
+            content="<@123>",
+            reply_func=AsyncMock(),
+            source="guild",
+        )
+        assert channel.last_user_id is None
+
+    @pytest.mark.asyncio
     async def test_custom_handler_invoked(self, channel: QQChannel) -> None:
         """When set_handler is used, the custom handler receives the message."""
         custom_handler = AsyncMock(return_value="custom reply")

@@ -169,6 +169,8 @@ class QQChannel(Channel):
             logger.debug("Ignoring empty message from %s", user_id)
             return
 
+        self._last_user_id = user_id
+
         logger.info(
             "QQ message from %s [%s]: %s",
             user_id,

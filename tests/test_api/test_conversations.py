@@ -400,9 +400,13 @@ def _make_checkpointed_agent(cid: str):
 
     saver = MemorySaver()
     mock_provider = MagicMock()
-    mock_provider.chat_model = AsyncMock()
+    mock_provider.chat_model = MagicMock()
     # 每次调用都返回全新的 AIMessage，使 add_messages 追加而不是替换。
-    mock_provider.chat_model.ainvoke.side_effect = lambda *a, **k: AIMessage(content="reply")
+    mock_provider.chat_model.ainvoke = AsyncMock(
+        side_effect=lambda *a, **k: AIMessage(content="reply")
+    )
+    # agent 始终携带内置通知工具，图会调用 bind_tools；返回自身保持 ainvoke 行为。
+    mock_provider.chat_model.bind_tools.return_value = mock_provider.chat_model
 
     mock_repository = AsyncMock()
     mock_repository.create_conversation.return_value = cid

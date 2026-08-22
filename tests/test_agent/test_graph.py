@@ -11,8 +11,14 @@ from langchain_core.messages import AIMessage, HumanMessage
 def _create_mock_provider():
     """Create a mock LLMProvider for testing."""
     mock_provider = MagicMock()
-    mock_provider.chat_model = AsyncMock()
-    mock_provider.chat_model.ainvoke.return_value = AIMessage(content="Hello! How can I help?")
+    # MagicMock (not AsyncMock) so bind_tools() returns the model itself,
+    # mirroring real behavior — the graph always binds tools now.
+    mock_provider.chat_model = MagicMock()
+    mock_provider.chat_model.ainvoke = AsyncMock(
+        return_value=AIMessage(content="Hello! How can I help?")
+    )
+    # The graph always binds tools now; return the model itself as the bound model.
+    mock_provider.chat_model.bind_tools.return_value = mock_provider.chat_model
     return mock_provider
 
 
@@ -53,17 +59,17 @@ class TestThumbelinaAgent:
 
         agent = ThumbelinaAgent(llm_provider=mock_provider, tools=[mock_tool])
 
-        assert len(agent.tools) == 1
-        assert agent.tools[0].name == "search"
+        names = {t.name for t in agent.tools}
+        assert names == {"search", "notify_user_by_channel"}
 
-    def test_agent_default_empty_tools(self):
-        """ThumbelinaAgent should default to empty tools list."""
+    def test_agent_default_tools_only_notify(self):
+        """Without external tools, only the built-in notify tool is present."""
         from thumbelina.agent.graph import ThumbelinaAgent
 
         mock_provider = _create_mock_provider()
         agent = ThumbelinaAgent(llm_provider=mock_provider)
 
-        assert agent.tools == []
+        assert [t.name for t in agent.tools] == ["notify_user_by_channel"]
 
     @pytest.mark.asyncio
     async def test_agent_run_returns_string(self):
@@ -516,7 +522,9 @@ class TestToolBinding:
         result = await agent.run("hi")
 
         mock_provider.chat_model.bind_tools.assert_called_once()
-        assert mock_provider.chat_model.bind_tools.call_args[0][0] == [echo]
+        bound = mock_provider.chat_model.bind_tools.call_args[0][0]
+        assert echo in bound
+        assert {t.name for t in bound} == {"echo", "notify_user_by_channel"}
         assert result == "ok"
 
     @pytest.mark.asyncio
@@ -853,3 +861,123 @@ class TestMemoryExtractionSignalPrefilter:
         # 超过 min_message_chars(默认 5) 的实质消息应触发抽取
         await agent._maybe_extract_memory("我习惯每天早上喝一杯黑咖啡提神，周末喜欢去公园慢跑")
         mock_extractor.extract_from_messages.assert_awaited_once()
+
+
+_UNSET = object()
+
+
+class TestNotifyUserByChannel:
+    """Tests for the channel registry and notify_user_by_channel tool."""
+
+    @staticmethod
+    def _make_agent():
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        return ThumbelinaAgent(llm_provider=_create_mock_provider())
+
+    @staticmethod
+    def _notify_tool(agent):
+        return next(t for t in agent.tools if t.name == "notify_user_by_channel")
+
+    @staticmethod
+    def _mock_channel(last_user="wx-u1", send_result=_UNSET):
+        ch = MagicMock()
+        ch.last_user_id = last_user
+        if send_result is _UNSET:
+            ch.send_message = AsyncMock(return_value={"ok": True})
+        else:
+            ch.send_message = AsyncMock(return_value=send_result)
+        return ch
+
+    def test_tool_present_by_default(self):
+        agent = self._make_agent()
+        assert "notify_user_by_channel" in [t.name for t in agent.tools]
+
+    def test_register_and_get_channel_case_insensitive(self):
+        agent = self._make_agent()
+        ch = self._mock_channel()
+        agent.register_channel("WeChat", ch)
+
+        assert agent.get_channel("wechat") is ch
+        assert agent.get_channel(" WECHAT ") is ch
+        assert agent.list_channels() == ["wechat"]
+
+    def test_get_channel_unknown_returns_none(self):
+        agent = self._make_agent()
+        assert agent.get_channel("telegram") is None
+
+    @pytest.mark.asyncio
+    async def test_notify_defaults_to_wechat_and_last_user(self):
+        agent = self._make_agent()
+        ch = self._mock_channel(last_user="wx-u1")
+        agent.register_channel("wechat", ch)
+
+        result = await self._notify_tool(agent).ainvoke({"message": "done"})
+
+        ch.send_message.assert_awaited_once_with("wx-u1", "done")
+        assert "sent" in result
+
+    @pytest.mark.asyncio
+    async def test_notify_explicit_channel_and_user_id(self):
+        agent = self._make_agent()
+        wechat = self._mock_channel()
+        qq = self._mock_channel(last_user=None)
+        agent.register_channel("wechat", wechat)
+        agent.register_channel("qq", qq)
+
+        await self._notify_tool(agent).ainvoke(
+            {"message": "hi", "channel": "qq", "user_id": "qq-42"}
+        )
+
+        qq.send_message.assert_awaited_once_with("qq-42", "hi")
+        wechat.send_message.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_notify_unregistered_channel(self):
+        agent = self._make_agent()
+        agent.register_channel("qq", self._mock_channel())
+
+        result = await self._notify_tool(agent).ainvoke({"message": "hi"})
+
+        assert "not registered" in result
+        assert "qq" in result
+
+    @pytest.mark.asyncio
+    async def test_notify_without_recipient(self):
+        agent = self._make_agent()
+        agent.register_channel("wechat", self._mock_channel(last_user=None))
+
+        result = await self._notify_tool(agent).ainvoke({"message": "hi"})
+
+        assert "user_id" in result
+
+    @pytest.mark.asyncio
+    async def test_notify_send_error_returns_message(self):
+        agent = self._make_agent()
+        ch = self._mock_channel()
+        ch.send_message = AsyncMock(side_effect=RuntimeError("needs QR scan"))
+        agent.register_channel("wechat", ch)
+
+        result = await self._notify_tool(agent).ainvoke({"message": "hi"})
+
+        assert "Failed to send" in result
+        assert "needs QR scan" in result
+
+    @pytest.mark.asyncio
+    async def test_notify_send_none_reports_unconfirmed(self):
+        agent = self._make_agent()
+        agent.register_channel("qq", self._mock_channel(send_result=None))
+
+        result = await self._notify_tool(agent).ainvoke({"message": "hi", "channel": "qq"})
+
+        assert "not confirmed" in result
+
+    def test_clone_shares_channel_registry(self):
+        agent = self._make_agent()
+        ch = self._mock_channel()
+        agent.register_channel("wechat", ch)
+
+        cloned = agent.clone()
+
+        assert cloned._channels is agent._channels
+        assert cloned.get_channel("wechat") is ch

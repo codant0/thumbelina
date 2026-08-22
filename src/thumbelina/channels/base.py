@@ -23,6 +23,12 @@ class Channel(ABC):
 
     def __init__(self) -> None:
         self._handler: MessageHandler | None = None
+        self._last_user_id: str | None = None
+
+    @property
+    def last_user_id(self) -> str | None:
+        """Most recent user who interacted with this channel, if any."""
+        return self._last_user_id
 
     def set_handler(self, handler: MessageHandler) -> None:
         """Register a message-handling callback.
