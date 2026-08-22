@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Header, type Page } from './components/Layout/Header'
 import { Sidebar, WECHAT_CONVERSATION_NAME } from './components/Layout/Sidebar'
 import { ChatWindow } from './components/Chat/ChatWindow'
+import { useWebSocket } from './hooks/useWebSocket'
 import { TaskManager } from './components/Tasks/TaskManager'
 import { TodoPage } from './components/Todo/TodoPage'
 import { MemoryViewer } from './components/Memory/MemoryViewer'
@@ -18,6 +19,15 @@ function App() {
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [selectedId, setSelectedId] = useState<string | undefined>()
   const [activePage, setActivePage] = useState<Page>('chat')
+
+  // The chat WebSocket lives here (not in ChatWindow) so switching to other
+  // pages keeps the connection open — otherwise an in-flight LLM response
+  // would be cancelled by the backend and lost.
+  const wsUrl = useMemo(() => {
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    return `${wsProtocol}//${window.location.host}/ws/chat`
+  }, [])
+  const chatSocket = useWebSocket(wsUrl, selectedId)
 
   // Track the latest fetch to discard stale responses
   const latestFetchRef = useRef(0)
@@ -171,6 +181,7 @@ function App() {
               selectedId={selectedId}
             />
             <ChatWindow
+              ws={chatSocket}
               conversationId={selectedId}
               conversations={conversations}
               onConversationCreated={fetchConversations}

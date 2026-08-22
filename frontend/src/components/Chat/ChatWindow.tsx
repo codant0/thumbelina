@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo } from 'react'
-import { useWebSocket } from '../../hooks/useWebSocket'
+import type { ChatSocket } from '../../hooks/useWebSocket'
 import { MessageList } from './MessageList'
 import { InputBox } from './InputBox'
 import { ConversationModelSelector } from './ConversationModelSelector'
@@ -14,6 +14,8 @@ import { useTranslation } from '../../i18n'
 import { clearConversationMessages, compressConversation } from '../../api/conversations'
 
 interface ChatWindowProps {
+  /** WebSocket state lifted to App so the connection survives page switches. */
+  ws: ChatSocket
   conversationId?: string
   conversations?: Conversation[]
   onConversationCreated?: () => void
@@ -24,13 +26,8 @@ interface ChatWindowProps {
   onSetThinking?: (id: string, enabled: boolean, effort: ThinkingEffort) => void
 }
 
-export function ChatWindow({ conversationId, conversations, onConversationCreated, onDefaultConversation, onSetEndpoint, onSetKnowledgeBase, onSetRole, onSetThinking }: ChatWindowProps) {
-  const wsUrl = useMemo(() => {
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    return `${wsProtocol}//${window.location.host}/ws/chat`
-  }, [])
-
-  const { messages, isConnected, isStreaming, streamingMode: wsStreamingMode, waitingForReply, awaitingMoreContent, newConversationId, clearNewConversation, sendMessage, stopGeneration, clearMessages, switchConversation, loadHistory } = useWebSocket(wsUrl, conversationId)
+export function ChatWindow({ ws, conversationId, conversations, onConversationCreated, onDefaultConversation, onSetEndpoint, onSetKnowledgeBase, onSetRole, onSetThinking }: ChatWindowProps) {
+  const { messages, isConnected, isStreaming, streamingMode: wsStreamingMode, waitingForReply, awaitingMoreContent, newConversationId, clearNewConversation, sendMessage, stopGeneration, clearMessages, switchConversation, loadHistory } = ws
   const [streamingMode, setStreamingMode] = useState(true)
   const [toggling, setToggling] = useState(false)
   const [clearing, setClearing] = useState(false)

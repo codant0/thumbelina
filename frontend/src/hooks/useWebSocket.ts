@@ -462,6 +462,12 @@ export function useWebSocket(url: string, activeConversationId?: string) {
           }
           clearWaitingFor(conv)
           streamConvRef.current = conv
+          // Snapshot the reply so a history fetch racing the DB write can
+          // reconcile it even when it arrived while this conversation was
+          // not on screen (e.g. the user was on another page).
+          if (data.response) {
+            completedContentRef.current = { convId: conv, content: data.response, reasoning: '' }
+          }
         }
         sessionConvRef.current = null
         setStreamingConvId(null)
@@ -672,3 +678,5 @@ export function useWebSocket(url: string, activeConversationId?: string) {
 
   return { messages, isConnected, isStreaming: isStreamingActive, streamingMode, waitingForReply, awaitingMoreContent, lastConversationId, newConversationId, clearNewConversation, sendMessage, stopGeneration, clearMessages, switchConversation, loadHistory }
 }
+
+export type ChatSocket = ReturnType<typeof useWebSocket>

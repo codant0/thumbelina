@@ -1,14 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { ChatWindow } from './ChatWindow'
+import type { ChatSocket } from '../../hooks/useWebSocket'
 
-// Mock the useWebSocket hook — ChatWindow tests focus on rendering/behavior
-// driven by the exposed state, not the WS protocol itself.
-const mockUseWebSocket = vi.fn()
-vi.mock('../../hooks/useWebSocket', () => ({
-  useWebSocket: (...args: unknown[]) => mockUseWebSocket(...args),
-}))
-
+// ChatWindow receives the lifted WebSocket state via the `ws` prop — tests
+// focus on rendering/behavior driven by that state, not the WS protocol.
 const mockCompress = vi.fn()
 vi.mock('../../api/conversations', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/conversations')>()
@@ -18,7 +14,7 @@ vi.mock('../../api/conversations', async (importOriginal) => {
   }
 })
 
-const baseState = {
+const baseState: ChatSocket = {
   messages: [],
   isConnected: true,
   isStreaming: false,
@@ -35,59 +31,63 @@ const baseState = {
   loadHistory: vi.fn(),
 }
 
+let wsState = baseState
+const renderWindow = (props: Record<string, unknown> = {}) =>
+  render(<ChatWindow ws={wsState} {...props} />)
+
 beforeEach(() => {
   vi.clearAllMocks()
-  mockUseWebSocket.mockReturnValue(baseState)
+  wsState = baseState
 })
 
 describe('ChatWindow', () => {
   it('should render chat window', () => {
-    render(<ChatWindow />)
+    renderWindow()
     expect(screen.getByTestId('chat-window')).toBeInTheDocument()
   })
 
   it('should show connection status', () => {
-    render(<ChatWindow />)
+    renderWindow()
     expect(screen.getByText(/Connected/i)).toBeInTheDocument()
   })
 
   it('should render message list', () => {
     // With empty messages, ChatWindow shows empty state; verify it renders
-    render(<ChatWindow />)
+    renderWindow()
     expect(screen.getByTestId('chat-window')).toBeInTheDocument()
   })
 
   it('should render input box', () => {
-    render(<ChatWindow />)
+    renderWindow()
     expect(screen.getByPlaceholderText(/Type a message/i)).toBeInTheDocument()
   })
 
   it('should render streaming toggle', () => {
-    render(<ChatWindow />)
+    renderWindow()
     expect(screen.getByTestId('streaming-toggle')).toBeInTheDocument()
   })
 
   it('should not render compress button without a conversation', () => {
-    render(<ChatWindow />)
+    renderWindow()
     expect(screen.queryByTestId('compress-context')).not.toBeInTheDocument()
   })
 
   it('should render compress button when a conversation is active', () => {
-    mockUseWebSocket.mockReturnValue({
+    wsState = {
       ...baseState,
       messages: [{ id: '1', role: 'user', content: 'hi', timestamp: '' }],
-    })
-    render(<ChatWindow conversationId="conv-1" />)
+    }
+    renderWindow({ conversationId: 'conv-1' })
     expect(screen.getByTestId('compress-context')).toBeInTheDocument()
   })
 
   it('should call the compress API and show a success notice', async () => {
-    mockUseWebSocket.mockReturnValue({
+    wsState = {
       ...baseState,
       messages: [{ id: '1', role: 'user', content: 'hi', timestamp: '' }],
-    })
+    }
     mockCompress.mockResolvedValueOnce({ compressed: true })
-    render(<ChatWindow conversationId="conv-1" />)
+    renderWindow({ conversationId: 'conv-1' })
     fireEvent.click(screen.getByTestId('compress-context'))
     await waitFor(() => {
       expect(mockCompress).toHaveBeenCalledWith('conv-1')
@@ -96,12 +96,12 @@ describe('ChatWindow', () => {
   })
 
   it('should show a failure notice when compression throws', async () => {
-    mockUseWebSocket.mockReturnValue({
+    wsState = {
       ...baseState,
       messages: [{ id: '1', role: 'user', content: 'hi', timestamp: '' }],
-    })
+    }
     mockCompress.mockRejectedValueOnce(new Error('boom'))
-    render(<ChatWindow conversationId="conv-1" />)
+    renderWindow({ conversationId: 'conv-1' })
     fireEvent.click(screen.getByTestId('compress-context'))
     await waitFor(() => {
       expect(screen.getByText(/Failed to compress context/i)).toBeInTheDocument()
@@ -109,20 +109,20 @@ describe('ChatWindow', () => {
   })
 
   it('does not render the stop button when not streaming', () => {
-    render(<ChatWindow conversationId="conv-1" />)
+    renderWindow({ conversationId: 'conv-1' })
     expect(screen.queryByTestId('stop-generation')).not.toBeInTheDocument()
   })
 
   it('renders the stop button while streaming and stops on click', () => {
-    mockUseWebSocket.mockReturnValue({
+    wsState = {
       ...baseState,
       isStreaming: true,
       messages: [
         { id: '1', role: 'user', content: 'hi', timestamp: '' },
         { id: 'stream-2', role: 'assistant', content: 'answ', timestamp: '' },
       ],
-    })
-    render(<ChatWindow conversationId="conv-1" />)
+    }
+    renderWindow({ conversationId: 'conv-1' })
     const stop = screen.getByTestId('stop-generation')
     expect(stop).toBeInTheDocument()
     fireEvent.click(stop)
@@ -130,31 +130,31 @@ describe('ChatWindow', () => {
   })
 
   it('keeps the input enabled while streaming (only disabled offline)', () => {
-    mockUseWebSocket.mockReturnValue({
+    wsState = {
       ...baseState,
       isStreaming: true,
       messages: [
         { id: '1', role: 'user', content: 'hi', timestamp: '' },
         { id: 'stream-2', role: 'assistant', content: 'answ', timestamp: '' },
       ],
-    })
-    render(<ChatWindow conversationId="conv-1" />)
+    }
+    renderWindow({ conversationId: 'conv-1' })
     expect(screen.getByPlaceholderText(/Type a message/i)).toBeEnabled()
   })
 
   it('disables the input when disconnected', () => {
-    mockUseWebSocket.mockReturnValue({ ...baseState, isConnected: false })
-    render(<ChatWindow />)
+    wsState = { ...baseState, isConnected: false }
+    renderWindow()
     expect(screen.getByPlaceholderText(/Type a message/i)).toBeDisabled()
   })
 
   it('disables the compress button while a stream is in progress', () => {
-    mockUseWebSocket.mockReturnValue({
+    wsState = {
       ...baseState,
       isStreaming: true,
       messages: [{ id: '1', role: 'user', content: 'hi', timestamp: '' }],
-    })
-    render(<ChatWindow conversationId="conv-1" />)
+    }
+    renderWindow({ conversationId: 'conv-1' })
     expect(screen.getByTestId('compress-context')).toBeDisabled()
   })
 })
