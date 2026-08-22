@@ -5,7 +5,8 @@ import type { TrajectoryDetail, TrajectoryEvent, TrajectoryPageData, TrajectoryT
 import { fetchTrajectory } from '../../api/trajectory'
 import { useTranslation } from '../../i18n'
 import { TrajectoryDetailModal } from './TrajectoryDetailModal'
-import { collapseMiddle, eventLabel } from './trajectoryDisplay'
+import { collapseMiddle, eventLabel, groupToolEvents } from './trajectoryDisplay'
+import type { ToolCallGroup } from './trajectoryDisplay'
 
 const PAGE_SIZE = 20
 
@@ -221,16 +222,73 @@ function TurnTrack({ turn, turnIndex, turnNumber, onOpenDetail }: {
         <div className="turn-events-empty">{t('trajectory.noEvents')}</div>
       ) : (
         <div className="turn-events">
-          {turn.events.map(event => (
-            <EventBlock
-              key={event.seq}
-              event={event}
-              turnIndex={turnIndex}
-              onOpenDetail={onOpenDetail}
-            />
-          ))}
+          {groupToolEvents(turn.events).map(block =>
+            'call' in block ? (
+              <ToolCallCard
+                key={`call-${block.call.seq}`}
+                group={block}
+                turnIndex={turnIndex}
+                onOpenDetail={onOpenDetail}
+              />
+            ) : (
+              <EventBlock
+                key={block.seq}
+                event={block}
+                turnIndex={turnIndex}
+                onOpenDetail={onOpenDetail}
+              />
+            ),
+          )}
         </div>
       )}
+    </div>
+  )
+}
+
+function ToolCallCard({ group, turnIndex, onOpenDetail }: {
+  group: ToolCallGroup
+  turnIndex: number
+  onOpenDetail: (target: TrajectoryDetail) => void
+}) {
+  const { t } = useTranslation()
+  const payload = group.call.payload as Record<string, unknown>
+  return (
+    <div className="tool-call-card">
+      <button
+        type="button"
+        className="tool-call-zone"
+        data-testid="turn-event"
+        onClick={() => onOpenDetail({ kind: 'event', event: group.call, turnIndex })}
+      >
+        <span className="chip-label">{eventLabel(t, group.call)}</span>
+        <span className="chip-icon"><Wrench size={14} aria-hidden="true" /></span>
+        <span className="event-summary">{collapseMiddle(JSON.stringify(payload.args ?? {}), 120, 60, 40).text}</span>
+        <span className="event-more">{t('trajectory.viewDetails')}</span>
+        {group.results.length === 0 && (
+          <span className="tool-call-missing">{t('trajectory.noMatchingResult')}</span>
+        )}
+      </button>
+      {group.results.map(result => {
+        const resultPayload = result.payload as Record<string, unknown>
+        const isError = resultPayload.is_error === true
+        return (
+          <button
+            key={result.seq}
+            type="button"
+            className={`tool-call-zone tool-call-result${isError ? ' tool-call-result--error' : ''}`}
+            data-testid="turn-event"
+            onClick={() => onOpenDetail({ kind: 'event', event: result, turnIndex })}
+          >
+            <span className="chip-icon">
+              {isError ? <CircleAlert size={14} aria-hidden="true" /> : <Terminal size={14} aria-hidden="true" />}
+            </span>
+            <span className="event-summary">
+              {collapseMiddle(String(resultPayload.content ?? ''), 120, 60, 40).text || t('trajectory.noEvents')}
+            </span>
+            <span className="event-more">{t('trajectory.viewDetails')}</span>
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -262,17 +320,13 @@ function EventBlock({ event, turnIndex, onOpenDetail }: {
   const isError = event.event_type === 'tool_result' && payload.is_error === true
   const icon = event.event_type === 'context'
     ? <Boxes size={14} aria-hidden="true" />
-    : event.event_type === 'tool_call'
-      ? <Wrench size={14} aria-hidden="true" />
-      : isError
-        ? <CircleAlert size={14} aria-hidden="true" />
-        : <Terminal size={14} aria-hidden="true" />
+    : isError
+      ? <CircleAlert size={14} aria-hidden="true" />
+      : <Terminal size={14} aria-hidden="true" />
 
   const summary = event.event_type === 'context'
     ? t('trajectory.contextCount').replace('{n}', String(Array.isArray(payload.items) ? payload.items.length : 0))
-    : event.event_type === 'tool_call'
-      ? collapseMiddle(JSON.stringify(payload.args ?? {}), 120, 60, 40).text
-      : collapseMiddle(String(payload.content ?? ''), 120, 60, 40).text || t('trajectory.noEvents')
+    : collapseMiddle(String(payload.content ?? ''), 120, 60, 40).text || t('trajectory.noEvents')
 
   return (
     <button

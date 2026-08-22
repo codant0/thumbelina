@@ -304,6 +304,7 @@
     "conversationNotFound": "Conversation not found",
     "toolCall": "Tool call",
     "toolResult": "Tool result",
+    "noMatchingResult": "No matching result",
     "context": "Context",
     "contextCount": "Context ({n} items)",
     "user": "User",

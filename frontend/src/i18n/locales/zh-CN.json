@@ -304,6 +304,7 @@
     "conversationNotFound": "会话不存在",
     "toolCall": "工具调用",
     "toolResult": "工具结果",
+    "noMatchingResult": "无匹配结果",
     "context": "上下文",
     "contextCount": "上下文（{n} 项）",
     "user": "用户",

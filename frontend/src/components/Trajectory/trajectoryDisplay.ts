@@ -29,3 +29,36 @@ export function eventLabel(t: (key: string) => string, event: TrajectoryEvent): 
   }
   return t('trajectory.context')
 }
+
+/** 同轮次内按 call_id 组合的调用与结果；results 为空表示无匹配结果。 */
+export interface ToolCallGroup {
+  call: TrajectoryEvent
+  results: TrajectoryEvent[]
+}
+
+function payloadOf(event: TrajectoryEvent): Record<string, unknown> {
+  return event.payload as Record<string, unknown>
+}
+
+/** 把 tool_call 与同 call_id 的 tool_result 组合为一块，其余事件保持原顺序透出。 */
+export function groupToolEvents(events: TrajectoryEvent[]): (TrajectoryEvent | ToolCallGroup)[] {
+  const blocks: (TrajectoryEvent | ToolCallGroup)[] = []
+  const consumed = new Set<number>()
+  for (const event of events) {
+    if (event.event_type === 'tool_call') {
+      const callId = payloadOf(event).call_id
+      const results = events.filter(e => {
+        if (e.event_type !== 'tool_result' || consumed.has(e.seq)) return false
+        const resultId = payloadOf(e).call_id
+        return typeof callId === 'string' && callId !== '' && resultId === callId
+      })
+      results.forEach(e => consumed.add(e.seq))
+      blocks.push({ call: event, results })
+    } else if (event.event_type === 'tool_result' && consumed.has(event.seq)) {
+      // 已被前序调用认领，不再单独展示
+    } else {
+      blocks.push(event)
+    }
+  }
+  return blocks
+}

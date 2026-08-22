@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { TrajectoryPage } from './TrajectoryPage'
-import { collapseMiddle } from './trajectoryDisplay'
+import { collapseMiddle, groupToolEvents } from './trajectoryDisplay'
+import type { ToolCallGroup } from './trajectoryDisplay'
+import type { TrajectoryEvent } from '../../types/trajectory'
 import { LocaleProvider } from '../../i18n'
 
 const LONG_TEXT = '长'.repeat(800)
@@ -78,6 +80,53 @@ describe('collapseMiddle', () => {
 
   it('边界长度不截断', () => {
     expect(collapseMiddle('x'.repeat(600), 600, 200, 200).truncated).toBe(false)
+  })
+})
+
+function ev(seq: number, event_type: string, payload: Record<string, unknown>): TrajectoryEvent {
+  return { seq, event_type, payload, created_at: '2026-08-22T10:00:00' }
+}
+
+describe('groupToolEvents', () => {
+  const call = (seq: number, callId: string) => ev(seq, 'tool_call', { tool: 'search', args: {}, call_id: callId })
+  const result = (seq: number, callId: string, content = 'ok') => ev(seq, 'tool_result', { call_id: callId, content, is_error: false })
+
+  it('按 call_id 组合调用与结果', () => {
+    const events = [call(0, 'c1'), result(1, 'c1')]
+    const [block] = groupToolEvents(events)
+    expect((block as ToolCallGroup).call).toBe(events[0])
+    expect((block as ToolCallGroup).results).toEqual([events[1]])
+  })
+
+  it('调用无匹配结果时 results 为空', () => {
+    const [block] = groupToolEvents([call(0, 'c1')])
+    expect((block as ToolCallGroup).results).toEqual([])
+  })
+
+  it('结果找不到调用时单独保留', () => {
+    const events = [call(0, 'c1'), result(1, 'c2')]
+    const blocks = groupToolEvents(events)
+    expect(blocks).toHaveLength(2)
+    expect((blocks[0] as ToolCallGroup).results).toEqual([])
+    expect(blocks[1]).toBe(events[1])
+  })
+
+  it('同一调用多个结果全部归入', () => {
+    const events = [call(0, 'c1'), result(1, 'c1', 'a'), result(2, 'c1', 'b')]
+    const blocks = groupToolEvents(events)
+    expect(blocks).toHaveLength(1)
+    expect((blocks[0] as ToolCallGroup).results).toHaveLength(2)
+  })
+
+  it('call_id 为空不配对', () => {
+    expect(groupToolEvents([call(0, ''), result(1, '')])).toHaveLength(2)
+  })
+
+  it('非工具事件透出并保持顺序', () => {
+    const user = ev(0, 'user', { content: 'hi' })
+    const assistant = ev(3, 'assistant', { content: 'ok' })
+    const blocks = groupToolEvents([user, call(1, 'c1'), result(2, 'c1'), assistant])
+    expect(blocks.map(b => ('call' in b ? 'group' : b.event_type))).toEqual(['user', 'group', 'assistant'])
   })
 })
 
@@ -171,6 +220,56 @@ describe('TrajectoryPage', () => {
     await waitFor(() => {
       expect(screen.queryByTestId('trajectory-detail-modal')).not.toBeInTheDocument()
     })
+  })
+
+  it('工具调用与结果合并为一张卡片，分区点击打开对应弹窗', async () => {
+    mockTrajectoryFetch()
+    renderWithI18n(<TrajectoryPage />)
+    await selectConversation()
+
+    const card = document.querySelector('.tool-call-card') as HTMLElement
+    expect(card).not.toBeNull()
+    // 卡片内同时包含调用与结果
+    expect(within(card).getByText('工具调用: search')).toBeInTheDocument()
+    expect(within(card).getByText('结果A')).toBeInTheDocument()
+
+    // 结果区 → tool_result 详情弹窗
+    fireEvent.click(card.querySelectorAll('[data-testid="turn-event"]')[1])
+    const resultModal = await screen.findByTestId('trajectory-detail-modal')
+    expect(within(resultModal).getByText('工具结果')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('detail-close'))
+
+    // 请求区 → tool_call 详情弹窗
+    fireEvent.click(card.querySelectorAll('[data-testid="turn-event"]')[0])
+    const callModal = await screen.findByTestId('trajectory-detail-modal')
+    expect(within(callModal).getByText('工具调用: search')).toBeInTheDocument()
+  })
+
+  it('调用无匹配结果时展示提示，孤儿结果仍单独展示', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/trajectory/')) {
+        return Promise.resolve(new Response(JSON.stringify({
+          ...TRAJECTORY_DATA,
+          turns: [{
+            turn_id: 't9',
+            started_at: '2026-08-22T11:00:00',
+            events: [
+              { seq: 0, event_type: 'tool_call', payload: { tool: 'web', args: { u: 'x' }, call_id: 'no-result' }, created_at: '2026-08-22T11:00:00' },
+              { seq: 1, event_type: 'tool_result', payload: { call_id: 'other', content: '别的结果', is_error: false }, created_at: '2026-08-22T11:00:01' },
+            ],
+          }],
+        }), { status: 200 }))
+      }
+      return Promise.resolve(new Response(JSON.stringify(CONVERSATIONS), { status: 200 }))
+    })
+    renderWithI18n(<TrajectoryPage />)
+    await selectConversation()
+
+    expect(screen.getByText('无匹配结果')).toBeInTheDocument()
+    expect(screen.getByText('别的结果')).toBeInTheDocument()
+    // 无匹配结果提示位于调用卡片内部
+    expect(document.querySelector('.tool-call-card')).not.toBeNull()
   })
 
   it('点击轮次头打开轮次信息弹窗', async () => {

@@ -4958,10 +4958,22 @@
 .event-block--error .chip-icon { color: var(--error); }
 .event-block--error:hover { box-shadow: inset 3px 0 0 var(--error), var(--shadow-sm); }
 
+.tool-call-card { display: flex; flex-direction: column; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius); overflow: hidden; }
+.tool-call-zone { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: var(--sp-2); row-gap: var(--sp-1); align-items: center; width: 100%; padding: var(--sp-2) var(--sp-3); background: transparent; border: none; color: inherit; font-family: inherit; font-size: var(--fs-base); cursor: pointer; text-align: left; transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out); }
+.tool-call-zone:hover { background: var(--bg-hover); box-shadow: var(--shadow-sm); }
+.tool-call-zone:active { transform: scale(0.995); }
+.tool-call-zone .chip-label { grid-column: 1 / -1; font-size: var(--fs-xs); color: var(--text-secondary); }
+.tool-call-zone .chip-icon { display: inline-flex; color: var(--text-secondary); }
+.tool-call-result { border-top: 1px solid var(--border-subtle); border-radius: 0; }
+.tool-call-result--error { background: var(--error-muted); box-shadow: inset 3px 0 0 var(--error); }
+.tool-call-result--error .chip-icon { color: var(--error); }
+.tool-call-result--error:hover { background: var(--error-muted); box-shadow: inset 3px 0 0 var(--error), var(--shadow-sm); }
+.tool-call-missing { grid-column: 1 / -1; font-size: var(--fs-xs); color: var(--text-secondary); }
+
 .event-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; color: var(--text-primary); font-size: var(--fs-sm); }
 .event-more { font-size: var(--fs-xs); color: var(--accent); white-space: nowrap; }
 
-.event-block:focus-visible, .turn-header-btn:focus-visible, .trajectory-json-toggle:focus-visible, .trajectory-select:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.event-block:focus-visible, .turn-header-btn:focus-visible, .trajectory-json-toggle:focus-visible, .trajectory-select:focus-visible, .tool-call-zone:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
 /* 详情弹窗 */
 .trajectory-modal .modal__body { display: flex; flex-direction: column; gap: var(--sp-3); }
