@@ -22,4 +22,5 @@ export interface TrajectoryPageData {
 
 export type TrajectoryDetail =
   | { kind: 'event'; event: TrajectoryEvent; turnIndex: number }
-  | { kind: 'turn-meta'; turn: TrajectoryTurn; turnIndex: number }
+  // 全局轮次序号：倒序列表中最旧（底部）为 #1，越往上越大。
+  | { kind: 'turn-meta'; turn: TrajectoryTurn; turnNumber: number }

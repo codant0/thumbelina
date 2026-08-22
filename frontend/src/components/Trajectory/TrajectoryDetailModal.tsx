@@ -51,7 +51,7 @@ export function TrajectoryDetailModal({ target, onClose }: TrajectoryDetailModal
   if (!target) return null
 
   const title = target.kind === 'turn-meta'
-    ? `${t('trajectory.turnMeta')} #${target.turnIndex + 1}`
+    ? `${t('trajectory.turnMeta')} #${target.turnNumber}`
     : eventLabel(t, target.event)
 
   return (
@@ -80,7 +80,7 @@ export function TrajectoryDetailModal({ target, onClose }: TrajectoryDetailModal
         </div>
         <div className="modal__body trajectory-modal__body">
           {target.kind === 'turn-meta' ? (
-            <TurnMetaBody turn={target.turn} index={target.turnIndex} />
+            <TurnMetaBody turn={target.turn} turnNumber={target.turnNumber} />
           ) : (
             <EventBody event={target.event} />
           )}
@@ -90,13 +90,13 @@ export function TrajectoryDetailModal({ target, onClose }: TrajectoryDetailModal
   )
 }
 
-function TurnMetaBody({ turn, index }: { turn: TrajectoryTurn; index: number }) {
+function TurnMetaBody({ turn, turnNumber }: { turn: TrajectoryTurn; turnNumber: number }) {
   const { t } = useTranslation()
   return (
     <dl className="trajectory-fields">
       <div className="trajectory-field">
         <dt>{t('trajectory.turn')}</dt>
-        <dd>#{index + 1}</dd>
+        <dd>#{turnNumber}</dd>
       </div>
       <div className="trajectory-field">
         <dt>Turn ID</dt>

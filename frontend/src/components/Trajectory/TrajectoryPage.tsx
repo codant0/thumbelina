@@ -142,6 +142,7 @@ export function TrajectoryPage({ initialConversationId }: { initialConversationI
                 key={turn.turn_id}
                 turn={turn}
                 turnIndex={turnIndex}
+                turnNumber={data.total_turns - turnIndex}
                 onOpenDetail={openDetail}
               />
             ))}
@@ -194,9 +195,10 @@ function TrajectorySkeleton() {
   )
 }
 
-function TurnTrack({ turn, turnIndex, onOpenDetail }: {
+function TurnTrack({ turn, turnIndex, turnNumber, onOpenDetail }: {
   turn: TrajectoryTurn
   turnIndex: number
+  turnNumber: number
   onOpenDetail: (target: TrajectoryDetail) => void
 }) {
   const { t } = useTranslation()
@@ -209,10 +211,10 @@ function TurnTrack({ turn, turnIndex, onOpenDetail }: {
       <button
         type="button"
         className="turn-header turn-header-btn"
-        aria-label={`${t('trajectory.turnMeta')} #${turnIndex + 1}`}
-        onClick={() => onOpenDetail({ kind: 'turn-meta', turn, turnIndex })}
+        aria-label={`${t('trajectory.turnMeta')} #${turnNumber}`}
+        onClick={() => onOpenDetail({ kind: 'turn-meta', turn, turnNumber })}
       >
-        <span className="turn-name">{t('trajectory.turn')} #{turnIndex + 1}</span>
+        <span className="turn-name">{t('trajectory.turn')} #{turnNumber}</span>
         <time className="turn-time" dateTime={turn.started_at}>{turn.started_at}</time>
       </button>
       {turn.events.length === 0 ? (

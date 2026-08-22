@@ -103,6 +103,15 @@ describe('TrajectoryPage', () => {
     expect(fetchSpy).toHaveBeenCalledWith(expect.stringContaining('/trajectory/c1?page=1'))
   })
 
+  it('轮次序号倒序编号：顶部最新为 #total，越往下越小', async () => {
+    mockTrajectoryFetch()
+    renderWithI18n(<TrajectoryPage />)
+    await selectConversation()
+    expect(screen.getByText('轮次 #3')).toBeInTheDocument()
+    expect(screen.getByText('轮次 #2')).toBeInTheDocument()
+    expect(screen.queryByText('轮次 #1')).not.toBeInTheDocument()
+  })
+
   it('时间线结构：轮次轨道含节点与时间线容器', async () => {
     mockTrajectoryFetch()
     renderWithI18n(<TrajectoryPage />)
@@ -168,9 +177,9 @@ describe('TrajectoryPage', () => {
     mockTrajectoryFetch()
     renderWithI18n(<TrajectoryPage />)
     await selectConversation()
-    fireEvent.click(screen.getByText(/^轮次 #1$/))
+    fireEvent.click(screen.getByText(/^轮次 #3$/))
     expect(await screen.findByTestId('trajectory-detail-modal')).toBeInTheDocument()
-    expect(screen.getByText('轮次信息 #1')).toBeInTheDocument()
+    expect(screen.getByText('轮次信息 #3')).toBeInTheDocument()
   })
 
   it('加载更多：翻页追加', async () => {
@@ -193,6 +202,8 @@ describe('TrajectoryPage', () => {
     await waitFor(() => {
       expect(screen.getAllByTestId('turn-card')).toHaveLength(3)
     })
+    // 追加的最旧一轮（底部）编号为 #1
+    expect(screen.getByText('轮次 #1')).toBeInTheDocument()
   })
 
   it('加载失败展示错误与重试', async () => {
