@@ -52,6 +52,7 @@ export function TrajectoryPage({ initialConversationId }: { initialConversationI
 
   useEffect(() => {
     if (selectedId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       void load(selectedId, 1, false)
     } else {
       setData(null)
