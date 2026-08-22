@@ -94,7 +94,7 @@ async def test_workspace_relative_write(tmp_path):
 async def test_search_files_finds_regex(tmp_path):
     (tmp_path / "a.py").write_text("def foo():\n    pass\n")
     (tmp_path / "b.txt").write_text("no match here")
-    result = await search_files.ainvoke({"pattern": "foo"})
+    result = await search_files.ainvoke({"pattern": "foo", "path": str(tmp_path)})
     assert "a.py:1:" in result
     assert "b.txt" not in result
 
