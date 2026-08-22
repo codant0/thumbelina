@@ -45,23 +45,17 @@ def _validate_workspace(mode: str, workspace: str | None) -> str | None:
     """校验并规范化工作区路径；非法时抛 422。"""
     if mode == "coder":
         if not workspace or not workspace.strip():
-            raise HTTPException(
-                status_code=422, detail="mode='coder' 需要提供 workspace 路径"
-            )
+            raise HTTPException(status_code=422, detail="mode='coder' 需要提供 workspace 路径")
         try:
             path = Path(workspace).resolve()
         except OSError as exc:
             raise HTTPException(status_code=422, detail=f"无效的工作区路径: {exc}")
         if not path.is_dir():
-            raise HTTPException(
-                status_code=422, detail=f"工作区不是有效目录: {workspace}"
-            )
+            raise HTTPException(status_code=422, detail=f"工作区不是有效目录: {workspace}")
         try:
             next(path.iterdir(), None)
         except (PermissionError, OSError) as exc:
-            raise HTTPException(
-                status_code=422, detail=f"工作区不可读: {exc}"
-            )
+            raise HTTPException(status_code=422, detail=f"工作区不可读: {exc}")
         return str(path)
     if workspace:
         raise HTTPException(status_code=422, detail="普通会话不允许设置 workspace")

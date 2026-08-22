@@ -105,9 +105,7 @@ def mock_repository():
             return True
         return False
 
-    async def create_conversation(
-        name=None, pinned=False, mode="chat", workspace=None, role=None
-    ):
+    async def create_conversation(name=None, pinned=False, mode="chat", workspace=None, role=None):
         """Record a new conversation; ids increment per fixture instance."""
         conv_id = f"test-conv-id-{len(conversations) + 1}"
         conversations[conv_id] = {

@@ -255,9 +255,7 @@ async def _apply_conversation_role(agent: ThumbelinaAgent, conversation_id: str)
     agent.role_prompt = role_prompt
 
 
-async def _apply_conversation_workspace(
-    agent: ThumbelinaAgent, conversation_id: str
-) -> None:
+async def _apply_conversation_workspace(agent: ThumbelinaAgent, conversation_id: str) -> None:
     """将会话绑定的工作区注入 agent 克隆与工具执行上下文。"""
     repository = agent.repository_manager
     if repository is None:

@@ -28,9 +28,7 @@ async def test_run_shell_invalid_command():
 async def test_run_shell_uses_workspace_cwd(tmp_path):
     set_workspace(str(tmp_path))
     try:
-        result = await run_shell.ainvoke(
-            {"command": "python -c \"import os; print(os.getcwd())\""}
-        )
+        result = await run_shell.ainvoke({"command": 'python -c "import os; print(os.getcwd())"'})
         assert str(tmp_path) in result
     finally:
         set_workspace(None)

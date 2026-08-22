@@ -42,9 +42,7 @@ async def test_apply_conversation_runtime_sets_workspace(tmp_path):
     agent = SimpleNamespace(
         repository_manager=repo, role="assistant", role_prompt="x", workspace=None
     )
-    context = SimpleNamespace(
-        app=SimpleNamespace(state=SimpleNamespace(endpoint_manager=None))
-    )
+    context = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(endpoint_manager=None)))
     try:
         await apply_conversation_runtime(context, agent, "cid")
         assert agent.workspace == str(tmp_path)
@@ -64,9 +62,7 @@ async def test_apply_conversation_runtime_without_workspace(tmp_path):
     agent = SimpleNamespace(
         repository_manager=repo, role="assistant", role_prompt="x", workspace=None
     )
-    context = SimpleNamespace(
-        app=SimpleNamespace(state=SimpleNamespace(endpoint_manager=None))
-    )
+    context = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(endpoint_manager=None)))
     try:
         await apply_conversation_runtime(context, agent, "cid")
         assert agent.workspace is None
