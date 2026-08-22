@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import { CoderPage } from './CoderPage'
 import { LocaleProvider } from '../../i18n'
 import type { ChatSocket } from '../../hooks/useWebSocket'
@@ -73,5 +73,32 @@ describe('CoderPage', () => {
     expect(screen.queryByTestId('coder-no-selection')).not.toBeInTheDocument()
     expect(screen.getByTestId('chat-window')).toBeInTheDocument()
     expect(screen.getByPlaceholderText(/Type a message/i)).toBeInTheDocument()
+  })
+
+  it('shows the hero empty state and opens the picker via its CTA', () => {
+    renderPage({ conversations: [] })
+    expect(screen.getByTestId('coder-hero-empty')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('coder-hero-cta'))
+    expect(screen.getByTestId('workspace-picker')).toBeInTheDocument()
+  })
+
+  it('opens the picker with the N shortcut from the empty state', () => {
+    renderPage({ conversations: [] })
+    fireEvent.keyDown(window, { key: 'n' })
+    expect(screen.getByTestId('workspace-picker')).toBeInTheDocument()
+  })
+
+  it('shows loading state without the hero', () => {
+    renderPage({ conversations: [], coderLoading: true })
+    expect(screen.queryByTestId('coder-hero-empty')).not.toBeInTheDocument()
+    expect(screen.getByTestId('coder-sidebar-loading')).toBeInTheDocument()
+  })
+
+  it('shows the load error with a retry button', () => {
+    const onRefresh = vi.fn()
+    renderPage({ conversations: [], coderError: true, onRefresh })
+    expect(screen.getByTestId('coder-load-error')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('coder-retry'))
+    expect(onRefresh).toHaveBeenCalled()
   })
 })

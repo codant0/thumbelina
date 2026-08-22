@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { Conversation } from '../../types/chat'
-import { ChevronDown, ChevronRight, FileText, FolderOpen, Pencil, Plus, X, Check } from 'lucide-react'
+import { ChevronDown, ChevronRight, FileText, FolderClosed, FolderOpen, Pencil, Plus, X, Check } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 
 interface CoderSidebarProps {
@@ -10,9 +10,10 @@ interface CoderSidebarProps {
   onDelete?: (id: string) => void
   onRename?: (id: string, name: string) => void
   selectedId?: string
+  loading?: boolean
 }
 
-export function CoderSidebar({ conversations, onSelect, onNew, onDelete, onRename, selectedId }: CoderSidebarProps) {
+export function CoderSidebar({ conversations, onSelect, onNew, onDelete, onRename, selectedId, loading }: CoderSidebarProps) {
   const { t } = useTranslation()
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -71,76 +72,96 @@ export function CoderSidebar({ conversations, onSelect, onNew, onDelete, onRenam
         )}
       </div>
       <div className="sidebar-list">
-        {groups.size === 0 ? (
+        {loading ? (
+          <div className="coder-skeleton" data-testid="coder-sidebar-loading" aria-label={t('common.loading')}>
+            <div className="coder-skeleton__line" style={{ width: '60%' }} />
+            <div className="coder-skeleton__line" style={{ width: '40%', marginLeft: 12 }} />
+            <div className="coder-skeleton__line" style={{ width: '70%', marginLeft: 12 }} />
+          </div>
+        ) : groups.size === 0 ? (
           <div className="sidebar-empty" data-testid="coder-sidebar-empty">
             {t('coder.emptyHint')}
           </div>
         ) : (
-          [...groups.entries()].map(([ws, list]) => (
-            <div key={ws} className="coder-group" data-testid="coder-group">
-              <button className="coder-group__header" data-testid="coder-group-toggle" onClick={() => toggleGroup(ws)} title={ws}>
-                {collapsed.has(ws) ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-                <FolderOpen size={14} />
-                <span className="coder-group__name">{workspaceName(ws)}</span>
-                <span className="coder-group__count">{list.length}</span>
-              </button>
-              {!collapsed.has(ws) && (
-                <div className="coder-group__items">
-                  {list.map(conv => (
-                    <div
-                      key={conv.id}
-                      data-testid="coder-conversation-item"
-                      className={`sidebar-item${selectedId === conv.id ? ' active' : ''}`}
-                      onClick={() => editingId !== conv.id && onSelect(conv.id)}
-                    >
-                      {editingId === conv.id ? (
-                        <div className="sidebar-item__edit" onClick={e => e.stopPropagation()}>
-                          <input
-                            data-testid="rename-input"
-                            className="sidebar-item__input"
-                            value={draft}
-                            onChange={e => setDraft(e.target.value)}
-                            onBlur={commitEdit}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter') commitEdit()
-                              else if (e.key === 'Escape') { setEditingId(null); setDraft('') }
-                            }}
-                            maxLength={100}
-                            aria-label={t('chat.renameConversation')}
-                          />
-                          <button className="btn btn-ghost btn-sm sidebar-item__confirm" data-testid="rename-confirm"
-                            title={t('chat.saveName')} aria-label={t('chat.saveName')}
-                            onMouseDown={e => e.preventDefault()}
-                            onClick={e => { e.stopPropagation(); commitEdit() }}>
-                            <Check size={14} />
-                          </button>
-                        </div>
-                      ) : (
-                        <>
-                          <FileText size={13} className="coder-item-icon" />
-                          <span className="item-title__text">{conv.name || conv.summary || conv.id.slice(0, 8)}</span>
-                          {onRename && (
-                            <button className="btn btn-ghost btn-sm sidebar-action" data-testid="rename-conversation"
-                              title={t('chat.renameConversation')} aria-label={t('chat.renameConversation')}
-                              onClick={e => { e.stopPropagation(); startEdit(conv) }}>
-                              <Pencil size={13} />
+          <div role="tree" aria-label={t('coder.sidebarTitle')}>
+            {[...groups.entries()].map(([ws, list]) => {
+              const isCollapsed = collapsed.has(ws)
+              return (
+                <div key={ws} className="coder-group" data-testid="coder-group">
+                  <button
+                    className="coder-group__header"
+                    data-testid="coder-group-toggle"
+                    onClick={() => toggleGroup(ws)}
+                    title={ws}
+                    role="treeitem"
+                    aria-expanded={!isCollapsed}
+                  >
+                    {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                    {isCollapsed ? <FolderClosed size={14} /> : <FolderOpen size={14} />}
+                    <span className="coder-group__name">{workspaceName(ws)}</span>
+                    <span className="coder-group__count">{list.length}</span>
+                  </button>
+                  <div
+                    role="group"
+                    className={`coder-group__items${isCollapsed ? ' coder-group__items--collapsed' : ''}`}
+                    aria-hidden={isCollapsed}
+                  >
+                    {list.map(conv => (
+                      <div
+                        key={conv.id}
+                        data-testid="coder-conversation-item"
+                        className={`sidebar-item coder-item${selectedId === conv.id ? ' active' : ''}`}
+                        onClick={() => editingId !== conv.id && onSelect(conv.id)}
+                      >
+                        {editingId === conv.id ? (
+                          <div className="sidebar-item__edit" onClick={e => e.stopPropagation()}>
+                            <input
+                              data-testid="rename-input"
+                              className="sidebar-item__input"
+                              value={draft}
+                              onChange={e => setDraft(e.target.value)}
+                              onBlur={commitEdit}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') commitEdit()
+                                else if (e.key === 'Escape') { setEditingId(null); setDraft('') }
+                              }}
+                              maxLength={100}
+                              aria-label={t('chat.renameConversation')}
+                            />
+                            <button className="btn btn-ghost btn-sm sidebar-item__confirm" data-testid="rename-confirm"
+                              title={t('chat.saveName')} aria-label={t('chat.saveName')}
+                              onMouseDown={e => e.preventDefault()}
+                              onClick={e => { e.stopPropagation(); commitEdit() }}>
+                              <Check size={14} />
                             </button>
-                          )}
-                          {onDelete && (
-                            <button className="btn btn-ghost btn-sm sidebar-delete" data-testid="delete-conversation"
-                              title={t('chat.deleteConversation')} aria-label={t('chat.deleteConversation')}
-                              onClick={e => { e.stopPropagation(); onDelete(conv.id) }}>
-                              <X size={14} />
-                            </button>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  ))}
+                          </div>
+                        ) : (
+                          <>
+                            <FileText size={13} className="coder-item-icon" />
+                            <span className="item-title__text">{conv.name || conv.summary || conv.id.slice(0, 8)}</span>
+                            {onRename && (
+                              <button className="btn btn-ghost btn-sm sidebar-action" data-testid="rename-conversation"
+                                title={t('chat.renameConversation')} aria-label={t('chat.renameConversation')}
+                                onClick={e => { e.stopPropagation(); startEdit(conv) }}>
+                                <Pencil size={13} />
+                              </button>
+                            )}
+                            {onDelete && (
+                              <button className="btn btn-ghost btn-sm sidebar-delete" data-testid="delete-conversation"
+                                title={t('chat.deleteConversation')} aria-label={t('chat.deleteConversation')}
+                                onClick={e => { e.stopPropagation(); onDelete(conv.id) }}>
+                                <X size={14} />
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              )}
-            </div>
-          ))
+              )
+            })}
+          </div>
         )}
       </div>
     </aside>

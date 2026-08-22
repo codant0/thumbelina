@@ -34,9 +34,19 @@ describe('CoderSidebar', () => {
 
   it('collapses a group when its header is clicked', () => {
     render(<CoderSidebar {...base} conversations={[conv('c1', 'ws-a', '2026-08-22T10:00:00Z')]} />)
-    expect(screen.getAllByTestId('coder-conversation-item')).toHaveLength(1)
-    fireEvent.click(screen.getByTestId('coder-group-toggle'))
-    expect(screen.queryAllByTestId('coder-conversation-item')).toHaveLength(0)
+    const toggle = screen.getByTestId('coder-group-toggle')
+    const items = screen.getByRole('group')
+    expect(items.className).not.toContain('coder-group__items--collapsed')
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    fireEvent.click(toggle)
+    expect(items.className).toContain('coder-group__items--collapsed')
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('shows a loading skeleton while fetching', () => {
+    render(<CoderSidebar {...base} conversations={[]} loading />)
+    expect(screen.getByTestId('coder-sidebar-loading')).toBeInTheDocument()
+    expect(screen.queryByTestId('coder-sidebar-empty')).not.toBeInTheDocument()
   })
 
   it('shows empty state when there are no conversations', () => {

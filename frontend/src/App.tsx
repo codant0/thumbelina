@@ -62,10 +62,20 @@ function App() {
     return () => window.removeEventListener('conversations-updated', handler)
   }, [fetchConversations])
 
+  const [coderLoading, setCoderLoading] = useState(true)
+  const [coderError, setCoderError] = useState(false)
+
   const fetchCoderConversations = useCallback(() => {
     fetchConversationsApi('coder')
-      .then(data => setCoderConversations(Array.isArray(data) ? data : []))
-      .catch(() => setCoderConversations([]))
+      .then(data => {
+        setCoderConversations(Array.isArray(data) ? data : [])
+        setCoderError(false)
+      })
+      .catch(() => {
+        setCoderConversations([])
+        setCoderError(true)
+      })
+      .finally(() => setCoderLoading(false))
   }, [])
 
   useEffect(() => {
@@ -197,6 +207,8 @@ function App() {
             onDelete={handleDelete}
             onRename={handleRename}
             onRefresh={fetchCoderConversations}
+            coderLoading={coderLoading}
+            coderError={coderError}
             onSetEndpoint={handleSetEndpoint}
             onSetKnowledgeBase={handleSetKnowledgeBase}
             onSetRole={handleSetRole}

@@ -49,4 +49,32 @@ describe('WorkspacePicker', () => {
     fireEvent.click(screen.getByText('Cancel'))
     expect(onClose).toHaveBeenCalled()
   })
+
+  it('hides the native picker button and shows a hint when the API is unsupported', () => {
+    render(<WorkspacePicker onClose={onClose} onCreated={onCreated} />)
+    expect(screen.queryByTestId('workspace-pick-native')).not.toBeInTheDocument()
+    expect(screen.getByTestId('workspace-dir-unavailable')).toBeInTheDocument()
+  })
+
+  it('shows the native picker button when showDirectoryPicker exists', () => {
+    const win = window as unknown as Record<string, unknown>
+    const original = win.showDirectoryPicker
+    win.showDirectoryPicker = vi.fn()
+    try {
+      render(<WorkspacePicker onClose={onClose} onCreated={onCreated} />)
+      expect(screen.getByTestId('workspace-pick-native')).toBeInTheDocument()
+      expect(screen.queryByTestId('workspace-dir-unavailable')).not.toBeInTheDocument()
+    } finally {
+      if (original === undefined) delete win.showDirectoryPicker
+      else win.showDirectoryPicker = original
+    }
+  })
+
+  it('fills the path from a recent workspace chip', () => {
+    render(<WorkspacePicker onClose={onClose} onCreated={onCreated} recentWorkspaces={['C:\\proj\\alpha', 'D:\\other']} />)
+    const chips = screen.getAllByTestId('workspace-recent-chip')
+    expect(chips).toHaveLength(2)
+    fireEvent.click(chips[0])
+    expect((screen.getByTestId('workspace-path-input') as HTMLInputElement).value).toBe('C:\\proj\\alpha')
+  })
 })
