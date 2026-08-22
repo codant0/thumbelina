@@ -8,6 +8,8 @@ describe('WorkspacePicker', () => {
 
   beforeEach(() => {
     vi.restoreAllMocks()
+    localStorage.clear()
+    delete (window as unknown as Record<string, unknown>).showDirectoryPicker
     onClose.mockClear()
     onCreated.mockClear()
     globalThis.fetch = vi.fn(async () => ({
@@ -15,6 +17,10 @@ describe('WorkspacePicker', () => {
       json: async () => ({ id: 'new-coder-id', mode: 'coder', workspace: 'C:\\ws' }),
     })) as unknown as typeof fetch
   })
+
+  const stubDirectoryPicker = (name: string) => {
+    (window as unknown as Record<string, unknown>).showDirectoryPicker = vi.fn().mockResolvedValue({ name })
+  }
 
   it('creates a coder conversation with the workspace path', async () => {
     render(<WorkspacePicker onClose={onClose} onCreated={onCreated} />)
@@ -76,5 +82,40 @@ describe('WorkspacePicker', () => {
     expect(chips).toHaveLength(2)
     fireEvent.click(chips[0])
     expect((screen.getByTestId('workspace-path-input') as HTMLInputElement).value).toBe('C:\\proj\\alpha')
+  })
+
+  it('submits immediately when a remembered directory is picked', async () => {
+    localStorage.setItem('thumbelina-coder-workspace-paths', JSON.stringify({ thumbelina: 'F:\\proj\\thumbelina' }))
+    stubDirectoryPicker('thumbelina')
+    render(<WorkspacePicker onClose={onClose} onCreated={onCreated} />)
+    fireEvent.click(screen.getByTestId('workspace-pick-native'))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith('new-coder-id'))
+    const [url, init] = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0]
+    expect(String(url)).toBe('/api/v1/conversations')
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({ mode: 'coder', workspace: 'F:\\proj\\thumbelina' })
+  })
+
+  it('prefills the directory name on first use without submitting', async () => {
+    stubDirectoryPicker('thumbelina')
+    render(<WorkspacePicker onClose={onClose} onCreated={onCreated} />)
+    fireEvent.click(screen.getByTestId('workspace-pick-native'))
+    await waitFor(() => {
+      expect((screen.getByTestId('workspace-path-input') as HTMLInputElement).value).toBe('thumbelina')
+    })
+    expect(onCreated).not.toHaveBeenCalled()
+    expect(screen.getByTestId('workspace-dir-hint')).toHaveTextContent('thumbelina')
+  })
+
+  it('remembers the resolved path after a successful manual create', async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ id: 'new-coder-id', mode: 'coder', workspace: 'F:\\proj\\thumbelina' }),
+    })) as unknown as typeof fetch
+    render(<WorkspacePicker onClose={onClose} onCreated={onCreated} />)
+    fireEvent.change(screen.getByTestId('workspace-path-input'), { target: { value: 'F:\\proj\\thumbelina' } })
+    fireEvent.click(screen.getByTestId('workspace-confirm'))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith('new-coder-id'))
+    const saved = JSON.parse(localStorage.getItem('thumbelina-coder-workspace-paths') ?? '{}')
+    expect(saved).toEqual({ thumbelina: 'F:\\proj\\thumbelina' })
   })
 })

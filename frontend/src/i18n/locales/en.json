@@ -265,6 +265,7 @@
     "pickDirButton": "Choose directory…",
     "dirUnavailable": "Directory picker unsupported — type the full path",
     "dirConfirmed": "Directory confirmed (name)",
+    "dirFirstUse": "First time — complete the full path (it will be remembered for next time)",
     "loadFailed": "Failed to load sessions",
     "confirmCreate": "Create"
   },

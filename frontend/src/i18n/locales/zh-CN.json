@@ -265,6 +265,7 @@
     "pickDirButton": "选择目录…",
     "dirUnavailable": "当前浏览器不支持目录选择，请直接输入完整路径",
     "dirConfirmed": "已确认目录（名称）",
+    "dirFirstUse": "首次使用请补全完整路径（将自动记住，下次一键直达）",
     "loadFailed": "会话列表加载失败",
     "confirmCreate": "创建"
   },

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useTranslation } from '../../i18n'
 import { createConversation } from '../../api/conversations'
 
@@ -11,12 +11,38 @@ interface WorkspacePickerProps {
   recentWorkspaces?: string[]
 }
 
+// The browser only exposes the directory *name* (never the absolute path) —
+// but the agent needs the absolute path. We bridge the gap by remembering a
+// name → path mapping on this machine (server and browser share the disk),
+// so picking a known directory submits immediately.
+const STORAGE_KEY = 'thumbelina-coder-workspace-paths'
+
+function loadWorkspacePaths(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    return raw ? JSON.parse(raw) as Record<string, string> : {}
+  } catch {
+    return {}
+  }
+}
+
+function saveWorkspacePaths(map: Record<string, string>) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(map))
+  } catch {
+    // storage unavailable — the mapping simply won't persist
+  }
+}
+
+const workspaceName = (ws: string) => ws.split(/[\\/]/).filter(Boolean).pop() || ws
+
 export function WorkspacePicker({ onClose, onCreated, recentWorkspaces }: WorkspacePickerProps) {
   const { t } = useTranslation()
   const [path, setPath] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [dirName, setDirName] = useState<string | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   // File System Access API is Chromium-only; without it (Firefox/Safari/
   // non-secure context) the picker button is hidden and the path is typed.
@@ -25,15 +51,41 @@ export function WorkspacePicker({ onClose, onCreated, recentWorkspaces }: Worksp
     [],
   )
 
+  const createFromPath = async (workspacePath: string) => {
+    setCreating(true)
+    setError(null)
+    try {
+      const conv = await createConversation({ mode: 'coder', workspace: workspacePath })
+      // Remember name → resolved path so a later directory pick submits directly.
+      if (conv.workspace) {
+        const paths = loadWorkspacePaths()
+        saveWorkspacePaths({ ...paths, [workspaceName(conv.workspace)]: conv.workspace })
+      }
+      onCreated(conv.id)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('coder.createFailed'))
+      setCreating(false)
+    }
+  }
+
   const pickDirectory = async () => {
     try {
       const picker = (window as unknown as {
         showDirectoryPicker?: () => Promise<DirectoryHandle>
       }).showDirectoryPicker
       const handle = picker ? await picker.call(window) : null
-      if (handle) {
-        setDirName(handle.name)
-        setError(null)
+      if (!handle) return
+      setDirName(handle.name)
+      setError(null)
+      const known = loadWorkspacePaths()[handle.name]
+      if (known) {
+        // Known directory — create the session right away and return to chat.
+        await createFromPath(known)
+      } else {
+        // First time: prefill the name and ask for the full path once.
+        setPath(handle.name)
+        inputRef.current?.focus()
+        inputRef.current?.select()
       }
     } catch {
       // user cancelled or the API is unavailable — ignore
@@ -46,16 +98,7 @@ export function WorkspacePicker({ onClose, onCreated, recentWorkspaces }: Worksp
       setError(t('coder.workspaceRequired'))
       return
     }
-    setCreating(true)
-    setError(null)
-    try {
-      const conv = await createConversation({ mode: 'coder', workspace: trimmed })
-      onCreated(conv.id)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('coder.createFailed'))
-    } finally {
-      setCreating(false)
-    }
+    await createFromPath(trimmed)
   }
 
   return (
@@ -70,6 +113,7 @@ export function WorkspacePicker({ onClose, onCreated, recentWorkspaces }: Worksp
         <div className="workspace-picker__body">
           <div className="workspace-picker__row">
             <input
+              ref={inputRef}
               data-testid="workspace-path-input"
               className="workspace-picker__input"
               type="text"
@@ -91,8 +135,9 @@ export function WorkspacePicker({ onClose, onCreated, recentWorkspaces }: Worksp
             </div>
           )}
           {dirName && (
-            <div className="workspace-picker__hint">
+            <div className="workspace-picker__hint" data-testid="workspace-dir-hint">
               {t('coder.dirConfirmed')}: {dirName}
+              {path === dirName && ` — ${t('coder.dirFirstUse')}`}
             </div>
           )}
           {recentWorkspaces && recentWorkspaces.length > 0 && (
