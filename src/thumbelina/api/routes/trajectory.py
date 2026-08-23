@@ -69,10 +69,11 @@ def _synthesize_message_turns(
 @router.get("/cache-stats")
 async def get_cache_stats(
     limit: int = Query(100, ge=1, le=1000),
+    conversation_id: str | None = Query(None, description="限定统计到单个会话"),
     repository: RepositoryManager = Depends(get_repository_manager),
 ) -> dict[str, Any]:
-    """最近 limit 条 llm_usage 事件的 KV 缓存命中汇总(状态栏展示用)。"""
-    return await repository.get_cache_stats(limit)
+    """最近 limit 条 llm_usage 事件的 KV 缓存命中汇总(状态栏展示用,可限定会话)。"""
+    return await repository.get_cache_stats(limit, conversation_id)
 
 
 @router.get("/{conversation_id}")

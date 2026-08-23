@@ -12,12 +12,14 @@ import { PluginsPage } from './components/Plugins/PluginsPage'
 import { ChannelsPage } from './components/Channels/ChannelsPage'
 import { KnowledgeBasePage } from './components/KnowledgeBase/KnowledgeBasePage'
 import { TrajectoryPage } from './components/Trajectory/TrajectoryPage'
-import { renameConversation, setConversationEndpoint, setConversationKnowledgeBase, setConversationRole, setConversationThinking } from './api/conversations'
+import { renameConversation, setConversationEndpoint, setConversationKnowledgeBase, setConversationRole, setConversationThinking, createConversation, fetchConversations as fetchConversationsApi } from './api/conversations'
+import { CoderPage } from './components/Coder/CoderPage'
 import type { Conversation, ThinkingEffort } from './types/chat'
 import './App.css'
 
 function App() {
   const [conversations, setConversations] = useState<Conversation[]>([])
+  const [coderConversations, setCoderConversations] = useState<Conversation[]>([])
   const [selectedId, setSelectedId] = useState<string | undefined>()
   const [activePage, setActivePage] = useState<Page>('chat')
   const [trajectorySessionId, setTrajectorySessionId] = useState<string | undefined>()
@@ -36,11 +38,7 @@ function App() {
 
   const fetchConversations = useCallback(() => {
     const fetchId = ++latestFetchRef.current
-    fetch('/api/v1/conversations')
-      .then(res => {
-        if (!res.ok) return []
-        return res.json()
-      })
+    fetchConversationsApi('chat')
       .then(data => {
         if (fetchId === latestFetchRef.current) {
           setConversations(Array.isArray(data) ? data : [])
@@ -64,6 +62,26 @@ function App() {
     return () => window.removeEventListener('conversations-updated', handler)
   }, [fetchConversations])
 
+  const [coderLoading, setCoderLoading] = useState(true)
+  const [coderError, setCoderError] = useState(false)
+
+  const fetchCoderConversations = useCallback(() => {
+    fetchConversationsApi('coder')
+      .then(data => {
+        setCoderConversations(Array.isArray(data) ? data : [])
+        setCoderError(false)
+      })
+      .catch(() => {
+        setCoderConversations([])
+        setCoderError(true)
+      })
+      .finally(() => setCoderLoading(false))
+  }, [])
+
+  useEffect(() => {
+    fetchCoderConversations()
+  }, [fetchCoderConversations])
+
   // Default to the WeChat conversation when entering the chat page with no selection
   useEffect(() => {
     if (selectedId === undefined && conversations.length > 0) {
@@ -83,38 +101,39 @@ function App() {
 
   const handleNewConversation = useCallback(async () => {
     try {
-      const res = await fetch('/api/v1/conversations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+      const conv = await createConversation({})
+      setSelectedId(conv.id)
+      // Insert after pinned conversations so pinned items (e.g. 微信Clawbot)
+      // always stay on top, mirroring the backend's pinned-first ordering.
+      setConversations(prev => {
+        const list = Array.isArray(prev) ? prev : []
+        const pinned = list.filter(c => c.pinned)
+        const rest = list.filter(c => !c.pinned)
+        return [...pinned, conv, ...rest]
       })
-      if (res.ok) {
-        const conv: Conversation = await res.json()
-        setSelectedId(conv.id)
-        // Insert after pinned conversations so pinned items (e.g. 微信Clawbot)
-        // always stay on top, mirroring the backend's pinned-first ordering.
-        setConversations(prev => {
-          const list = Array.isArray(prev) ? prev : []
-          const pinned = list.filter(c => c.pinned)
-          const rest = list.filter(c => !c.pinned)
-          return [...pinned, conv, ...rest]
-        })
-      }
     } catch { /* ignore */ }
   }, [])
+
+  const handleCoderConversationCreated = useCallback((id: string) => {
+    setSelectedId(id)
+    fetchCoderConversations()
+  }, [fetchCoderConversations])
 
   const handleDelete = useCallback(async (id: string) => {
     try {
       const res = await fetch(`/api/v1/conversations/${id}`, { method: 'DELETE' })
       if (res.ok) {
         setConversations(prev => Array.isArray(prev) ? prev.filter(c => c.id !== id) : [])
+        setCoderConversations(prev => Array.isArray(prev) ? prev.filter(c => c.id !== id) : [])
         if (selectedId === id) setSelectedId(undefined)
       }
     } catch { /* ignore */ }
   }, [selectedId])
 
   const updateConversationInState = useCallback((conv: Conversation) => {
-    setConversations(prev => (Array.isArray(prev) ? prev : []).map(c => (c.id === conv.id ? { ...c, ...conv } : c)))
+    const apply = (list: Conversation[]) => (Array.isArray(list) ? list : []).map(c => (c.id === conv.id ? { ...c, ...conv } : c))
+    setConversations(prev => apply(prev))
+    setCoderConversations(prev => apply(prev))
   }, [])
 
   const handleRename = useCallback(async (id: string, name: string) => {
@@ -177,8 +196,33 @@ function App() {
         return <KnowledgeBasePage />
       case 'trajectory':
         return <TrajectoryPage initialConversationId={trajectorySessionId} />
+      case 'coder':
+        return (
+          <CoderPage
+            ws={chatSocket}
+            conversations={coderConversations}
+            selectedId={selectedId}
+            onSelect={handleSelect}
+            onCreated={handleCoderConversationCreated}
+            onDelete={handleDelete}
+            onRename={handleRename}
+            onRefresh={fetchCoderConversations}
+            coderLoading={coderLoading}
+            coderError={coderError}
+            onSetEndpoint={handleSetEndpoint}
+            onSetKnowledgeBase={handleSetKnowledgeBase}
+            onSetRole={handleSetRole}
+            onSetThinking={handleSetThinking}
+            onViewTrajectory={handleViewTrajectory}
+          />
+        )
       case 'chat':
-      default:
+      default: {
+        // Only treat a selected conversation as active on the chat page when
+        // it actually exists in the chat list. A coder conversation selected
+        // on the coder page must not stay active here (no chat role, and it
+        // would be passed to the backend as an active chat session).
+        const chatActiveId = conversations.some(c => c.id === selectedId) ? selectedId : undefined
         return (
           <>
             <Sidebar
@@ -187,11 +231,11 @@ function App() {
               onNew={handleNewConversation}
               onDelete={handleDelete}
               onRename={handleRename}
-              selectedId={selectedId}
+              selectedId={chatActiveId}
             />
             <ChatWindow
               ws={chatSocket}
-              conversationId={selectedId}
+              conversationId={chatActiveId}
               conversations={conversations}
               onConversationCreated={fetchConversations}
               onDefaultConversation={handleDefaultConversation}
@@ -203,6 +247,7 @@ function App() {
             />
           </>
         )
+      }
     }
   }
 

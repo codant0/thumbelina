@@ -263,7 +263,7 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
                   messages={messages}
                   endpointId={activeConversation?.endpoint_id ?? null}
                 />
-                <CacheHitRateItem />
+                <CacheHitRateItem conversationId={conversationId} />
               </div>
             </>
           ) : undefined

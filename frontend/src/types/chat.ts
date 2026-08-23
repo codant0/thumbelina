@@ -19,6 +19,8 @@ export interface Conversation {
   id: string
   name?: string | null
   pinned?: boolean
+  mode?: 'chat' | 'coder'
+  workspace?: string | null
   endpoint_id?: string | null
   model?: string | null
   knowledge_base_id?: string | null

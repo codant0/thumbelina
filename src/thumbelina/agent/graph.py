@@ -6,6 +6,7 @@ import asyncio
 import logging
 import re
 from collections.abc import AsyncGenerator, Sequence
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -54,6 +55,37 @@ logger = logging.getLogger(__name__)
 
 # 首次遇到"响应无 LLM 用量元数据"时打一条 WARNING 帮助诊断,后续降级为 DEBUG。
 _llm_usage_warned = False
+
+
+WORKSPACE_SNAPSHOT_LIMIT = 50
+
+
+def build_workspace_context(workspace: str | None) -> str | None:
+    """构造工作区 SystemMessage 内容。
+
+    工作区路径 + 顶层目录快照（深度 1，最多 50 条）；目录不可读或
+    已删除时退化为仅路径。
+    """
+    if not workspace:
+        return None
+    lines = [
+        f"当前工作区：{workspace}",
+        "文件工具的相对路径以该工作区为根，禁止越界访问。",
+    ]
+    try:
+        root = Path(workspace).resolve()
+        if root.is_dir():
+            entries = sorted(root.iterdir())[:WORKSPACE_SNAPSHOT_LIMIT]
+            if entries:
+                lines.append("工作区顶层内容：")
+                for entry in entries:
+                    kind = "d" if entry.is_dir() else "f"
+                    lines.append(f"- [{kind}] {entry.name}")
+            else:
+                lines.append("工作区顶层为空。")
+    except OSError:
+        pass
+    return "\n".join(lines)
 
 
 # 注入边界处理(§9.4):剥离 Markdown 链接语法、把 ``#``/``>`` 降级为纯文本。
@@ -432,6 +464,7 @@ class ThumbelinaAgent:
         composition_engine: CompositionEngine | None = None,
         conversation_namer: ConversationNamer | None = None,
         role: str | None = None,
+        workspace: str | None = None,  # 码农会话绑定的工作区路径
         checkpointer: BaseCheckpointSaver[Any] | None = None,
         context_config: ContextConfig | None = None,
         context_window_tokens: int | None = None,
@@ -449,6 +482,7 @@ class ThumbelinaAgent:
         self.conversation_namer = conversation_namer
         self.role = role
         self.role_prompt = get_role_prompt(role) if role else None
+        self.workspace = workspace
         self.current_conversation_id: str | None = None
         # Lazily-resolved chat model; None means resolve from llm_provider.
         self._llm: BaseChatModel | None = None
@@ -956,6 +990,10 @@ class ThumbelinaAgent:
             if memory_context:
                 messages.append(SystemMessage(content=memory_context))
                 traj_items.append({"kind": "memory", "content": memory_context})
+            workspace_context = build_workspace_context(self.workspace)
+            if workspace_context:
+                messages.append(SystemMessage(content=workspace_context))
+                traj_items.append({"kind": "workspace", "content": workspace_context})
 
         # 若会话绑定了知识库，则注入 RAG 上下文
         rag_context = None
@@ -1134,6 +1172,7 @@ class ThumbelinaAgent:
             composition_engine=self.composition_engine,
             conversation_namer=self.conversation_namer,
             role=self.role,
+            workspace=self.workspace,
             checkpointer=self._checkpointer,
             context_config=self._context_config,
             context_window_tokens=self._context_window_tokens,

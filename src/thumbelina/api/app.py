@@ -31,6 +31,7 @@ from thumbelina.api.routes import (
     chat,
     conversations,
     data,
+    fs,
     memory,
     plugins,
     qq,
@@ -800,6 +801,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(chat.router, prefix="/api/v1")
     app.include_router(config_routes.router, prefix="/api/v1")
     app.include_router(conversations.router, prefix="/api/v1")
+    app.include_router(fs.router, prefix="/api/v1")
     app.include_router(roles.router, prefix="/api/v1")
     app.include_router(data.router, prefix="/api/v1")
     app.include_router(tasks.router, prefix="/api/v1")

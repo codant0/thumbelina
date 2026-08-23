@@ -128,3 +128,17 @@ async def test_cache_stats_aggregates_llm_usage(manager: RepositoryManager):
     assert stats2["hit_tokens"] == 100
     assert stats2["miss_tokens"] == 500
     assert stats2["turns"] == 1
+
+    # 按会话过滤:只统计该会话自身的事件
+    stats_a = await manager.get_cache_stats(conversation_id=conv_a)
+    assert stats_a["hit_tokens"] == 1000
+    assert stats_a["miss_tokens"] == 800
+    assert stats_a["turns"] == 2
+    stats_b = await manager.get_cache_stats(conversation_id=conv_b)
+    assert stats_b["hit_tokens"] == 0
+    assert stats_b["miss_tokens"] == 0
+    assert stats_b["turns"] == 1
+    # 无任何 llm_usage 事件的会话返回全零
+    conv_c = await manager.create_conversation(name="会话C")
+    stats_c = await manager.get_cache_stats(conversation_id=conv_c)
+    assert stats_c == {"hit_tokens": 0, "miss_tokens": 0, "turns": 0}
