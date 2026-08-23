@@ -150,9 +150,7 @@ async def test_cache_stats_filter_by_conversation(trajectory_client):
                     "turn_id": turn,
                     "seq": 0,
                     "event_type": "llm_usage",
-                    "payload": json.dumps(
-                        {"cache_hit_tokens": hit, "cache_miss_tokens": miss}
-                    ),
+                    "payload": json.dumps({"cache_hit_tokens": hit, "cache_miss_tokens": miss}),
                     "created_at": base,
                 }
             ],
