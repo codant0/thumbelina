@@ -129,3 +129,41 @@ async def test_cache_stats_endpoint(trajectory_client):
     assert data["hit_tokens"] == 1000
     assert data["miss_tokens"] == 800
     assert data["turns"] == 2
+
+
+async def test_cache_stats_filter_by_conversation(trajectory_client):
+    """cache-stats 带 conversation_id 时只统计该会话的 llm_usage 事件。"""
+    client, manager = trajectory_client
+    conv_a = await manager.create_conversation(name="会话A")
+    conv_b = await manager.create_conversation(name="会话B")
+    base = datetime(2026, 8, 21, 10, 0, 0)
+
+    for conv, turn, hit, miss in [
+        (conv_a, "a1", 900, 300),
+        (conv_a, "a2", 100, 500),
+        (conv_b, "b1", 50, 50),
+    ]:
+        await manager.add_trajectory_events(
+            conv,
+            [
+                {
+                    "turn_id": turn,
+                    "seq": 0,
+                    "event_type": "llm_usage",
+                    "payload": json.dumps(
+                        {"cache_hit_tokens": hit, "cache_miss_tokens": miss}
+                    ),
+                    "created_at": base,
+                }
+            ],
+        )
+
+    resp = client.get(f"/api/v1/trajectory/cache-stats?conversation_id={conv_b}")
+    assert resp.status_code == 200
+    assert resp.json() == {"hit_tokens": 50, "miss_tokens": 50, "turns": 1}
+
+    # 无事件的会话返回全零,而不是其他会话的数据
+    conv_c = await manager.create_conversation(name="会话C")
+    resp = client.get(f"/api/v1/trajectory/cache-stats?conversation_id={conv_c}")
+    assert resp.status_code == 200
+    assert resp.json() == {"hit_tokens": 0, "miss_tokens": 0, "turns": 0}

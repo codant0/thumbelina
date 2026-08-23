@@ -21,25 +21,25 @@ function rateOf(d: Record<string, unknown>): number | null {
 }
 
 /**
- * KV 缓存命中率栏目：展示最近 100 轮 LLM 请求的缓存命中率。
+ * KV 缓存命中率栏目：展示当前会话最近 100 轮 LLM 请求的缓存命中率。
  *
- * - 数据来自只读端点 /api/v1/trajectory/cache-stats（聚合 llm_usage 事件），
+ * - 数据来自只读端点 /api/v1/trajectory/cache-stats（按会话聚合 llm_usage 事件），
  *   只读展示，不触发 LLM 调用。
  * - 受「状态栏栏目开关」控制：关闭时不渲染（且不发起请求）。
  */
-export function CacheHitRateItem() {
+export function CacheHitRateItem({ conversationId }: { conversationId: string }) {
   const { config } = useStatusBarConfig()
   if (!config.cacheHit) return null
-  return <CacheHitRateItemInner />
+  return <CacheHitRateItemInner conversationId={conversationId} />
 }
 
-function CacheHitRateItemInner() {
+function CacheHitRateItemInner({ conversationId }: { conversationId: string }) {
   const { t } = useTranslation()
 
   const item = useMemo<StatusBarItem>(() => ({
     key: 'cacheHit',
     icon: <Zap size={13} aria-hidden="true" />,
-    getData: () => fetchCacheStats(),
+    getData: () => fetchCacheStats(conversationId),
     render: d => {
       const rate = rateOf(d)
       return rate === null ? '—' : `${Math.round(rate * 100)}%`

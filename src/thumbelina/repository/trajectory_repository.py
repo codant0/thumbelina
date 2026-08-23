@@ -121,19 +121,20 @@ class TrajectoryRepository:
     async def get_events(self, turn_ids: list[str]) -> list[dict[str, Any]]:
         return await asyncio.to_thread(self._get_events_sync, turn_ids)
 
-    def _get_cache_stats_sync(self, limit: int) -> dict[str, Any]:
-        """最近 limit 条 llm_usage 事件的 KV 缓存命中汇总(跨会话)。"""
+    def _get_cache_stats_sync(
+        self, limit: int, conversation_id: str | None = None
+    ) -> dict[str, Any]:
+        """最近 limit 条 llm_usage 事件的 KV 缓存命中汇总(可限定会话)。"""
+        stmt = (
+            select(TrajectoryEvent)
+            .where(TrajectoryEvent.event_type == "llm_usage")
+            .order_by(TrajectoryEvent.created_at.desc())
+            .limit(limit)
+        )
+        if conversation_id is not None:
+            stmt = stmt.where(TrajectoryEvent.conversation_id == conversation_id)
         with self._get_session() as session:
-            rows = (
-                session.execute(
-                    select(TrajectoryEvent)
-                    .where(TrajectoryEvent.event_type == "llm_usage")
-                    .order_by(TrajectoryEvent.created_at.desc())
-                    .limit(limit)
-                )
-                .scalars()
-                .all()
-            )
+            rows = session.execute(stmt).scalars().all()
         hit = 0
         miss = 0
         turns = 0
@@ -152,5 +153,7 @@ class TrajectoryRepository:
                 turns += 1
         return {"hit_tokens": hit, "miss_tokens": miss, "turns": turns}
 
-    async def get_cache_stats(self, limit: int = 100) -> dict[str, Any]:
-        return await asyncio.to_thread(self._get_cache_stats_sync, limit)
+    async def get_cache_stats(
+        self, limit: int = 100, conversation_id: str | None = None
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self._get_cache_stats_sync, limit, conversation_id)

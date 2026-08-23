@@ -362,9 +362,11 @@ class RepositoryManager:
         ]
         return {"total_turns": total, "turns": turns}
 
-    async def get_cache_stats(self, limit: int = 100) -> dict[str, Any]:
-        """最近 limit 条 llm_usage 事件的 KV 缓存命中汇总(跨会话)。"""
-        return await self.trajectory_repository.get_cache_stats(limit)
+    async def get_cache_stats(
+        self, limit: int = 100, conversation_id: str | None = None
+    ) -> dict[str, Any]:
+        """最近 limit 条 llm_usage 事件的 KV 缓存命中汇总(可限定会话)。"""
+        return await self.trajectory_repository.get_cache_stats(limit, conversation_id)
 
     async def search(
         self,
