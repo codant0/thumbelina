@@ -1,8 +1,7 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from '../../i18n'
 import { createConversation } from '../../api/conversations'
-
-interface DirectoryHandle { name: string }
+import { listDirs, type DirEntry, type DirListing } from '../../api/fs'
 
 interface WorkspacePickerProps {
   onClose: () => void
@@ -11,84 +10,64 @@ interface WorkspacePickerProps {
   recentWorkspaces?: string[]
 }
 
-// The browser only exposes the directory *name* (never the absolute path) —
-// but the agent needs the absolute path. We bridge the gap by remembering a
-// name → path mapping on this machine (server and browser share the disk),
-// so picking a known directory submits immediately.
-const STORAGE_KEY = 'thumbelina-coder-workspace-paths'
-
-function loadWorkspacePaths(): Record<string, string> {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    return raw ? JSON.parse(raw) as Record<string, string> : {}
-  } catch {
-    return {}
-  }
-}
-
-function saveWorkspacePaths(map: Record<string, string>) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(map))
-  } catch {
-    // storage unavailable — the mapping simply won't persist
-  }
-}
-
-const workspaceName = (ws: string) => ws.split(/[\\/]/).filter(Boolean).pop() || ws
-
 export function WorkspacePicker({ onClose, onCreated, recentWorkspaces }: WorkspacePickerProps) {
   const { t } = useTranslation()
   const [path, setPath] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
-  const [dirName, setDirName] = useState<string | null>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
 
-  // File System Access API is Chromium-only; without it (Firefox/Safari/
-  // non-secure context) the picker button is hidden and the path is typed.
-  const supportsPicker = useMemo(
-    () => typeof (window as unknown as { showDirectoryPicker?: unknown }).showDirectoryPicker === 'function',
-    [],
-  )
+  // Server-side directory tree: the browser never sees absolute paths
+  // (native pickers expose only a name), and in NAS deployments the agent
+  // works on the *server's* filesystem anyway — so we browse that.
+  const [currentPath, setCurrentPath] = useState<string | null>(null)
+  const [parentPath, setParentPath] = useState<string | null>(null)
+  const [entries, setEntries] = useState<DirEntry[] | null>(null)
+  const [truncated, setTruncated] = useState(false)
+  const [browsing, setBrowsing] = useState(true)
+  const [browseError, setBrowseError] = useState<string | null>(null)
+
+  const applyListing = (dir: string | null, listing: DirListing) => {
+    setCurrentPath(listing.path)
+    setParentPath(listing.parent)
+    setEntries(listing.children)
+    setTruncated(listing.truncated)
+    if (dir !== null) setPath(listing.path ?? '')
+  }
+
+  const formatError = (err: unknown) => (err instanceof Error ? err.message : String(err))
+
+  const navigate = async (dir: string | null) => {
+    setBrowsing(true)
+    setBrowseError(null)
+    try {
+      applyListing(dir, await listDirs(dir ?? undefined))
+    } catch (err) {
+      // Browsing is a convenience — a failed listing never blocks manual entry.
+      setBrowseError(formatError(err))
+    } finally {
+      setBrowsing(false)
+    }
+  }
+
+  useEffect(() => {
+    // Initial root listing without synchronous state updates in the effect.
+    let cancelled = false
+    listDirs()
+      .then(listing => { if (!cancelled) applyListing(null, listing) })
+      .catch(err => { if (!cancelled) setBrowseError(formatError(err)) })
+      .finally(() => { if (!cancelled) setBrowsing(false) })
+    return () => { cancelled = true }
+  }, [])
 
   const createFromPath = async (workspacePath: string) => {
     setCreating(true)
     setError(null)
     try {
       const conv = await createConversation({ mode: 'coder', workspace: workspacePath })
-      // Remember name → resolved path so a later directory pick submits directly.
-      if (conv.workspace) {
-        const paths = loadWorkspacePaths()
-        saveWorkspacePaths({ ...paths, [workspaceName(conv.workspace)]: conv.workspace })
-      }
       onCreated(conv.id)
     } catch (err) {
       setError(err instanceof Error ? err.message : t('coder.createFailed'))
       setCreating(false)
-    }
-  }
-
-  const pickDirectory = async () => {
-    try {
-      const picker = (window as unknown as {
-        showDirectoryPicker?: () => Promise<DirectoryHandle>
-      }).showDirectoryPicker
-      const handle = picker ? await picker.call(window) : null
-      if (!handle) return
-      setDirName(handle.name)
-      setError(null)
-      const known = loadWorkspacePaths()[handle.name]
-      if (known) {
-        // Known directory — create the session right away and return to chat.
-        await createFromPath(known)
-      } else {
-        // First time: prefill the name and ask for the full path once.
-        setPath(handle.name)
-        inputRef.current?.focus()
-        inputRef.current?.select()
-      }
-    } catch {
-      // user cancelled or the API is unavailable — ignore
     }
   }
 
@@ -113,7 +92,6 @@ export function WorkspacePicker({ onClose, onCreated, recentWorkspaces }: Worksp
         <div className="workspace-picker__body">
           <div className="workspace-picker__row">
             <input
-              ref={inputRef}
               data-testid="workspace-path-input"
               className="workspace-picker__input"
               type="text"
@@ -123,23 +101,50 @@ export function WorkspacePicker({ onClose, onCreated, recentWorkspaces }: Worksp
               onKeyDown={e => { if (e.key === 'Enter') submit() }}
               autoFocus
             />
-            {supportsPicker && (
-              <button data-testid="workspace-pick-native" onClick={pickDirectory} type="button" className="btn btn-ghost">
-                {t('coder.pickDirButton')}
+          </div>
+          <div className="workspace-picker__pathbar" data-testid="workspace-pathbar">
+            {currentPath ?? t('coder.selectDrive')}
+          </div>
+          <div className="workspace-picker__browser" data-testid="workspace-browser">
+            {browseError ? (
+              <div className="workspace-picker__error" data-testid="workspace-browse-error" role="status">
+                {t('coder.browseFailed')}: {browseError}
+              </div>
+            ) : browsing && entries === null ? (
+              <div className="workspace-picker__empty">{t('common.loading')}</div>
+            ) : parentPath && (
+              <button
+                type="button"
+                className="workspace-picker__dir-row workspace-picker__dir-row--up"
+                data-testid="workspace-up"
+                onClick={() => navigate(parentPath)}
+              >
+                ↰ {t('coder.upLevel')}
               </button>
             )}
+            {!browseError && entries !== null && entries.length === 0 && (
+              <div className="workspace-picker__empty" data-testid="workspace-empty">
+                {t('coder.emptyDirectory')}
+              </div>
+            )}
+            {!browseError &&
+              (entries ?? []).map(entry => (
+                <button
+                  key={entry.path}
+                  type="button"
+                  className="workspace-picker__dir-row"
+                  data-testid="workspace-dir-row"
+                  onClick={() => navigate(entry.path)}
+                >
+                  {entry.name}
+                </button>
+              ))}
+            {!browseError && truncated && (
+              <div className="workspace-picker__truncated" data-testid="workspace-truncated">
+                {t('coder.listTruncated')}
+              </div>
+            )}
           </div>
-          {!supportsPicker && (
-            <div className="workspace-picker__unavailable" data-testid="workspace-dir-unavailable">
-              {t('coder.dirUnavailable')}
-            </div>
-          )}
-          {dirName && (
-            <div className="workspace-picker__hint" data-testid="workspace-dir-hint">
-              {t('coder.dirConfirmed')}: {dirName}
-              {path === dirName && ` — ${t('coder.dirFirstUse')}`}
-            </div>
-          )}
           {recentWorkspaces && recentWorkspaces.length > 0 && (
             <div className="workspace-picker__recent">
               <span>{t('coder.recentWorkspaces')}:</span>

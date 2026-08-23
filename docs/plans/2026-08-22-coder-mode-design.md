@@ -119,3 +119,9 @@ API Schema 同步：`CreateConversationRequest` 增加 `mode`（默认 `'chat'`�
 ## 安全说明
 
 本应用属本地/私有部署信任模型（现有 `run_shell` 工具本就无限制），工作区边界校验是行为约束而非安全沙箱；`run_shell` 仅做 `cwd` 约束。目录选择由前端输入 + 后端校验存在性完成，不暴露新的枚举接口。
+
+## 修订记录（2026-08-24）：工作区来源改为服务器目录浏览
+
+原方案（上文"工作区来源"/"无浏览端点"）已被替代：浏览器原生目录选择器（`showDirectoryPicker`）出于隐私只返回目录 **name**、不返回绝对路径，与后端绝对路径校验（`_validate_workspace`）冲突；首用新目录必须手输完整路径，且 NAS 部署下浏览器与后端异机，原生选择器选的是浏览器机器目录，而 agent 操作的是服务器文件系统，语义错误。
+
+替代方案：新增只读端点 `GET /api/v1/fs/dirs`（`src/thumbelina/api/routes/fs.py`）——服务器侧目录列举（根/盘符、仅子目录、跳过符号链接、排序、截断、422 校验）。前端 `WorkspacePicker` 改为服务器目录树导航（点击进入/上级返回），输入框与最近工作区保留为兜底；移除原生选择器与 localStorage name→path 映射。绝对路径由后端得出，跨浏览器可用，NAS 场景浏览的正是 agent 工作的文件系统。`POST /conversations` 仍是工作区路径的唯一权威校验。
