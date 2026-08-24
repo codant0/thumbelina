@@ -5132,7 +5132,7 @@
 }
 .coder-hero__error { color: var(--error); font-family: var(--coder-mono); font-size: var(--fs-sm); }
 /* 终端风工作区弹窗 */
-.workspace-picker { padding: 0; overflow: hidden; }
+.workspace-picker { padding: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
 .workspace-picker__chrome {
   display: flex;
   align-items: center;

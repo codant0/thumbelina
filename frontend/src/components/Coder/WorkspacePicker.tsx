@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from '../../i18n'
 import { createConversation } from '../../api/conversations'
 import { listDirs, type DirEntry, type DirListing } from '../../api/fs'
@@ -12,6 +12,7 @@ interface WorkspacePickerProps {
 
 export function WorkspacePicker({ onClose, onCreated, recentWorkspaces }: WorkspacePickerProps) {
   const { t } = useTranslation()
+  const browserRef = useRef<HTMLDivElement>(null)
   const [path, setPath] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
@@ -59,6 +60,11 @@ export function WorkspacePicker({ onClose, onCreated, recentWorkspaces }: Worksp
     return () => { cancelled = true }
   }, [])
 
+  // 进入新目录时回到列表顶部，避免残留滚动位置导致内容看起来缺失
+  useEffect(() => {
+    if (browserRef.current) browserRef.current.scrollTop = 0
+  }, [currentPath])
+
   const createFromPath = async (workspacePath: string) => {
     setCreating(true)
     setError(null)
@@ -105,7 +111,7 @@ export function WorkspacePicker({ onClose, onCreated, recentWorkspaces }: Worksp
           <div className="workspace-picker__pathbar" data-testid="workspace-pathbar">
             {currentPath ?? t('coder.selectDrive')}
           </div>
-          <div className="workspace-picker__browser" data-testid="workspace-browser">
+          <div className="workspace-picker__browser" ref={browserRef} data-testid="workspace-browser">
             {browseError ? (
               <div className="workspace-picker__error" data-testid="workspace-browse-error" role="status">
                 {t('coder.browseFailed')}: {browseError}
@@ -135,6 +141,7 @@ export function WorkspacePicker({ onClose, onCreated, recentWorkspaces }: Worksp
                   className="workspace-picker__dir-row"
                   data-testid="workspace-dir-row"
                   onClick={() => navigate(entry.path)}
+                  title={entry.name}
                 >
                   {entry.name}
                 </button>
