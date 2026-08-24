@@ -305,7 +305,8 @@
     "today": "Today",
     "yesterday": "Yesterday",
     "remark": "Remark",
-    "remarkPlaceholder": "Add a remark…"
+    "remarkPlaceholder": "Add a remark…",
+    "ungrouped": "Ungrouped"
   },
   "memory": {
     "title": "Memory",

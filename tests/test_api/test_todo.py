@@ -202,3 +202,60 @@ def test_503_when_disabled(disabled_client: TestClient) -> None:
     response = disabled_client.get("/api/v1/todo/status")
     assert response.status_code == 200
     assert response.json() == {"enabled": False}
+
+
+def _write_todo_file(tmp_path: Path, name: str, content: str) -> None:
+    (tmp_path / "TODO" / name).write_text(content, encoding="utf-8")
+
+
+def test_items_report_group(todo_client: TestClient, tmp_path: Path) -> None:
+    """Items under a '# heading' are tagged with that group in the response."""
+    _write_todo_file(
+        tmp_path,
+        "todolist.md",
+        "# 工作\n- [ ] 写周报\n- [x] 开会\n\n# 学习\n- [ ] 读论文\n",
+    )
+
+    response = todo_client.get("/api/v1/todo/items")
+
+    assert response.status_code == 200
+    assert response.json()["items"] == [
+        {"index": 0, "text": "写周报", "done": False, "remark": "", "group": "工作"},
+        {"index": 1, "text": "开会", "done": True, "remark": "", "group": "工作"},
+        {"index": 2, "text": "读论文", "done": False, "remark": "", "group": "学习"},
+    ]
+
+
+def test_items_omit_group_key_when_ungrouped(todo_client: TestClient, tmp_path: Path) -> None:
+    """Ungrouped items expose no 'group' key (exclude_none)."""
+    _write_todo_file(tmp_path, "todolist.md", "- [ ] 无分组条目\n")
+
+    response = todo_client.get("/api/v1/todo/items")
+
+    assert "group" not in response.json()["items"][0]
+
+
+def test_notes_report_group(todo_client: TestClient, tmp_path: Path) -> None:
+    """Notes under a '# heading' are tagged with that group; grouped keys appear."""
+    _write_todo_file(
+        tmp_path,
+        "notes.md",
+        "# 项目A\n## 2026-08-14 21:30\n内容1\n\n# 生活\n## 2026-08-10 09:00\n内容2\n",
+    )
+
+    response = todo_client.get("/api/v1/todo/notes")
+
+    assert response.status_code == 200
+    notes = response.json()["notes"]
+    assert [note["group"] for note in notes] == ["项目A", "生活"]
+    assert notes[0]["content"] == "内容1"
+    assert notes[1]["content"] == "内容2"
+
+
+def test_notes_omit_group_key_when_ungrouped(todo_client: TestClient, tmp_path: Path) -> None:
+    """Ungrouped notes expose no 'group' key (exclude_none)."""
+    _write_todo_file(tmp_path, "notes.md", "## 2026-08-14 21:30\n内容\n")
+
+    response = todo_client.get("/api/v1/todo/notes")
+
+    assert "group" not in response.json()["notes"][0]

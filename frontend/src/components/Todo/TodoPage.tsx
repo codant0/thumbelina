@@ -119,6 +119,86 @@ function TodoFilterTabs({ value, counts, onChange }: TodoFilterTabsProps) {
   )
 }
 
+/** Sentinel key for the ungrouped bucket in the group filter. */
+export const UNGROUPED_KEY = '__ungrouped__'
+
+interface TodoGroupFilterOption {
+  /** '' = all items; UNGROUPED_KEY = items without a heading; otherwise the heading text. */
+  key: string
+  count: number
+  /** Whether the card shows the panel icon (all groups or ungrouped). */
+  icon: 'all' | 'ungrouped' | null
+}
+
+/** Derives filter options from the visible list: All (total) → ungrouped →
+ * heading groups in first-occurrence order. Empty buckets never appear.
+ * Pure function, order and counts stay derived from the input list. */
+function groupFilterOptions<T extends { group?: string | null }>(list: T[]): TodoGroupFilterOption[] {
+  if (list.length === 0) return []
+  const counts = new Map<string, number>()
+  const order: string[] = []
+  for (const entry of list) {
+    const key = entry.group ?? ''
+    const next = (counts.get(key) ?? 0) + 1
+    counts.set(key, next)
+    if (next === 1) order.push(key)
+  }
+  const options: TodoGroupFilterOption[] = [
+    { key: '', count: list.length, icon: 'all' },
+  ]
+  for (const key of order) {
+    const ungrouped = key === ''
+    options.push({
+      key: ungrouped ? UNGROUPED_KEY : key,
+      count: counts.get(key) ?? 0,
+      icon: ungrouped ? 'ungrouped' : null,
+    })
+  }
+  return options
+}
+
+interface TodoGroupFilterProps {
+  options: TodoGroupFilterOption[]
+  /** '' shows the full grouped view; otherwise only the selected bucket. */
+  selected: string
+  onSelect: (key: string) => void
+  /** Panel identity used for the 'all' card icon. */
+  kind: 'items' | 'notes'
+}
+
+const TODO_ALL_ICON = { items: ClipboardList, notes: StickyNote } as const
+
+function TodoGroupFilter({ options, selected, onSelect, kind }: TodoGroupFilterProps) {
+  const { t } = useTranslation()
+  const AllIcon = TODO_ALL_ICON[kind]
+  return (
+    <div className="todo-group-filter" data-testid="todo-group-filter">
+      {options.map(option => {
+        const Icon = option.icon === 'all' ? AllIcon : option.icon === 'ungrouped' ? Inbox : null
+        return (
+          <button
+            key={option.key}
+            type="button"
+            aria-pressed={selected === option.key}
+            className={`todo-group-filter__card${selected === option.key ? ' todo-group-filter__card--selected' : ''}`}
+            data-testid="todo-group-filter-card"
+            onClick={() => onSelect(option.key)}
+            title={option.key === '' || option.key === UNGROUPED_KEY ? undefined : option.key}
+          >
+            {Icon ? <Icon size={14} aria-hidden="true" /> : null}
+            <span>
+              {option.key === '' ? t('todo.all') : option.key === UNGROUPED_KEY ? t('todo.ungrouped') : option.key}
+            </span>
+            <span className="todo-group-filter__badge" data-testid="todo-group-filter-count">
+              {option.count}
+            </span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 interface TodoListPanelProps {
   /** Items visible under the current filter. */
   items: TodoItem[]
@@ -152,6 +232,13 @@ function TodoListPanel({
   const [editText, setEditText] = useState('')
   const [remarkIndex, setRemarkIndex] = useState<number | null>(null)
   const [editRemark, setEditRemark] = useState('')
+  const [groupKey, setGroupKey] = useState<string>('')
+
+  const groupOptions = useMemo(() => groupFilterOptions(items), [items])
+  const shownItems = useMemo(() => {
+    if (groupKey === '') return items
+    return items.filter(item => (item.group ?? '') === (groupKey === UNGROUPED_KEY ? '' : groupKey))
+  }, [items, groupKey])
 
   const submitNew = useCallback(() => {
     const text = newText.trim()
@@ -226,6 +313,15 @@ function TodoListPanel({
     <>
       <TodoFilterTabs value={filter} counts={counts} onChange={onFilterChange} />
 
+      {groupOptions.length > 1 && (
+        <TodoGroupFilter
+          options={groupOptions}
+          selected={groupKey}
+          onSelect={setGroupKey}
+          kind="items"
+        />
+      )}
+
       <div className="todo-add">
         <input
           className="todo-add__input form-input"
@@ -252,11 +348,136 @@ function TodoListPanel({
         </button>
       </div>
 
-      {items.length === 0 ? (
+      {shownItems.length === 0 ? (
         renderEmptyState()
+      ) : groupKey === '' ? (
+        <div className="todo-list">
+          {groupByHeading(items).map(group => (
+            <div key={`group-${group.key}`} className="todo-group" data-testid="todo-group">
+              <div className="todo-group__header" data-testid="todo-group-header">
+                {group.key || t('todo.ungrouped')}
+              </div>
+              {group.items.map(item => (
+                <div
+                  key={item.index}
+                  className={`todo-item${item.done ? ' todo-item--done' : ''}`}
+                  data-testid="todo-item"
+                >
+              {editingIndex === item.index ? (
+                <div className="todo-item__edit">
+                  <input
+                    className="todo-item__edit-input form-input"
+                    type="text"
+                    value={editText}
+                    aria-label={t('todo.edit')}
+                    autoFocus
+                    disabled={busy}
+                    onChange={e => setEditText(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        saveEdit()
+                      } else if (e.key === 'Escape') {
+                        cancelEdit()
+                      }
+                    }}
+                  />
+                  <button
+                    className="btn btn-primary btn-sm"
+                    disabled={busy || !editText.trim()}
+                    onClick={saveEdit}
+                  >
+                    <Check size={14} />
+                    {t('todo.save')}
+                  </button>
+                  <button className="btn btn-ghost btn-sm" disabled={busy} onClick={cancelEdit}>
+                    <X size={14} />
+                    {t('todo.cancel')}
+                  </button>
+                </div>
+              ) : (
+                <div className="todo-item__body">
+                  <div className="todo-item__row">
+                    <input
+                      className="todo-item__checkbox"
+                      type="checkbox"
+                      checked={item.done}
+                      disabled={busy}
+                      aria-label={item.text}
+                      onChange={() => onToggle(item)}
+                    />
+                    <span className="todo-item__text">{item.text}</span>
+                    <div className="todo-item__actions">
+                      <button
+                        className="todo-item__action"
+                        aria-label={t('todo.remark')}
+                        title={t('todo.remark')}
+                        disabled={busy}
+                        onClick={() => startRemark(item)}
+                      >
+                        <StickyNote size={14} />
+                      </button>
+                      <button
+                        className="todo-item__action"
+                        aria-label={t('todo.edit')}
+                        title={t('todo.edit')}
+                        disabled={busy}
+                        onClick={() => startEdit(item)}
+                      >
+                        <Pencil size={14} />
+                      </button>
+                      <button
+                        className="todo-item__action todo-item__action--danger"
+                        aria-label={t('todo.delete')}
+                        title={t('todo.delete')}
+                        disabled={busy}
+                        onClick={() => onDelete(item.index)}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+                  {remarkIndex === item.index ? (
+                    <div className="todo-item__remark-edit">
+                      <textarea
+                        className="todo-item__remark-textarea form-input"
+                        value={editRemark}
+                        aria-label={t('todo.remark')}
+                        rows={3}
+                        autoFocus
+                        disabled={busy}
+                        onChange={e => setEditRemark(e.target.value)}
+                      />
+                      <div className="todo-item__remark-edit-actions">
+                        <button
+                          className="btn btn-primary btn-sm"
+                          disabled={busy}
+                          onClick={saveRemark}
+                        >
+                          <Check size={14} />
+                          {t('todo.save')}
+                        </button>
+                        <button className="btn btn-ghost btn-sm" disabled={busy} onClick={cancelRemark}>
+                          <X size={14} />
+                          {t('todo.cancel')}
+                        </button>
+                      </div>
+                    </div>
+                  ) : item.remark ? (
+                    <div className="todo-item__remark">
+                      <MarkdownContent content={item.remark} />
+                    </div>
+                  ) : null}
+                </div>
+              )}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
       ) : (
         <div className="todo-list">
-          {items.map(item => (
+          {shownItems.map(item => (
             <div
               key={item.index}
               className={`todo-item${item.done ? ' todo-item--done' : ''}`}
@@ -407,6 +628,30 @@ function groupNotesByDay(notes: TodoNote[]): NoteGroup[] {
   return Array.from(groups, ([key, bucket]) => ({ key, notes: bucket }))
 }
 
+interface HeadingGroup<T> {
+  /** Group key from the '# heading' marker; '' means ungrouped. */
+  key: string
+  items: T[]
+}
+
+/** Groups entries by their '#' heading marker. The ungrouped bucket (empty
+ * key) always comes first, other groups in first-occurrence order. */
+function groupByHeading<T extends { group?: string | null }>(list: T[]): HeadingGroup<T>[] {
+  const groups = new Map<string, HeadingGroup<T>>()
+  for (const entry of list) {
+    const key = entry.group ?? ''
+    const bucket = groups.get(key)
+    if (bucket) {
+      bucket.items.push(entry)
+    } else {
+      groups.set(key, { key, items: [entry] })
+    }
+  }
+  const ungrouped = groups.get('')
+  if (!ungrouped) return Array.from(groups.values())
+  return [ungrouped, ...Array.from(groups.values()).filter(group => group !== ungrouped)]
+}
+
 /** Formats a Date as local YYYY-MM-DD, matching the date part of note
  * timestamps. Manual padding is locale/timezone stable (no 'sv-SE' trick). */
 function toLocalDateKey(date: Date): string {
@@ -420,6 +665,13 @@ function TodoNotesPanel({ notes, busy, onAdd, onUpdate, onDelete }: TodoNotesPan
   const [draft, setDraft] = useState('')
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [editDraft, setEditDraft] = useState('')
+  const [groupKey, setGroupKey] = useState<string>('')
+
+  const groupOptions = useMemo(() => groupFilterOptions(notes), [notes])
+  const shownNotes = useMemo(() => {
+    if (groupKey === '') return notes
+    return notes.filter(note => (note.group ?? '') === (groupKey === UNGROUPED_KEY ? '' : groupKey))
+  }, [notes, groupKey])
 
   const submitDraft = useCallback(() => {
     const content = draft.trim()
@@ -460,7 +712,6 @@ function TodoNotesPanel({ notes, busy, onAdd, onUpdate, onDelete }: TodoNotesPan
   // Translate date-group keys: today/yesterday get friendly labels, older
   // groups show their raw YYYY-MM-DD key. Local date arithmetic avoids the
   // UTC drift that parsing 'YYYY-MM-DD' timestamps would introduce.
-  const groups = groupNotesByDay(notes)
   const now = new Date()
   const todayKey = toLocalDateKey(now)
   const yesterdayKey = toLocalDateKey(
@@ -494,19 +745,104 @@ function TodoNotesPanel({ notes, busy, onAdd, onUpdate, onDelete }: TodoNotesPan
         </button>
       </div>
 
-      {notes.length === 0 ? (
+      {groupOptions.length > 1 && (
+        <TodoGroupFilter
+          options={groupOptions}
+          selected={groupKey}
+          onSelect={setGroupKey}
+          kind="notes"
+        />
+      )}
+
+      {shownNotes.length === 0 ? (
         <TodoEmptyState icon={StickyNote} text={t('todo.emptyNotes')} />
+      ) : groupKey === '' ? (
+        <div className="todo-note-list">
+          {groupByHeading(notes).map(heading => (
+            <div key={`heading-${heading.key}`} className="todo-group" data-testid="todo-group">
+              <div className="todo-group__header" data-testid="todo-group-header">
+                {heading.key || t('todo.ungrouped')}
+              </div>
+              {groupNotesByDay(heading.items).flatMap(dayGroup => [
+                <div
+                  key={`day-${dayGroup.key}`}
+                  className="todo-note-group__header"
+                  data-testid="note-group-header"
+                >
+                  {groupLabel(dayGroup.key)}
+                </div>,
+                ...dayGroup.notes.map(note => (
+                  <div key={note.index} className="todo-note" data-testid="todo-note">
+                    <div className="todo-note__header">
+                      <span className="todo-note__time">{note.timestamp}</span>
+                      <div className="todo-note__actions">
+                        <button
+                          className="todo-note__action"
+                          aria-label={t('todo.edit')}
+                          title={t('todo.edit')}
+                          disabled={busy}
+                          onClick={() => startEdit(note)}
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        <button
+                          className="todo-note__action todo-note__action--danger"
+                          aria-label={t('todo.delete')}
+                          title={t('todo.delete')}
+                          disabled={busy}
+                          onClick={() => onDelete(note.index)}
+                          data-testid="note-delete"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                    {editingIndex === note.index ? (
+                      <div className="todo-note__edit">
+                        <textarea
+                          className="todo-note__edit-textarea form-input"
+                          value={editDraft}
+                          aria-label={t('todo.edit')}
+                          rows={3}
+                          autoFocus
+                          disabled={busy}
+                          onChange={e => setEditDraft(e.target.value)}
+                        />
+                        <div className="todo-note__edit-actions">
+                          <button
+                            className="btn btn-primary btn-sm"
+                            disabled={busy || !editDraft.trim()}
+                            onClick={saveEdit}
+                          >
+                            <Check size={14} />
+                            {t('todo.save')}
+                          </button>
+                          <button className="btn btn-ghost btn-sm" disabled={busy} onClick={cancelEdit}>
+                            <X size={14} />
+                            {t('todo.cancel')}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="todo-note__content">{note.content}</div>
+                    )}
+                  </div>
+                )),
+              ])}
+            </div>
+          ))}
+        </div>
       ) : (
         <div className="todo-note-list">
-          {groups.flatMap(group => [
+          {groupNotesByDay(shownNotes).flatMap(dayGroup => [
             <div
-              key={`group-${group.key}`}
+              key={`day-${dayGroup.key}`}
               className="todo-note-group__header"
               data-testid="note-group-header"
             >
-              {groupLabel(group.key)}
+              {groupLabel(dayGroup.key)}
             </div>,
-            ...group.notes.map(note => (
+            ...dayGroup.notes.map(note => (
               <div key={note.index} className="todo-note" data-testid="todo-note">
                 <div className="todo-note__header">
                   <span className="todo-note__time">{note.timestamp}</span>

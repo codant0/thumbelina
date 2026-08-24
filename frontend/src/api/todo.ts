@@ -3,12 +3,14 @@ export interface TodoItem {
   text: string
   done: boolean
   remark: string
+  group?: string | null
 }
 
 export interface TodoNote {
   index: number
   timestamp: string
   content: string
+  group?: string | null
 }
 
 export interface TodoListResponse {

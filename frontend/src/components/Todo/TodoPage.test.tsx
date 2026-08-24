@@ -770,4 +770,250 @@ describe('TodoPage', () => {
     expect(within(cards[0]).getByText('first note')).toBeInTheDocument()
     expect(within(cards[1]).getByText('second note')).toBeInTheDocument()
   })
+
+  it('groups items under their heading markers', async () => {
+    mockFetch(enabledHandler((url, init) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/v1/todo/items' && method === 'GET') {
+        return jsonResponse({
+          items: [
+            { index: 0, text: '无标题任务', done: false, remark: '' },
+            { index: 1, text: '写周报', done: false, remark: '', group: '工作' },
+            { index: 2, text: '读论文', done: false, remark: '', group: '学习' },
+          ],
+        })
+      }
+      return undefined
+    }))
+    render(<TodoPage />)
+    await screen.findByText('写周报')
+
+    const itemsPanel = screen.getByTestId('todo-items-panel')
+    // Ungrouped bucket comes first, other groups in first-occurrence order.
+    const headers = within(itemsPanel).getAllByTestId('todo-group-header')
+    expect(headers.map(header => header.textContent)).toEqual(['Ungrouped', '工作', '学习'])
+
+    // Items render inside their own group container.
+    const groups = within(itemsPanel).getAllByTestId('todo-group')
+    expect(within(groups[0]).getByText('无标题任务')).toBeInTheDocument()
+    expect(within(groups[1]).getByText('写周报')).toBeInTheDocument()
+    expect(within(groups[1]).queryByText('读论文')).not.toBeInTheDocument()
+    expect(within(groups[2]).getByText('读论文')).toBeInTheDocument()
+  })
+
+  it('shows an ungrouped header for items without a heading', async () => {
+    mockFetch(enabledHandler())
+    render(<TodoPage />)
+    await screen.findByText('buy milk')
+
+    expect(
+      within(screen.getByTestId('todo-items-panel'))
+        .getAllByTestId('todo-group-header')
+        .map(header => header.textContent),
+    ).toEqual(['Ungrouped'])
+  })
+
+  it('notes show heading groups above day groups', async () => {
+    const today = toDateString(new Date())
+    const yesterday = toDateString(new Date(Date.now() - 86400000))
+    mockFetch(enabledHandler((url, init) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/v1/todo/notes' && method === 'GET') {
+        return jsonResponse({
+          notes: [
+            { index: 0, timestamp: `${today} 09:00`, content: '工作记录', group: '工作' },
+            { index: 1, timestamp: `${yesterday} 09:00`, content: '旧工作记录', group: '工作' },
+            { index: 2, timestamp: `${today} 08:00`, content: '无分组随笔' },
+          ],
+        })
+      }
+      return undefined
+    }))
+    render(<TodoPage />)
+    await screen.findByText('工作记录')
+
+    const notesPanel = screen.getByTestId('todo-notes-panel')
+    // Heading groups: ungrouped first, then '工作'; day sub-headers nest inside.
+    const headingHeaders = within(notesPanel).getAllByTestId('todo-group-header')
+    expect(headingHeaders.map(header => header.textContent)).toEqual(['Ungrouped', '工作'])
+    const dayHeaders = within(notesPanel).getAllByTestId('note-group-header')
+    expect(dayHeaders.map(header => header.textContent)).toEqual(['Today', 'Today', 'Yesterday'])
+  })
+
+  it('shows an ungrouped header for notes without a heading', async () => {
+    mockFetch(
+      notesHandler([{ index: 0, timestamp: '2026-01-01 10:00', content: 'plain note' }]),
+    )
+    render(<TodoPage />)
+    await screen.findByText('plain note')
+
+    const notesPanel = screen.getByTestId('todo-notes-panel')
+    // Only the ungrouped heading header exists; the day header stays intact.
+    expect(
+      within(notesPanel).getAllByTestId('todo-group-header').map(header => header.textContent),
+    ).toEqual(['Ungrouped'])
+    expect(within(notesPanel).getAllByTestId('note-group-header')).toHaveLength(1)
+  })
+
+  it('derives group filter cards from visible items', async () => {
+    mockFetch(enabledHandler((url, init) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/v1/todo/items' && method === 'GET') {
+        return jsonResponse({
+          items: [
+            { index: 0, text: '无标题任务', done: false, remark: '' },
+            { index: 1, text: '写周报', done: false, remark: '', group: '工作' },
+            { index: 2, text: '开会', done: false, remark: '', group: '工作' },
+            { index: 3, text: '读论文', done: false, remark: '', group: '学习' },
+          ],
+        })
+      }
+      return undefined
+    }))
+    render(<TodoPage />)
+    await screen.findByText('写周报')
+
+    const itemsPanel = screen.getByTestId('todo-items-panel')
+    const cards = within(itemsPanel).getAllByTestId('todo-group-filter-card')
+    const readCard = (card: HTMLElement) => ({
+      label: (card.textContent ?? '').replace(
+        within(card).getByTestId('todo-group-filter-count').textContent ?? '',
+        '',
+      ).trim(),
+      count: within(card).getByTestId('todo-group-filter-count').textContent,
+    })
+    const summary = cards.map(readCard)
+    expect(summary.map(card => card.label)).toEqual(['All', 'Ungrouped', '工作', '学习'])
+    expect(summary.map(card => card.count)).toEqual(['4', '1', '2', '1'])
+    // Default selection is "all" and the grouped view is shown.
+    expect(cards[0].getAttribute('aria-pressed')).toBe('true')
+    expect(within(itemsPanel).getAllByTestId('todo-group-header')).toHaveLength(3)
+  })
+
+  it('clicking a group card filters to that group', async () => {
+    mockFetch(enabledHandler((url, init) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/v1/todo/items' && method === 'GET') {
+        return jsonResponse({
+          items: [
+            { index: 0, text: '无标题任务', done: false, remark: '' },
+            { index: 1, text: '写周报', done: false, remark: '', group: '工作' },
+            { index: 2, text: '开会', done: false, remark: '', group: '工作' },
+            { index: 3, text: '读论文', done: false, remark: '', group: '学习' },
+          ],
+        })
+      }
+      return undefined
+    }))
+    render(<TodoPage />)
+    await screen.findByText('写周报')
+
+    const itemsPanel = screen.getByTestId('todo-items-panel')
+    const cards = within(itemsPanel).getAllByTestId('todo-group-filter-card')
+    const workCard = cards.find(card => card.textContent?.includes('工作'))
+    if (!workCard) throw new Error('工作 card not found')
+    fireEvent.click(workCard)
+
+    // Only that group's items remain; the flat view hides group headers.
+    const items = within(itemsPanel).getAllByTestId('todo-item')
+    expect(items).toHaveLength(2)
+    expect(within(items[0]).getByText('写周报')).toBeInTheDocument()
+    expect(within(itemsPanel).queryByText('无标题任务')).not.toBeInTheDocument()
+    expect(within(itemsPanel).queryByText('读论文')).not.toBeInTheDocument()
+    expect(within(itemsPanel).queryByTestId('todo-group-header')).not.toBeInTheDocument()
+    expect(workCard.getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('selecting all restores the grouped view', async () => {
+    mockFetch(enabledHandler((url, init) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/v1/todo/items' && method === 'GET') {
+        return jsonResponse({
+          items: [
+            { index: 0, text: '写周报', done: false, remark: '', group: '工作' },
+            { index: 1, text: '读论文', done: false, remark: '', group: '学习' },
+          ],
+        })
+      }
+      return undefined
+    }))
+    render(<TodoPage />)
+    await screen.findByText('写周报')
+
+    const itemsPanel = screen.getByTestId('todo-items-panel')
+    const cards = within(itemsPanel).getAllByTestId('todo-group-filter-card')
+    fireEvent.click(cards.find(card => card.textContent?.includes('工作')) as HTMLButtonElement)
+    expect(within(itemsPanel).queryByTestId('todo-group-header')).not.toBeInTheDocument()
+    fireEvent.click(cards[0])
+
+    expect(within(itemsPanel).getAllByTestId('todo-group-header')).toHaveLength(2)
+    expect(within(itemsPanel).getByText('写周报')).toBeInTheDocument()
+    expect(within(itemsPanel).getByText('读论文')).toBeInTheDocument()
+  })
+
+  it('group filter counts respect the status filter', async () => {
+    mockFetch(enabledHandler((url, init) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/v1/todo/items' && method === 'GET') {
+        return jsonResponse({
+          items: [
+            { index: 0, text: '未完成任务', done: false, remark: '', group: '工作' },
+            { index: 1, text: '已完成任务', done: true, remark: '', group: '工作' },
+          ],
+        })
+      }
+      return undefined
+    }))
+    render(<TodoPage />)
+    await screen.findByText('未完成任务')
+
+    // Default 'active' filter: only the pending item counts in the cards.
+    const itemsPanel = screen.getByTestId('todo-items-panel')
+    const cards = within(itemsPanel).getAllByTestId('todo-group-filter-card')
+    expect(cards).toHaveLength(2)
+    expect(
+      within(cards[0]).getByTestId('todo-group-filter-count').textContent,
+    ).toBe('1')
+    expect(
+      within(cards[1]).getByTestId('todo-group-filter-count').textContent,
+    ).toBe('1')
+  })
+
+  it('notes group filter cards filter the notes panel', async () => {
+    const today = toDateString(new Date())
+    const yesterday = toDateString(new Date(Date.now() - 86400000))
+    mockFetch(enabledHandler((url, init) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/v1/todo/notes' && method === 'GET') {
+        return jsonResponse({
+          notes: [
+            { index: 0, timestamp: `${today} 09:00`, content: '项目记录', group: '项目A' },
+            { index: 1, timestamp: `${yesterday} 09:00`, content: '旧项目记录', group: '项目A' },
+            { index: 2, timestamp: `${today} 08:00`, content: '生活随笔', group: '生活' },
+          ],
+        })
+      }
+      return undefined
+    }))
+    render(<TodoPage />)
+    await screen.findByText('项目记录')
+
+    const notesPanel = screen.getByTestId('todo-notes-panel')
+    const cards = within(notesPanel).getAllByTestId('todo-group-filter-card')
+    expect(cards.map(card => (card.textContent ?? '').replace(
+      within(card).getByTestId('todo-group-filter-count').textContent ?? '',
+      '',
+    ).trim())).toEqual(['All', '项目A', '生活'])
+
+    const projectCard = cards.find(card => card.textContent?.includes('项目A'))
+    if (!projectCard) throw new Error('项目A card not found')
+    fireEvent.click(projectCard)
+
+    const notes = within(notesPanel).getAllByTestId('todo-note')
+    expect(notes).toHaveLength(2)
+    expect(within(notesPanel).queryByText('生活随笔')).not.toBeInTheDocument()
+    // Heading group header disappears, day sub-headers stay.
+    expect(within(notesPanel).queryByTestId('todo-group-header')).not.toBeInTheDocument()
+    expect(within(notesPanel).getAllByTestId('note-group-header')).toHaveLength(2)
+  })
 })

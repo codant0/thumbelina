@@ -50,6 +50,7 @@ class TodoItemOut(BaseModel):
     text: str
     done: bool
     remark: str = ""
+    group: str | None = None
 
 
 class TodoItemsOut(BaseModel):
@@ -64,6 +65,7 @@ class NoteOut(BaseModel):
     index: int
     timestamp: str
     content: str
+    group: str | None = None
 
 
 class TodoNotesOut(BaseModel):
@@ -81,7 +83,13 @@ class TodoStatusOut(BaseModel):
 def _items_payload(items: list[TodoItem]) -> TodoItemsOut:
     return TodoItemsOut(
         items=[
-            TodoItemOut(index=item.index, text=item.text, done=item.done, remark=item.remark)
+            TodoItemOut(
+                index=item.index,
+                text=item.text,
+                done=item.done,
+                remark=item.remark,
+                group=item.group,
+            )
             for item in items
         ]
     )
@@ -90,7 +98,12 @@ def _items_payload(items: list[TodoItem]) -> TodoItemsOut:
 def _notes_payload(notes: list[Note]) -> TodoNotesOut:
     return TodoNotesOut(
         notes=[
-            NoteOut(index=note.index, timestamp=note.timestamp, content=note.content)
+            NoteOut(
+                index=note.index,
+                timestamp=note.timestamp,
+                content=note.content,
+                group=note.group,
+            )
             for note in notes
         ]
     )
@@ -111,13 +124,13 @@ async def todo_status(request: Request) -> TodoStatusOut:
     return TodoStatusOut(enabled=service is not None)
 
 
-@router.get("/items", response_model=TodoItemsOut)
+@router.get("/items", response_model=TodoItemsOut, response_model_exclude_none=True)
 async def list_items(service: TodoService = Depends(get_todo_service)) -> TodoItemsOut:
     """List all todo items."""
     return _items_payload(await service.list_items())
 
 
-@router.post("/items", response_model=TodoItemsOut)
+@router.post("/items", response_model=TodoItemsOut, response_model_exclude_none=True)
 async def create_item(
     payload: TodoItemCreate,
     service: TodoService = Depends(get_todo_service),
@@ -127,7 +140,7 @@ async def create_item(
     return _items_payload(await service.add_item(text))
 
 
-@router.patch("/items/{index}", response_model=TodoItemsOut)
+@router.patch("/items/{index}", response_model=TodoItemsOut, response_model_exclude_none=True)
 async def update_item(
     index: int,
     payload: TodoItemUpdate,
@@ -148,7 +161,7 @@ async def update_item(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.delete("/items/{index}", response_model=TodoItemsOut)
+@router.delete("/items/{index}", response_model=TodoItemsOut, response_model_exclude_none=True)
 async def delete_item(
     index: int,
     service: TodoService = Depends(get_todo_service),
@@ -160,13 +173,13 @@ async def delete_item(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.get("/notes", response_model=TodoNotesOut)
+@router.get("/notes", response_model=TodoNotesOut, response_model_exclude_none=True)
 async def list_notes(service: TodoService = Depends(get_todo_service)) -> TodoNotesOut:
     """List all quick notes (newest first)."""
     return _notes_payload(await service.list_notes())
 
 
-@router.post("/notes", response_model=TodoNotesOut)
+@router.post("/notes", response_model=TodoNotesOut, response_model_exclude_none=True)
 async def create_note(
     payload: NoteCreate,
     service: TodoService = Depends(get_todo_service),
@@ -176,7 +189,7 @@ async def create_note(
     return _notes_payload(await service.add_note(content))
 
 
-@router.put("/notes/{index}", response_model=TodoNotesOut)
+@router.put("/notes/{index}", response_model=TodoNotesOut, response_model_exclude_none=True)
 async def update_note(
     index: int,
     payload: NoteUpdate,
@@ -190,7 +203,7 @@ async def update_note(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.delete("/notes/{index}", response_model=TodoNotesOut)
+@router.delete("/notes/{index}", response_model=TodoNotesOut, response_model_exclude_none=True)
 async def delete_note(
     index: int,
     service: TodoService = Depends(get_todo_service),

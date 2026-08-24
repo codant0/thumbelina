@@ -305,7 +305,8 @@
     "today": "今天",
     "yesterday": "昨天",
     "remark": "备注",
-    "remarkPlaceholder": "添加备注说明…"
+    "remarkPlaceholder": "添加备注说明…",
+    "ungrouped": "未分组"
   },
   "memory": {
     "title": "记忆",

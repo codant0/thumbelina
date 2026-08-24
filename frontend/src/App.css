@@ -4461,6 +4461,38 @@
   gap: var(--sp-2);
 }
 
+/* Each '# heading' bucket is its own group; the group header mirrors the
+   date-group header style (dashed separators around the label). */
+.todo-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.todo-group__header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semi);
+  color: var(--text-secondary);
+}
+
+.todo-group__header::before,
+.todo-group__header::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.todo-group + .todo-group {
+  margin-top: var(--sp-1);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border-subtle);
+}
+
 @keyframes todo-item-in {
   from {
     opacity: 0;
@@ -4696,6 +4728,79 @@
   background: var(--accent-muted);
   color: var(--accent);
   font-weight: var(--fw-med);
+}
+
+/* Group filter cards: each '# heading' bucket (plus All / Ungrouped) is a
+   tappable card with a count badge; selected state uses the orange accent
+   to stand apart from the teal status filter tabs. The bar stays a single
+   row in both panels (scrolls horizontally when there are many groups), so
+   the panels keep aligned heights. */
+.todo-group-filter {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 2px;
+  margin: -2px 0 var(--sp-3);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.todo-group-filter::-webkit-scrollbar {
+  display: none;
+}
+
+.todo-group-filter__card {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 30px;
+  padding: var(--sp-1) var(--sp-3);
+  flex-shrink: 0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.todo-group-filter__card:hover {
+  border-color: var(--border);
+}
+
+.todo-group-filter__card:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+
+.todo-group-filter__card--selected,
+.todo-group-filter__card--selected:hover {
+  border: 1px solid var(--accent-secondary-border);
+  background: var(--accent-secondary-muted);
+  color: var(--accent-secondary);
+  font-weight: var(--fw-med);
+}
+
+.todo-group-filter__badge {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-full);
+  background: var(--bg);
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+}
+
+.todo-group-filter__card--selected .todo-group-filter__badge {
+  background: var(--accent-secondary);
+  color: var(--bg-surface);
 }
 
 .todo-empty-state {
