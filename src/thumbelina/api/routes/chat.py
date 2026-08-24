@@ -15,6 +15,7 @@ from thumbelina.llm.endpoint_manager import EndpointManager, LLMEndpoint
 from thumbelina.llm.factory import create_provider
 from thumbelina.prompts.roles import get_role_prompt
 from thumbelina.repository.manager import RepositoryManager
+from thumbelina.tools.workspace_context import set_workspace
 
 logger = logging.getLogger(__name__)
 
@@ -254,16 +255,33 @@ async def _apply_conversation_role(agent: ThumbelinaAgent, conversation_id: str)
     agent.role_prompt = role_prompt
 
 
+async def _apply_conversation_workspace(agent: ThumbelinaAgent, conversation_id: str) -> None:
+    """将会话绑定的工作区注入 agent 克隆与工具执行上下文。"""
+    repository = agent.repository_manager
+    if repository is None:
+        return
+    try:
+        conv = await repository.get_conversation(conversation_id)
+    except Exception:
+        return
+    if conv is None:
+        return
+    workspace = conv.get("workspace")
+    agent.workspace = workspace
+    set_workspace(workspace)
+
+
 async def apply_conversation_runtime(
     context: Any, agent: ThumbelinaAgent, conversation_id: str
 ) -> None:
-    """应用会话的端点与角色（HTTP / WebSocket / 通道共用）。
+    """应用会话的端点、角色与工作区（HTTP / WebSocket / 通道共用）。
 
     ``context`` 只需暴露 ``app.state``（``Request``、``WebSocket`` 或
     指向 ``app.state`` 的轻量 shim 均可）。
     """
     await _apply_conversation_endpoint(context, agent, conversation_id)
     await _apply_conversation_role(agent, conversation_id)
+    await _apply_conversation_workspace(agent, conversation_id)
 
 
 async def resolve_run_window(

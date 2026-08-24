@@ -34,4 +34,12 @@ describe('Header', () => {
     render(<Header activePage="chat" onNavigate={vi.fn()} />)
     expect(screen.getByTestId('nav-trajectory')).toBeInTheDocument()
   })
+
+  it('renders the coder nav entry after chat', () => {
+    render(<Header activePage="chat" onNavigate={vi.fn()} />)
+    expect(screen.getByTestId('nav-coder')).toBeInTheDocument()
+    const nav = screen.getByRole('navigation')
+    const labels = Array.from(nav.querySelectorAll('button')).map(b => b.getAttribute('data-testid'))
+    expect(labels.indexOf('nav-coder')).toBe(labels.indexOf('nav-chat') + 1)
+  })
 })

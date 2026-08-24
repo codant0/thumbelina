@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from thumbelina.api.deps import get_agent, get_repository_manager
@@ -40,11 +41,39 @@ async def _clear_checkpoint(request: Request, conversation_id: str) -> None:
         )
 
 
+def _validate_workspace(mode: str, workspace: str | None) -> str | None:
+    """校验并规范化工作区路径；非法时抛 422。"""
+    if mode == "coder":
+        if not workspace or not workspace.strip():
+            raise HTTPException(status_code=422, detail="mode='coder' 需要提供 workspace 路径")
+        try:
+            path = Path(workspace).resolve()
+        except OSError as exc:
+            raise HTTPException(status_code=422, detail=f"无效的工作区路径: {exc}")
+        if not path.is_dir():
+            raise HTTPException(status_code=422, detail=f"工作区不是有效目录: {workspace}")
+        try:
+            next(path.iterdir(), None)
+        except (PermissionError, OSError) as exc:
+            raise HTTPException(status_code=422, detail=f"工作区不可读: {exc}")
+        return str(path)
+    if workspace:
+        raise HTTPException(status_code=422, detail="普通会话不允许设置 workspace")
+    return None
+
+
 class CreateConversationRequest(BaseModel):
     """Request body for creating a new conversation."""
 
     name: str | None = Field(default=None, description="Optional conversation name")
     pinned: bool = Field(default=False, description="Whether to pin the conversation")
+    mode: Literal["chat", "coder"] = Field(
+        default="chat", description="Conversation mode: 'chat' or 'coder'"
+    )
+    workspace: str | None = Field(
+        default=None,
+        description="Absolute workspace directory path; required when mode='coder'",
+    )
 
 
 class RenameConversationRequest(BaseModel):
@@ -117,7 +146,12 @@ async def create_conversation(
     """Create a new conversation."""
     name = body.name if body else None
     pinned = body.pinned if body else False
-    conv_id = await repository.create_conversation(name=name, pinned=pinned)
+    mode = body.mode if body else "chat"
+    workspace = _validate_workspace(mode, body.workspace) if body else None
+    role = "coder" if mode == "coder" else None
+    conv_id = await repository.create_conversation(
+        name=name, pinned=pinned, mode=mode, workspace=workspace, role=role
+    )
     conv = await repository.get_conversation(conv_id)
     if conv is None:
         raise HTTPException(status_code=500, detail="Failed to create conversation")
@@ -139,11 +173,14 @@ async def search_conversations(
 
 @router.get("/conversations", response_model=list[ConversationSchema])
 async def list_conversations(
+    mode: Literal["chat", "coder"] | None = Query(
+        default=None, description="Filter conversations by mode"
+    ),
     repository: RepositoryManager = Depends(get_repository_manager),
 ) -> list[ConversationSchema]:
-    """List all conversations."""
+    """List conversations, optionally filtered by mode."""
     try:
-        conversations = await repository.get_conversations()
+        conversations = await repository.get_conversations(mode=mode)
         logger.debug("Fetched %d conversations", len(conversations))
         return [ConversationSchema(**c) for c in conversations]
     except Exception:
@@ -169,6 +206,8 @@ async def get_conversation(
         id=conversation["id"],
         name=conversation.get("name"),
         pinned=conversation.get("pinned", False),
+        mode=conversation.get("mode", "chat"),
+        workspace=conversation.get("workspace"),
         endpoint_id=conversation.get("endpoint_id"),
         model=conversation.get("model"),
         knowledge_base_id=conversation.get("knowledge_base_id"),

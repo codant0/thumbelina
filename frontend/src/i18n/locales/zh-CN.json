@@ -1,6 +1,7 @@
 {
   "nav": {
     "chat": "聊天",
+    "coder": "码农",
     "trajectory": "轨迹",
     "tasks": "任务",
     "todo": "待办",
@@ -244,6 +245,30 @@
     "generating": "正在生成…",
     "viewTrajectory": "查看轨迹",
     "viewTrajectoryTitle": "在轨迹页审计该会话"
+  },
+  "coder": {
+    "sidebarTitle": "码农会话",
+    "newConversation": "新建码农会话",
+    "emptyHint": "选择一个工作区，开始第一个码农会话。",
+    "selectToStart": "请选择或新建一个码农会话",
+    "unknownWorkspace": "未知工作区",
+    "heroTitle": "开始一个编码会话",
+    "heroDesc": "选择服务器上的工作区，让码农在真实项目里工作",
+    "heroCta": "选择工作区",
+    "heroShortcut": "快捷键 N",
+    "recentWorkspaces": "最近工作区",
+    "pickerTitle": "new workspace session",
+    "pickWorkspaceTitle": "选择工作区",
+    "workspacePlaceholder": "输入服务器上的目录绝对路径",
+    "workspaceRequired": "请输入工作区路径",
+    "createFailed": "创建会话失败",
+    "upLevel": "上级目录",
+    "selectDrive": "选择驱动器…",
+    "emptyDirectory": "（空目录）",
+    "listTruncated": "目录条目过多，仅显示前 1000 项…",
+    "browseFailed": "无法列出目录",
+    "loadFailed": "会话列表加载失败",
+    "confirmCreate": "创建"
   },
   "taskManager": {
     "title": "任务管理器",

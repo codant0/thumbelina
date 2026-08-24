@@ -608,3 +608,62 @@ def test_compress_api_endpoint_accepts_context_window(client, conversation_id):
     agent.compress_conversation.assert_awaited_once_with(
         conversation_id, context_window_tokens=8000
     )
+
+
+def test_create_coder_conversation_with_workspace(client, tmp_path):
+    response = client.post(
+        "/api/v1/conversations",
+        json={"mode": "coder", "workspace": str(tmp_path)},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["mode"] == "coder"
+    assert data["workspace"] == str(tmp_path.resolve())
+    assert data["role"] == "coder"
+
+
+def test_create_coder_without_workspace_rejected(client):
+    response = client.post("/api/v1/conversations", json={"mode": "coder"})
+    assert response.status_code == 422
+
+
+def test_create_coder_with_missing_workspace_rejected(client, tmp_path):
+    response = client.post(
+        "/api/v1/conversations",
+        json={"mode": "coder", "workspace": str(tmp_path / "nonexistent")},
+    )
+    assert response.status_code == 422
+
+
+def test_chat_conversation_with_workspace_rejected(client):
+    response = client.post("/api/v1/conversations", json={"workspace": "C:\\"})
+    assert response.status_code == 422
+
+
+def test_list_conversations_filters_by_mode(client, tmp_path):
+    client.post("/api/v1/conversations", json={"mode": "coder", "workspace": str(tmp_path)})
+    client.post("/api/v1/conversations", json={})
+    coder_ids = [c["id"] for c in client.get("/api/v1/conversations?mode=coder").json()]
+    chat_ids = [c["id"] for c in client.get("/api/v1/conversations?mode=chat").json()]
+    assert len(coder_ids) == 1
+    assert all(cid not in chat_ids for cid in coder_ids)
+
+
+def test_get_coder_conversation_detail_includes_mode_and_workspace(client, tmp_path):
+    """GET 会话详情应如实返回 coder 会话的 mode 与 workspace。"""
+    created = client.post(
+        "/api/v1/conversations",
+        json={"mode": "coder", "workspace": str(tmp_path)},
+    )
+    conv_id = created.json()["id"]
+
+    detail = client.get(f"/api/v1/conversations/{conv_id}").json()
+    assert detail["mode"] == "coder"
+    assert detail["workspace"] == str(tmp_path.resolve())
+
+
+def test_get_chat_conversation_detail_defaults_mode_and_workspace(client, conversation_id):
+    """GET 普通会话详情应报告 mode='chat' 且 workspace 为 None。"""
+    detail = client.get(f"/api/v1/conversations/{conversation_id}").json()
+    assert detail["mode"] == "chat"
+    assert detail["workspace"] is None

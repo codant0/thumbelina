@@ -38,7 +38,14 @@ class RepositoryManager:
         """Close the repository and release resources."""
         self.conversation_repository.close()
 
-    async def create_conversation(self, name: str | None = None, pinned: bool = False) -> str:
+    async def create_conversation(
+        self,
+        name: str | None = None,
+        pinned: bool = False,
+        mode: str = "chat",
+        workspace: str | None = None,
+        role: str | None = None,
+    ) -> str:
         """Create a new conversation.
 
         Parameters
@@ -47,13 +54,21 @@ class RepositoryManager:
             Optional human-readable name for the conversation.
         pinned:
             Whether to pin the conversation to the top of the list.
+        mode:
+            Conversation mode: 'chat' (default) or 'coder'.
+        workspace:
+            Absolute workspace directory path for coder conversations.
+        role:
+            Optional persona role; coder conversations default to 'coder' (set by the API layer).
 
         Returns
         -------
         str
             The ID of the newly created conversation.
         """
-        return await self.conversation_repository.create_conversation(name=name, pinned=pinned)
+        return await self.conversation_repository.create_conversation(
+            name=name, pinned=pinned, mode=mode, workspace=workspace, role=role
+        )
 
     async def add_message(
         self,
@@ -113,15 +128,20 @@ class RepositoryManager:
         """
         return await self.conversation_repository.get_messages(conversation_id)
 
-    async def get_conversations(self) -> list[dict[str, Any]]:
-        """Get all conversations.
+    async def get_conversations(self, mode: str | None = None) -> list[dict[str, Any]]:
+        """Get conversations, optionally filtered by mode.
+
+        Parameters
+        ----------
+        mode:
+            If given, only return conversations with this mode ('chat' or 'coder').
 
         Returns
         -------
         list[dict[str, Any]]
             List of conversation dictionaries.
         """
-        return await self.conversation_repository.get_conversations()
+        return await self.conversation_repository.get_conversations(mode=mode)
 
     async def get_all_conversations_with_messages(self) -> list[dict[str, Any]]:
         """Get all conversations with their messages."""
@@ -342,9 +362,11 @@ class RepositoryManager:
         ]
         return {"total_turns": total, "turns": turns}
 
-    async def get_cache_stats(self, limit: int = 100) -> dict[str, Any]:
-        """最近 limit 条 llm_usage 事件的 KV 缓存命中汇总(跨会话)。"""
-        return await self.trajectory_repository.get_cache_stats(limit)
+    async def get_cache_stats(
+        self, limit: int = 100, conversation_id: str | None = None
+    ) -> dict[str, Any]:
+        """最近 limit 条 llm_usage 事件的 KV 缓存命中汇总(可限定会话)。"""
+        return await self.trajectory_repository.get_cache_stats(limit, conversation_id)
 
     async def search(
         self,

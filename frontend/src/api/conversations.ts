@@ -2,6 +2,32 @@ import type { Conversation, ThinkingEffort } from '../types/chat'
 
 const API_BASE = '/api/v1'
 
+export async function fetchConversations(mode?: 'chat' | 'coder'): Promise<Conversation[]> {
+  const query = mode ? `?mode=${mode}` : ''
+  const res = await fetch(`${API_BASE}/conversations${query}`)
+  if (!res.ok) return []
+  const data = await res.json()
+  return Array.isArray(data) ? data : []
+}
+
+export async function createConversation(options: {
+  name?: string
+  pinned?: boolean
+  mode?: 'chat' | 'coder'
+  workspace?: string
+} = {}): Promise<Conversation> {
+  const res = await fetch(`${API_BASE}/conversations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(options),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.detail || `HTTP ${res.status}`)
+  }
+  return res.json() as Promise<Conversation>
+}
+
 export async function renameConversation(id: string, name: string): Promise<Conversation> {
   const res = await fetch(`${API_BASE}/conversations/${id}`, {
     method: 'PATCH',

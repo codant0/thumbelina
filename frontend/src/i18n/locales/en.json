@@ -1,6 +1,7 @@
 {
   "nav": {
     "chat": "Chat",
+    "coder": "Coder",
     "trajectory": "Trajectory",
     "tasks": "Tasks",
     "todo": "TODO",
@@ -244,6 +245,30 @@
     "generating": "Generating…",
     "viewTrajectory": "View trajectory",
     "viewTrajectoryTitle": "Audit this conversation in the trajectory page"
+  },
+  "coder": {
+    "sidebarTitle": "Coder Sessions",
+    "newConversation": "New coder conversation",
+    "emptyHint": "Pick a workspace to start your first coder conversation.",
+    "selectToStart": "Select or create a coder conversation",
+    "unknownWorkspace": "Unknown workspace",
+    "heroTitle": "Start a coding session",
+    "heroDesc": "Pick a workspace on the server so Coder works in your real project",
+    "heroCta": "Choose workspace",
+    "heroShortcut": "Shortcut N",
+    "recentWorkspaces": "Recent workspaces",
+    "pickerTitle": "new workspace session",
+    "pickWorkspaceTitle": "Choose workspace",
+    "workspacePlaceholder": "Absolute path to a directory on the server",
+    "workspaceRequired": "Workspace path is required",
+    "createFailed": "Failed to create conversation",
+    "upLevel": "Parent directory",
+    "selectDrive": "Select a drive…",
+    "emptyDirectory": "(empty directory)",
+    "listTruncated": "Too many entries — showing the first 1000…",
+    "browseFailed": "Failed to list directory",
+    "loadFailed": "Failed to load sessions",
+    "confirmCreate": "Create"
   },
   "taskManager": {
     "title": "Task Manager",

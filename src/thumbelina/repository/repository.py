@@ -53,31 +53,35 @@ class ConversationRepository:
         """
         return await asyncio.to_thread(self._ping_sync)
 
-    def _create_conversation_sync(self, name: str | None = None, pinned: bool = False) -> str:
+    def _create_conversation_sync(
+        self,
+        name: str | None = None,
+        pinned: bool = False,
+        mode: str = "chat",
+        workspace: str | None = None,
+        role: str | None = None,
+    ) -> str:
         """Synchronous implementation of create_conversation."""
         with self._get_session() as session:
-            conversation = Conversation(name=name, pinned=pinned)
+            conversation = Conversation(
+                name=name, pinned=pinned, mode=mode, workspace=workspace, role=role
+            )
             session.add(conversation)
             session.commit()
             session.refresh(conversation)
             return conversation.id
 
-    async def create_conversation(self, name: str | None = None, pinned: bool = False) -> str:
-        """Create a new conversation.
-
-        Parameters
-        ----------
-        name:
-            Optional human-readable name for the conversation.
-        pinned:
-            Whether to pin the conversation to the top of the list.
-
-        Returns
-        -------
-        str
-            The ID of the newly created conversation.
-        """
-        return await asyncio.to_thread(self._create_conversation_sync, name, pinned)
+    async def create_conversation(
+        self,
+        name: str | None = None,
+        pinned: bool = False,
+        mode: str = "chat",
+        workspace: str | None = None,
+        role: str | None = None,
+    ) -> str:
+        return await asyncio.to_thread(
+            self._create_conversation_sync, name, pinned, mode, workspace, role
+        )
 
     def _add_message_sync(
         self,
@@ -183,13 +187,15 @@ class ConversationRepository:
         """
         return await asyncio.to_thread(self._get_messages_sync, conversation_id)
 
-    def _get_conversations_sync(self) -> list[dict[str, Any]]:
+    def _get_conversations_sync(self, mode: str | None = None) -> list[dict[str, Any]]:
         """Synchronous implementation of get_conversations."""
         with self._get_session() as session:
             stmt = select(Conversation).order_by(
                 Conversation.pinned.desc(),
                 Conversation.updated_at.desc(),
             )
+            if mode is not None:
+                stmt = stmt.where(Conversation.mode == mode)
             result = session.execute(stmt)
             conversations = result.scalars().all()
 
@@ -198,6 +204,8 @@ class ConversationRepository:
                     "id": conv.id,
                     "name": conv.name,
                     "pinned": conv.pinned or False,
+                    "mode": conv.mode or "chat",
+                    "workspace": conv.workspace,
                     "endpoint_id": conv.endpoint_id,
                     "model": conv.model,
                     "knowledge_base_id": conv.knowledge_base_id,
@@ -211,15 +219,9 @@ class ConversationRepository:
                 for conv in conversations
             ]
 
-    async def get_conversations(self) -> list[dict[str, Any]]:
-        """Get all conversations.
-
-        Returns
-        -------
-        list[dict[str, Any]]
-            List of conversation dictionaries.
-        """
-        return await asyncio.to_thread(self._get_conversations_sync)
+    async def get_conversations(self, mode: str | None = None) -> list[dict[str, Any]]:
+        """Get conversations, optionally filtered by mode."""
+        return await asyncio.to_thread(self._get_conversations_sync, mode)
 
     def _get_all_conversations_with_messages_sync(self) -> list[dict[str, Any]]:
         """Synchronous implementation of get_all_conversations_with_messages."""
@@ -241,6 +243,8 @@ class ConversationRepository:
                     "model": conv.model,
                     "knowledge_base_id": conv.knowledge_base_id,
                     "role": conv.role,
+                    "mode": conv.mode or "chat",
+                    "workspace": conv.workspace,
                     "thinking_enabled": conv.thinking_enabled or False,
                     "thinking_effort": conv.thinking_effort or "medium",
                     "created_at": conv.created_at.isoformat(),
@@ -281,6 +285,8 @@ class ConversationRepository:
                 "model": conversation.model,
                 "knowledge_base_id": conversation.knowledge_base_id,
                 "role": conversation.role,
+                "mode": conversation.mode or "chat",
+                "workspace": conversation.workspace,
                 "thinking_enabled": conversation.thinking_enabled or False,
                 "thinking_effort": conversation.thinking_effort or "medium",
                 "created_at": conversation.created_at.isoformat(),
