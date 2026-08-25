@@ -90,11 +90,13 @@ function readStats(container: HTMLElement): Array<{ num: string; label: string }
   }))
 }
 
-/** Locates a filter tab button by its visible label ('All' / 'Active' / 'Done'). */
+/** Locates a filter tab button by its visible label ('All' / 'Active' / 'Done').
+ * Scoped to the tabs container: group filter cards reuse similar labels
+ * ('All' / 'Ungrouped') and render before the tabs in each panel. */
 function getFilterTab(label: string): HTMLButtonElement {
   const tab = screen
     .getAllByRole('button')
-    .find(button => button.textContent?.includes(label))
+    .find(button => button.closest('.todo-filter-tabs') && button.textContent?.includes(label))
   if (!tab) throw new Error(`filter tab "${label}" not found`)
   return tab as HTMLButtonElement
 }

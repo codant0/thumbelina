@@ -311,8 +311,6 @@ function TodoListPanel({
 
   return (
     <>
-      <TodoFilterTabs value={filter} counts={counts} onChange={onFilterChange} />
-
       {groupOptions.length > 1 && (
         <TodoGroupFilter
           options={groupOptions}
@@ -321,6 +319,8 @@ function TodoListPanel({
           kind="items"
         />
       )}
+
+      <TodoFilterTabs value={filter} counts={counts} onChange={onFilterChange} />
 
       <div className="todo-add">
         <input
@@ -725,6 +725,15 @@ function TodoNotesPanel({ notes, busy, onAdd, onUpdate, onDelete }: TodoNotesPan
 
   return (
     <>
+      {groupOptions.length > 1 && (
+        <TodoGroupFilter
+          options={groupOptions}
+          selected={groupKey}
+          onSelect={setGroupKey}
+          kind="notes"
+        />
+      )}
+
       <div className="todo-note-form">
         <textarea
           className="todo-note-form__textarea form-input"
@@ -744,15 +753,6 @@ function TodoNotesPanel({ notes, busy, onAdd, onUpdate, onDelete }: TodoNotesPan
           {t('todo.addNote')}
         </button>
       </div>
-
-      {groupOptions.length > 1 && (
-        <TodoGroupFilter
-          options={groupOptions}
-          selected={groupKey}
-          onSelect={setGroupKey}
-          kind="notes"
-        />
-      )}
 
       {shownNotes.length === 0 ? (
         <TodoEmptyState icon={StickyNote} text={t('todo.emptyNotes')} />

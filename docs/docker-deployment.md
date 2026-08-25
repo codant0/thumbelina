@@ -277,9 +277,11 @@ docker run -d --name registry --restart=unless-stopped -p 5000:5000 registry:2
 
 ```bash
 docker login <REGISTRY>          # 一次即可
-REGISTRY=192.168.1.100:5000 ./deploy/online/build-and-push.sh   # tag 默认取 git 短 commit
-# REGISTRY=... TAG=v1.2 ./deploy/online/build-and-push.sh       # 手动指定 tag
+REGISTRY=192.168.1.100:5000 ./deploy/online/build-and-push.sh   # 版本自动递增（读根目录 VERSION 末位 +1 并回写）
+# REGISTRY=... ./deploy/online/build-and-push.sh v1.2.3         # 手动指定版本
 ```
+
+版本号由三部分组成（`vX.Y.Z`），当前版本维护在仓库根目录 `VERSION` 文件。未指定版本参数时脚本自动将末位 +1（如 `v0.0.1` → `v0.0.2`）并回写文件，镜像以该版本号作为 tag 推送。
 
 脚本用 `buildx` 同时构建 `linux/amd64` 和 `linux/arm64` 镜像并推送，NAS 拉取时自动匹配自身架构。首次在 x86 上构建 arm64 需先启用 QEMU：
 
@@ -292,10 +294,11 @@ docker run --privileged --rm tonistiigi/binfmt --install all
 ```bash
 docker login <REGISTRY>
 cd /path/to/thumbelina
-REGISTRY=192.168.1.100:5000 TAG=<上一步的 tag> ./deploy/online/pull-and-run.sh
+REGISTRY=192.168.1.100:5000 ./deploy/online/pull-and-run.sh       # 使用 VERSION 文件当前版本
+# REGISTRY=192.168.1.100:5000 ./deploy/online/pull-and-run.sh v1.2.3   # 与 build 相同的版本
 ```
 
-`pull-and-run.sh` 会设置 `THUMBELINA_IMAGE` 并执行 `docker compose pull thumbelina`（只拉镜像、不构建）后 `up -d`。之后更新版本：PC 重新构建推送新 tag，NAS 换 tag 再执行一遍即可。
+`pull-and-run.sh` 会设置 `THUMBELINA_IMAGE` 并执行 `docker compose pull thumbelina`（只拉镜像、不构建）后 `up -d`。之后更新版本：PC 重新构建推送新版本，NAS 同步仓库后换成 VERSION 文件新版本再执行一遍即可。
 
 > 说明：`docker-compose.yml` 同时声明了 `build` 和 `image`。本地 `docker compose up -d --build` 走构建流程不受影响；NAS 端不构建，依赖 `pull` 拉取的镜像运行。
 
@@ -306,12 +309,12 @@ NAS 无法直连 registry 或不想搭私有仓库时，把镜像导出为 tar �
 **1) PC 端构建并导出**
 
 ```bash
-sh ./deploy/offline/export-image.sh                 # 默认 amd64，tag=latest
+sh ./deploy/offline/export-image.sh                 # 默认 amd64，版本自动递增（读根目录 VERSION 末位 +1 并回写）
 # ARCH=arm64 ./deploy/offline/export-image.sh    # 绿联 DH 系列（ARM）
-# ARCH=arm64 TAG=v1.2 ./deploy/offline/export-image.sh
+# ARCH=arm64 ./deploy/offline/export-image.sh v0.1.0
 ```
 
-生成 `thumbelina-<arch>-<tag>.tar`。首次在 x86 上构建 arm64 需先启用 QEMU（同 7.3）。
+生成 `thumbelina-<arch>-<version>.tar`（版本号即 `VERSION` 文件中的 `vX.Y.Z`）。首次在 x86 上构建 arm64 需先启用 QEMU（同 7.3）。
 
 **2) 拷贝到 NAS**
 
@@ -321,7 +324,7 @@ U 盘 / SMB 共享 / SCP 均可，无需联网。
 
 ```bash
 cd /path/to/thumbelina
-./deploy/offline/load-and-run.sh thumbelina-arm64-latest.tar
+./deploy/offline/load-and-run.sh thumbelina-arm64-v0.0.1.tar   # 版本号自动从文件名识别
 ```
 
 > NAS 上建议把数据放到存储盘而非 Docker 卷目录：启动前 `export THUMBELINA_DATA_DIR=/volume1/thumbelina/data`（或写入项目根 `.env`），再执行 `load-and-run.sh` / `docker compose up -d`，见 [4.3](#43-指定数据文件存放路径)。
