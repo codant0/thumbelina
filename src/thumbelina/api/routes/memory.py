@@ -17,7 +17,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from thumbelina.api.deps import get_memory_service
 from thumbelina.memory.exceptions import MemoryEntryNotFoundError, MemoryServiceError
 from thumbelina.memory.paths import _resolve
-from thumbelina.memory.search import search_entries
 from thumbelina.memory.service import MemoryService
 
 logger = logging.getLogger(__name__)
@@ -136,23 +135,29 @@ async def search_memory(
     top_k: int = Query(8, ge=1, le=50, description="返回前 K 条命中"),
     service: MemoryService | None = Depends(get_memory_service),
 ) -> list[dict[str, Any]]:
-    """对索引摘要做 n-gram 检索,返回命中条目(含分数)。"""
+    """分层全文检索:对 L0 标题/摘要 + L1 概览 + L2 正文分块打分。
+
+    返回命中条目的标题/摘要/分数/命中字段/命中片段/更新时间/来源。
+    """
     _check_roles(request)
     _enforce_rate_limit(request)
     svc = _require_service(service)
     try:
-        index = await svc.load_index()
+        hits = await svc.search_content(q, top_k=top_k)
     except Exception as exc:
-        logger.warning("Memory search load_index failed", exc_info=True)
+        logger.warning("Memory search failed", exc_info=True)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    hits = search_entries(index.entries, q, top_k=top_k)
     return [
         {
             "title": h.title,
             "category": h.category,
             "slug": h.slug,
             "summary": h.summary,
-            "score": h.score,
+            "score": round(h.score, 4),
+            "matched_field": h.matched_field,
+            "snippet": h.snippet,
+            "updated": h.updated,
+            "source": h.source,
         }
         for h in hits
     ]

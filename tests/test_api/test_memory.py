@@ -299,6 +299,27 @@ class TestSearch:
         assert resp.status_code == 200
         assert resp.json() == []
 
+    async def test_search_returns_layered_fields(self, memory_app) -> None:
+        """分层检索返回命中字段/片段,且正文命中可被召回。"""
+        client, app = memory_app
+        svc: MemoryService = app.state.memory_service
+        await svc.update_memory(
+            _entry(
+                slug="trip",
+                title="用户:旅行计划",
+                overview="出行时间段与目的地。",
+                full_text="- 2026-09-01:预订大阪酒店。\n- 2026-09-03:购买环球影城门票。",
+            )
+        )
+        resp = client.get("/api/v1/memory/search", params={"q": "环球影城"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert any(h["slug"] == "trip" for h in data)
+        trip = next(h for h in data if h["slug"] == "trip")
+        assert trip["matched_field"] == "full_text"
+        assert "环球影城" in trip["snippet"]
+        assert trip["updated"]
+
     async def test_search_503_when_no_service(self, memory_app_no_service) -> None:
         client, _ = memory_app_no_service
         resp = client.get("/api/v1/memory/search", params={"q": "x"})

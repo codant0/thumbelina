@@ -28,13 +28,14 @@ from thumbelina.filestore import (
     write_text_atomic,
 )
 from thumbelina.memory.exceptions import MemoryEntryNotFoundError, MemoryServiceError
-from thumbelina.memory.models import MemoryEntry, MemoryIndex
+from thumbelina.memory.models import ContentHit, MemoryEntry, MemoryIndex
 from thumbelina.memory.parser import (
     build_index,
     parse_overview_only,
     scan_entries,
 )
 from thumbelina.memory.paths import _resolve, resolve_index
+from thumbelina.memory.search import search_entries_full
 from thumbelina.rag.retrieval.context_formatter import estimate_tokens
 
 logger = logging.getLogger(__name__)
@@ -174,6 +175,23 @@ class MemoryService:
     ) -> MemoryEntry:
         """读取单条记忆的完整内容(概览 + 全文,受 ``max_full_tokens`` 截断)。"""
         return await self.read_full(category, slug, user_id=user_id)
+
+    async def search_content(
+        self,
+        query: str,
+        top_k: int = 8,
+        *,
+        user_id: str = DEFAULT_USER_ID,
+    ) -> list[ContentHit]:
+        """分层全文检索(L0 标题/摘要 + L1 概览 + L2 正文)。
+
+        条目在扫描时已完整解析(``scan_entries`` 解析到概览与全文区间),
+        直接复用内存结果,不额外读盘;打分见 :func:`search_entries_full`。
+        """
+        del user_id  # 本期忽略,签名预留
+        async with self._locks.locked(self._index_path):
+            entries = await asyncio.to_thread(scan_entries, self._base, self._categories)
+        return search_entries_full(entries, query, top_k=top_k)
 
     # ------------------------------------------------------------------
     # 写路径

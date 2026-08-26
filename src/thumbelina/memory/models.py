@@ -67,6 +67,28 @@ class MemoryHit:
 
 
 @dataclass
+class ContentHit:
+    """分层全文检索命中(L0 标题/摘要 + L1 概览 + L2 正文)。
+
+    ``score`` 为字段权重加权 + 分块 max-pooling 的确定性得分;
+    ``matched_field`` 为贡献最高分的字段(``title``/``summary``/
+    ``overview``/``full_text``);``snippet`` 为命中块截断片段,
+    供前端高亮展示;``entry`` 为完整条目引用。
+    """
+
+    title: str
+    category: str
+    slug: str
+    summary: str
+    score: float
+    matched_field: str = ""
+    snippet: str = ""
+    updated: str = ""
+    source: str = ""
+    entry: MemoryEntry | None = None
+
+
+@dataclass
 class UpdateDecision:
     """抽取器输出模型(见设计文档 §8.5 JSON schema)。
 

@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 from thumbelina.memory.models import MemoryEntry
-from thumbelina.memory.search import search_entries, select_for_injection
+from thumbelina.memory.search import search_entries, search_entries_full, select_for_injection
 
 
 def _e(
@@ -20,6 +20,8 @@ def _e(
     summary: str,
     *,
     updated: str = "2026-08-16",
+    overview: str = "",
+    full_text: str = "",
 ) -> MemoryEntry:
     return MemoryEntry(
         title=title,
@@ -27,8 +29,8 @@ def _e(
         slug=slug,
         summary=summary,
         updated=updated,
-        overview="",
-        full_text="",
+        overview=overview,
+        full_text=full_text,
     )
 
 
@@ -161,3 +163,110 @@ class TestSelectForInjection:
 
     def test_empty_entries_returns_empty(self) -> None:
         assert select_for_injection([], "q", index_token_cap=600, top_k=8) == []
+
+
+class TestSearchEntriesFull:
+    """分层全文检索(设计 §7.2 扩展):L0/L1/L2 分块 max-pooling。"""
+
+    def test_full_text_hit_when_index_misses(self) -> None:
+        """关键词只出现在正文时可被命中(L2),解决"分块存储查询难"。"""
+        entries = [
+            _e(
+                "用户:旅行计划",
+                "user",
+                "trip",
+                "计划日本之行。",
+                overview="出行时间段与目的地。",
+                full_text=(
+                    "- 2026-09-01:预订大阪酒店,靠近梅田站。\n"
+                    "- 2026-09-03:购买环球影城门票。\n"
+                    "- 备注:记得带转换插头。"
+                ),
+            ),
+            _e("用户:编程偏好", "user", "prog", "偏好 Python。"),
+        ]
+        hits = search_entries_full(entries, "环球影城", top_k=8)
+        assert any(h.slug == "trip" for h in hits)
+        trip = next(h for h in hits if h.slug == "trip")
+        assert trip.matched_field == "full_text"
+        assert "环球影城" in trip.snippet
+
+    def test_overview_second_priority(self) -> None:
+        """概览命中时 matched_field 为 overview。"""
+        entries = [
+            _e(
+                "项目:部署环境",
+                "project",
+                "deploy",
+                "线上为 Docker 部署。",
+                overview="服务器地址与容器编排方式。",
+            ),
+        ]
+        hits = search_entries_full(entries, "容器编排", top_k=8)
+        assert hits
+        assert hits[0].matched_field == "overview"
+
+    def test_title_higher_weight_than_full_text(self) -> None:
+        """标题命中分 > 同词仅在正文中出现的分。"""
+        entries = [
+            _e("主题:数据库选型", "topic", "db-title", "数据库选型记录。",
+               full_text=""),
+            _e("主题:杂记", "topic", "db-body", "无关摘要。",
+               full_text="这里讨论过数据库选型的细节与权衡。"),
+        ]
+        hits = search_entries_full(entries, "数据库选型", top_k=8)
+        title_slug = next(h.slug for h in hits if h.slug == "db-title")
+        body_slug = next(h.slug for h in hits if h.slug == "db-body")
+        title_score = next(h.score for h in hits if h.slug == title_slug)
+        body_score = next(h.score for h in hits if h.slug == body_slug)
+        assert title_score > body_score
+
+    def test_snippet_truncated(self) -> None:
+        """长正文命中片段被截断且附省略号。"""
+        long_full = "句" * 300  # > 160 字触发拆句,仍为单块时截断
+        entries = [
+            _e("用户:A", "user", "a", "摘要", full_text=f"关键词 {long_full}"),
+        ]
+        hits = search_entries_full(entries, "关键词", top_k=8)
+        assert hits
+        assert len(hits[0].snippet) <= 201  # 200 + 省略号
+        assert hits[0].snippet.endswith("…")
+
+    def test_matched_field_and_meta_populated(self) -> None:
+        """命中携带 updated/source 元数据。"""
+        entries = [
+            _e("用户:B", "user", "b", "摘要", updated="2026-08-20", full_text="正文含 SQLite"),
+        ]
+        hits = search_entries_full(entries, "SQLite", top_k=8)
+        assert hits
+        h = hits[0]
+        assert h.updated == "2026-08-20"
+        assert h.source == ""
+        assert h.slug == "b"
+
+    def test_no_hits_returns_empty(self) -> None:
+        entries = [_e("用户:C", "user", "c", "摘要", full_text="正文内容")]
+        assert search_entries_full(entries, "zzzzznomatch", top_k=8) == []
+
+    def test_empty_inputs_returns_empty(self) -> None:
+        assert search_entries_full([], "q", top_k=8) == []
+        assert search_entries_full([_e("A", "user", "a", "摘要")], "", top_k=8) == []
+        assert search_entries_full([_e("A", "user", "a", "摘要")], "   ", top_k=8) == []
+        assert search_entries_full([_e("A", "user", "a", "摘要")], "q", top_k=0) == []
+
+    def test_topk_respected(self) -> None:
+        entries = [
+            _e(f"条目{i}", "user", f"s{i}", f"摘要 {i}", full_text=f"关键词内容 {i}")
+            for i in range(5)
+        ]
+        hits = search_entries_full(entries, "关键词", top_k=2)
+        assert len(hits) == 2
+
+    def test_descending_score_order(self) -> None:
+        entries = [
+            _e("低相关", "user", "low", "正文无关键词"),
+            _e("高相关", "user", "high", "正文含关键词关键词关键词"),
+        ]
+        hits = search_entries_full(entries, "关键词", top_k=8)
+        assert len(hits) >= 2
+        assert hits[0].score >= hits[1].score
