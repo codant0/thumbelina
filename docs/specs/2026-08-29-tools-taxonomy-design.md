@@ -223,3 +223,22 @@ class ThumbelinaBaseTool(BaseTool):
 - `tool_node` / `bind_tools` / `ainvoke` 调用路径不变。
 - 失败仍返回 `Error:` 前缀字符串，成功仍返回 `str`。
 - `workspace_context` ContextVar 机制不变。
+
+## 11. 实现期勘误（SDD 执行期裁定，2026-08-29，feat/tools-taxonomy）
+
+1. **§3/§6 修订：记忆三类物理留在 `memory/tools.py`**，不迁入 `tools/` 包。仅换基类
+   （`SearchMemoryTool`/`ReadMemoryTool`→`PerceptionTool`，`RememberTool`→`ExecutionTool`）
+   与生命周期写法；`make_memory_tools` 出口、`graph.py` 的 `RememberTool` import 均不变。
+   import 方向 memory→tools，无循环；分类语义不受影响。
+2. **§4.3 修订：未建 `TaskTool` 类**。协作工具用显式 `args_schema` 内联模型声明强类型
+   `task: str` 字段，契约语义等价（LLM 可见 schema 相同）；`report_status` 作为
+   `ListSubagentsTool` 静态方法。
+3. **§5.3 修订：`create_skill_composition` 的 verify 不检查 composition.id**——失败路径
+   已由 `_execute` 返回 `Failed to create composition:` 串，重复报警无增益，返回 `Ok()`。
+4. **§5.3 精确化：`write_file` 以 `newline=""` 写字节精确**（Windows 不再 `\n`→`\r\n`
+   转译），使「N bytes」文案与自验证字节比对同时为真；`self_verify` 取输出中**最后**
+   一个 `[exit code: N]` 标记（防程序伪造先前标记）。
+5. **§5.1 增强（终审）：** `rm` 黑名单覆盖 `-rf/-fr/-r -f/--recursive --force` 各种
+   合写/拆写顺序、目标为 `/` 开头任意路径（含 `/*`）；目录类保护守卫锚定工作区根
+   分段（`src/memory/` 不误伤），文件名类（`thumbelina.db*`/`.env*`）任意层级。
+   已知残留：`rm -rf --no-preserve-root /` 长短选项混写形式可绕过（后续项）。
