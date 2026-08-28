@@ -6,7 +6,7 @@ from typing import Any
 
 from langchain_core.tools import BaseTool
 
-from thumbelina.tools.file_ops import write_file
+from thumbelina.tools.execution import RunShellTool, WriteFileTool
 from thumbelina.tools.perception import (
     AnalyzeTextTool,
     FetchUrlTool,
@@ -18,7 +18,6 @@ from thumbelina.tools.perception import (
     SearchTextTool,
     make_web_search_tool,
 )
-from thumbelina.tools.shell import run_shell
 
 # 感知工具已类化(Task 2);模块级实例保持旧符号可用,收口在 Task 7。
 read_file = ReadFileTool()
@@ -29,6 +28,9 @@ parse_json = ParseJsonTool()
 parse_csv = ParseCsvTool()
 analyze_text = AnalyzeTextTool()
 search_text = SearchTextTool()
+# 执行工具已类化(Task 4);同样保留模块级实例垫片。
+write_file = WriteFileTool()
+run_shell = RunShellTool()
 
 __all__ = [
     "analyze_text",
