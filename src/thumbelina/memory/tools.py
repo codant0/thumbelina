@@ -258,7 +258,7 @@ def make_memory_tools(
     extractor: MemoryExtractor | None = None,
     search_top_k: int = 8,
 ) -> list[BaseTool]:
-    """组装记忆工具列表,供阶段三 ``_make_memory_tools()`` 直接调用。
+    """组装记忆工具列表,供 ``ThumbelinaAgent`` 装配。
 
     Parameters
     ----------

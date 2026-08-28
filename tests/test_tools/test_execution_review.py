@@ -33,6 +33,13 @@ def test_module_constants_exported():
         "echo x > /dev/sda",
         "echo x>/dev/sda",
         "chmod -R 777 /",
+        # 终审 I-1:rm 变体(r/f 合并、拆分、--force 长形式)删任意绝对路径/根通配
+        "rm -rf /",
+        "rm -rf /*",
+        "rm -rf /etc",
+        "rm -fr /",
+        "rm -r -f /usr",
+        "rm --recursive --force /srv",
     ],
 )
 @pytest.mark.asyncio
@@ -41,6 +48,27 @@ async def test_dangerous_commands_rejected(cmd):
 
     verdict = await RunShellTool().security_review({"command": cmd})
     assert isinstance(verdict, Reject)
+
+
+# 终审 I-1:相对路径与无危险标志的 rm 不得误伤
+@pytest.mark.parametrize(
+    "cmd",
+    ["rm -rf ./build", "rm file.txt", "rm -rf build", "rm ../x/y.txt"],
+)
+@pytest.mark.asyncio
+async def test_ordinary_rm_allowed(cmd):
+    from thumbelina.tools.base import Allow
+
+    verdict = await RunShellTool().security_review({"command": cmd})
+    assert isinstance(verdict, Allow)
+
+
+# 终审 M-2:ExecutionTool 抽象门槛必须真生效
+def test_execution_tool_is_abstract():
+    from thumbelina.tools.execution import ExecutionTool
+
+    with pytest.raises(TypeError):
+        ExecutionTool()
 
 
 @pytest.mark.parametrize("cmd", ["git push --force", "npm publish", "sudo ls"])
@@ -110,6 +138,45 @@ async def test_write_file_rejects_protected_dirs(tmp_path):
     for p in ["prompts/roles/x.md", ".env", "plugins/y.py", "MEMORY/a/b.md"]:
         out = await WriteFileTool()._arun(path=p, content="x")
         assert "安全审查拒绝" in out, p
+
+
+# 终审 I-2:目录类守卫只锚定工作区根分段,深层同名目录的普通代码不得误伤;
+# 根级命中仍必须拒绝。
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "p",
+    ["src/memory/util.py", "app/plugins/views.py", "docs/prompts/roles/x.md"],
+)
+async def test_deep_same_name_dirs_allowed(tmp_path, p):
+    from thumbelina.tools.workspace_context import set_workspace
+
+    set_workspace(str(tmp_path))
+    out = await WriteFileTool()._arun(path=p, content="x")
+    assert "Successfully wrote" in out, p
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("p", ["MEMORY/a.md", "plugins/y.py", "prompts/roles/z.md"])
+async def test_root_level_protected_dirs_rejected(tmp_path, p):
+    from thumbelina.tools.workspace_context import set_workspace
+
+    set_workspace(str(tmp_path))
+    out = await WriteFileTool()._arun(path=p, content="x")
+    assert "安全审查拒绝" in out, p
+
+
+# 终审 I-3:Windows 下文本模式换行转译导致 st_size 与内容字节数不符的假告警。
+# newline="" 字节精确写入后,含 \n 与 \r\n 的内容均不得触发 [warn],
+# 且文件字节数 == len(content.encode("utf-8"))。
+@pytest.mark.asyncio
+@pytest.mark.parametrize("content", ["line1\nline2\n", "line1\r\nline2\r\n"])
+async def test_write_file_crlf_byte_exact(tmp_path, content):
+    from thumbelina.tools.workspace_context import set_workspace
+
+    set_workspace(str(tmp_path))
+    out = await WriteFileTool()._arun(path="crlf.txt", content=content)
+    assert "[warn]" not in out
+    assert (tmp_path / "crlf.txt").read_bytes() == content.encode("utf-8")
 
 
 @pytest.mark.asyncio

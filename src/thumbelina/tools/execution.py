@@ -29,8 +29,34 @@ logger = logging.getLogger(__name__)
 
 _TIMEOUT = 30
 
+def _rm_root_patterns() -> list[re.Pattern]:
+    """rm 递归+强制删除任意绝对路径(/、/*、/etc)的黑名单正则(终审 I-1)。
+
+    语义:rm 后跟一串选项 token(r/f 可合写 ``-rf``/``-fr``、拆写 ``-r -f``,
+    长参数 ``--recursive``/``--force`` 各算一个标志;``-(?!-)`` 保证短选项
+    按字母匹配、长选项按词面匹配),目标以 ``/`` 开头 → Reject。
+    ``rm -rf ./build``、``rm file.txt`` 等相对/无标志命令不误伤;
+    仅含 r 或仅含 f 不构成危险组合。两条正则分别处理「合写」与「拆写」,
+    拆写两条枚举 r→f 与 f→r 顺序(可读优先)。
+    """
+    both = r"(?:\s+-\w*r\w*f\w*|\s+-\w*f\w*r\w*)"  # 合写:同一短选项含 r 与 f
+    skip = r"(?:\s+-\w+)*"                 # 夹带的中性选项
+    r_tok = r"\s+-(?!-)\w*r\w*"            # 递归短选项(含 r 字母)
+    f_tok = r"\s+-(?!-)\w*f\w*"            # 强制短选项(含 f 字母)
+    r_long = r"\s+--recursive"             # 长参数等价形式
+    f_long = r"\s+--force"
+    target = r"\s+(/\S*)(?:\s|$)"          # 以 / 开头的目标(/、/*、/etc/...)
+    return [
+        re.compile(rf"\brm{both}{skip}{target}", re.I),
+        re.compile(rf"\brm{r_tok}{skip}{f_tok}{skip}{target}", re.I),
+        re.compile(rf"\brm{f_tok}{skip}{r_tok}{skip}{target}", re.I),
+        re.compile(rf"\brm{r_long}{skip}{f_long}{skip}{target}", re.I),
+        re.compile(rf"\brm{f_long}{skip}{r_long}{skip}{target}", re.I),
+    ]
+
+
 DANGEROUS_PATTERNS: list[re.Pattern] = [
-    re.compile(r"\brm\s+(-[a-z]*r[a-z]*f|--recursive)\s+/(\s|$)", re.I),
+    *_rm_root_patterns(),
     re.compile(r"\bmkfs\b", re.I),
     re.compile(r"\bdd\b[^\n]*\bof=/dev/", re.I),
     re.compile(r":\(\)\s*{", re.I),                      # fork 炸弹头部
@@ -53,18 +79,31 @@ PROTECTED_PATH_PATTERNS: list[str] = [
 ]
 
 
-def _is_protected(raw: str) -> str | None:
-    """命中保护路径则返回该模式,否则 None。以路径分段做前缀/相等匹配,避免误伤。"""
+def _is_protected(raw: str, workspace: str | None = None) -> str | None:
+    """命中保护路径则返回该模式,否则 None。
+
+    终审 I-2:目录类守卫(带尾斜杠,如 MEMORY/、plugins/)只锚定工作区
+    相对路径的开头分段——深层同名目录(src/memory/util.py、app/plugins/
+    views.py)是普通代码,不应误伤;文件名类守卫(thumbelina.db*、.env*)
+    保持任意层级分段匹配(数据/秘密文件放到哪都危险)。
+    绝对路径先以 workspace(无 workspace 时退到 CWD)前缀相对化再取分段;
+    前缀不匹配时保守地按原分段锚定。
+    """
     posix = raw.replace("\\", "/").lower()
     parts = [seg for seg in posix.split("/") if seg]
+    base = (workspace or os.getcwd()).replace("\\", "/").rstrip("/").lower()
+    base_parts = [seg for seg in base.split("/") if seg]
+    if base_parts and parts[: len(base_parts)] == base_parts:
+        parts = parts[len(base_parts):]
     for guard in PROTECTED_PATH_PATTERNS:
         g = guard.lower()
         if g.endswith("/"):
-            dirs = g.rstrip("/").split("/")
-            for i in range(len(parts) - len(dirs) + 1):
-                if parts[i : i + len(dirs)] == dirs:
-                    return guard
+            # 目录类:仅锚定开头分段
+            dirs = [seg for seg in g.rstrip("/").split("/") if seg]
+            if parts[: len(dirs)] == dirs:
+                return guard
         else:
+            # 文件名类:任意层级
             for seg in parts:
                 if seg == g or seg.startswith(g):
                     return guard
@@ -165,7 +204,7 @@ class WriteFileTool(ExecutionTool):
         except ValueError as exc:
             return Reject(str(exc))
         # 第二道:保护路径(含 resolve 前的原始相对路径与解析后的绝对路径)
-        guard = _is_protected(raw)
+        guard = _is_protected(raw, get_workspace())
         if guard:
             return Reject(f"受保护路径: {guard}")
         return Allow()
@@ -178,8 +217,11 @@ class WriteFileTool(ExecutionTool):
             return f"Error: {exc}"
         try:
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(content, encoding="utf-8")
-            return f"Successfully wrote {len(content)} bytes to {path}"
+            # 终审 I-3:newline="" 关闭平台换行转译,字节精确落盘——
+            # Windows 下文本模式会把 \n 转成 \r\n,导致 st_size 与
+            # len(content.encode()) 不符,自验证每次误报 [warn]。
+            p.write_text(content, encoding="utf-8", newline="")
+            return f"Successfully wrote {len(content.encode('utf-8'))} bytes to {path}"
         except PermissionError:
             return f"Error: Permission denied: {path}"
         except OSError as exc:
