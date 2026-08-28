@@ -1,8 +1,6 @@
 """Agent 记忆工具(见设计文档 §7.3 表)。
 
-三个 LangChain ``BaseTool`` 子类,供阶段三 ``_make_memory_tools()``
-并入 ``self.tools``(对齐 ``_make_subagent_tools``/``_make_scheduler_tools``
-模式):
+三个分类体系工具子类,供 ``ThumbelinaAgent`` 装配并入 ``self.tools``:
 
   - :class:`SearchMemoryTool` —— 对索引摘要 n-gram 检索,返回命中条目
     的标题/摘要/链接文本(L0→L1 入口)。
@@ -28,6 +26,9 @@ from thumbelina.memory.exceptions import MemoryEntryNotFoundError, MemoryService
 from thumbelina.memory.extractor import MemoryExtractor
 from thumbelina.memory.search import search_entries
 from thumbelina.memory.service import DEFAULT_USER_ID, MemoryService
+from thumbelina.tools.base import Allow, Ok
+from thumbelina.tools.execution import ExecutionTool
+from thumbelina.tools.perception import PerceptionTool
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +75,7 @@ class _RememberArgs(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class SearchMemoryTool(BaseTool):
+class SearchMemoryTool(PerceptionTool):
     """对记忆索引摘要做 n-gram 检索,返回命中条目的标题/摘要/链接。
 
     用于从 L0 索引找到相关记忆入口,再用 ``read_memory`` 拉取详情。
@@ -92,7 +93,7 @@ class SearchMemoryTool(BaseTool):
     service: MemoryService
     top_k: int = 8
 
-    async def _arun(
+    async def _execute(
         self,
         search_memory_query: str,
         **kwargs: Any,
@@ -114,12 +115,8 @@ class SearchMemoryTool(BaseTool):
         ]
         return f"找到 {len(hits)} 条相关记忆:\n" + "\n".join(lines)
 
-    def _run(self, search_memory_query: str, **kwargs: Any) -> str:
-        del kwargs
-        return "search_memory 仅支持异步调用(_arun);请在异步 agent 循环中使用。"
 
-
-class ReadMemoryTool(BaseTool):
+class ReadMemoryTool(PerceptionTool):
     """分层读取一条记忆的概览(默认)或全文。"""
 
     name: str = "read_memory"
@@ -134,7 +131,7 @@ class ReadMemoryTool(BaseTool):
 
     service: MemoryService
 
-    async def _arun(
+    async def _execute(
         self,
         read_memory_category: str,
         read_memory_slug: str,
@@ -172,18 +169,8 @@ class ReadMemoryTool(BaseTool):
             logger.warning("read_memory 读取失败", exc_info=True)
             return "读取记忆时发生意外错误。"
 
-    def _run(
-        self,
-        read_memory_category: str,
-        read_memory_slug: str,
-        read_memory_depth: str = "overview",
-        **kwargs: Any,
-    ) -> str:
-        del kwargs
-        return "read_memory 仅支持异步调用(_arun);请在异步 agent 循环中使用。"
 
-
-class RememberTool(BaseTool):
+class RememberTool(ExecutionTool):
     """记录一条事实,走抽取器同一写路径入库(受单轮配额与去重)。
 
     单轮配额计数器为实例级 ``_turn_count``(默认 0);阶段三在每轮
@@ -219,7 +206,16 @@ class RememberTool(BaseTool):
         """返回本轮已使用的 remember 配额数。"""
         return self._turn_count
 
-    async def _arun(self, remember_fact: str, **kwargs: Any) -> str:
+    async def security_review(self, args: dict[str, Any]) -> Allow:
+        # 写入走抽取器既有安全路径(§8.6 去重/配额),无额外静态危险模式可审。
+        return Allow()
+
+    async def self_verify(self, args: dict[str, Any], result: str) -> Ok:
+        # decision 合法性已由 _execute 的 _format_result 兜底(getattr 默认 NOOP);
+        # NOOP 说明文案在 _execute 返回,不追加 warn(spec §5.3)。
+        return Ok()
+
+    async def _execute(self, remember_fact: str, **kwargs: Any) -> str:
         del kwargs
         if self._turn_count >= REMEMBER_PER_TURN_LIMIT:
             return f"本轮 remember 调用已达上限({REMEMBER_PER_TURN_LIMIT} 次),其余事实请下轮再记。"
@@ -232,10 +228,6 @@ class RememberTool(BaseTool):
             logger.warning("remember 抽取失败", exc_info=True)
             return "记录事实时发生错误,未能写入记忆库。"
         return self._format_result(decision, remember_fact)
-
-    def _run(self, remember_fact: str, **kwargs: Any) -> str:
-        del kwargs
-        return "remember 仅支持异步调用(_arun);请在异步 agent 循环中使用。"
 
     @staticmethod
     def _format_result(decision: Any, fact: str) -> str:

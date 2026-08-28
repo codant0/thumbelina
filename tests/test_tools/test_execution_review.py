@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from types import SimpleNamespace
 
 import pytest
 
@@ -127,3 +128,100 @@ async def test_write_file_workspace_escape(tmp_path):
     set_workspace(str(tmp_path))
     out = await WriteFileTool()._arun(path="../outside.txt", content="x")
     assert out.startswith("Error:")
+
+
+# ---------------------------------------------------------------------------
+# RememberTool(迁入执行体系,Task 6):四文案/配额/可实例化/review+verify 已实现
+# ---------------------------------------------------------------------------
+
+
+def _fake_extractor(decision):
+    from unittest.mock import AsyncMock
+
+    from thumbelina.memory.extractor import MemoryExtractor
+
+    # spec= 使 mock 通过 pydantic 的 isinstance 校验(字段声明为 MemoryExtractor)
+    ex = AsyncMock(spec=MemoryExtractor)
+    ex.extract_from_messages = AsyncMock(return_value=decision)
+    return ex
+
+
+def _fake_service():
+    from unittest.mock import MagicMock
+
+    from thumbelina.memory.service import MemoryService
+
+    return MagicMock(spec=MemoryService)
+
+
+def _make_remember(decision):
+    from thumbelina.memory.tools import RememberTool
+
+    return RememberTool(service=_fake_service(), extractor=_fake_extractor(decision))
+
+
+def test_remember_tool_instantiable_and_category_execution():
+    """ExecutionTool 强制抽象 security_review/self_verify —— 可实例化即证明两者已实现。"""
+    from thumbelina.memory.tools import RememberTool
+    from thumbelina.tools.base import ToolCategory
+
+    t = _make_remember(SimpleNamespace(action="NOOP"))
+    assert isinstance(t, RememberTool)
+    assert t.category == ToolCategory.EXECUTION
+
+
+@pytest.mark.asyncio
+async def test_remember_search_read_categories():
+    from thumbelina.memory.tools import ReadMemoryTool, SearchMemoryTool
+    from thumbelina.tools.base import ToolCategory
+
+    s = SearchMemoryTool(service=_fake_service())
+    r = ReadMemoryTool(service=_fake_service())
+    assert s.category == ToolCategory.PERCEPTION
+    assert r.category == ToolCategory.PERCEPTION
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "decision,expected",
+    [
+        (
+            SimpleNamespace(
+                action="NEW",
+                entry=SimpleNamespace(category="user", slug="py-pref"),
+            ),
+            "已记下(新建 user/py-pref.md)",
+        ),
+        (
+            SimpleNamespace(
+                action="UPDATE",
+                entry=SimpleNamespace(category="user", slug="py-pref"),
+            ),
+            "已更新已有记忆(user/py-pref.md)",
+        ),
+        (
+            SimpleNamespace(action="DELETE", target="user/old"),
+            "已删除记忆(user/old)。",
+        ),
+        (SimpleNamespace(action="NOOP"), "无需记录(本轮没有新的稳定事实)"),
+    ],
+)
+async def test_remember_four_action_texts(decision, expected):
+    t = _make_remember(decision)
+    out = await t._arun(remember_fact="我偏好 Python 和类型注解")
+    assert out.startswith(expected)
+    assert "[warn]" not in out  # NOOP 说明文案在 _execute 返回,self_verify 不追加 warn
+
+
+@pytest.mark.asyncio
+async def test_remember_quota_exceeded_does_not_call_extractor():
+    from thumbelina.memory.tools import REMEMBER_PER_TURN_LIMIT
+
+    decision = SimpleNamespace(action="NOOP")
+    t = _make_remember(decision)
+    for _ in range(REMEMBER_PER_TURN_LIMIT):
+        await t._arun(remember_fact="事实")
+    assert t.extractor.extract_from_messages.await_count == REMEMBER_PER_TURN_LIMIT
+    out = await t._arun(remember_fact="超限事实")
+    assert "已达上限" in out
+    assert t.extractor.extract_from_messages.await_count == REMEMBER_PER_TURN_LIMIT
