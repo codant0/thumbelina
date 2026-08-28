@@ -3,6 +3,7 @@
 假 engine 覆盖 CompositionEngine 契约:
 create_composition / match_composition / execute_composition / composition_repo。
 """
+
 from __future__ import annotations
 
 import pytest

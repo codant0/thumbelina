@@ -1,4 +1,5 @@
 """感知工具迁移后行为回归: 名称、schema、错误文案不变。"""
+
 from __future__ import annotations
 
 import pytest
@@ -10,7 +11,8 @@ from thumbelina.tools.base import ToolCategory
 @pytest.mark.asyncio
 async def test_read_file_missing(tmp_path):
     t = p.ReadFileTool()
-    assert await t._arun(path=str(tmp_path / "nope")) == f"Error: File not found: {tmp_path / 'nope'}"
+    missing = str(tmp_path / "nope")
+    assert await t._arun(path=missing) == f"Error: File not found: {missing}"
 
 
 @pytest.mark.asyncio
@@ -75,8 +77,14 @@ def test_categories():
 def test_perception_tools_names():
     names = {t.name for t in p.perception_tools()}
     assert names == {
-        "read_file", "list_directory", "search_files", "fetch_url",
-        "parse_json", "parse_csv", "analyze_text", "search_text",
+        "read_file",
+        "list_directory",
+        "search_files",
+        "fetch_url",
+        "parse_json",
+        "parse_csv",
+        "analyze_text",
+        "search_text",
     }
     # web_search 受 config 门控,默认不在列表中
     assert "web_search" not in names

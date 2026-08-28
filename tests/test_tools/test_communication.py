@@ -1,4 +1,5 @@
 """用户沟通工具迁移测试(Task 5)。"""
+
 from __future__ import annotations
 
 import pytest

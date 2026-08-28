@@ -344,9 +344,7 @@ def make_web_search_tool(search_config_provider: Any) -> WebSearchTool:
 
 class ParseJsonTool(PerceptionTool):
     name: str = "parse_json"
-    description: str = (
-        "Parse JSON text and return a formatted summary (keys, types, structure)."
-    )
+    description: str = "Parse JSON text and return a formatted summary (keys, types, structure)."
     args_schema: type[BaseModel] = _ParseJsonArgs
 
     async def _execute(self, text: str) -> str:
@@ -385,9 +383,7 @@ class ParseJsonTool(PerceptionTool):
 
 class ParseCsvTool(PerceptionTool):
     name: str = "parse_csv"
-    description: str = (
-        "Parse CSV text and return column names, row count, and first few rows."
-    )
+    description: str = "Parse CSV text and return column names, row count, and first few rows."
     args_schema: type[BaseModel] = _ParseCsvArgs
 
     async def _execute(self, text: str) -> str:

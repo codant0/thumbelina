@@ -216,6 +216,8 @@ class ThumbelinaBaseTool(BaseTool):
 - 插件 `PluginType.TOOL` 产出真实工具实例
 - `security/` 模块与工具审查的整合（保持独立：工具审查是运行时，
   security 是 HTTP 层）
+- `run_shell` 真沙箱化（容器/只读挂载/stdin 非交互清洗）——对抗性隔离属
+  未来自建沙箱层，本期黑名单仅为行为塑形层（见 §11 第 7 条威胁模型定位）
 
 ## 10. 兼容性承诺
 
@@ -238,7 +240,40 @@ class ThumbelinaBaseTool(BaseTool):
 4. **§5.3 精确化：`write_file` 以 `newline=""` 写字节精确**（Windows 不再 `\n`→`\r\n`
    转译），使「N bytes」文案与自验证字节比对同时为真；`self_verify` 取输出中**最后**
    一个 `[exit code: N]` 标记（防程序伪造先前标记）。
-5. **§5.1 增强（终审）：** `rm` 黑名单覆盖 `-rf/-fr/-r -f/--recursive --force` 各种
+5. **§5.1 增强（终审）**：`rm` 黑名单覆盖 `-rf/-fr/-r -f/--recursive --force` 各种
    合写/拆写顺序、目标为 `/` 开头任意路径（含 `/*`）；目录类保护守卫锚定工作区根
    分段（`src/memory/` 不误伤），文件名类（`thumbelina.db*`/`.env*`）任意层级。
    已知残留：`rm -rf --no-preserve-root /` 长短选项混写形式可绕过（后续项）。
+6. **§2 判据修正（独立审核）：** 原判据「作用对象 + 副作用性质」二维未定优先级，
+   落地时对 `list_scheduled_tasks` 用了「对象优先」、对 `remember` 用了「性质优先」，
+   自相矛盾。修正为：主判据 = **副作用性质优先**（写外部状态即执行类）；例外原则 =
+   纯查询型工具（`list_*`/`search_*`/`read_*`）随其资源域归组（如
+   `list_scheduled_tasks` 归事件触发）；两判据仍多命中时，显式裁决序为
+   **副作用性质 > 资源域 > 作用对象**。
+7. **§5.1 威胁模型定位声明（独立审核）：** 正则黑名单是**行为塑形层（防误操作）+
+   纵深防御最外层，不是对抗性边界**。嵌套解释器（`bash -c`/`python -c`/
+   `os.system`）、变量展开（`$HOME`）、路径改写、shell 续行等构造上可绕过，
+   本节规则只求覆盖 LLM 高频输出中的直接危险形态。对抗性隔离由未来自建沙箱层
+   承担（见 §9）。
+8. **§4.2 异常留痕补充（独立审核）：** 「失败返回 `str`」约定下，基类模板的每个
+   try 分支在返回 `Error:` 串之前**同时 `logger.exception` 落栈**，保留第一现场
+   （栈信息只进日志，不进 ToolMessage/LLM 上下文）。且 try 范围覆盖
+   security_review / _execute / self_verify 三段（review 故障 fail-closed 转
+   Error，verify 故障降级为 `[warn] 结果自验证异常` 保留已发生输出），
+   修正原 docstring 与实现不符处。
+9. **安全规则已知缺口补记（独立审核，均 best-effort 不阻塞）：**
+   ① `--no-preserve-root` 长短选项混写绕过（见第 5 条）；
+   ② shell 续行：本轮已修「反斜杠+换行」折叠（`_normalize_command` 先折
+   `\\\r?\n` 再剥注释/折空白），其余续行构造（如变量分片）仍可绕过；
+   ③ 嵌套解释器（`bash -c "..."` 内部命令不受黑名单约束）；
+   ④ `rm ~`/`rm $HOME` 等家目录目标（无绝对路径前缀可锚）；
+   ⑤ 命令位误判：`grep -r shutdown src/` 会被 `\bshutdown\b` 误杀——引入命令
+   位置解析属过度设计，明确接受该误杀为已知局限。
+   可用性修正：`> /dev/null`、`2>/dev/null`、`dd of=/dev/null` 不再误杀
+   （负向前瞻排除 null）；Reject/Confirm reason 改为人类可读短名，不再泄露
+   正则源码（防污染 LLM 上下文与向模型披露规则）。
+10. **延迟副作用不受门控（设计缺口，后续项，不阻塞本 PR）：** `schedule_task`
+    注册的是「未来无人监督的完整 agent run」、`create_subagent` 无 spawn
+    深度/配额限制，二者当前默认 `Allow()`——执行时刻不在审查链路内、协作扇出
+    无上限。后续项：事件/协作类工具的轻量审查（延迟副作用声明式检查）+
+    spawn 深度/配额限制，连同 §9 的 run_shell 真沙箱化一并规划。

@@ -4,7 +4,8 @@
 
 所有 agent 工具继承 ``ThumbelinaBaseTool``(langchain BaseTool 子类)。
 公共生命周期下沉到 ``_arun``: security_review → _execute → self_verify,
-异常统一转为 ``Error:`` 字符串,不抛到 tool_node。
+三段自身的异常都被 try 捕获并统一转为 ``Error:`` / ``[warn]`` 字符串,
+不抛到 tool_node;spec §4.2。
 """
 
 from __future__ import annotations
@@ -75,19 +76,29 @@ class ThumbelinaBaseTool(BaseTool):
         """子类唯一必写方法;失败返回 ``Error: ...`` 字符串。"""
 
     async def _arun(self, **kwargs: Any) -> str:
-        verdict = await self.security_review(kwargs)
+        # 审核修复 B-9:review/verify 也纳入 try——原实现只兜 _execute,
+        # 二者自身异常会抛到 tool_node,违反「异常统一转 Error: 串」契约。
+        # 审查故障必须 fail-closed(不执行);验证故障保留已发生的输出。
+        try:
+            verdict = await self.security_review(kwargs)
+        except Exception as exc:
+            logger.exception("tool %s: security_review 异常", self.name)
+            return f"Error: {self.name}: 安全审查异常: {exc}"
         if isinstance(verdict, Reject):
             return f"Error: {self.name}: 安全审查拒绝: {verdict.reason}"
         if isinstance(verdict, Confirm):
             # 本期无人机交互:放行 + 日志,枚举保留三态为 HITL 留接口。
-            logger.warning(
-                "tool %s: 安全审查建议确认(已放行): %s", self.name, verdict.reason
-            )
+            logger.warning("tool %s: 安全审查建议确认(已放行): %s", self.name, verdict.reason)
         try:
             result = await self._execute(**kwargs)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
+            logger.exception("tool %s: _execute 异常", self.name)
             return f"Error: {self.name}: {exc}"
-        verify = await self.self_verify(kwargs, result)
+        try:
+            verify = await self.self_verify(kwargs, result)
+        except Exception as exc:
+            logger.exception("tool %s: self_verify 异常", self.name)
+            verify = Suspect(f"结果自验证异常: {exc}")
         if isinstance(verify, Suspect):
             result = f"{result}\n[warn] {verify.reason}"
         return result

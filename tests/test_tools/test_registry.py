@@ -1,12 +1,20 @@
 """get_all_tools 名称集合回归: 与重构前逐字一致(spec §7)。"""
+
 from __future__ import annotations
 
 from thumbelina.tools import get_all_tools
 
 EXPECTED = {
-    "read_file", "write_file", "list_directory", "search_files",
-    "fetch_url", "run_shell", "parse_json", "parse_csv",
-    "analyze_text", "search_text",
+    "read_file",
+    "write_file",
+    "list_directory",
+    "search_files",
+    "fetch_url",
+    "run_shell",
+    "parse_json",
+    "parse_csv",
+    "analyze_text",
+    "search_text",
 }
 
 

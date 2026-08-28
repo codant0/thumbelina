@@ -1,13 +1,12 @@
 """ThumbelinaBaseTool 模板方法契约测试。"""
+
 from __future__ import annotations
 
 import pytest
 from pydantic import BaseModel
 
 from thumbelina.tools.base import (
-    Allow,
     Confirm,
-    Ok,
     Reject,
     Suspect,
     ThumbelinaBaseTool,

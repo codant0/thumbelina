@@ -44,9 +44,13 @@ class CommunicationTool(ThumbelinaBaseTool):
             )
         target = user_id.strip() or getattr(ch, "last_user_id", None)
         if not target:
-            return None, "", (
-                f"Channel '{channel_name}' has no recent user to notify; "
-                "provide an explicit user_id."
+            return (
+                None,
+                "",
+                (
+                    f"Channel '{channel_name}' has no recent user to notify; "
+                    "provide an explicit user_id."
+                ),
             )
         return ch, target, None
 
@@ -71,21 +75,19 @@ class NotifyUserByChannelTool(CommunicationTool):
         "WeChat channel and to that channel's most recent user.\n\n"
         "Args:\n"
         "    message: The message text to send.\n"
-        "    channel: Channel name, e.g. \"wechat\" or \"qq\". Defaults to \"wechat\".\n"
+        '    channel: Channel name, e.g. "wechat" or "qq". Defaults to "wechat".\n'
         "    user_id: Target user ID. If empty, the channel's most recent user\n"
         "        is used."
     )
     args_schema: type[BaseModel] = _NotifyUserByChannelArgs
 
-    async def _execute(
-        self, message: str, channel: str = "wechat", user_id: str = ""
-    ) -> str:
+    async def _execute(self, message: str, channel: str = "wechat", user_id: str = "") -> str:
         ch, target, err = self.resolve_target(channel, user_id)
         if err:
             return err
         try:
             result = await ch.send_message(target, message)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return self.format_receipt(channel, target, None, exc=exc)
         return self.format_receipt(channel, target, result)
 

@@ -24,9 +24,7 @@ class _CreateSkillCompositionArgs(BaseModel):
         description="Comma-separated list of skill IDs to chain together.",
     )
     name: str = Field(..., description="Name for the composition.")
-    description: str = Field(
-        ..., description="Description of what the composition does."
-    )
+    description: str = Field(..., description="Description of what the composition does.")
 
 
 class _ListSkillCompositionsArgs(BaseModel):
@@ -34,9 +32,7 @@ class _ListSkillCompositionsArgs(BaseModel):
 
 
 class _ExecuteSkillCompositionArgs(BaseModel):
-    user_input: str = Field(
-        ..., description="User input used to find a matching composition."
-    )
+    user_input: str = Field(..., description="User input used to find a matching composition.")
 
 
 class SkillCompositionTool(ExecutionTool):
@@ -60,9 +56,7 @@ class CreateSkillCompositionTool(SkillCompositionTool):
     )
     args_schema: type[BaseModel] = _CreateSkillCompositionArgs
 
-    async def _execute(
-        self, skill_ids: str, name: str, description: str
-    ) -> str:
+    async def _execute(self, skill_ids: str, name: str, description: str) -> str:
         ids = [s.strip() for s in skill_ids.split(",") if s.strip()]
         if not ids:
             return "No skill IDs provided."
@@ -73,7 +67,7 @@ class CreateSkillCompositionTool(SkillCompositionTool):
             return (
                 f"Composition created with ID {composition.id}. Name: {name}. Skills: {len(ids)}."
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return f"Failed to create composition: {exc}"
 
     async def self_verify(self, args: dict[str, Any], result: str) -> Ok:
@@ -104,9 +98,7 @@ class ListSkillCompositionsTool(SkillCompositionTool):
 
 class ExecuteSkillCompositionTool(SkillCompositionTool):
     name: str = "execute_skill_composition"
-    description: str = (
-        "Find and execute a matching skill composition for the given input."
-    )
+    description: str = "Find and execute a matching skill composition for the given input."
     args_schema: type[BaseModel] = _ExecuteSkillCompositionArgs
 
     async def _execute(self, user_input: str) -> str:
@@ -116,9 +108,7 @@ class ExecuteSkillCompositionTool(SkillCompositionTool):
         result: str = await self.engine.execute_composition(composition, user_input)
         return result
 
-    async def self_verify(
-        self, args: dict[str, Any], result: str
-    ) -> Ok | Suspect:
+    async def self_verify(self, args: dict[str, Any], result: str) -> Ok | Suspect:
         # spec §5.3:执行结果为空串 → 可疑。
         if not result.strip():
             return Suspect("技能编组执行返回空结果")

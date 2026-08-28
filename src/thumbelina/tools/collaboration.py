@@ -38,8 +38,7 @@ class CreateSubagentTool(CollaborationTool):
             agent = await self.manager.create_agent(task)
             await self.manager.run_agent(agent.id)
             return (
-                f"Subagent created with ID {agent.id}. Task: {task}. "
-                f"Status: {agent.status.value}"
+                f"Subagent created with ID {agent.id}. Task: {task}. Status: {agent.status.value}"
             )
         except RuntimeError as exc:
             return f"Failed to create subagent: {exc}"
