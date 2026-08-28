@@ -80,3 +80,12 @@ def test_perception_tools_names():
     }
     # web_search 受 config 门控,默认不在列表中
     assert "web_search" not in names
+
+
+@pytest.mark.asyncio
+async def test_read_file_ainvoke_lifecycle(tmp_path):
+    """经 langchain ainvoke 入口走完整生命周期(security_review→_execute→self_verify)。"""
+    f = tmp_path / "life.txt"
+    f.write_text("via ainvoke", encoding="utf-8")
+    out = await p.ReadFileTool().ainvoke({"path": str(f)})
+    assert out == "via ainvoke"

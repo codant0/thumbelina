@@ -12,7 +12,7 @@ An AI-powered personal assistant built with [FastAPI](https://fastapi.tiangolo.c
 - **DeepSeek API Support** — Compatible via `openai` provider with graceful fallback for `/models` endpoint
 - **Agent Core** — LangGraph-powered agent loop with tool calling and conditional routing
 - **Role Prompts** — Role personas stored as files under `prompts/roles/` (built-in: assistant / coder), injected as the system prompt; supports a global default role and per-conversation switching in the Web UI
-- **Built-in Tools** — File operations, web requests, web search (Tavily / DuckDuckGo), shell commands, and data processing (JSON/CSV/text analysis/regex search)
+- **Built-in Tools** — File operations, web requests, web search (Tavily / DuckDuckGo), shell commands, and data processing (JSON/CSV/text analysis/regex search). Tools are organized into five categories — perception / execution / user communication / collaboration / event-trigger — and execution tools carry a security review and result self-verification step
 - **RAG (Retrieval-Augmented Generation)** — Document ingestion, chunking, embedding (HuggingFace via llama-index), vector retrieval (ChromaDB), and context-aware indexing pipeline
 - **Conversation Storage** — Persistent storage (SQLite) with keyword search, LLM-generated summaries, and auto-naming for new conversations
 - **Semantic Search** — Vector-based semantic search via ChromaDB, with hybrid keyword + semantic fallback

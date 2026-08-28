@@ -25,7 +25,7 @@ from thumbelina.tools.workspace_context import resolve_workspace_path
 
 _MAX_FILE_SIZE = 1 * 1024 * 1024  # 1MB
 _MAX_CONTENT_SIZE = 50 * 1024  # 50KB
-_RESULT_TOKEN_LIMIT = 4000  # 字符截断上限，防结果过大撑爆上下文
+_SEARCH_TRUNCATE_LIMIT = 4000  # web_search 结果字符截断上限，防结果过大撑爆上下文
 _SEARCH_MAX_HITS = 50
 _SEARCH_MAX_LINE = 500
 _SEARCH_MAX_FILE = 1 * 1024 * 1024
@@ -33,9 +33,9 @@ _MAX_RESULTS = 5
 
 
 def _truncate(text: str) -> str:
-    """搜索结果的公共截断助手(替代散落的 1MB/50KB/4000 截断三套逻辑)。"""
-    if len(text) > _RESULT_TOKEN_LIMIT:
-        return text[:_RESULT_TOKEN_LIMIT] + "\n... (truncated)"
+    """web_search 结果截断助手:超过 ``_SEARCH_TRUNCATE_LIMIT`` 字符时截断。"""
+    if len(text) > _SEARCH_TRUNCATE_LIMIT:
+        return text[:_SEARCH_TRUNCATE_LIMIT] + "\n... (truncated)"
     return text
 
 
