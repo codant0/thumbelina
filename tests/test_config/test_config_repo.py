@@ -27,6 +27,14 @@ class TestIsSensitive:
     def test_webhook_secret_is_sensitive(self):
         assert _is_sensitive("channels.wechat.webhook_secret") is True
 
+    def test_web_search_api_key_not_sensitive(self):
+        # tools.web_search.api_key is explicitly allowlisted for DB storage
+        assert _is_sensitive("tools.web_search.api_key") is False
+
+    def test_web_search_api_key_with_child_sensitive(self):
+        # any other api_key spelling stays sensitive
+        assert _is_sensitive("tools.api_key") is True
+
     def test_provider_not_sensitive(self):
         assert _is_sensitive("llm.provider") is False
 
@@ -167,6 +175,13 @@ class TestConfigRepositoryAsync:
         await repo.set("auth.secret_key", json.dumps("s" * 48), "auth")
         value = await repo.get("auth.secret_key")
         assert value is None
+
+    @pytest.mark.asyncio()
+    async def test_set_web_search_api_key_stored(self, repo):
+        """tools.web_search.api_key is allowlisted and stored in the DB."""
+        await repo.set("tools.web_search.api_key", json.dumps("tvly-key"), "tools")
+        value = await repo.get("tools.web_search.api_key")
+        assert value == json.dumps("tvly-key")
 
     @pytest.mark.asyncio()
     async def test_set_auth_required_roles_stored(self, repo):

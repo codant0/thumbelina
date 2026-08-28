@@ -61,7 +61,26 @@
       "contextDesc": "Show estimated context window usage in the chat toolbar",
       "cacheHit": "Cache hit rate",
       "cacheHitDesc": "Show KV cache hit rate of the latest 100 LLM requests in the chat page"
-    }
+    },
+    "tools": "Tools"
+  },
+  "tools": {
+    "loading": "Loading…",
+    "loadFailed": "Failed to load tools config",
+    "webSearchEnabled": "Enable web search",
+    "webSearchEnabledDesc": "Let the assistant search the web for up-to-date information",
+    "provider": "Search provider",
+    "tavily": "Tavily (requires API key)",
+    "duckduckgo": "DuckDuckGo (no key)",
+    "providerHint": "Tavily returns LLM-friendly answers and needs an API key; DuckDuckGo works without one.",
+    "tavilyApiKey": "Tavily API Key",
+    "tavilyApiKeyPlaceholder": "tvly-…",
+    "tavilyApiKeyHint": "The key is saved to the config database. Leave the field blank to keep the current key.",
+    "keySet": "Key set",
+    "keepKeyHint": "Leave blank to keep the current key",
+    "saving": "Saving…",
+    "saved": "Tools config saved",
+    "saveFailed": "Failed to save tools config"
   },
   "statusbar": {
     "cacheHitTitle": "Cache hit rate {pct}% ({hit}/{total} tokens · {turns} turns)"

@@ -19,6 +19,12 @@ describe('SettingsPanel', () => {
       if (urlString.includes('/config/llm/endpoints')) {
         return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
       }
+      if (urlString.includes('/config/tools')) {
+        return Promise.resolve(new Response(
+          JSON.stringify({ web_search: { enabled: true, provider: 'tavily', api_key_set: false } }),
+          { status: 200 },
+        ))
+      }
       return Promise.resolve(new Response(JSON.stringify({}), { status: 200 }))
     })
   })

@@ -249,7 +249,7 @@ async def _run_chat_session(config: AppConfig, provider: str, model: str | None)
 
     agent = ThumbelinaAgent(
         llm_provider=llm_provider,
-        tools=get_all_tools(),
+        tools=get_all_tools(search_config=config.tools),
         repository_manager=repository_manager,
         request_timeout=config.llm.request_timeout,
         skill_engine=skill_engine,

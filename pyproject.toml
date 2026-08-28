@@ -51,6 +51,9 @@ rag = [
     "requests>=2.31",
     "markdown-it-py>=3.0",
 ]
+web = [
+    "ddgs>=4.0",
+]
 rag-ocr = [
     "paddlepaddle>=3.0",
     "paddleocr>=3.0",

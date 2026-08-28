@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from langchain_core.tools import BaseTool
 
 from thumbelina.tools.data_tools import analyze_text, parse_csv, parse_json, search_text
 from thumbelina.tools.file_ops import list_directory, read_file, search_files, write_file
 from thumbelina.tools.shell import run_shell
+from thumbelina.tools.web_search_tools import make_web_search_tool
 from thumbelina.tools.web_tools import fetch_url
 
 __all__ = [
@@ -14,6 +17,7 @@ __all__ = [
     "fetch_url",
     "get_all_tools",
     "list_directory",
+    "make_web_search_tool",
     "parse_csv",
     "parse_json",
     "read_file",
@@ -24,9 +28,18 @@ __all__ = [
 ]
 
 
-def get_all_tools() -> list[BaseTool]:
-    """Return all built-in tools."""
-    return [
+def get_all_tools(search_config: Any = None) -> list[BaseTool]:
+    """Return all built-in tools.
+
+    Parameters
+    ----------
+    search_config:
+        Optional :class:`~thumbelina.config.models.ToolsConfig` (or an
+        object exposing ``.web_search``). When provided and web search is
+        enabled, the ``web_search`` tool is included, bound to the live
+        config so runtime hot-swaps take effect.
+    """
+    tools: list[BaseTool] = [
         read_file,
         write_file,
         list_directory,
@@ -38,3 +51,10 @@ def get_all_tools() -> list[BaseTool]:
         analyze_text,
         search_text,
     ]
+
+    if search_config is not None:
+        web_search_cfg = getattr(search_config, "web_search", None)
+        if web_search_cfg is not None and getattr(web_search_cfg, "enabled", False):
+            tools.append(make_web_search_tool(web_search_cfg))
+
+    return tools

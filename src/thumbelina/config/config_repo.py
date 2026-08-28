@@ -24,9 +24,21 @@ _SENSITIVE_KEYS: frozenset[str] = frozenset(
     }
 )
 
+# Explicit allowlist of otherwise-sensitive keys that ARE persisted to the
+# database. Deliberate, scoped exception: the web_search tool's Tavily key is
+# user-maintained via the Settings UI and stored specially (per product
+# decision), unlike LLM/channel secrets which stay env-only.
+_ALLOWED_SECRET_KEYS: frozenset[str] = frozenset(
+    {
+        "tools.web_search.api_key",
+    }
+)
+
 
 def _is_sensitive(key: str) -> bool:
     """Check if a config key contains sensitive data."""
+    if key in _ALLOWED_SECRET_KEYS:
+        return False
     suffix = key.rsplit(".", 1)[-1] if "." in key else key
     return suffix in _SENSITIVE_KEYS
 

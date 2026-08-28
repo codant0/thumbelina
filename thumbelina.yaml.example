@@ -54,6 +54,15 @@ memory:
   tools:
     enabled: true             # 暴露 search_memory/read_memory/remember
 
+# Tools: built-in web search strategy for the agent.
+# tavily 需要 API key(在设置里配置,密钥保存到配置数据库);
+# duckduckgo 无需任何密钥(需要 pip install -e ".[web]" 安装 ddgs)。
+tools:
+  web_search:
+    enabled: true                 # 暴露 web_search 工具给 Agent
+    provider: tavily              # tavily | duckduckgo
+    api_key: ""                   # 仅 tavily 使用;保存到配置数据库(敏感例外)
+
 # Default context window of the active LLM model. Individual models (Web UI
 # "Settings" → endpoint) can override this via their own context_window field.
 # Supports K (thousand) / M (million) token suffixes, case-insensitive.

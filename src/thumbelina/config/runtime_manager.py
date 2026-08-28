@@ -352,4 +352,15 @@ class RuntimeConfigManager:
                 # captured the same list object picks up the change.
                 self._config.auth.required_roles[:] = [str(role) for role in roles]
 
+        # Apply tools overrides (web_search). api_key is persisted for this
+        # tool (scoped allowlist exception) and is restored from the DB here.
+        tools = db_config.get("tools", {})
+        web_search = tools.get("web_search", {})
+        if "enabled" in web_search:
+            self._config.tools.web_search.enabled = bool(web_search["enabled"])
+        if "provider" in web_search:
+            self._config.tools.web_search.provider = web_search["provider"]
+        if "api_key" in web_search:
+            self._config.tools.web_search.api_key = str(web_search["api_key"])
+
         logger.info("Loaded config overrides from database")

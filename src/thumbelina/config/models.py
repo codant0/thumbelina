@@ -256,6 +256,30 @@ class MemoryConfig(BaseModel):
     tools: MemoryToolsConfig = Field(default_factory=MemoryToolsConfig)
 
 
+class WebSearchConfig(BaseModel):
+    """网页搜索工具(web_search)配置。
+
+    ``provider`` 决定搜索后端：``tavily`` 需要配置 ``api_key``，
+    ``duckduckgo`` 无需任何密钥。
+    """
+
+    enabled: bool = Field(default=True, description="暴露 web_search 工具给 Agent")
+    provider: Literal["tavily", "duckduckgo"] = Field(
+        default="tavily",
+        description="搜索后端：tavily(需 API key) 或 duckduckgo(免 key)",
+    )
+    api_key: str = Field(
+        default="",
+        description="Tavily API key，仅 provider=tavily 时使用",
+    )
+
+
+class ToolsConfig(BaseModel):
+    """内置工具配置。当前仅实现 web_search 搜索后端策略。"""
+
+    web_search: WebSearchConfig = Field(default_factory=WebSearchConfig)
+
+
 class AppConfig(BaseModel):
     """Top-level application configuration."""
 
@@ -268,6 +292,7 @@ class AppConfig(BaseModel):
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     context: ContextConfig = Field(default_factory=ContextConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
+    tools: ToolsConfig = Field(default_factory=ToolsConfig)
     cors_origins: list[str] = Field(
         default_factory=lambda: ["*"],
         description="Allowed CORS origins. Use ['*'] for development only.",

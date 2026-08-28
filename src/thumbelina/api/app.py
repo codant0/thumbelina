@@ -40,6 +40,7 @@ from thumbelina.api.routes import (
     skills,
     tasks,
     todo,
+    tools,
     trajectory,
     wechat,
 )
@@ -473,7 +474,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     agent = ThumbelinaAgent(
         llm_provider=llm_provider,
-        tools=get_all_tools(),
+        tools=get_all_tools(search_config=config.tools),
         repository_manager=repository,
         request_timeout=config.llm.request_timeout,
         skill_engine=skill_engine,
@@ -812,6 +813,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(rag.router, prefix="/api/v1")
     app.include_router(todo.router, prefix="/api/v1")
     app.include_router(memory.router, prefix="/api/v1")
+    app.include_router(tools.router, prefix="/api/v1")
     app.include_router(trajectory.router, prefix="/api/v1")
     app.include_router(ws_router)
 

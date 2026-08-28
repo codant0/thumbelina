@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import { EndpointManager } from './EndpointManager'
+import { ToolsConfig } from './ToolsConfig'
 import { useTranslation } from '../../i18n'
 import { Toast } from './Toast'
 import { Gauge, Globe, Database, Download, Trash2, Loader2, Zap } from 'lucide-react'
@@ -111,6 +112,9 @@ export function SettingsPanel() {
 
       {/* LLM Configuration */}
       <EndpointManager onMessage={(msg, err) => { setMessage(msg); setIsError(err) }} />
+
+      {/* Tools Configuration */}
+      <ToolsConfig onMessage={(msg, err) => { setMessage(msg); setIsError(err) }} />
 
       {/* Data Management */}
       <div className="card" data-testid="data-management-card">

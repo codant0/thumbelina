@@ -12,7 +12,7 @@ An AI-powered personal assistant built with [FastAPI](https://fastapi.tiangolo.c
 - **DeepSeek API Support** — Compatible via `openai` provider with graceful fallback for `/models` endpoint
 - **Agent Core** — LangGraph-powered agent loop with tool calling and conditional routing
 - **Role Prompts** — Role personas stored as files under `prompts/roles/` (built-in: assistant / coder), injected as the system prompt; supports a global default role and per-conversation switching in the Web UI
-- **Built-in Tools** — File operations, web requests, shell commands, and data processing (JSON/CSV/text analysis/regex search)
+- **Built-in Tools** — File operations, web requests, web search (Tavily / DuckDuckGo), shell commands, and data processing (JSON/CSV/text analysis/regex search)
 - **RAG (Retrieval-Augmented Generation)** — Document ingestion, chunking, embedding (HuggingFace via llama-index), vector retrieval (ChromaDB), and context-aware indexing pipeline
 - **Conversation Storage** — Persistent storage (SQLite) with keyword search, LLM-generated summaries, and auto-naming for new conversations
 - **Semantic Search** — Vector-based semantic search via ChromaDB, with hybrid keyword + semantic fallback
@@ -218,7 +218,7 @@ thumbelina/
 │   ├── security/            # JWT auth + rate limiter + RBAC
 │   ├── skills/              # Skill extraction, matching, composition, persistence
 │   ├── subagents/           # Sub-agent manager, monitor/worker agents, message queue, shared state
-│   └── tools/               # Built-in tools (file ops, web requests, shell, data processing)
+│   └── tools/               # Built-in tools (file ops, web requests, web search, shell, data processing)
 ├── tests/                   # Pytest test suite (mirrors src/ structure)
 ├── frontend/                # React 19 + TypeScript + Vite
 │   └── src/
@@ -426,12 +426,23 @@ logging:
 todo:
   enabled: true             # Enable the TODO module (local Markdown todo list & quick notes)
   directory: TODO           # Directory holding todolist.md / notes.md
+
+tools:
+  web_search:
+    enabled: true           # Expose the web_search tool to the agent
+    provider: tavily        # tavily | duckduckgo
+    api_key: ""             # Tavily only; saved to the config database
 ```
 
 > `llm` and `auth` are no longer startup configuration:
 > - **llm.\*** — managed after startup via the Web UI "Settings" page or the `/api/v1/config/llm` API family (presets/endpoints persisted to the config database).
 > - **auth.required_roles** — hot-updatable at runtime via the config API.
 > - **auth.secret_key** — sensitive; only accepted from the `THUMBELINA_AUTH__SECRET_KEY` environment variable (≥32 bytes, restart required). Auth is automatically disabled when empty.
+>
+> **Web search tool** — `tools.web_search` selects the search backend:
+> - `tavily` (default) — returns LLM-friendly answers; requires an API key, configured via the Web UI "Settings → Tools" and saved to the config database (a scoped exception to the sensitive-key policy for this tool only).
+> - `duckduckgo` — no API key required; requires `pip install -e ".[web]"` (installs `ddgs`).
+> `enabled`, `provider` and `api_key` are all hot-updatable at runtime via `PUT /api/v1/config/tools/web_search`.
 
 The following sections are optional — uncomment in `thumbelina.yaml` to enable:
 
