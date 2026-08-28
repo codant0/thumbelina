@@ -36,7 +36,7 @@ DANGEROUS_PATTERNS: list[re.Pattern] = [
     re.compile(r":\(\)\s*{", re.I),                      # fork 炸弹头部
     re.compile(r"\bshutdown\b|\breboot\b|\bpoweroff\b", re.I),
     re.compile(r"\b(curl|wget)\b[^|]*\|\s*(sudo\s+)?(ba)?sh", re.I),  # 管道执行
-    re.compile(r"\b>\s*/dev/[a-z]", re.I),
+    re.compile(r">\s*/dev/[a-z]", re.I),  # 无 \b:兼容「空格 + >」重定向(如 echo x > /dev/sda)
     re.compile(r"\bchmod\s+(-R\s+)?777\s+/(\s|$)", re.I),
 ]
 
@@ -144,7 +144,8 @@ class RunShellTool(ExecutionTool):
         return output + f"\n[exit code: {proc.returncode}]"
 
     async def self_verify(self, args: dict[str, Any], result: str) -> Ok | Suspect:
-        m = re.search(r"\[exit code: (-?\d+)\]", result)
+        ms = list(re.finditer(r"\[exit code: (-?\d+)\]", result))
+        m = ms[-1] if ms else None  # 取末尾匹配:防程序伪造 [exit code: 0] 抢先
         if m and m.group(1) != "0":
             if _ERROR_HINTS.search(result) or m.group(1) not in ("",):
                 return Suspect(f"命令退出码非零: {m.group(1)}")
