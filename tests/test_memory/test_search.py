@@ -209,10 +209,14 @@ class TestSearchEntriesFull:
     def test_title_higher_weight_than_full_text(self) -> None:
         """标题命中分 > 同词仅在正文中出现的分。"""
         entries = [
-            _e("主题:数据库选型", "topic", "db-title", "数据库选型记录。",
-               full_text=""),
-            _e("主题:杂记", "topic", "db-body", "无关摘要。",
-               full_text="这里讨论过数据库选型的细节与权衡。"),
+            _e("主题:数据库选型", "topic", "db-title", "数据库选型记录。", full_text=""),
+            _e(
+                "主题:杂记",
+                "topic",
+                "db-body",
+                "无关摘要。",
+                full_text="这里讨论过数据库选型的细节与权衡。",
+            ),
         ]
         hits = search_entries_full(entries, "数据库选型", top_k=8)
         title_slug = next(h.slug for h in hits if h.slug == "db-title")
