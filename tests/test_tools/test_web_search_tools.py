@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from thumbelina.config.models import WebSearchConfig
-from thumbelina.tools.web_search_tools import (
+from thumbelina.tools.perception import (
     _search_duckduckgo,
     _search_tavily,
     make_web_search_tool,
@@ -42,7 +42,7 @@ async def test_tavily_without_key_returns_hint():
 async def test_tavily_uses_configured_key():
     tool = make_web_search_tool(_config(provider="tavily", api_key="cfg-key"))
     with patch(
-        "thumbelina.tools.web_search_tools._search_tavily",
+        "thumbelina.tools.perception._search_tavily",
         return_value="ok",
     ) as mock_search:
         result = await tool.ainvoke({"query": "hello"})
@@ -54,7 +54,7 @@ async def test_tavily_uses_configured_key():
 async def test_tavily_error_is_returned_gracefully():
     tool = make_web_search_tool(_config(provider="tavily", api_key="key"))
     with patch(
-        "thumbelina.tools.web_search_tools._search_tavily",
+        "thumbelina.tools.perception._search_tavily",
         side_effect=RuntimeError("boom"),
     ):
         result = await tool.ainvoke({"query": "hello"})
@@ -65,7 +65,7 @@ async def test_tavily_error_is_returned_gracefully():
 async def test_duckduckgo_dispatches():
     tool = make_web_search_tool(_config(provider="duckduckgo"))
     with patch(
-        "thumbelina.tools.web_search_tools._search_duckduckgo",
+        "thumbelina.tools.perception._search_duckduckgo",
         return_value="ddg ok",
     ) as mock_search:
         result = await tool.ainvoke({"query": "hello"})

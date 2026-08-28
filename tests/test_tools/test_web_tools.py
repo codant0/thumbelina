@@ -6,7 +6,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from thumbelina.tools.web_tools import fetch_url
+from thumbelina.tools.perception import FetchUrlTool
+
+fetch_url = FetchUrlTool()
 
 
 @pytest.mark.asyncio
@@ -28,11 +30,6 @@ async def test_fetch_url_success():
 @pytest.mark.asyncio
 async def test_fetch_url_not_installed():
     with patch.dict("sys.modules", {"httpx": None}):
-        # Re-import to trigger ImportError path
-        import importlib
-
-        import thumbelina.tools.web_tools
-
-        importlib.reload(thumbelina.tools.web_tools)
-        result = await thumbelina.tools.web_tools.fetch_url.ainvoke({"url": "https://example.com"})
+        # httpx 为函数体内惰性导入,屏蔽 sys.modules 即可触发 ImportError 分支
+        result = await fetch_url.ainvoke({"url": "https://example.com"})
         assert "not installed" in result

@@ -6,8 +6,10 @@ import asyncio
 
 import pytest
 
-from thumbelina.tools.file_ops import read_file
+from thumbelina.tools.perception import ReadFileTool
 from thumbelina.tools.workspace_context import get_workspace, set_workspace
+
+read_file = ReadFileTool()
 
 
 @pytest.mark.asyncio
