@@ -143,9 +143,6 @@ def test_limit_constant_positive() -> None:
     assert _MAX_LIST_ENTRIES > 0
 
 
-pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
-
-
 def _init_repo(tmp_path) -> pathlib.Path:
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -160,28 +157,41 @@ def _init_repo(tmp_path) -> pathlib.Path:
     return repo
 
 
-def test_git_info_in_repo(client, tmp_path) -> None:
-    repo = _init_repo(tmp_path)
-    resp = client.get("/api/v1/fs/git", params={"path": str(repo)})
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["is_git"] is True
-    assert isinstance(data["branch"], str) and data["branch"]
+class TestGitInfoEndpoints:
+    """git 探测端点测试;git 缺失时仅跳过本类,不影响目录浏览测试。"""
 
+    pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
 
-def test_git_info_non_repo(client, tmp_path) -> None:
-    plain = tmp_path / "plain"
-    plain.mkdir()
-    resp = client.get("/api/v1/fs/git", params={"path": str(plain)})
-    assert resp.status_code == 200
-    assert resp.json() == {"is_git": False, "branch": None}
+    def test_git_info_in_repo(self, client, tmp_path) -> None:
+        repo = _init_repo(tmp_path)
+        resp = client.get("/api/v1/fs/git", params={"path": str(repo)})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["is_git"] is True
+        assert isinstance(data["branch"], str) and data["branch"]
 
+    def test_git_info_non_repo(self, client, tmp_path) -> None:
+        plain = tmp_path / "plain"
+        plain.mkdir()
+        resp = client.get("/api/v1/fs/git", params={"path": str(plain)})
+        assert resp.status_code == 200
+        assert resp.json() == {"is_git": False, "branch": None}
 
-def test_git_info_invalid_path(client, tmp_path) -> None:
-    resp = client.get("/api/v1/fs/git", params={"path": str(tmp_path / "missing")})
-    assert resp.status_code == 422
+    def test_git_info_invalid_path(self, client, tmp_path) -> None:
+        resp = client.get("/api/v1/fs/git", params={"path": str(tmp_path / "missing")})
+        assert resp.status_code == 422
 
+    def test_git_info_empty_repo(self, client, tmp_path) -> None:
+        """无提交的空仓也是 git 仓库,应显示 is_git 与 unborn 分支名。"""
+        repo = tmp_path / "empty"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        resp = client.get("/api/v1/fs/git", params={"path": str(repo)})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["is_git"] is True
+        assert isinstance(data["branch"], str) and data["branch"]
 
-def test_git_info_relative_path_rejected(client, tmp_path) -> None:
-    resp = client.get("/api/v1/fs/git", params={"path": "some/relative"})
-    assert resp.status_code == 422
+    def test_git_info_relative_path_rejected(self, client, tmp_path) -> None:
+        resp = client.get("/api/v1/fs/git", params={"path": "some/relative"})
+        assert resp.status_code == 422

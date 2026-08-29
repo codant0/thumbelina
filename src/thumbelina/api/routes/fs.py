@@ -67,6 +67,8 @@ def _run_git(path: str, args: list[str]) -> tuple[int, str, str]:
             ["git", "-C", path, *args],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=10,
         )
     except subprocess.TimeoutExpired:
@@ -78,14 +80,29 @@ def _run_git(path: str, args: list[str]) -> tuple[int, str, str]:
     )
 
 
+def _current_branch(resolved: Path) -> str | None:
+    """当前分支名;unborn 分支经 symbolic-ref 返回候选名,detached HEAD 退回 rev-parse。"""
+    code, out, _ = _run_git(str(resolved), ["symbolic-ref", "--short", "-q", "HEAD"])
+    if code == 0 and out:
+        return out
+    code, out, _ = _run_git(str(resolved), ["rev-parse", "--abbrev-ref", "HEAD"])
+    if code == 0 and out:
+        return out
+    return None
+
+
 @router.get("/fs/git", response_model=GitInfo)
 def git_info(path: str = Query(...)) -> GitInfo:
-    """返回工作区 git 状态;非 git 目录返回 is_git=False。"""
+    """返回工作区 git 状态;非 git 目录返回 is_git=False。
+
+    用 --is-inside-work-tree 判定仓库(空仓/unborn 分支也是 git 仓库),
+    分支名遍历 symbolic-ref → rev-parse 兜底。
+    """
     resolved = _resolve_dir(path)
-    code, branch, _ = _run_git(str(resolved), ["rev-parse", "--abbrev-ref", "HEAD"])
-    if code != 0 or not branch:
+    code, ok, _ = _run_git(str(resolved), ["rev-parse", "--is-inside-work-tree"])
+    if code != 0 or ok.strip() != "true":
         return GitInfo(is_git=False, branch=None)
-    return GitInfo(is_git=True, branch=branch)
+    return GitInfo(is_git=True, branch=_current_branch(resolved))
 
 
 def _list_roots() -> list[DirEntry]:
