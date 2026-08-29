@@ -1,7 +1,10 @@
 /* ===== Trajectory page (审计轨迹 · 时间线) ===== */
+/* Centered reading column; the list owns its scroll (infinite-scroll observer
+   root), the page itself does not. Title uses .page-title for cross-page
+   consistency. */
 .trajectory-page { --tm-rail: 72px; --tm-line: 35px; padding: var(--sp-4); max-width: 960px; margin: 0 auto; }
 .trajectory-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; margin-bottom: var(--sp-3); position: sticky; top: 0; z-index: 5; background: var(--bg); padding: var(--sp-2) 0; }
-.trajectory-toolbar h2 { margin: 0; }
+.trajectory-toolbar .page-title { margin-bottom: 0; }
 .trajectory-select { width: 100%; max-width: 400px; padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-primary); font-family: inherit; font-size: var(--fs-base); }
 .trajectory-select:hover { border-color: var(--accent-border); }
 
