@@ -85,6 +85,9 @@
   text-align: center;
   padding: var(--sp-6);
 }
+/* The shared EmptyState sits directly in the flex-row shell (no page
+   container), so it needs the same flex-grow to center in the viewport. */
+.coder-shell > .empty-state-block { flex: 1; min-width: 0; }
 .coder-hero {
   flex: 1;
   display: flex;
