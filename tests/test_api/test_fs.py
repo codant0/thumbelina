@@ -195,3 +195,26 @@ class TestGitInfoEndpoints:
     def test_git_info_relative_path_rejected(self, client, tmp_path) -> None:
         resp = client.get("/api/v1/fs/git", params={"path": "some/relative"})
         assert resp.status_code == 422
+
+
+class TestGitBranchesEndpoints:
+    pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
+
+    def test_git_branches(self, client, tmp_path) -> None:
+        repo = _init_repo(tmp_path)
+        subprocess.run(["git", "checkout", "-q", "-b", "feature-a"], cwd=repo, check=True)
+        subprocess.run(["git", "checkout", "-q", "main"], cwd=repo, check=True)
+        subprocess.run(["git", "branch", "-q", "feature-b"], cwd=repo, check=True)
+        resp = client.get("/api/v1/fs/git/branches", params={"path": str(repo)})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["is_git"] is True
+        assert data["current"] == "main"
+        assert data["branches"] == ["feature-a", "feature-b", "main"]
+
+    def test_git_branches_non_repo(self, client, tmp_path) -> None:
+        plain = tmp_path / "plain"
+        plain.mkdir()
+        resp = client.get("/api/v1/fs/git/branches", params={"path": str(plain)})
+        assert resp.status_code == 200
+        assert resp.json() == {"is_git": False, "current": None, "branches": []}

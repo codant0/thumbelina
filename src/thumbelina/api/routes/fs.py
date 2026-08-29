@@ -105,6 +105,25 @@ def git_info(path: str = Query(...)) -> GitInfo:
     return GitInfo(is_git=True, branch=_current_branch(resolved))
 
 
+class GitBranches(BaseModel):
+    is_git: bool
+    current: str | None = None
+    branches: list[str] = []
+
+
+@router.get("/fs/git/branches", response_model=GitBranches)
+def git_branches(path: str = Query(...)) -> GitBranches:
+    """列出所有本地分支及当前分支。"""
+    resolved = _resolve_dir(path)
+    code, out, _ = _run_git(
+        str(resolved), ["for-each-ref", "refs/heads", "--format=%(refname:short)"]
+    )
+    if code != 0:
+        return GitBranches(is_git=False)
+    branches = sorted(out.splitlines()) if out else []
+    return GitBranches(is_git=True, current=_current_branch(resolved), branches=branches)
+
+
 def _list_roots() -> list[DirEntry]:
     listdrives = getattr(os, "listdrives", None)
     if listdrives is not None:
