@@ -13,6 +13,7 @@ import { Mail, Eraser, Shrink, Route } from 'lucide-react'
 import type { Conversation, ThinkingEffort } from '../../types/chat'
 import { useTranslation } from '../../i18n'
 import { clearConversationMessages, compressConversation } from '../../api/conversations'
+import { ConfirmDialog } from '../common/ConfirmDialog'
 
 interface ChatWindowProps {
   /** WebSocket state lifted to App so the connection survives page switches. */
@@ -33,6 +34,7 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
   const [streamingMode, setStreamingMode] = useState(true)
   const [toggling, setToggling] = useState(false)
   const [clearing, setClearing] = useState(false)
+  const [confirmClear, setConfirmClear] = useState(false)
   const [compressing, setCompressing] = useState(false)
   // Local inline feedback for the compress action (quiet success/failure hint).
   const [compressNotice, setCompressNotice] = useState<{ message: string; isError: boolean } | null>(null)
@@ -76,7 +78,7 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
 
   const handleClearContext = useCallback(async () => {
     if (!conversationId || clearing) return
-    if (!window.confirm(t('chat.clearContextConfirm'))) return
+    setConfirmClear(false)
     setClearing(true)
     try {
       await clearConversationMessages(conversationId)
@@ -86,7 +88,7 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
     } finally {
       setClearing(false)
     }
-  }, [conversationId, clearing, clearMessages, t])
+  }, [conversationId, clearing, clearMessages])
 
   const handleCompress = useCallback(async () => {
     if (!conversationId || compressing) return
@@ -113,6 +115,12 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
     // button disappears.
     stopGeneration()
   }, [stopGeneration])
+
+  const handleRegenerate = useCallback(() => {
+    if (isStreaming || !isConnected) return
+    const lastUser = [...messages].reverse().find(m => m.role === 'user')
+    if (lastUser) sendMessage(lastUser.content, conversationId)
+  }, [messages, isStreaming, isConnected, conversationId, sendMessage])
 
   const toggleStreaming = useCallback(async () => {
     const next = !streamingMode
@@ -191,7 +199,7 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
             data-testid="clear-context"
             title={t('chat.clearContext')}
             aria-label={t('chat.clearContext')}
-            onClick={() => void handleClearContext()}
+            onClick={() => setConfirmClear(true)}
             disabled={clearing || isStreaming || messages.length === 0}
           >
             <Eraser size={14} />
@@ -218,6 +226,15 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
         isError={compressNotice?.isError}
         onClose={() => setCompressNotice(null)}
       />
+      {confirmClear && (
+        <ConfirmDialog
+          title={t('chat.clearContext')}
+          message={t('chat.clearContextConfirm')}
+          danger
+          onConfirm={() => void handleClearContext()}
+          onCancel={() => setConfirmClear(false)}
+        />
+      )}
       {messages.length === 0 ? (
         <div className="empty-state">
           <div className="empty-icon"><Mail size={24} /></div>
@@ -225,7 +242,7 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
           <p className="empty-hint">{t('chat.startHint')}</p>
         </div>
       ) : (
-        <MessageList messages={messages} waitingForReply={waitingForReply} isStreaming={isStreaming} awaitingMoreContent={awaitingMoreContent} />
+        <MessageList messages={messages} waitingForReply={waitingForReply} isStreaming={isStreaming} awaitingMoreContent={awaitingMoreContent} onRegenerate={handleRegenerate} />
       )}
       <InputBox
         onSend={handleSend}

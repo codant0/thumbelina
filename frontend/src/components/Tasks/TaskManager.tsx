@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Bot, X, CalendarClock } from 'lucide-react'
 import { useTranslation } from '../../i18n'
+import { EmptyState } from '../common/EmptyState'
 
 interface Subagent {
   id: string
@@ -73,7 +74,7 @@ export function TaskManager() {
         <div className="card-title"><Bot size={14} />{t('taskManager.subagents')}</div>
         <div className="task-list" data-testid="subagent-list">
           {subagents.length === 0 ? (
-            <p className="task-empty">{t('taskManager.noSubagents')}</p>
+            <EmptyState compact icon={<Bot size={20} />} title={t('taskManager.noSubagents')} />
           ) : (
             subagents.map(agent => (
               <div key={agent.id} className="task-item" data-testid="subagent-item">
@@ -104,7 +105,7 @@ export function TaskManager() {
         <div className="card-title"><CalendarClock size={14} />{t('taskManager.scheduledTasks')}</div>
         <div className="task-list" data-testid="task-list">
           {tasks.length === 0 ? (
-            <p className="task-empty">{t('taskManager.noTasks')}</p>
+            <EmptyState compact icon={<CalendarClock size={20} />} title={t('taskManager.noTasks')} />
           ) : (
             tasks.map(task => (
               <div key={task.id} className="task-item" data-testid="task-item">

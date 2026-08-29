@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, Sparkles } from 'lucide-react'
 import { useTranslation } from '../../i18n'
+import { EmptyState } from '../common/EmptyState'
 
 interface TimelineSkill {
   id: string
@@ -94,9 +95,12 @@ export function DreamViewer() {
     return (
       <div className="page-container" data-testid="dream-viewer">
         <div className="page-title">{t('dream.title')}</div>
-        <div className="empty-state" data-testid="dream-empty">
-          <p>{t('dream.noSkills')}</p>
-        </div>
+        <EmptyState
+          testId="dream-empty"
+          icon={<Sparkles size={26} />}
+          title={t('dream.noSkills')}
+          hint={t('dream.emptyHint')}
+        />
       </div>
     )
   }

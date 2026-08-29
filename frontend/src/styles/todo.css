@@ -1,0 +1,596 @@
+/* ===== Todo Page ===== */
+.todo-page {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+.todo-page__panel {
+  margin-bottom: 0;
+}
+
+.todo-page__error {
+  color: var(--error);
+  font-size: var(--fs-sm);
+  margin-bottom: var(--sp-3);
+}
+
+.todo-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-6);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+}
+
+.todo-disabled {
+  padding: var(--sp-6);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  text-align: center;
+}
+
+.todo-add {
+  display: flex;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+
+.todo-add__input {
+  flex: 1;
+}
+
+.todo-list,
+.todo-note-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+/* Each '# heading' bucket is its own group; the group header mirrors the
+   date-group header style (dashed separators around the label). */
+.todo-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.todo-group__header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semi);
+  color: var(--text-secondary);
+}
+
+.todo-group__header::before,
+.todo-group__header::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.todo-group + .todo-group {
+  margin-top: var(--sp-1);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border-subtle);
+}
+
+@keyframes todo-item-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.todo-item {
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
+  transition: background var(--dur-fast) var(--ease-out);
+  animation: todo-item-in var(--dur-base) var(--ease-out);
+}
+
+.todo-item:hover {
+  background: var(--bg-hover);
+}
+
+.todo-item--done {
+  opacity: 0.68;
+}
+
+.todo-item__row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.todo-item__remark {
+  margin: var(--sp-2) 0 0 calc(18px + var(--sp-2));
+  padding: var(--sp-1) var(--sp-2);
+  border-left: 3px solid var(--border);
+  background: var(--bg-elevated);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.todo-item__remark .md-body {
+  margin: 0;
+}
+
+.todo-item__remark-edit {
+  margin: var(--sp-2) 0 0 calc(18px + var(--sp-2));
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.todo-item__remark-textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.todo-item__remark-edit-actions {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+/* Custom circular checkbox: appearance none + rotated-border checkmark. */
+.todo-item__checkbox {
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border: 2px solid var(--border);
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.todo-item__checkbox:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.todo-item__checkbox:checked::after {
+  content: '';
+  display: block;
+  width: 4px;
+  height: 8px;
+  margin: 1px auto 0;
+  border-right: 2px solid var(--bg-surface);
+  border-bottom: 2px solid var(--bg-surface);
+  transform: rotate(45deg);
+  position: relative;
+  left: 1px;
+}
+
+.todo-item__checkbox:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.todo-item__text {
+  flex: 1;
+  font-size: var(--fs-base);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.todo-item--done .todo-item__text {
+  text-decoration: line-through;
+  color: var(--text-secondary);
+}
+
+.todo-item__actions,
+.todo-note__actions {
+  display: flex;
+  gap: var(--sp-1);
+  flex-shrink: 0;
+}
+
+/* Row actions stay focusable in the DOM but only become visible on
+   hover or keyboard focus (:focus-within). */
+.todo-item__actions,
+.todo-note__actions {
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.todo-item:hover .todo-item__actions,
+.todo-item:focus-within .todo-item__actions,
+.todo-note:hover .todo-note__actions,
+.todo-note:focus-within .todo-note__actions {
+  opacity: 1;
+}
+
+/* Touch devices have no hover: keep the actions visible. */
+@media (hover: none) {
+  .todo-item__actions,
+  .todo-note__actions {
+    opacity: 1;
+  }
+}
+
+.todo-item__action,
+.todo-note__action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.todo-item__action:hover:not(:disabled),
+.todo-note__action:hover:not(:disabled) {
+  background: var(--bg-active);
+  color: var(--text-primary);
+}
+
+.todo-item__action:focus-visible,
+.todo-note__action:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.todo-item__action:disabled,
+.todo-note__action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.todo-item__action--danger,
+.todo-note__action--danger {
+  color: var(--error);
+}
+
+.todo-item__action--danger:hover:not(:disabled),
+.todo-note__action--danger:hover:not(:disabled) {
+  background: var(--error-muted);
+  color: var(--error);
+}
+
+.todo-item__edit {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: 1;
+  min-width: 0;
+}
+
+.todo-item__edit-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.todo-empty {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  padding: var(--sp-2) 0;
+}
+
+.todo-filter-tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  margin-bottom: var(--sp-3);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+}
+
+.todo-filter-tabs__tab {
+  padding: var(--sp-1) var(--sp-3);
+  border: none;
+  border-radius: var(--radius-full);
+  background: transparent;
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+
+.todo-filter-tabs__tab:hover {
+  color: var(--text-primary);
+}
+
+.todo-filter-tabs__tab--active,
+.todo-filter-tabs__tab--active:hover {
+  background: var(--accent-muted);
+  color: var(--accent);
+  font-weight: var(--fw-med);
+}
+
+/* Group filter cards: each '# heading' bucket (plus All / Ungrouped) is a
+   tappable card with a count badge; selected state uses the orange accent
+   to stand apart from the teal status filter tabs. The bar stays a single
+   row in both panels (scrolls horizontally when there are many groups), so
+   the panels keep aligned heights. */
+.todo-group-filter {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 2px;
+  margin: -2px 0 var(--sp-3);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.todo-group-filter::-webkit-scrollbar {
+  display: none;
+}
+
+.todo-group-filter__card {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 30px;
+  padding: var(--sp-1) var(--sp-3);
+  flex-shrink: 0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.todo-group-filter__card:hover {
+  border-color: var(--border);
+}
+
+.todo-group-filter__card:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+
+.todo-group-filter__card--selected,
+.todo-group-filter__card--selected:hover {
+  border: 1px solid var(--accent-secondary-border);
+  background: var(--accent-secondary-muted);
+  color: var(--accent-secondary);
+  font-weight: var(--fw-med);
+}
+
+.todo-group-filter__badge {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-full);
+  background: var(--bg);
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+}
+
+.todo-group-filter__card--selected .todo-group-filter__badge {
+  background: var(--accent-secondary);
+  color: var(--bg-surface);
+}
+
+.todo-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-8) 0;
+  color: var(--text-secondary);
+}
+
+.todo-empty-state svg {
+  opacity: 0.6;
+}
+
+.todo-empty-state p {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
+.todo-empty-state--celebrate svg {
+  color: var(--success);
+}
+
+.todo-note-form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+
+.todo-note-form__textarea,
+.todo-note__edit-textarea {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+/* Date-group header: label flanked by hairlines on both sides. */
+.todo-note-group__header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: var(--sp-3) 0 var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+
+.todo-note-group__header::before,
+.todo-note-group__header::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* Sticky-note card: orange accent bar marks the notes identity. */
+.todo-note {
+  padding: var(--sp-3);
+  background: var(--bg);
+  border: none;
+  border-left: 3px solid var(--accent-secondary);
+  border-radius: var(--radius);
+  transition: transform var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.todo-note:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+
+.todo-note__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-1);
+}
+
+.todo-note__time {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+
+.todo-note__content {
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.todo-note__edit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.todo-note__edit-actions {
+  display: flex;
+  gap: var(--sp-2);
+  justify-content: flex-end;
+}
+
+.todo-stats {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-5);
+}
+
+.todo-stats__item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  white-space: nowrap;
+}
+
+.todo-stats__icon {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.todo-stats__icon--done {
+  color: var(--success);
+}
+
+.todo-stats__icon--notes {
+  color: var(--accent-secondary);
+}
+
+.todo-stats__num {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semi);
+  color: var(--text-heading);
+}
+
+.todo-stats__label {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+
+.todo-stats__progress {
+  flex: 1;
+  min-width: 120px;
+  height: 6px;
+  background: var(--bg-hover);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.todo-stats__progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-hover));
+  border-radius: var(--radius-full);
+  transition: width var(--dur-slow) var(--ease-out);
+}
+
+.todo-stats__pct {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semi);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+@keyframes todo-shimmer {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.todo-skeleton {
+  background: var(--bg-hover);
+  border-radius: var(--radius-sm);
+  animation: todo-shimmer 1.2s ease-in-out infinite;
+}
+
+.todo-skeleton--stats {
+  height: 56px;
+  margin-bottom: var(--sp-3);
+}
+
+.todo-skeleton--panel {
+  height: 320px;
+  border-radius: var(--radius);
+}
+
+@media (max-width: 1023px) {
+  .todo-page {
+    grid-template-columns: 1fr;
+  }
+}
+

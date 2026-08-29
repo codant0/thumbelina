@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Code2 } from 'lucide-react'
+import { Code2, FolderOpen } from 'lucide-react'
 import type { ChatSocket } from '../../hooks/useWebSocket'
 import type { Conversation, ThinkingEffort } from '../../types/chat'
 import { ChatWindow } from '../Chat/ChatWindow'
 import { CoderSidebar } from './CoderSidebar'
 import { WorkspacePicker } from './WorkspacePicker'
+import { EmptyState } from '../common/EmptyState'
 import { useTranslation } from '../../i18n'
 
 interface CoderPageProps {
@@ -23,9 +24,12 @@ interface CoderPageProps {
   onSetRole?: (id: string, role: string | null) => void
   onSetThinking?: (id: string, enabled: boolean, effort: ThinkingEffort) => void
   onViewTrajectory?: (id: string) => void
+  /** Mobile drawer state (session list overlays the viewport on small screens). */
+  sidebarOpen?: boolean
+  onCloseSidebar?: () => void
 }
 
-export function CoderPage({ ws, conversations, selectedId, onSelect, onCreated, onDelete, onRename, onRefresh, coderLoading, coderError, onSetEndpoint, onSetKnowledgeBase, onSetRole, onSetThinking, onViewTrajectory }: CoderPageProps) {
+export function CoderPage({ ws, conversations, selectedId, onSelect, onCreated, onDelete, onRename, onRefresh, coderLoading, coderError, onSetEndpoint, onSetKnowledgeBase, onSetRole, onSetThinking, onViewTrajectory, sidebarOpen, onCloseSidebar }: CoderPageProps) {
   const [pickerOpen, setPickerOpen] = useState(false)
   const { t } = useTranslation()
 
@@ -113,9 +117,12 @@ export function CoderPage({ ws, conversations, selectedId, onSelect, onCreated, 
     // nothing interactive. Without ChatWindow there is no message input, so
     // no chat-mode conversation can be lazily created from this page.
     main = (
-      <div className="coder-empty-state" data-testid="coder-no-selection">
-        {t('coder.selectToStart')}
-      </div>
+      <EmptyState
+        testId="coder-no-selection"
+        icon={<FolderOpen size={26} />}
+        title={t('coder.selectToStart')}
+        hint={t('coder.emptyHint')}
+      />
     )
   }
 
@@ -139,7 +146,11 @@ export function CoderPage({ ws, conversations, selectedId, onSelect, onCreated, 
         onRename={onRename}
         selectedId={activeCoderId}
         loading={coderLoading}
+        onClose={onCloseSidebar}
       />
+      {sidebarOpen && onCloseSidebar && (
+        <button className="sidebar-backdrop" aria-hidden="true" tabIndex={-1} onClick={onCloseSidebar} />
+      )}
       {main}
     </div>
   )

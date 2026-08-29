@@ -5,8 +5,10 @@
   --bg-elevated: #18181b;
   --bg-hover: #1e1e22;
   --bg-active: #27272a;
-  --text: #71717a;
-  --text-secondary: #52525b;
+  /* Bumped to meet WCAG AA (>=4.5:1) on every surface tier — the previous
+     values (3.9 / 2.4) failed on body and secondary/nav text. */
+  --text: #9a9aa6;
+  --text-secondary: #8a8a94;
   --text-primary: #d4d4d8;
   --text-heading: #fafafa;
   --border: #27272a;
@@ -44,8 +46,9 @@
   --bg-elevated: #f4f4f5;
   --bg-hover: #e4e4e7;
   --bg-active: #d4d4d8;
-  --text: #71717a;
-  --text-secondary: #a1a1aa;
+  /* AA-compliant muted text on white *and* on the #f4f4f5 elevated tier. */
+  --text: #64646e;
+  --text-secondary: #6e6e78;
   --text-primary: #18181b;
   --text-heading: #09090b;
   --border: #e4e4e7;
@@ -64,7 +67,7 @@
   --warning-muted: rgba(234, 179, 8, 0.12);
   --error: #ef4444;
   --error-muted: rgba(239, 68, 68, 0.12);
-  --user-bubble: #0D9488;
+  --user-bubble: #0f766e;
   --user-bubble-text: #ffffff;
   --assistant-bubble: #f4f4f5;
   --assistant-bubble-text: #18181b;
@@ -83,8 +86,9 @@
   --bg-elevated: #2d2825;
   --bg-hover: #38322e;
   --bg-active: #443d38;
-  --text: #a09890;
-  --text-secondary: #786e65;
+  /* Warm-theme muted ramp raised to clear 4.5:1 on the surface/elevated tiers. */
+  --text: #b0a79e;
+  --text-secondary: #9a9188;
   --text-primary: #d9cfc5;
   --text-heading: #f5efe9;
   --border: #3d3630;

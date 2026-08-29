@@ -13,9 +13,11 @@ interface SidebarProps {
   onDelete?: (id: string) => void
   onRename?: (id: string, name: string) => void
   selectedId?: string
+  /** Shows a close control for the mobile drawer. */
+  onClose?: () => void
 }
 
-export function Sidebar({ conversations, onSelect, onNew, onDelete, onRename, selectedId }: SidebarProps) {
+export function Sidebar({ conversations, onSelect, onNew, onDelete, onRename, selectedId, onClose }: SidebarProps) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
@@ -57,11 +59,16 @@ export function Sidebar({ conversations, onSelect, onNew, onDelete, onRename, se
             <Plus size={16} />
           </button>
         )}
+        {onClose && (
+          <button className="sidebar-close-btn" onClick={onClose} title={t('common.close')} aria-label={t('common.close')}>
+            <X size={16} />
+          </button>
+        )}
       </div>
-      <div className="sidebar-list">
+      <div className="sidebar-list" role="list">
         {conversations.length === 0 ? (
           <div className="sidebar-empty" data-testid="sidebar-empty">
-            No conversations yet.<br />{t('chat.sendHint')}
+            {t('chat.listEmpty')}<br />{t('chat.sendHint')}
           </div>
         ) : (
           conversations.map(conv => {
@@ -71,8 +78,18 @@ export function Sidebar({ conversations, onSelect, onNew, onDelete, onRename, se
               <div
                 key={conv.id}
                 data-testid="conversation-item"
+                role="listitem"
+                tabIndex={0}
+                aria-current={selectedId === conv.id ? 'true' : undefined}
                 className={`sidebar-item${selectedId === conv.id ? ' active' : ''}${conv.pinned ? ' sidebar-item--pinned' : ''}${isWeChat ? ' sidebar-item--wechat' : ''}`}
                 onClick={() => !isEditing && onSelect(conv.id)}
+                onKeyDown={e => {
+                  if (isEditing) return
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    onSelect(conv.id)
+                  }
+                }}
               >
                 {isEditing ? (
                   <div className="sidebar-item__edit" onClick={e => e.stopPropagation()}>
@@ -106,7 +123,7 @@ export function Sidebar({ conversations, onSelect, onNew, onDelete, onRename, se
                   <>
                     <div className="item-title">
                       {isWeChat && <WeChatIcon size={14} className="wechat-icon" />}
-                      <span className="item-title__text">{conv.name || conv.summary || conv.id.slice(0, 8)}</span>
+                      <span className="item-title__text">{conv.name || conv.summary || t('chat.unnamed')}</span>
                     </div>
                     <div className="item-date">
                       {conv.updated_at

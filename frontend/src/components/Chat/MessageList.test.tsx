@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { MessageList } from './MessageList'
 import type { Message } from '../../types/chat'
@@ -252,5 +252,63 @@ describe('MessageList', () => {
     const nextUser: Message = { id: '3', role: 'user', content: 'again', timestamp: '2024-01-01T00:00:02Z' }
     rerender(<MessageList messages={[userMsg, reply, nextUser]} />)
     expect(list.scrollTop).toBe(list.scrollHeight)
+  })
+
+  it('renders fenced code as a highlighted block with a copy button', () => {
+    const messages: Message[] = [
+      { id: '1', role: 'assistant', content: '```python\ndef f():\n    return 1\n```', timestamp: '2024-01-01T00:00:00Z' },
+    ]
+    const { container } = render(<MessageList messages={messages} />)
+    expect(container.querySelector('.codeblock')).toBeTruthy()
+    expect(container.querySelector('.codeblock__lang')?.textContent).toBe('python')
+    expect(container.querySelector('.codeblock .hljs-keyword')).toBeTruthy()
+    expect(screen.getByText('Copy', { selector: '.codeblock__copy span' })).toBeInTheDocument()
+  })
+
+  it('lifts a leading raw JSON payload into a collapsed card', () => {
+    const json = '{"action":"NEW","target":"","entry":{"title":"用户称呼习惯","category":"user","slug":"addr","summary":"偏好称呼为大哥","full_text":"用户要求称呼大哥","source":"对话"}}\n\n好的大哥记住了'
+    const messages: Message[] = [
+      { id: '1', role: 'assistant', content: json, timestamp: '2024-01-01T00:00:00Z' },
+    ]
+    const { container } = render(<MessageList messages={messages} />)
+    expect(container.querySelector('[data-testid="json-block"]')).toBeTruthy()
+    expect(screen.getByText(/好的大哥记住了/)).toBeInTheDocument()
+  })
+
+  it('collapses tool calls behind a summary toggle', () => {
+    const messages: Message[] = [
+      {
+        id: '1', role: 'assistant', content: 'ok', timestamp: '2024-01-01T00:00:00Z',
+        toolCalls: [{ name: 'web_search', args: { query: 'hello' }, result: 'found 3 results' }],
+      },
+    ]
+    const { container } = render(<MessageList messages={messages} />)
+    // Collapsed by default: args payload not visible
+    expect(container.querySelector('.tool-call__detail')).toBeNull()
+    fireEvent.click(container.querySelector('.tool-call__summary')!)
+    const detail = container.querySelector('.tool-call__detail')
+    expect(detail).toBeTruthy()
+    expect(detail!.textContent).toContain('"query": "hello"')
+  })
+
+  it('offers regenerate on the last assistant message when idle', () => {
+    const messages: Message[] = [
+      { id: '1', role: 'user', content: 'hi', timestamp: '2024-01-01T00:00:00Z' },
+      { id: '2', role: 'assistant', content: 'yo', timestamp: '2024-01-01T00:00:01Z' },
+    ]
+    const onRegenerate = vi.fn()
+    render(<MessageList messages={messages} onRegenerate={onRegenerate} />)
+    const btn = screen.getByTestId('regenerate')
+    fireEvent.click(btn)
+    expect(onRegenerate).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not offer regenerate while streaming', () => {
+    const messages: Message[] = [
+      { id: '1', role: 'user', content: 'hi', timestamp: '2024-01-01T00:00:00Z' },
+      { id: '2', role: 'assistant', content: 'partial', timestamp: '2024-01-01T00:00:01Z' },
+    ]
+    render(<MessageList messages={messages} isStreaming onRegenerate={() => {}} />)
+    expect(screen.queryByTestId('regenerate')).toBeNull()
   })
 })

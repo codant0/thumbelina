@@ -33,7 +33,8 @@
     "show": "显示",
     "hide": "隐藏",
     "refresh": "刷新",
-    "error": "出错了"
+    "error": "出错了",
+    "confirm": "确认"
   },
   "settings": {
     "title": "设置",
@@ -263,7 +264,13 @@
     "stopTitle": "停止生成",
     "generating": "正在生成…",
     "viewTrajectory": "查看轨迹",
-    "viewTrajectoryTitle": "在轨迹页审计该会话"
+    "viewTrajectoryTitle": "在轨迹页审计该会话",
+    "copy": "复制消息",
+    "copied": "已复制",
+    "regenerate": "重新生成",
+    "scrollToBottom": "回到最新消息",
+    "unnamed": "新对话",
+    "listEmpty": "暂无对话。"
   },
   "coder": {
     "sidebarTitle": "码农会话",
@@ -394,7 +401,8 @@
     "categoryTitle": "分类",
     "skillCloud": "技能云",
     "noSkills": "尚无技能记录。技能将在代理学习过程中出现在此处。",
-    "errors": "加载技能统计数据失败"
+    "errors": "加载技能统计数据失败",
+    "emptyHint": "智能体在对话中学习到的技能会陆续出现在这里。"
   },
   "plugins": {
     "title": "插件",
@@ -506,5 +514,17 @@
     "light": "浅色",
     "warm": "暖色",
     "changeTheme": "切换主题"
+  },
+  "codeblock": {
+    "copy": "复制",
+    "copied": "已复制"
+  },
+  "jsonBlock": {
+    "title": "结构化数据（JSON）"
+  },
+  "toolCalls": {
+    "arguments": "参数",
+    "result": "结果",
+    "hasResult": "含返回结果"
   }
 }

@@ -100,16 +100,16 @@ export function TrajectoryPage({ initialConversationId }: { initialConversationI
   return (
     <div className="trajectory-page" data-testid="trajectory-page">
       <div className="trajectory-toolbar">
-        <h2>{t('trajectory.title')}</h2>
+        <h2 className="page-title">{t('trajectory.title')}</h2>
         <select
           data-testid="trajectory-select"
           value={selectedId ?? ''}
           onChange={e => handleSelect(e.target.value)}
-          className="trajectory-select"
+          className="trajectory-select form-select"
         >
           <option value="">{t('trajectory.selectPlaceholder')}</option>
           {conversations.map(c => (
-            <option key={c.id} value={c.id}>{c.name || c.id}</option>
+            <option key={c.id} value={c.id}>{c.name || c.summary || t('chat.unnamed')}</option>
           ))}
         </select>
       </div>
