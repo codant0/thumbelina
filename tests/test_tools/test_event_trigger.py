@@ -5,7 +5,7 @@ from datetime import datetime
 import pytest
 
 from thumbelina.tools.base import ToolCategory
-from thumbelina.tools.event import (
+from thumbelina.tools.event_trigger import (
     EventTriggerTool,
     ListScheduledTasksTool,
     ScheduleTaskTool,

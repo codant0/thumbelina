@@ -47,7 +47,7 @@ from thumbelina.skills.composition_engine import CompositionEngine
 from thumbelina.subagents.manager import SubagentManager
 from thumbelina.tools.collaboration import make_collaboration_tools
 from thumbelina.tools.communication import make_communication_tools
-from thumbelina.tools.event import make_event_tools
+from thumbelina.tools.event_trigger import make_event_tools
 from thumbelina.tools.execution_skill import make_skill_tools
 
 if TYPE_CHECKING:
