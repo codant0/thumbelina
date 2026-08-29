@@ -7,9 +7,11 @@ export interface StatusBarConfig {
   context: boolean
   /** KV 缓存命中率栏目是否展示 */
   cacheHit: boolean
+  /** git 分支状态栏栏目是否展示 */
+  git: boolean
 }
 
-const DEFAULTS: StatusBarConfig = { context: true, cacheHit: true }
+const DEFAULTS: StatusBarConfig = { context: true, cacheHit: true, git: true }
 
 function load(): StatusBarConfig {
   try {
@@ -19,6 +21,7 @@ function load(): StatusBarConfig {
     return {
       context: typeof parsed.context === 'boolean' ? parsed.context : DEFAULTS.context,
       cacheHit: typeof parsed.cacheHit === 'boolean' ? parsed.cacheHit : DEFAULTS.cacheHit,
+      git: typeof parsed.git === 'boolean' ? parsed.git : DEFAULTS.git,
     }
   } catch {
     return DEFAULTS
