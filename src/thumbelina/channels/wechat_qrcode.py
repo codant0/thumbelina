@@ -225,6 +225,84 @@ def _normalize_id(raw: str) -> str:
     return re.sub(r"[^\w\-]", "-", raw)
 
 
+def _credentials_path(accounts_dir: str, bot_id: str) -> Path:
+    """Return the credentials file path for a normalized bot ID."""
+    return _accounts_dir(accounts_dir) / f"{_normalize_id(bot_id)}.json"
+
+
+def load_credentials(accounts_dir: str = "", bot_id: str = "") -> WeChatCredentials | None:
+    """Load saved iLink credentials from ``{accounts_dir}/{bot_id}.json``.
+
+    When *bot_id* is empty, the accounts directory is scanned and the most
+    recently modified credentials file is used (useful when the bot ID is
+    not known after a container rebuild — see :func:`discover_credentials`).
+
+    Parameters
+    ----------
+    accounts_dir:
+        Override for the credential storage directory
+        (``channels.wechat.accounts_dir``); empty uses the default.
+    bot_id:
+        The iLink bot ID to look up. Empty = auto-discover.
+
+    Returns
+    -------
+    WeChatCredentials | None
+        The loaded credentials, or ``None`` if no credentials file exists
+        or the file cannot be parsed.
+    """
+    if bot_id:
+        path = _credentials_path(accounts_dir, bot_id)
+        if path.exists():
+            return _parse_credentials_file(path)
+        return None
+
+    discovered = discover_credentials_file(accounts_dir)
+    if discovered is None:
+        return None
+    return _parse_credentials_file(discovered)
+
+
+def discover_credentials_file(accounts_dir: str = "") -> Path | None:
+    """Scan the accounts directory for the most recently saved credentials.
+
+    Returns ``None`` when the directory does not exist or contains no
+    ``*.json`` files. Only files whose name looks like ``{bot_id}.json``
+    are considered.
+    """
+    dir_path = _accounts_dir(accounts_dir)
+    if not dir_path.is_dir():
+        return None
+
+    candidates = [p for p in dir_path.glob("*.json") if p.is_file()]
+    if not candidates:
+        return None
+
+    newest = max(candidates, key=lambda p: p.stat().st_mtime)
+    logger.info("Discovered credentials file: %s", newest)
+    return newest
+
+
+def _parse_credentials_file(path: Path) -> WeChatCredentials | None:
+    """Parse a credentials JSON file into :class:`WeChatCredentials`."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        bot_token = data.get("bot_token", "")
+        ilink_bot_id = data.get("ilink_bot_id", "")
+        if not bot_token or not ilink_bot_id:
+            logger.warning("Credentials file %s is missing bot_token/ilink_bot_id", path)
+            return None
+        return WeChatCredentials(
+            bot_token=bot_token,
+            ilink_bot_id=ilink_bot_id,
+            base_url=data.get("baseurl", ""),
+            ilink_user_id=data.get("ilink_user_id", ""),
+        )
+    except (OSError, json.JSONDecodeError, TypeError) as exc:
+        logger.warning("Failed to parse credentials file %s: %s", path, exc)
+        return None
+
+
 # ── iLink Message Types ────────────────────────────────────────────
 
 

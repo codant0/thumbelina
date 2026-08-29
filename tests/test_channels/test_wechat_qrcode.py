@@ -13,6 +13,7 @@ from thumbelina.channels.wechat_qrcode import (
     WeChatQRCodeManager,
     _accounts_dir,
     _normalize_id,
+    load_credentials,
 )
 
 
@@ -229,6 +230,86 @@ class TestSaveCredentials:
         assert saved == str(custom_dir / "bot-1.json")
         data = json.loads((custom_dir / "bot-1.json").read_text())
         assert data["bot_token"] == "tok"
+
+
+class TestLoadCredentials:
+    def test_loads_by_bot_id(self, tmp_path):
+        accounts_dir = tmp_path / "accounts"
+        accounts_dir.mkdir()
+        (accounts_dir / "bot-id.json").write_text(
+            json.dumps(
+                {
+                    "bot_token": "tok-1",
+                    "ilink_bot_id": "bot@id",
+                    "baseurl": "https://example.com",
+                    "ilink_user_id": "user-1",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        creds = load_credentials(str(accounts_dir), bot_id="bot@id")
+
+        assert creds is not None
+        assert creds.bot_token == "tok-1"
+        assert creds.ilink_bot_id == "bot@id"
+        assert creds.base_url == "https://example.com"
+        assert creds.ilink_user_id == "user-1"
+
+    def test_missing_file_returns_none(self, tmp_path):
+        assert load_credentials(str(tmp_path), bot_id="nobody") is None
+
+    def test_auto_discovers_newest_file(self, tmp_path):
+        accounts_dir = tmp_path / "accounts"
+        accounts_dir.mkdir()
+        old = accounts_dir / "old-bot.json"
+        old.write_text(
+            json.dumps(
+                {
+                    "bot_token": "old-token",
+                    "ilink_bot_id": "old@bot",
+                    "baseurl": "",
+                    "ilink_user_id": "old@user",
+                }
+            ),
+            encoding="utf-8",
+        )
+        new = accounts_dir / "new-bot.json"
+        new.write_text(
+            json.dumps(
+                {
+                    "bot_token": "new-token",
+                    "ilink_bot_id": "new@bot",
+                    "baseurl": "",
+                    "ilink_user_id": "new@user",
+                }
+            ),
+            encoding="utf-8",
+        )
+        # make 'new' strictly newer
+        import os
+        import time
+
+        old_time = time.time() - 100
+        os.utime(old, (old_time, old_time))
+
+        creds = load_credentials(str(accounts_dir), bot_id="")
+
+        assert creds is not None
+        assert creds.bot_token == "new-token"
+        assert creds.ilink_bot_id == "new@bot"
+
+    def test_auto_discover_empty_dir_returns_none(self, tmp_path):
+        assert load_credentials(str(tmp_path), bot_id="") is None
+
+    def test_auto_discover_missing_dir_returns_none(self, tmp_path):
+        assert load_credentials(str(tmp_path / "nope"), bot_id="") is None
+
+    def test_parse_invalid_json_returns_none(self, tmp_path):
+        accounts_dir = tmp_path / "accounts"
+        accounts_dir.mkdir()
+        (accounts_dir / "bad.json").write_text("{not json", encoding="utf-8")
+        assert load_credentials(str(accounts_dir), bot_id="bad") is None
 
 
 class TestClose:

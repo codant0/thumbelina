@@ -189,6 +189,99 @@ class TestWeChatChannelLifecycle:
             assert ch._ilink is mock_ilink
 
     @pytest.mark.asyncio
+    async def test_start_auto_discovers_credentials_when_bot_id_unknown(
+        self, mock_agent: MagicMock, tmp_path
+    ) -> None:
+        """start() should auto-discover saved credentials even when ilink_bot_id
+        is unknown (container rebuild lost the config/database but kept the
+        credentials volume)."""
+        import json
+
+        config = WeChatChannelConfig(
+            enabled=True,
+            bot_token="",
+            ilink_bot_id="",
+            ilink_user_id="",
+            ilink_base_url="https://ilinkai.weixin.qq.com",
+            accounts_dir=str(tmp_path),
+        )
+        ch = WeChatChannel(config=config, agent=mock_agent)
+
+        # Single credentials file in the accounts dir
+        accounts_dir = tmp_path
+        cred_file = accounts_dir / "bot-id.json"
+        cred_file.write_text(
+            json.dumps(
+                {
+                    "bot_token": "discovered-token",
+                    "ilink_bot_id": "bot@discovered",
+                    "baseurl": "https://ilinkai.weixin.qq.com",
+                    "ilink_user_id": "user@discovered",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        mock_ilink = AsyncMock()
+        mock_ilink.close = AsyncMock()
+
+        with (
+            patch(
+                "thumbelina.channels.wechat_qrcode.ILinkClient",
+                return_value=mock_ilink,
+            ),
+            patch("asyncio.create_task") as mock_create_task,
+        ):
+            mock_task = MagicMock()
+            mock_task.cancel = MagicMock()
+            mock_task.__await__ = MagicMock(return_value=iter([]))
+            mock_create_task.return_value = mock_task
+            await ch.start()
+            assert config.bot_token == "discovered-token"
+            assert config.ilink_bot_id == "bot@discovered"
+            assert config.ilink_user_id == "user@discovered"
+            assert ch._ilink is mock_ilink
+            assert ch._needs_authentication is False
+
+    @pytest.mark.asyncio
+    async def test_start_does_not_pick_wrong_account_when_bot_id_known(
+        self, mock_agent: MagicMock, tmp_path
+    ) -> None:
+        """When ilink_bot_id is known, an exact-match file is required —
+        a mismatched file must NOT be auto-loaded."""
+        import json
+
+        config = WeChatChannelConfig(
+            enabled=True,
+            bot_token="",
+            ilink_bot_id="expected@bot",
+            ilink_user_id="",
+            ilink_base_url="https://ilinkai.weixin.qq.com",
+            accounts_dir=str(tmp_path),
+        )
+        ch = WeChatChannel(config=config, agent=mock_agent)
+
+        # Only a credentials file for a DIFFERENT bot exists
+        cred_file = tmp_path / "other-bot.json"
+        cred_file.write_text(
+            json.dumps(
+                {
+                    "bot_token": "other-token",
+                    "ilink_bot_id": "other@bot",
+                    "baseurl": "https://ilinkai.weixin.qq.com",
+                    "ilink_user_id": "other@user",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        await ch.start()
+
+        assert ch._needs_authentication is True
+        assert ch._ilink is None
+        assert config.bot_token == ""
+
+    @pytest.mark.asyncio
     async def test_start_marks_needs_auth_when_no_token_and_no_saved_creds(
         self, mock_agent: MagicMock, tmp_path
     ) -> None:
