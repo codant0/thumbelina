@@ -10,6 +10,8 @@ authoritative workspace validator.
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
@@ -30,6 +32,60 @@ class DirListing(BaseModel):
     parent: str | None
     children: list[DirEntry]
     truncated: bool
+
+
+class GitInfo(BaseModel):
+    is_git: bool
+    branch: str | None = None
+
+
+def _resolve_dir(path: str) -> Path:
+    """解析绝对目录路径,非法则 422。"""
+    if not path or not path.strip():
+        raise HTTPException(status_code=422, detail="路径不能为空")
+    p = Path(path)
+    if not p.is_absolute():
+        raise HTTPException(status_code=422, detail=f"路径必须是绝对路径: {path}")
+    try:
+        resolved = p.resolve()
+    except OSError as exc:
+        raise HTTPException(status_code=422, detail=f"无效的路径: {exc}")
+    if not resolved.is_dir():
+        raise HTTPException(status_code=422, detail=f"路径不是有效目录: {path}")
+    return resolved
+
+
+def _run_git(path: str, args: list[str]) -> tuple[int, str, str]:
+    """执行只读/短写 git 命令,返回 (returncode, stdout, stderr)。
+
+    git 不存在时返回非零。带超时防挂起。
+    """
+    if shutil.which("git") is None:
+        return 1, "", "git not found"
+    try:
+        proc = subprocess.run(
+            ["git", "-C", path, *args],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired:
+        return 1, "", "git timeout"
+    return (
+        proc.returncode,
+        (proc.stdout or "").strip(),
+        (proc.stderr or "").strip(),
+    )
+
+
+@router.get("/fs/git", response_model=GitInfo)
+def git_info(path: str = Query(...)) -> GitInfo:
+    """返回工作区 git 状态;非 git 目录返回 is_git=False。"""
+    resolved = _resolve_dir(path)
+    code, branch, _ = _run_git(str(resolved), ["rev-parse", "--abbrev-ref", "HEAD"])
+    if code != 0 or not branch:
+        return GitInfo(is_git=False, branch=None)
+    return GitInfo(is_git=True, branch=branch)
 
 
 def _list_roots() -> list[DirEntry]:

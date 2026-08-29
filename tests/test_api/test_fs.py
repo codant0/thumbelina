@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import os
+import pathlib
 import re
+import shutil
+import subprocess
 
 import pytest
 
@@ -138,3 +141,47 @@ def test_root_parent_is_none(client) -> None:
 
 def test_limit_constant_positive() -> None:
     assert _MAX_LIST_ENTRIES > 0
+
+
+pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
+
+
+def _init_repo(tmp_path) -> pathlib.Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(
+        ["git", "-c", "init.defaultBranch=main", "init", "-q"], cwd=repo, check=True
+    )
+    subprocess.run(
+        ["git", "-c", "user.name=T", "-c", "user.email=t@t",
+         "commit", "--allow-empty", "-q", "-m", "init"],
+        cwd=repo, check=True,
+    )
+    return repo
+
+
+def test_git_info_in_repo(client, tmp_path) -> None:
+    repo = _init_repo(tmp_path)
+    resp = client.get("/api/v1/fs/git", params={"path": str(repo)})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["is_git"] is True
+    assert isinstance(data["branch"], str) and data["branch"]
+
+
+def test_git_info_non_repo(client, tmp_path) -> None:
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    resp = client.get("/api/v1/fs/git", params={"path": str(plain)})
+    assert resp.status_code == 200
+    assert resp.json() == {"is_git": False, "branch": None}
+
+
+def test_git_info_invalid_path(client, tmp_path) -> None:
+    resp = client.get("/api/v1/fs/git", params={"path": str(tmp_path / "missing")})
+    assert resp.status_code == 422
+
+
+def test_git_info_relative_path_rejected(client, tmp_path) -> None:
+    resp = client.get("/api/v1/fs/git", params={"path": "some/relative"})
+    assert resp.status_code == 422
