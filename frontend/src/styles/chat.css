@@ -16,6 +16,11 @@
   display: flex;
   align-items: center;
   gap: 7px;
+  /* Chips must never be clipped at the right edge — the toolbar wraps to a
+     second row when it's too wide for the chat column. The streaming toggle's
+     leading auto-margin keeps the chip group right-aligned within its row. */
+  flex-wrap: wrap;
+  row-gap: 5px;
   flex-shrink: 0;
   background: var(--bg-surface);
 }
