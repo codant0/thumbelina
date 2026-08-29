@@ -12,7 +12,7 @@ An AI-powered personal assistant built with [FastAPI](https://fastapi.tiangolo.c
 - **DeepSeek API Support** — Compatible via `openai` provider with graceful fallback for `/models` endpoint
 - **Agent Core** — LangGraph-powered agent loop with tool calling and conditional routing
 - **Role Prompts** — Role personas stored as files under `prompts/roles/` (built-in: assistant / coder), injected as the system prompt; supports a global default role and per-conversation switching in the Web UI
-- **Coder Mode & Workspace** — Conversations are created with `mode: chat | coder`; coder conversations bind to an absolute workspace directory (enforced boundary for the file/shell tools, invisible to the LLM), chat conversations may not set a workspace. Browse candidate directories with `GET /api/v1/fs/dirs`; dedicated Coder page with workspace picker in the Web UI
+- **Coder Mode & Workspace** — Conversations are created with `mode: chat | coder`; coder conversations bind to an absolute workspace directory (enforced boundary for the file/shell tools, invisible to the LLM), chat conversations may not set a workspace. Browse candidate directories with `GET /api/v1/fs/dirs`; dedicated Coder page with workspace picker in the Web UI. When the workspace is a git repository the status bar shows the current branch and lets you switch branches in one click (server-side validated, refreshed via WebSocket broadcast)
 - **Thinking Mode** — Per-conversation reasoning/thinking toggle with effort level, persisted per conversation and set via `PUT /api/v1/conversations/{id}/thinking`
 - **Built-in Tools** — File operations, web requests, web search (Tavily / DuckDuckGo), shell commands, and data processing (JSON/CSV/text analysis/regex search). Tools are organized into five categories — perception / execution / user communication / collaboration / event-trigger — and execution tools carry a security review and result self-verification step
 - **RAG (Retrieval-Augmented Generation)** — Document ingestion, chunking, embedding (HuggingFace via llama-index), vector retrieval (ChromaDB), and context-aware indexing pipeline
@@ -33,7 +33,7 @@ An AI-powered personal assistant built with [FastAPI](https://fastapi.tiangolo.c
 - **Streaming WebSocket** — Real-time token-by-token responses over WebSocket connections
 - **Security** — JWT authentication (HS256), sliding-window rate limiting, role-based access control, and data export/deletion
 - **Backup & Recovery** — JSON-based backup with metadata envelopes
-- **Web UI** — React 19 + TypeScript frontend with Chat, Coder (workspace-bound coding sessions), Tasks, Todo, Memory, Knowledge Base (RAG document management & retrieval testing), Trajectory (execution replay & cache stats), Settings (LLM presets, endpoints, connection & speed tests, web search), Plugins, Channels, and Dream pages. Supports English and Chinese via in-app language toggle, with dark/light/warm theme switching and a per-page differentiated status bar (including KV cache hit-rate indicator)
+- **Web UI** — React 19 + TypeScript frontend with Chat, Coder (workspace-bound coding sessions), Tasks, Todo, Memory, Knowledge Base (RAG document management & retrieval testing), Trajectory (execution replay & cache stats), Settings (LLM presets, endpoints, connection & speed tests, web search), Plugins, Channels, and Dream pages. Supports English and Chinese via in-app language toggle, with dark/light/warm theme switching and a per-page differentiated status bar (including KV cache hit-rate and git branch indicators)
 - **Docker** — Containerized deployment with docker-compose
 
 ## Quick Start
@@ -279,6 +279,9 @@ thumbelina/
 | DELETE | `/api/v1/conversations/{id}/messages` | Delete all messages of a conversation |
 | DELETE | `/api/v1/conversations/{id}` | Delete a conversation |
 | GET | `/api/v1/fs/dirs` | List directories (for the workspace picker) |
+| GET | `/api/v1/fs/git` | Probe workspace git status (is_git + current branch) |
+| GET | `/api/v1/fs/git/branches` | List local branches and the current one |
+| POST | `/api/v1/fs/git/checkout` | Switch to a local branch (server-side validated; broadcasts via WebSocket) |
 | GET | `/api/v1/tasks` | List scheduled tasks |
 | POST | `/api/v1/tasks/{id}/cancel` | Cancel a scheduled task |
 | GET | `/api/v1/subagents` | List active sub-agents |

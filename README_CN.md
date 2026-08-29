@@ -12,7 +12,7 @@
 - **DeepSeek API 兼容** — 通过 openai provider 接入，/models 端点自动降级处理
 - **代理核心** — LangGraph 驱动的代理循环，支持工具调用和条件路由
 - **角色提示词** — 角色人设以文件形式存放于 `prompts/roles/`（内置 assistant / coder），作为系统提示词注入；支持全局默认角色，并可在 Web 界面按对话随时切换
-- **编码会话与工作区** — 创建会话时可选 `mode: chat | coder`；coder 会话绑定一个绝对工作区目录（文件/Shell 工具在该边界内解析路径，对 LLM 不可见），普通 chat 会话不允许设置工作区。目录浏览见 `GET /api/v1/fs/dirs`，Web 界面提供带工作区选择器的独立 Coder 页
+- **编码会话与工作区** — 创建会话时可选 `mode: chat | coder`；coder 会话绑定一个绝对工作区目录（文件/Shell 工具在该边界内解析路径，对 LLM 不可见），普通 chat 会话不允许设置工作区。目录浏览见 `GET /api/v1/fs/dirs`，Web 界面提供带工作区选择器的独立 Coder 页。工作区为 git 仓库时，状态栏显示当前分支并可一键切换（服务端校验，经 WebSocket 广播实时刷新）
 - **思考模式** — 按对话开关推理/思考模式并可设强度档位，随会话持久化，经 `PUT /api/v1/conversations/{id}/thinking` 设置
 - **内置工具** — 文件操作、网络请求、网络搜索（Tavily / DuckDuckGo）、Shell 命令、数据处理（JSON/CSV/文本分析/正则搜索）。工具按感知/执行/用户沟通/协作/事件触发五类组织，执行类工具带安全审查与结果自验证
 - **RAG（检索增强生成）** — 文档加载、分块、向量化嵌入（llama-index + HuggingFace）、向量检索（ChromaDB）、上下文感知索引流水线
@@ -33,7 +33,7 @@
 - **流式 WebSocket** — 通过 WebSocket 连接实现实时逐 token 流式响应
 - **安全机制** — JWT 认证（HS256）、滑动窗口限流、基于角色的访问控制、数据导出/删除
 - **备份恢复** — 基于 JSON 的备份，支持元数据信封
-- **Web 界面** — React 19 + TypeScript 前端，包含聊天、编码（Coder）、任务、待办、记忆、知识库（RAG 文档管理与检索测试）、轨迹、设置（LLM 预设、端点、连接与速度测试、网络搜索）、插件、频道、梦境页面。支持页面内语言切换（中文 / English）、暗色/亮色/暖色主题与按页面差异化的状态栏（含 KV 缓存命中率指示）
+- **Web 界面** — React 19 + TypeScript 前端，包含聊天、编码（Coder）、任务、待办、记忆、知识库（RAG 文档管理与检索测试）、轨迹、设置（LLM 预设、端点、连接与速度测试、网络搜索）、插件、频道、梦境页面。支持页面内语言切换（中文 / English）、暗色/亮色/暖色主题与按页面差异化的状态栏（含 KV 缓存命中率与 git 分支指示）
 - **Docker** — 容器化部署，支持 docker-compose
 
 ## 快速开始
@@ -269,6 +269,9 @@ thumbelina/
 | DELETE | `/api/v1/conversations/{id}/messages` | 删除对话的全部消息 |
 | DELETE | `/api/v1/conversations/{id}` | 删除对话 |
 | GET | `/api/v1/fs/dirs` | 列举目录（工作区选择器用） |
+| GET | `/api/v1/fs/git` | 探测工作区 git 状态（is_git + 当前分支） |
+| GET | `/api/v1/fs/git/branches` | 列出本地分支与当前分支 |
+| POST | `/api/v1/fs/git/checkout` | 切换本地分支（服务端校验，成功经 WebSocket 广播） |
 | GET | `/api/v1/tasks` | 列出定时任务 |
 | POST | `/api/v1/tasks/{id}/cancel` | 取消定时任务 |
 | GET | `/api/v1/subagents` | 列出活跃子代理 |
