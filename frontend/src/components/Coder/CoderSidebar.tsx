@@ -11,9 +11,11 @@ interface CoderSidebarProps {
   onRename?: (id: string, name: string) => void
   selectedId?: string
   loading?: boolean
+  /** Shows a close control for the mobile drawer. */
+  onClose?: () => void
 }
 
-export function CoderSidebar({ conversations, onSelect, onNew, onDelete, onRename, selectedId, loading }: CoderSidebarProps) {
+export function CoderSidebar({ conversations, onSelect, onNew, onDelete, onRename, selectedId, loading, onClose }: CoderSidebarProps) {
   const { t } = useTranslation()
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -70,6 +72,11 @@ export function CoderSidebar({ conversations, onSelect, onNew, onDelete, onRenam
             <Plus size={16} />
           </button>
         )}
+        {onClose && (
+          <button className="sidebar-close-btn" onClick={onClose} title={t('common.close')} aria-label={t('common.close')}>
+            <X size={16} />
+          </button>
+        )}
       </div>
       <div className="sidebar-list">
         {loading ? (
@@ -110,8 +117,18 @@ export function CoderSidebar({ conversations, onSelect, onNew, onDelete, onRenam
                       <div
                         key={conv.id}
                         data-testid="coder-conversation-item"
+                        role="treeitem"
+                        tabIndex={0}
+                        aria-current={selectedId === conv.id ? 'true' : undefined}
                         className={`sidebar-item coder-item${selectedId === conv.id ? ' active' : ''}`}
                         onClick={() => editingId !== conv.id && onSelect(conv.id)}
+                        onKeyDown={e => {
+                          if (editingId === conv.id) return
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault()
+                            onSelect(conv.id)
+                          }
+                        }}
                       >
                         {editingId === conv.id ? (
                           <div className="sidebar-item__edit" onClick={e => e.stopPropagation()}>
@@ -138,7 +155,7 @@ export function CoderSidebar({ conversations, onSelect, onNew, onDelete, onRenam
                         ) : (
                           <>
                             <FileText size={13} className="coder-item-icon" />
-                            <span className="item-title__text">{conv.name || conv.summary || conv.id.slice(0, 8)}</span>
+                            <span className="item-title__text">{conv.name || conv.summary || t('chat.unnamed')}</span>
                             {onRename && (
                               <button className="btn btn-ghost btn-sm sidebar-action" data-testid="rename-conversation"
                                 title={t('chat.renameConversation')} aria-label={t('chat.renameConversation')}
