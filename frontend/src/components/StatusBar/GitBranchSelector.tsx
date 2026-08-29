@@ -108,7 +108,7 @@ function GitBranchSelectorInner({ ws, workspace }: { ws: ChatSocket; workspace: 
         onClick={() => (open ? setOpen(false) : openPanel())}
       />
       {open && (
-        <div className="role-float__panel" role="listbox" data-testid="git-branch-menu">
+        <div className="role-float__panel role-float__panel--right" role="listbox" data-testid="git-branch-menu">
           <div className="role-float__heading">{t('git.chooseBranch')}</div>
           {loadingBranches && <div className="role-float__empty">{t('common.loading')}</div>}
           {error && (

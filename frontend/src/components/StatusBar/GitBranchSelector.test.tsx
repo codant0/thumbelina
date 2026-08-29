@@ -57,7 +57,10 @@ describe('GitBranchSelector', () => {
     render(<LocaleProvider><GitBranchSelector ws={ws} workspace="/ws" /></LocaleProvider>)
     const trigger = await screen.findByTestId('statusbar-item')
     fireEvent.click(trigger)
-    expect(await screen.findByTestId('git-branch-menu')).toBeInTheDocument()
+    const menu = await screen.findByTestId('git-branch-menu')
+    expect(menu).toBeInTheDocument()
+    // 贴右缘的触发器应右对齐向左展开,避免溢出视口
+    expect(menu).toHaveClass('role-float__panel--right')
     expect(screen.getByTestId('git-branch-option-feature-a')).toBeInTheDocument()
   })
 

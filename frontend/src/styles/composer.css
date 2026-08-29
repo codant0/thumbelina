@@ -221,6 +221,12 @@
   animation: role-float-in var(--dur-fast) var(--ease-out);
 }
 
+/* 右对齐面板(贴右缘的触发器):向右展开会溢出视口,改为向左展开 */
+.role-float__panel--right {
+  left: auto;
+  right: 0;
+}
+
 @keyframes role-float-in {
   from {
     opacity: 0;
