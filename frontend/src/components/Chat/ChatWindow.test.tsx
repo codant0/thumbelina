@@ -29,6 +29,7 @@ const baseState: ChatSocket = {
   clearMessages: vi.fn(),
   switchConversation: vi.fn(),
   loadHistory: vi.fn(),
+  subscribe: vi.fn(() => () => {}),
 }
 
 let wsState = baseState

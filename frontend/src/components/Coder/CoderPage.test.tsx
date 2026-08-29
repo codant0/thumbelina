@@ -22,6 +22,7 @@ const ws = {
   clearMessages: vi.fn(),
   switchConversation: vi.fn(),
   loadHistory: vi.fn(),
+  subscribe: vi.fn(() => () => {}),
 } as ChatSocket
 
 const conv = (id: string, mode: 'chat' | 'coder'): Conversation => ({

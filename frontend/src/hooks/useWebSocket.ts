@@ -21,7 +21,11 @@ interface WsIncoming {
     response: string
     source?: string
   }
+  /** 后端切换 git 分支后广播的事件,携带工作区与当前分支名。 */
+  git_branch?: { workspace: string; branch: string }
 }
+
+type WsListener = (msg: WsIncoming) => void
 
 const CHARS_PER_TICK = 3
 const TICK_INTERVAL = 30
@@ -70,6 +74,8 @@ export function useWebSocket(url: string, activeConversationId?: string) {
   // indicator in the message list. State mirror guarded by `awaitingMoreRef`.
   const [awaitingMoreContent, setAwaitingMoreContent] = useState(false)
   const awaitingMoreRef = useRef(false)
+  // 广播事件监听器集合:通过 subscribe() 注册,收到 git_branch 等事件时派发。
+  const listenersRef = useRef<Set<WsListener>>(new Set())
   const setAwaitingMore = useCallback((value: boolean) => {
     if (awaitingMoreRef.current !== value) {
       awaitingMoreRef.current = value
@@ -202,6 +208,14 @@ export function useWebSocket(url: string, activeConversationId?: string) {
       // Any message from the backend means the connection is alive; clear
       // the reply timeout that was started when sendMessage fired.
       clearReplyTimer()
+
+      // 后端广播事件(如 git_branch)派发给订阅者,放在 error 分支之前,
+      // 保证消息只含 { git_branch } 时也能正常通知;单个监听者异常不影响主流程。
+      if (data.git_branch) {
+        for (const fn of listenersRef.current) {
+          try { fn(data) } catch { /* 监听者异常不影响主流程 */ }
+        }
+      }
 
       if (data.error) {
         const conv = data.conversation_id ?? null
@@ -667,6 +681,12 @@ export function useWebSocket(url: string, activeConversationId?: string) {
     setNewConversationId(null)
   }, [])
 
+  // 订阅后端广播事件(目前仅 git_branch);返回退订函数,组件卸载时调用。
+  const subscribe = useCallback((fn: WsListener) => {
+    listenersRef.current.add(fn)
+    return () => { listenersRef.current.delete(fn) }
+  }, [])
+
   // Expose streaming/waiting state relative to the active conversation so a
   // busy conversation does not lock the others. A null streamingConvId means
   // the reply did not report a conversation — treat it as the active one.
@@ -676,7 +696,7 @@ export function useWebSocket(url: string, activeConversationId?: string) {
     (activeConversationId && waitingConvIds.includes(activeConversationId)) ||
     (!activeConversationId && waitingConvIds.includes('@pending')) || false
 
-  return { messages, isConnected, isStreaming: isStreamingActive, streamingMode, waitingForReply, awaitingMoreContent, lastConversationId, newConversationId, clearNewConversation, sendMessage, stopGeneration, clearMessages, switchConversation, loadHistory }
+  return { messages, isConnected, isStreaming: isStreamingActive, streamingMode, waitingForReply, awaitingMoreContent, lastConversationId, newConversationId, clearNewConversation, sendMessage, stopGeneration, clearMessages, switchConversation, loadHistory, subscribe }
 }
 
 export type ChatSocket = ReturnType<typeof useWebSocket>
