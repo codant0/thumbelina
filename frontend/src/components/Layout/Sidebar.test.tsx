@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { Sidebar } from './Sidebar'
 
 describe('Sidebar', () => {
@@ -64,5 +64,35 @@ describe('Sidebar rename', () => {
     ]
     render(<Sidebar conversations={conversations} onSelect={vi.fn()} onRename={onRename} />)
     expect(screen.queryByTestId('rename-conversation')).toBeNull()
+  })
+})
+
+describe('Sidebar keyboard access', () => {
+  it('selects a conversation with Enter', () => {
+    const onSelect = vi.fn()
+    const conversations = [
+      { id: '1', name: 'Item', created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' },
+    ]
+    render(<Sidebar conversations={conversations} onSelect={onSelect} />)
+    const item = screen.getByTestId('conversation-item')
+    expect(item).toHaveAttribute('tabindex', '0')
+    fireEvent.keyDown(item, { key: 'Enter' })
+    expect(onSelect).toHaveBeenCalledWith('1')
+    fireEvent.keyDown(item, { key: ' ' })
+    expect(onSelect).toHaveBeenCalledTimes(2)
+  })
+
+  it('shows a friendly fallback instead of a raw UUID prefix', () => {
+    const conversations = [
+      { id: 'bf3153d2-2cdb-4bf3-bb7b-061a68eb2883', created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' },
+    ]
+    render(<Sidebar conversations={conversations} onSelect={vi.fn()} />)
+    expect(screen.getByText('New Conversation')).toBeInTheDocument()
+    expect(screen.queryByText(/bf3153d2/)).toBeNull()
+  })
+
+  it('renders a close button when onClose is provided (mobile drawer)', () => {
+    render(<Sidebar conversations={[]} onSelect={vi.fn()} onClose={vi.fn()} />)
+    expect(screen.getByLabelText(/Close/i)).toBeInTheDocument()
   })
 })

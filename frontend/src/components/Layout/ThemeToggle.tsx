@@ -49,6 +49,17 @@ export function ThemeToggle() {
   const currentTheme = THEMES.find(t => t.value === theme)!
   const CurrentIcon = currentTheme.Icon
 
+  // Cross-fade the theme swap where the browser supports View Transitions;
+  // setAttribute on the root element alone repaints instantly.
+  const applyTheme = (next: Theme) => {
+    const doc = document as Document & { startViewTransition?: (cb: () => void) => unknown }
+    if (typeof doc.startViewTransition === 'function') {
+      doc.startViewTransition(() => setTheme(next))
+    } else {
+      setTheme(next)
+    }
+  }
+
   return (
     <div className="theme-toggle-wrapper" ref={wrapperRef}>
       <button
@@ -67,7 +78,7 @@ export function ThemeToggle() {
               key={value}
               className={`theme-option${theme === value ? ' active' : ''}`}
               onClick={() => {
-                setTheme(value)
+                applyTheme(value)
                 setIsOpen(false)
               }}
               role="menuitem"

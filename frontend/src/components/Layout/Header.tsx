@@ -12,6 +12,8 @@ import {
   Radio,
   BookOpen,
   Footprints,
+  Menu,
+  Languages,
 } from 'lucide-react'
 import type { ComponentType } from 'react'
 
@@ -36,6 +38,8 @@ const NAV_ICONS: Record<Page, ComponentType<{ size?: number | string }>> = {
 interface HeaderProps {
   activePage: Page
   onNavigate: (page: Page) => void
+  /** Toggles the conversation sidebar drawer on small screens. */
+  onToggleSidebar?: () => void
 }
 
 const NAV_I18N: Record<Page, string> = {
@@ -52,8 +56,10 @@ const NAV_I18N: Record<Page, string> = {
   channels: 'nav.channels',
 }
 
-export function Header({ activePage, onNavigate }: HeaderProps) {
-  const { t } = useTranslation()
+export function Header({ activePage, onNavigate, onToggleSidebar }: HeaderProps) {
+  const { t, locale, setLocale } = useTranslation()
+
+  const toggleLocale = () => setLocale(locale === 'en' ? 'zh-CN' : 'en')
 
   return (
     <header className="header">
@@ -61,6 +67,17 @@ export function Header({ activePage, onNavigate }: HeaderProps) {
         <span className="brand-dot" />
         <h1>Thumbelina</h1>
       </div>
+      {onToggleSidebar && (
+        <button
+          type="button"
+          className="sidebar-hamburger"
+          data-testid="sidebar-hamburger"
+          aria-label={t('chat.sidebarTitle')}
+          onClick={onToggleSidebar}
+        >
+          <Menu size={16} />
+        </button>
+      )}
       <nav>
         {navKeys.map(page => {
           const Icon = NAV_ICONS[page]
@@ -69,15 +86,30 @@ export function Header({ activePage, onNavigate }: HeaderProps) {
               key={page}
               data-testid={`nav-${page}`}
               className={activePage === page ? 'active' : ''}
+              title={t(NAV_I18N[page])}
+              aria-current={activePage === page ? 'page' : undefined}
               onClick={() => onNavigate(page)}
             >
               <Icon />
-              {t(NAV_I18N[page])}
+              <span className="nav-label">{t(NAV_I18N[page])}</span>
             </button>
           )
         })}
       </nav>
-      <ThemeToggle />
+      <div className="header-actions">
+        <button
+          type="button"
+          className="lang-toggle-btn"
+          data-testid="lang-toggle"
+          onClick={toggleLocale}
+          title={t('settings.language')}
+          aria-label={t('settings.language')}
+        >
+          <Languages size={14} />
+          <span>{locale === 'en' ? '中文' : 'EN'}</span>
+        </button>
+        <ThemeToggle />
+      </div>
     </header>
   )
 }
