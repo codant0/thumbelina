@@ -8,6 +8,7 @@ import { RoleSelector } from './RoleSelector'
 import { ThinkingSelector } from './ThinkingSelector'
 import { ContextUsageItem } from '../StatusBar/ContextUsageItem'
 import { CacheHitRateItem } from '../StatusBar/CacheHitRateItem'
+import { GitBranchSelector } from '../StatusBar/GitBranchSelector'
 import { Toast } from '../Settings/Toast'
 import { Mail, Eraser, Shrink, Route } from 'lucide-react'
 import type { Conversation, ThinkingEffort } from '../../types/chat'
@@ -281,6 +282,7 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
                   endpointId={activeConversation?.endpoint_id ?? null}
                 />
                 <CacheHitRateItem conversationId={conversationId} />
+                <GitBranchSelector ws={ws} workspace={activeConversation?.workspace ?? null} />
               </div>
             </>
           ) : undefined

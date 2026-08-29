@@ -3,7 +3,7 @@ import { EndpointManager } from './EndpointManager'
 import { ToolsConfig } from './ToolsConfig'
 import { useTranslation } from '../../i18n'
 import { Toast } from './Toast'
-import { Gauge, Database, Download, Trash2, Loader2, Zap } from 'lucide-react'
+import { Gauge, Database, Download, Trash2, Loader2, Zap, GitBranch } from 'lucide-react'
 import { StatusBarCardGrid } from '../StatusBar/StatusBarCardGrid'
 import { useStatusBarConfig } from '../StatusBar/useStatusBarConfig'
 
@@ -87,6 +87,12 @@ export function SettingsPanel() {
               label: t('settings.statusbarColumns.cacheHit'),
               description: t('settings.statusbarColumns.cacheHitDesc'),
               icon: <Zap size={18} />,
+            },
+            {
+              key: 'git',
+              label: t('settings.statusbarColumns.git'),
+              description: t('settings.statusbarColumns.gitDesc'),
+              icon: <GitBranch size={18} />,
             },
           ]}
           config={config}
