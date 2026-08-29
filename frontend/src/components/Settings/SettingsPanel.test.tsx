@@ -106,11 +106,4 @@ describe('SettingsPanel', () => {
       expect(screen.getByTestId('endpoint-manager')).toBeInTheDocument()
     })
   })
-
-  it('should render language selector', async () => {
-    renderWithProvider()
-    await waitFor(() => {
-      expect(screen.getByTestId('language-select')).toBeInTheDocument()
-    })
-  })
 })

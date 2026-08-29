@@ -86,10 +86,6 @@
   "statusbar": {
     "cacheHitTitle": "Cache hit rate {pct}% ({hit}/{total} tokens · {turns} turns)"
   },
-  "language": {
-    "en": "English",
-    "zhCN": "中文"
-  },
   "connectionTest": {
     "button": "Test Connection",
     "title": "Connection Test",

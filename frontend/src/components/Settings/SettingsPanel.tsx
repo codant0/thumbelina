@@ -3,12 +3,12 @@ import { EndpointManager } from './EndpointManager'
 import { ToolsConfig } from './ToolsConfig'
 import { useTranslation } from '../../i18n'
 import { Toast } from './Toast'
-import { Gauge, Globe, Database, Download, Trash2, Loader2, Zap } from 'lucide-react'
+import { Gauge, Database, Download, Trash2, Loader2, Zap } from 'lucide-react'
 import { StatusBarCardGrid } from '../StatusBar/StatusBarCardGrid'
 import { useStatusBarConfig } from '../StatusBar/useStatusBarConfig'
 
 export function SettingsPanel() {
-  const { t, locale, setLocale } = useTranslation()
+  const { t } = useTranslation()
   const [message, setMessage] = useState('')
   const [isError, setIsError] = useState(false)
   const { config, toggle } = useStatusBarConfig()
@@ -70,22 +70,6 @@ export function SettingsPanel() {
         isError={isError}
         onClose={() => setMessage('')}
       />
-
-      {/* Language selector */}
-      <div className="card">
-        <div className="card-title"><Globe size={14} />{t('settings.language')}</div>
-        <div className="settings-row">
-          <select
-            className="form-select"
-            data-testid="language-select"
-            value={locale}
-            onChange={e => setLocale(e.target.value === 'zh-CN' ? 'zh-CN' : 'en')}
-          >
-            <option value="en">{t('language.en')}</option>
-            <option value="zh-CN">{t('language.zhCN')}</option>
-          </select>
-        </div>
-      </div>
 
       {/* Status Bar */}
       <div className="card" data-testid="statusbar-settings-card">

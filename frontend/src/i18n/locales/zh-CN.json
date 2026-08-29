@@ -86,10 +86,6 @@
   "statusbar": {
     "cacheHitTitle": "缓存命中率 {pct}%（{hit}/{total} tokens · {turns} 轮）"
   },
-  "language": {
-    "en": "English",
-    "zhCN": "中文"
-  },
   "connectionTest": {
     "button": "测试连接",
     "title": "连接测试",
