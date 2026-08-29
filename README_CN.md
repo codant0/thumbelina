@@ -375,6 +375,13 @@ thumbelina/
 4. 轮询 `GET /api/v1/wechat/qrcode/status` 直到状态为 `confirmed`
 5. 调用 `POST /api/v1/wechat/qrcode/confirm` 保存凭据并启用频道
 
+> **Docker 部署的凭据持久化**：扫码成功后凭据（`{bot_id}.json`）会保存到
+> `channels.wechat.accounts_dir`（默认 `CHANNEL/.weclaw/accounts`，相对工作目录）。
+> Docker 下请确保 `docker-compose.yml` 已设置
+> `THUMBELINA_CHANNELS__WECHAT__ACCOUNTS_DIR=/app/data/CHANNEL/.weclaw/accounts`
+> （数据卷内），否则凭据落在容器内层、重建容器即丢失。若升级前凭据已丢失，
+> 只需重新扫码一次，之后重建容器无需再次扫码。
+
 ### 方式 B：手动配置
 
 在 `thumbelina.yaml` 中添加：
