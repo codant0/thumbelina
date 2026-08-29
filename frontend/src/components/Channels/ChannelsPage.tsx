@@ -336,7 +336,7 @@ export function ChannelsPage() {
       <div className="card" data-testid="qq-channel-card">
         <div className="card-title card-title--between">
           <span><Radio size={14} />{t('channels.qqBot')}</span>
-          <span className={`badge ${config?.qq.enabled ? 'badge-success' : 'badge-error'}`}>
+          <span className={`badge ${config?.qq.enabled ? 'badge-success' : 'badge-neutral'}`}>
             {config?.qq.enabled ? t('channels.enabled') : t('channels.disabled')}
           </span>
         </div>
@@ -468,7 +468,7 @@ export function ChannelsPage() {
       <div className="card" data-testid="wechat-channel-card">
         <div className="card-title card-title--between">
           <span><QrCode size={14} />{t('channels.wechat')}</span>
-          <span className={`badge ${config?.wechat.enabled ? 'badge-success' : 'badge-error'}`}>
+          <span className={`badge ${config?.wechat.enabled ? 'badge-success' : 'badge-neutral'}`}>
             {config?.wechat.enabled ? t('channels.enabled') : t('channels.disabled')}
           </span>
         </div>

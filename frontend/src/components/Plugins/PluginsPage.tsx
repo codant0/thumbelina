@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Blocks, ShieldCheck, ShieldAlert, FileWarning } from 'lucide-react'
 import { useTranslation } from '../../i18n'
+import { EmptyState } from '../common/EmptyState'
 
 interface Plugin {
   id: string
@@ -73,7 +74,7 @@ export function PluginsPage() {
           </button>
         </div>
         {plugins.length === 0 ? (
-          <p className="task-empty">{t('plugins.noPlugins')}</p>
+          <EmptyState compact icon={<Blocks size={20} />} title={t('plugins.noPlugins')} />
         ) : (
           <div className="task-list" data-testid="plugin-list">
             {plugins.map(plugin => (
@@ -83,7 +84,7 @@ export function PluginsPage() {
                   <div className="task-meta">
                     <span className="badge badge-neutral">{plugin.plugin_type}</span>
                     <span className="badge badge-neutral">v{plugin.version}</span>
-                    <span className={`badge ${plugin.enabled ? 'badge-success' : 'badge-error'}`}>
+                    <span className={`badge ${plugin.enabled ? 'badge-success' : 'badge-neutral'}`}>
                       {plugin.enabled ? t('channels.enabled') : t('channels.disabled')}
                     </span>
                     {plugin.sandbox && (
