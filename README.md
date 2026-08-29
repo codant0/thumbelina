@@ -12,6 +12,8 @@ An AI-powered personal assistant built with [FastAPI](https://fastapi.tiangolo.c
 - **DeepSeek API Support** — Compatible via `openai` provider with graceful fallback for `/models` endpoint
 - **Agent Core** — LangGraph-powered agent loop with tool calling and conditional routing
 - **Role Prompts** — Role personas stored as files under `prompts/roles/` (built-in: assistant / coder), injected as the system prompt; supports a global default role and per-conversation switching in the Web UI
+- **Coder Mode & Workspace** — Conversations are created with `mode: chat | coder`; coder conversations bind to an absolute workspace directory (enforced boundary for the file/shell tools, invisible to the LLM), chat conversations may not set a workspace. Browse candidate directories with `GET /api/v1/fs/dirs`; dedicated Coder page with workspace picker in the Web UI
+- **Thinking Mode** — Per-conversation reasoning/thinking toggle with effort level, persisted per conversation and set via `PUT /api/v1/conversations/{id}/thinking`
 - **Built-in Tools** — File operations, web requests, web search (Tavily / DuckDuckGo), shell commands, and data processing (JSON/CSV/text analysis/regex search). Tools are organized into five categories — perception / execution / user communication / collaboration / event-trigger — and execution tools carry a security review and result self-verification step
 - **RAG (Retrieval-Augmented Generation)** — Document ingestion, chunking, embedding (HuggingFace via llama-index), vector retrieval (ChromaDB), and context-aware indexing pipeline
 - **Conversation Storage** — Persistent storage (SQLite) with keyword search, LLM-generated summaries, and auto-naming for new conversations
@@ -21,7 +23,9 @@ An AI-powered personal assistant built with [FastAPI](https://fastapi.tiangolo.c
 - **Markdown Layered Memory** — File-system-backed memory stored as human-auditable Markdown under `MEMORY/`. Three-tier on-demand loading (L0 auto-generated index of one-line summaries / L1 overview / L2 full text); `MemoryExtractor` runs in the background after each user turn to extract/rewrite/delete memories (NEW/UPDATE/DELETE/NOOP); the agent injects the L0 index summary every turn (treated as reference data, never instructions) and exposes `search_memory` / `read_memory` / `remember` tools; zero embedding/vector dependency; CRUD + search via `/api/v1/memory/*` routes
 - **Sub-Agent System** — Parallel task execution with monitor/worker agents, inter-agent messaging and shared state
 - **Task Scheduler** — Natural language time parsing (Chinese & English) with conditional triggers and notification broadcast
-- **TODO List & Quick Notes** — Local Markdown-based todo list and quick notes (`TODO/todolist.md` + `TODO/notes.md`), with per-item Markdown remarks (stored as blockquotes), manageable from the Web UI
+- **TODO List & Quick Notes** — Local Markdown-based todo list and quick notes (`TODO/todolist.md` + `TODO/notes.md`), with per-item Markdown remarks (stored as blockquotes), grouping by top-level Markdown heading with group-filter cards, manageable from the Web UI
+- **Trajectory Recording** — Per-turn agent execution trajectory (tool calls, LLM usage) persisted per conversation, browsable with pagination in the Web UI Trajectory page; KV cache hit-rate summary exposed for the status bar
+- **Context Compression** — Conversation context is checkpointed (LangGraph checkpointer) and can be compacted on demand via `POST /api/v1/conversations/{id}/compress`, with configurable strategies (`summary_recent` / sliding window) and token-budget trigger from `config.context`
 - **Plugin System** — Register and manage tools, skills, channels, and providers with sandbox validation and dependency resolution
 - **QQ Bot Channel** — Connect via QQ official bot SDK (`qq-botpy`), supports guild, group, and private messages
 - **WeChat Channel** — iLink long-polling integration for personal WeChat account via [weixin-bot](https://github.com/epiral/weixin-bot), with QR code login
@@ -29,7 +33,7 @@ An AI-powered personal assistant built with [FastAPI](https://fastapi.tiangolo.c
 - **Streaming WebSocket** — Real-time token-by-token responses over WebSocket connections
 - **Security** — JWT authentication (HS256), sliding-window rate limiting, role-based access control, and data export/deletion
 - **Backup & Recovery** — JSON-based backup with metadata envelopes
-- **Web UI** — React 19 + TypeScript frontend with Chat, Tasks, Memory, Knowledge Base (RAG document management & retrieval testing), Settings (LLM presets, endpoints, connection test), Plugins, Channels, and Dream pages. Supports English and Chinese via in-app language toggle, with dark/light/warm theme switching
+- **Web UI** — React 19 + TypeScript frontend with Chat, Coder (workspace-bound coding sessions), Tasks, Todo, Memory, Knowledge Base (RAG document management & retrieval testing), Trajectory (execution replay & cache stats), Settings (LLM presets, endpoints, connection & speed tests, web search), Plugins, Channels, and Dream pages. Supports English and Chinese via in-app language toggle, with dark/light/warm theme switching and a per-page differentiated status bar (including KV cache hit-rate indicator)
 - **Docker** — Containerized deployment with docker-compose
 
 ## Quick Start
@@ -141,7 +145,8 @@ For the full deployment guide (updates, backups, data migration, FAQ, production
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │  React Frontend (Vite)                                       │
-│  Chat · Tasks · Memory · Settings · Plugins · Channels · Dream│
+│  Chat · Coder · Tasks · Todo · Memory · Knowledge Base ·     │
+│  Trajectory · Settings · Plugins · Channels · Dream          │
 │  WebSocket /ws/chat (streaming) · HTTP /api/v1/*             │
 └───────────────────────────┬──────────────────────────────────┘
                             │
@@ -165,13 +170,15 @@ For the full deployment guide (updates, backups, data migration, FAQ, production
 ┌───────────────────────▼─────────────────▼────────────────────┐
 │  ThumbelinaAgent (agent/graph.py)                            │
 │  LangGraph StateGraph: agent ⇄ tools                        │
-│  ┌─────────┐ ┌─────────┐ ┌───────────┐ ┌──────────┐         │
-│  │ Skills  │ │Subagents│ │ Scheduler │ │  Tools   │         │
-│  │ Engine  │ │ Manager │ │           │ │ (file,   │         │
-│  │+Compos. │ │+Monitor │ │+Condition │ │  web,    │         │
-│  │+Feedback│ │+Worker  │ │+Notify    │ │  shell,  │         │
-│  │         │ │         │ │           │ │  data)   │         │
-│  └─────────┘ └─────────┘ └───────────┘ └──────────┘         │
+│  ┌─────────┐ ┌─────────┐ ┌───────────┐ ┌──────────────────┐ │
+│  │ Skills  │ │Subagents│ │ Scheduler │ │ Tools (5 cats)   │ │
+│  │ Engine  │ │ Manager │ │           │ │ perception/exec/ │ │
+│  │+Compos. │ │+Monitor │ │+Condition │ │ comm/collab/     │ │
+│  │+Feedback│ │+Worker  │ │+Notify    │ │ event; exec has  │ │
+│  │         │ │         │ │           │ │ review+verify    │ │
+│  │         │ │         │ │           │ │ +fs/web/search/  │ │
+│  │         │ │         │ │           │ │ shell/data       │ │
+│  └─────────┘ └─────────┘ └───────────┘ └──────────────────┘ │
 │  ┌──────────────┐ ┌──────────────────┐                       │
 │  │ Memory       │ │ Skill Context    │                       │
 │  │ (L0 index    │ │ (injected as     │                       │
@@ -203,11 +210,13 @@ thumbelina/
 │   ├── cli/                 # Click CLI with prompt_toolkit chat session
 │   ├── config/              # YAML + env var config loader, Pydantic models
 │   ├── llm/                 # LLM provider abstraction (OpenAI, Anthropic, Ollama)
-│   ├── repository/          # Conversation persistence, search, vector store, feedback
+│   ├── repository/          # Conversation persistence, search, vector store, feedback, trajectory
 │   ├── analysis/            # LLM analysis services: title summarizer, conversation namer
+│   ├── filestore/           # Shared atomic file I/O + per-key async file locks (used by todo/memory)
 │   ├── memory/              # Markdown layered memory (L0/L1/L2, extractor, search, tools)
 │   ├── notifications.py     # WebSocket notification broadcast
 │   ├── plugins/             # Plugin system (register, sandbox, dependency resolution)
+│   ├── prompts/roles/       # Role persona markdown files (assistant, coder)
 │   ├── rag/                 # RAG: document ingestion, chunking, embedding, retrieval, indexing pipeline
 │   │   ├── embedding/       # Embedding model abstraction (HuggingFace, ChromaDB vector store, registry)
 │   │   ├── ingestion/       # Document loaders and chunkers
@@ -218,7 +227,8 @@ thumbelina/
 │   ├── security/            # JWT auth + rate limiter + RBAC
 │   ├── skills/              # Skill extraction, matching, composition, persistence
 │   ├── subagents/           # Sub-agent manager, monitor/worker agents, message queue, shared state
-│   └── tools/               # Built-in tools (file ops, web requests, web search, shell, data processing)
+│   ├── todo/                # Markdown todo list & quick notes service
+│   └── tools/               # Built-in tools under a five-category taxonomy: base.py (ThumbelinaBaseTool template lifecycle) + perception / execution / communication / collaboration / event modules; execution tools enforce security review + result self-verification
 ├── tests/                   # Pytest test suite (mirrors src/ structure)
 ├── frontend/                # React 19 + TypeScript + Vite
 │   └── src/
@@ -226,18 +236,24 @@ thumbelina/
 │       ├── components/
 │       │   ├── Channels/    # ChannelsPage (QQ/WeChat config & status)
 │       │   ├── Chat/        # ChatWindow, InputBox, MessageList, KnowledgeBaseSelector
+│       │   ├── Coder/       # CoderPage, CoderSidebar, WorkspacePicker (workspace-bound coding)
 │       │   ├── Dream/       # Skill evolution visualization
 │       │   ├── KnowledgeBase/ # KnowledgeBasePage (KB CRUD, document management, retrieval test)
 │       │   ├── Layout/      # Header, Sidebar, ThemeToggle (dark/light/warm)
 │       │   ├── Memory/      # MemoryViewer (search + skill browser)
 │       │   ├── Plugins/     # PluginsPage (plugin list + sandbox report)
-│       │   ├── Settings/    # LLM endpoint/preset management, connection test, speed test
-│       │   └── Tasks/       # TaskManager (subagents + scheduled tasks)
+│       │   ├── Settings/    # LLM endpoint/preset management, connection test, speed test, web search config
+│       │   ├── StatusBar/   # Per-page differentiated status bar items
+│       │   ├── Tasks/       # TaskManager (subagents + scheduled tasks)
+│       │   ├── Todo/        # TodoPage (todo list + quick notes, heading groups)
+│       │   └── Trajectory/  # TrajectoryPage, TrajectoryDetailModal (execution replay)
 │       ├── hooks/           # useWebSocket custom hook
 │       ├── i18n/            # Internationalization (en, zh-CN) with LocaleContext
 │       ├── test/            # Test setup
 │       └── types/           # TypeScript interfaces
-├── docs/plans/              # Design documents (Chinese)
+├── docs/specs/              # Design specs
+├── docs/plans/              # Implementation plans
+├── docs/review/             # Review records
 ├── Dockerfile               # Multi-stage image: builds frontend, backend serves it
 ├── docker-compose.yml       # Single-container deployment
 ├── thumbelina.yaml.example  # Example configuration
@@ -251,14 +267,18 @@ thumbelina/
 | GET | `/health` | Health check (returns version + database status) |
 | POST | `/api/v1/chat` | Send a message, get an agent response |
 | GET | `/api/v1/conversations` | List all conversations |
-| POST | `/api/v1/conversations` | Create a new conversation |
+| POST | `/api/v1/conversations` | Create a new conversation (`mode: chat | coder`; coder requires `workspace`) |
 | GET | `/api/v1/conversations/search/{query}` | Search messages across conversations |
 | GET | `/api/v1/conversations/{id}` | Get conversation with messages |
 | PATCH | `/api/v1/conversations/{id}` | Rename a conversation |
 | PUT | `/api/v1/conversations/{id}/endpoint` | Set per-conversation LLM endpoint and model |
 | PUT | `/api/v1/conversations/{id}/role` | Set per-conversation role (`null` = restore global default) |
 | PUT | `/api/v1/conversations/{id}/knowledge-base` | Bind a RAG knowledge base to a conversation |
+| PUT | `/api/v1/conversations/{id}/thinking` | Set per-conversation thinking mode (enabled + effort) |
+| POST | `/api/v1/conversations/{id}/compress` | Manually compress the conversation context |
+| DELETE | `/api/v1/conversations/{id}/messages` | Delete all messages of a conversation |
 | DELETE | `/api/v1/conversations/{id}` | Delete a conversation |
+| GET | `/api/v1/fs/dirs` | List directories (for the workspace picker) |
 | GET | `/api/v1/tasks` | List scheduled tasks |
 | POST | `/api/v1/tasks/{id}/cancel` | Cancel a scheduled task |
 | GET | `/api/v1/subagents` | List active sub-agents |
@@ -266,6 +286,8 @@ thumbelina/
 | GET | `/api/v1/skills` | List extracted skills |
 | GET | `/api/v1/skills/stats` | Skill usage statistics (for Dream visualization) |
 | GET | `/api/v1/compositions` | List skill compositions |
+| GET | `/api/v1/trajectory/{conversation_id}` | Paged agent execution trajectory for a conversation |
+| GET | `/api/v1/trajectory/cache-stats` | KV cache hit-rate summary (status bar) |
 | POST | `/api/v1/feedback` | Submit user feedback (rating 1-5) |
 | GET | `/api/v1/feedback` | List feedback records |
 | GET | `/api/v1/feedback/stats` | Feedback statistics |
@@ -300,6 +322,17 @@ thumbelina/
 | POST | `/api/v1/config/llm/endpoints/{id}/test-connection` | Run a connectivity test against a saved endpoint |
 | POST | `/api/v1/config/llm/endpoints/{id}/activate` | Globally activate a saved endpoint (hot-swap LLM) |
 | PUT | `/api/v1/config/channels/{name}` | Hot-swap channel configuration |
+| GET | `/api/v1/config/tools` | Current tools config (web search provider, key-set flag) |
+| PUT | `/api/v1/config/tools/web_search` | Update web search config (hot-swappable) |
+| GET | `/api/v1/todo/status` | TODO module status (enabled, file paths, counts) |
+| GET | `/api/v1/todo/items` | List todo items (`TodoItemsOut`, entries carry their source heading group) |
+| POST | `/api/v1/todo/items` | Add a todo item |
+| PATCH | `/api/v1/todo/items/{index}` | Update a todo item (text / done / remark) |
+| DELETE | `/api/v1/todo/items/{index}` | Delete a todo item |
+| GET | `/api/v1/todo/notes` | List quick notes |
+| POST | `/api/v1/todo/notes` | Add a quick note |
+| PUT | `/api/v1/todo/notes/{index}` | Update a quick note |
+| DELETE | `/api/v1/todo/notes/{index}` | Delete a quick note |
 | GET | `/api/v1/config/export` | Export config from database |
 | POST | `/api/v1/config/reload` | Reload config from database |
 | GET | `/api/v1/qq/status` | Check QQ Bot connection status |
@@ -321,7 +354,9 @@ thumbelina/
 | GET | `/api/v1/rag/knowledge-bases/{id}/upload-tasks` | List upload tasks of a knowledge base |
 | DELETE | `/api/v1/rag/upload-tasks/{task_id}` | Cancel or dismiss an upload task |
 | DELETE | `/api/v1/rag/documents/{id}` | Delete a document |
+| GET | `/api/v1/rag/documents/{id}/chunks` | List chunks of a document |
 | POST | `/api/v1/rag/query` | Retrieve top-k chunks for a query |
+| POST | `/api/v1/rag/documents/simhash-query` | Near-duplicate search across documents via SimHash |
 | WS | `/ws/chat` | Real-time streaming chat via WebSocket |
 
 ## QQ Bot Setup

@@ -12,7 +12,9 @@
 - **DeepSeek API 兼容** — 通过 openai provider 接入，/models 端点自动降级处理
 - **代理核心** — LangGraph 驱动的代理循环，支持工具调用和条件路由
 - **角色提示词** — 角色人设以文件形式存放于 `prompts/roles/`（内置 assistant / coder），作为系统提示词注入；支持全局默认角色，并可在 Web 界面按对话随时切换
-- **内置工具** — 文件操作、网络请求、Shell 命令、数据处理（JSON/CSV/文本分析/正则搜索）。工具按感知/执行/用户沟通/协作/事件触发五类组织，执行类工具带安全审查与结果自验证
+- **编码会话与工作区** — 创建会话时可选 `mode: chat | coder`；coder 会话绑定一个绝对工作区目录（文件/Shell 工具在该边界内解析路径，对 LLM 不可见），普通 chat 会话不允许设置工作区。目录浏览见 `GET /api/v1/fs/dirs`，Web 界面提供带工作区选择器的独立 Coder 页
+- **思考模式** — 按对话开关推理/思考模式并可设强度档位，随会话持久化，经 `PUT /api/v1/conversations/{id}/thinking` 设置
+- **内置工具** — 文件操作、网络请求、网络搜索（Tavily / DuckDuckGo）、Shell 命令、数据处理（JSON/CSV/文本分析/正则搜索）。工具按感知/执行/用户沟通/协作/事件触发五类组织，执行类工具带安全审查与结果自验证
 - **RAG（检索增强生成）** — 文档加载、分块、向量化嵌入（llama-index + HuggingFace）、向量检索（ChromaDB）、上下文感知索引流水线
 - **对话存储** — 持久化存储（SQLite），支持关键词搜索、LLM 生成摘要和对话自动命名
 - **语义搜索** — 基于 ChromaDB 的向量语义搜索，支持关键词 + 语义混合回退
@@ -21,7 +23,9 @@
 - **Markdown 分层记忆** — 基于 Markdown 文件系统的分层记忆，存于 `MEMORY/` 目录，人类可读、可手工编辑、可 git 审计。三层按需加载（L0 自动生成的索引摘要 / L1 概览 / L2 全文）；`MemoryExtractor` 在每轮用户消息后后台异步抽取/改写/删除记忆（NEW/UPDATE/DELETE/NOOP）；Agent 每轮注入 L0 索引摘要（视为参考数据、绝非指令），并提供 `search_memory` / `read_memory` / `remember` 三个工具；零 embedding/向量依赖；通过 `/api/v1/memory/*` 路由提供浏览、搜索与状态查询
 - **子代理系统** — 并行任务执行，支持监控/工作代理、代理间消息传递和共享状态
 - **任务调度器** — 自然语言时间解析（中英文），支持条件触发和通知广播
-- **待办清单与随手记** — 基于本地 Markdown 文件的待办清单与随手记（`TODO/todolist.md` + `TODO/notes.md`），提供每项待办独立的 Markdown 备注（块引用格式），可在 Web 界面管理
+- **待办清单与随手记** — 基于本地 Markdown 文件的待办清单与随手记（`TODO/todolist.md` + `TODO/notes.md`），每项待办支持独立 Markdown 备注（块引用格式），按一级标题分组并提供分组过滤卡片，可在 Web 界面管理
+- **轨迹记录** — 每轮 agent 执行轨迹（工具调用、LLM 用量）按会话持久化，Web 界面 Trajectory 页分页浏览；KV 缓存命中率汇总供状态栏展示
+- **上下文压缩** — 会话上下文经 LangGraph checkpointer 持久化，可按需手动压缩（`POST /api/v1/conversations/{id}/compress`），压缩策略与 token 触发阈值经 `config.context` 配置（summary_recent / 滑动窗口）
 - **插件系统** — 注册和管理工具、技能、渠道、提供商，支持沙箱验证和依赖解析
 - **QQ Bot 频道** — 通过 QQ 官方 Bot SDK（`qq-botpy`）接入，支持频道、群聊和私聊
 - **微信频道** — 通过 [weixin-bot](https://github.com/epiral/weixin-bot) 协议接入个人微信号，支持扫码登录
@@ -29,7 +33,7 @@
 - **流式 WebSocket** — 通过 WebSocket 连接实现实时逐 token 流式响应
 - **安全机制** — JWT 认证（HS256）、滑动窗口限流、基于角色的访问控制、数据导出/删除
 - **备份恢复** — 基于 JSON 的备份，支持元数据信封
-- **Web 界面** — React 19 + TypeScript 前端，包含聊天、任务、记忆、设置（LLM 预设、端点、连接测试）、插件、频道、梦境七个页面。支持页面内语言切换（中文 / English）和暗色/亮色/暖色主题切换
+- **Web 界面** — React 19 + TypeScript 前端，包含聊天、编码（Coder）、任务、待办、记忆、知识库（RAG 文档管理与检索测试）、轨迹、设置（LLM 预设、端点、连接与速度测试、网络搜索）、插件、频道、梦境页面。支持页面内语言切换（中文 / English）、暗色/亮色/暖色主题与按页面差异化的状态栏（含 KV 缓存命中率指示）
 - **Docker** — 容器化部署，支持 docker-compose
 
 ## 快速开始
@@ -130,7 +134,8 @@ docker compose up -d --build
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │  React 前端 (Vite)                                           │
-│  聊天 · 任务 · 记忆 · 设置 · 插件 · 频道 · 梦境              │
+│  聊天 · 编码 · 任务 · 待办 · 记忆 · 知识库 · 轨迹 ·          │
+│  设置 · 插件 · 频道 · 梦境                                   │
 │  WebSocket /ws/chat (流式) · HTTP /api/v1/*                  │
 └───────────────────────────┬──────────────────────────────────┘
                             │
@@ -143,9 +148,11 @@ docker compose up -d --build
 │  │          │ │ /api/v1/tasks│ │                  │          │
 │  │          │ │ /api/v1/skills│ │                 │          │
 │  │          │ │ /api/v1/data │ │                  │          │
+│  │          │ │ /api/v1/todo │ │                  │          │
 │  │          │ │ /api/v1/config│ │                │          │
 │  │          │ │ /api/v1/feedback│ │              │          │
 │  │          │ │ /api/v1/plugins│ │               │          │
+│  │          │ │ /api/v1/trajectory│ │            │          │
 │  │          │ │ /api/v1/qq   │ │                  │          │
 │  │          │ │ /api/v1/wechat│ │                 │          │
 │  └──────────┘ └──────┬───────┘ └────────┬─────────┘          │
@@ -154,13 +161,14 @@ docker compose up -d --build
 ┌───────────────────────▼─────────────────▼────────────────────┐
 │  ThumbelinaAgent (agent/graph.py)                            │
 │  LangGraph 状态图：agent ⇄ tools                            │
-│  ┌─────────┐ ┌─────────┐ ┌───────────┐ ┌──────────┐         │
-│  │ 技能    │ │ 子代理  │ │ 调度器    │ │ 工具     │         │
-│  │ 引擎    │ │ 管理器  │ │           │ │ (文件,   │         │
-│  │+组合    │ │+监控    │ │+条件触发  │ │  网络,   │         │
-│  │+反馈    │ │+工作    │ │+通知      │ │  Shell,  │         │
-│  │         │ │         │ │           │ │  数据)   │         │
-│  └─────────┘ └─────────┘ └───────────┘ └──────────┘         │
+│  ┌─────────┐ ┌─────────┐ ┌───────────┐ ┌──────────────────┐ │
+│  │ 技能    │ │ 子代理  │ │ 调度器    │ │ 工具（五类）     │ │
+│  │ 引擎    │ │ 管理器  │ │           │ │ 感知/执行/沟通/  │ │
+│  │+组合    │ │+监控    │ │+条件触发  │ │ 协作/事件触发；  │ │
+│  │+反馈    │ │+工作    │ │+通知      │ │ 执行类带审查+自 │ │
+│  │         │ │         │ │           │ │ 验证+fs/网络/搜 │ │
+│  │         │ │         │ │           │ │ 索/Shell/数据   │ │
+│  └─────────┘ └─────────┘ └───────────┘ └──────────────────┘ │
 │  ┌──────────────┐ ┌──────────────────┐                       │
 │  │ 记忆         │ │ 技能上下文       │                       │
 │  │ (L0 索引     │ │ (注入为          │                       │
@@ -192,11 +200,13 @@ thumbelina/
 │   ├── cli/                 # Click CLI + prompt_toolkit 聊天会话
 │   ├── config/              # YAML + 环境变量配置加载、Pydantic 模型
 │   ├── llm/                 # LLM 提供商抽象层（OpenAI, Anthropic, Ollama）
-│   ├── repository/          # 对话持久化、搜索、向量存储、反馈
+│   ├── repository/          # 对话持久化、搜索、向量存储、反馈、轨迹
 │   ├── analysis/            # LLM 分析服务：标题摘要、对话命名
+│   ├── filestore/           # 公共原子文件 I/O + 按 key 异步文件锁（todo/memory 复用）
 │   ├── memory/              # Markdown 分层记忆（L0/L1/L2、抽取器、检索、工具）
 │   ├── notifications.py     # WebSocket 通知广播
 │   ├── plugins/             # 插件系统（注册、沙箱验证、依赖解析）
+│   ├── prompts/roles/       # 角色人设 Markdown 文件（assistant、coder）
 │   ├── rag/                 # RAG：文档加载、分块、嵌入、检索、索引流水线
 │   │   ├── embedding/       # 嵌入模型抽象层（HuggingFace、ChromaDB 向量存储、注册中心）
 │   │   ├── ingestion/       # 文档加载器与分块器
@@ -207,25 +217,33 @@ thumbelina/
 │   ├── security/            # JWT 认证 + 限流器 + RBAC
 │   ├── skills/              # 技能提取、匹配、组合、持久化
 │   ├── subagents/           # 子代理管理器、监控/工作代理、消息队列、共享状态
-│   └── tools/               # 内置工具（文件操作、网络请求、Shell、数据处理）
+│   ├── todo/                # Markdown 待办清单与随手记服务
+│   └── tools/               # 内置工具，按五类分类体系组织：base.py（ThumbelinaBaseTool 模板生命周期）+ perception / execution / communication / collaboration / event 模块；执行类工具强制安全审查 + 结果自验证
 ├── tests/                   # Pytest 测试套件（镜像 src/ 结构）
 ├── frontend/                # React 19 + TypeScript + Vite
 │   └── src/
 │       ├── api/             # API 客户端模块（conversations, llmConfig）
 │       ├── components/
 │       │   ├── Channels/    # ChannelsPage（QQ/微信配置与状态）
-│       │   ├── Chat/        # ChatWindow, InputBox, MessageList
+│       │   ├── Chat/        # ChatWindow, InputBox, MessageList, KnowledgeBaseSelector
+│       │   ├── Coder/       # CoderPage, CoderSidebar, WorkspacePicker（工作区编码会话）
 │       │   ├── Dream/       # 技能演化可视化
+│       │   ├── KnowledgeBase/ # KnowledgeBasePage（知识库 CRUD、文档管理、检索测试）
 │       │   ├── Layout/      # Header, Sidebar, ThemeToggle（暗色/亮色/暖色）
 │       │   ├── Memory/      # MemoryViewer（搜索 + 技能浏览）
 │       │   ├── Plugins/     # PluginsPage（插件列表 + 沙箱报告）
-│       │   ├── Settings/    # LLM 端点/预设管理、连接测试、速度测试
-│       │   └── Tasks/       # TaskManager（子代理 + 定时任务）
+│       │   ├── Settings/    # LLM 端点/预设管理、连接测试、速度测试、网络搜索配置
+│       │   ├── StatusBar/   # 按页面差异化的状态栏组件
+│       │   ├── Tasks/       # TaskManager（子代理 + 定时任务）
+│       │   ├── Todo/        # TodoPage（待办清单 + 随手记，按标题分组）
+│       │   └── Trajectory/  # TrajectoryPage, TrajectoryDetailModal（执行轨迹回放）
 │       ├── hooks/           # useWebSocket 自定义 Hook
 │       ├── i18n/            # 国际化（en, zh-CN）与 LocaleContext
 │       ├── test/            # 测试配置
 │       └── types/           # TypeScript 接口定义
-├── docs/plans/              # 设计文档
+├── docs/specs/              # 设计规范文档
+├── docs/plans/              # 实施计划文档
+├── docs/review/             # 审查记录
 ├── Dockerfile               # 多阶段镜像：构建前端，后端一并托管
 ├── docker-compose.yml       # 单容器部署
 ├── thumbelina.yaml.example  # 示例配置文件
@@ -239,13 +257,18 @@ thumbelina/
 | GET | `/health` | 健康检查（返回版本 + 数据库状态） |
 | POST | `/api/v1/chat` | 发送消息，获取代理响应 |
 | GET | `/api/v1/conversations` | 列出所有对话 |
-| POST | `/api/v1/conversations` | 创建新对话 |
+| POST | `/api/v1/conversations` | 创建新对话（`mode: chat \| coder`；coder 必填 `workspace`） |
 | GET | `/api/v1/conversations/search/{query}` | 跨对话搜索消息 |
 | GET | `/api/v1/conversations/{id}` | 获取对话详情及消息 |
 | PATCH | `/api/v1/conversations/{id}` | 重命名对话 |
 | PUT | `/api/v1/conversations/{id}/endpoint` | 设置对话使用的 LLM 端点和模型 |
 | PUT | `/api/v1/conversations/{id}/role` | 设置对话使用的角色（`null` = 恢复全局默认） |
+| PUT | `/api/v1/conversations/{id}/knowledge-base` | 为对话绑定 RAG 知识库 |
+| PUT | `/api/v1/conversations/{id}/thinking` | 设置对话的思考模式（开关 + 强度档位） |
+| POST | `/api/v1/conversations/{id}/compress` | 手动压缩对话上下文 |
+| DELETE | `/api/v1/conversations/{id}/messages` | 删除对话的全部消息 |
 | DELETE | `/api/v1/conversations/{id}` | 删除对话 |
+| GET | `/api/v1/fs/dirs` | 列举目录（工作区选择器用） |
 | GET | `/api/v1/tasks` | 列出定时任务 |
 | POST | `/api/v1/tasks/{id}/cancel` | 取消定时任务 |
 | GET | `/api/v1/subagents` | 列出活跃子代理 |
@@ -253,6 +276,8 @@ thumbelina/
 | GET | `/api/v1/skills` | 列出已提取技能 |
 | GET | `/api/v1/skills/stats` | 技能使用统计（梦境可视化） |
 | GET | `/api/v1/compositions` | 列出技能组合 |
+| GET | `/api/v1/trajectory/{conversation_id}` | 分页获取对话的 agent 执行轨迹 |
+| GET | `/api/v1/trajectory/cache-stats` | KV 缓存命中率汇总（状态栏用） |
 | POST | `/api/v1/feedback` | 提交用户反馈（评分 1-5） |
 | GET | `/api/v1/feedback` | 列出反馈记录 |
 | GET | `/api/v1/feedback/stats` | 反馈统计 |
@@ -287,6 +312,17 @@ thumbelina/
 | POST | `/api/v1/config/llm/endpoints/{id}/test-connection` | 对已保存端点运行连通性测试 |
 | POST | `/api/v1/config/llm/endpoints/{id}/activate` | 全局激活已保存端点（热切换 LLM） |
 | PUT | `/api/v1/config/channels/{name}` | 热切换频道配置 |
+| GET | `/api/v1/config/tools` | 当前工具配置（网络搜索提供商、是否已设密钥） |
+| PUT | `/api/v1/config/tools/web_search` | 更新网络搜索配置（热生效） |
+| GET | `/api/v1/todo/status` | TODO 模块状态（是否启用、文件路径、计数） |
+| GET | `/api/v1/todo/items` | 列出待办项（`TodoItemsOut`，条目携带来源标题分组 `group`） |
+| POST | `/api/v1/todo/items` | 新增待办项 |
+| PATCH | `/api/v1/todo/items/{index}` | 更新待办项（text / done / remark） |
+| DELETE | `/api/v1/todo/items/{index}` | 删除待办项 |
+| GET | `/api/v1/todo/notes` | 列出随手记 |
+| POST | `/api/v1/todo/notes` | 新增随手记 |
+| PUT | `/api/v1/todo/notes/{index}` | 更新随手记 |
+| DELETE | `/api/v1/todo/notes/{index}` | 删除随手记 |
 | GET | `/api/v1/config/export` | 从数据库导出配置 |
 | POST | `/api/v1/config/reload` | 从数据库重新加载配置 |
 | GET | `/api/v1/qq/status` | 检查 QQ Bot 连接状态 |
@@ -308,7 +344,9 @@ thumbelina/
 | GET | `/api/v1/rag/knowledge-bases/{id}/upload-tasks` | 列出知识库的上传任务 |
 | DELETE | `/api/v1/rag/upload-tasks/{task_id}` | 取消或关闭上传任务 |
 | DELETE | `/api/v1/rag/documents/{id}` | 删除文档 |
+| GET | `/api/v1/rag/documents/{id}/chunks` | 列出文档的分块 |
 | POST | `/api/v1/rag/query` | 检索 top-k 相关分块 |
+| POST | `/api/v1/rag/documents/simhash-query` | 跨文档 SimHash 近似重复检索 |
 | WS | `/ws/chat` | WebSocket 流式实时聊天 |
 
 ## QQ Bot 接入
@@ -413,12 +451,23 @@ logging:
 todo:
   enabled: true             # 是否启用 TODO 模块（本地 Markdown 待办清单与随手记）
   directory: TODO           # todolist.md / notes.md 所在目录
+
+tools:
+  web_search:
+    enabled: true           # 向代理暴露 web_search 工具
+    provider: tavily        # tavily | duckduckgo
+    api_key: ""             # 仅 Tavily 需要；保存到配置数据库
 ```
 
 > `llm` 与 `auth` 不再是启动配置：
 > - **llm.\*** — 启动后在 Web 界面「设置」或经 `/api/v1/config/llm` 系列 API 管理（预设/端点持久化到配置数据库）。
 > - **auth.required_roles** — 可通过配置 API 运行时热更新。
 > - **auth.secret_key** — 敏感字段，仅接受环境变量 `THUMBELINA_AUTH__SECRET_KEY`（≥32 字节，重启生效）；为空时认证自动禁用。
+>
+> **网络搜索工具** — `tools.web_search` 选择搜索后端：
+> - `tavily`（默认）— 返回对 LLM 友好的答案；需要 API Key，在 Web 界面「设置 → 工具」配置并保存到配置数据库（仅此工具的敏感密钥策略例外）。
+> - `duckduckgo` — 无需 API Key；需 `pip install -e ".[web]"`（安装 `ddgs`）。
+> `enabled`、`provider` 与 `api_key` 均可经 `PUT /api/v1/config/tools/web_search` 运行时热更新。
 
 以下部分为可选配置——在 `thumbelina.yaml` 中取消注释即可启用：
 
