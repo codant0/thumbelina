@@ -61,7 +61,9 @@
       "context": "Context usage",
       "contextDesc": "Show estimated context window usage in the chat toolbar",
       "cacheHit": "Cache hit rate",
-      "cacheHitDesc": "Show KV cache hit rate of the latest 100 LLM requests in the chat page"
+      "cacheHitDesc": "Show KV cache hit rate of the latest 100 LLM requests in the chat page",
+      "git": "Git branch",
+      "gitDesc": "Show current branch in the coder workspace; click to switch"
     },
     "tools": "Tools"
   },
@@ -84,7 +86,14 @@
     "saveFailed": "Failed to save tools config"
   },
   "statusbar": {
-    "cacheHitTitle": "Cache hit rate {pct}% ({hit}/{total} tokens · {turns} turns)"
+    "cacheHitTitle": "Cache hit rate {pct}% ({hit}/{total} tokens · {turns} turns)",
+    "gitTitle": "Current branch {branch}"
+  },
+  "git": {
+    "chooseBranch": "Switch branch",
+    "loadFailed": "Failed to load branches",
+    "switchFailed": "Failed to switch branch",
+    "noBranches": "No local branches"
   },
   "connectionTest": {
     "button": "Test Connection",

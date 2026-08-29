@@ -61,7 +61,9 @@
       "context": "上下文占用",
       "contextDesc": "在聊天输入栏右侧显示估算的上下文窗口占用",
       "cacheHit": "缓存命中率",
-      "cacheHitDesc": "在聊天页显示最近 100 轮 LLM 请求的 KV 缓存命中率"
+      "cacheHitDesc": "在聊天页显示最近 100 轮 LLM 请求的 KV 缓存命中率",
+      "git": "Git 分支",
+      "gitDesc": "在码农工作区显示当前分支,点击可切换"
     },
     "tools": "工具"
   },
@@ -84,7 +86,14 @@
     "saveFailed": "保存工具配置失败"
   },
   "statusbar": {
-    "cacheHitTitle": "缓存命中率 {pct}%（{hit}/{total} tokens · {turns} 轮）"
+    "cacheHitTitle": "缓存命中率 {pct}%（{hit}/{total} tokens · {turns} 轮）",
+    "gitTitle": "当前分支 {branch}"
+  },
+  "git": {
+    "chooseBranch": "切换分支",
+    "loadFailed": "加载分支列表失败",
+    "switchFailed": "切换分支失败",
+    "noBranches": "没有可切换的本地分支"
   },
   "connectionTest": {
     "button": "测试连接",
