@@ -248,6 +248,37 @@ class TestMemoryMigration:
             cfg = load_config()
         assert cfg.repository.database_url == "sqlite:///env.db"
 
+    def test_memory_env_var_directory_goes_to_memory_config(self):
+        """THUMBELINA_MEMORY__* 仅 database_url 走 repository,其余走新的 memory 配置。"""
+        from thumbelina.config.loader import load_config
+
+        env = {"THUMBELINA_MEMORY__DIRECTORY": "/app/data/MEMORY"}
+        with (
+            patch.dict(os.environ, env, clear=False),
+            patch("thumbelina.config.loader._discover_config_file", _no_discovery),
+        ):
+            cfg = load_config()
+        assert cfg.memory.directory == "/app/data/MEMORY"
+        # 不应被误判为 repository 配置
+        assert cfg.repository.database_url == "sqlite:///thumbelina.db"
+
+    def test_yaml_memory_block_without_database_url_not_migrated(self, tmp_path):
+        """新式 memory 块(无 database_url)不得被迁移为 repository。"""
+        from thumbelina.config.loader import load_config
+
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(
+            "memory:\n  directory: /app/data/MEMORY\n  categories: [user, project]\n",
+            encoding="utf-8",
+        )
+
+        cfg = load_config(str(config_file))
+        assert cfg.memory.directory == "/app/data/MEMORY"
+        # 文件不应被改写
+        rewritten = config_file.read_text(encoding="utf-8")
+        assert "memory:" in rewritten
+        assert "repository:" not in rewritten
+
     def test_both_keys_present_repository_wins(self, tmp_path):
         from thumbelina.config.loader import load_config
 

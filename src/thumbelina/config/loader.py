@@ -99,10 +99,14 @@ def _env_overrides() -> dict[str, Any]:
         rest = key[len(prefix) :].lower()
         parts = rest.split("__")
 
-        # 兼容旧名：memory 已改名为 repository
-        if parts[0] == "memory":
+        # 兼容旧名：存储模块由 memory 更名为 repository。改名前的 memory 配置
+        # 只有 database_url 一个字段，故仅该键重定向；其余 THUMBELINA_MEMORY__*
+        # 归属新的 Markdown 分层记忆子系统（MemoryConfig.directory 等）。
+        if parts[0] == "memory" and len(parts) == 2 and parts[1] == "database_url":
             logger.warning(
-                "Legacy env var %s detected — mapping THUMBELINA_MEMORY__* to repository", key
+                "Legacy env var %s detected — mapping THUMBELINA_MEMORY__DATABASE_URL "
+                "to repository",
+                key,
             )
             parts[0] = "repository"
 
@@ -130,10 +134,16 @@ def _rewrite_yaml_top_level_key(path: str, old_key: str, new_key: str) -> None:
 def _migrate_memory_config(config: dict[str, Any], config_path: str | None) -> dict[str, Any]:
     """把旧版顶层 ``memory`` 配置迁移为 ``repository``。
 
-    ``memory`` 已改名为 ``repository``。此处把旧键映射到新键，使现有配置
-    继续生效，并把 YAML 文件写回，使迁移永久生效。
+    顶层 ``memory`` 键是历史遗留：存储模块更名前的数据库配置只有
+    ``database_url`` 一个字段。之后引入的 Markdown 分层记忆子系统也复用了
+    顶层 ``memory`` 键（含 ``directory``/``categories`` 等字段），故只有
+    ``memory`` 块携带 ``database_url`` 时才认定为遗留配置并迁移，其余保留。
     """
     if "memory" not in config:
+        return config
+
+    memory_block = config["memory"]
+    if not isinstance(memory_block, dict) or "database_url" not in memory_block:
         return config
 
     if "repository" in config:
