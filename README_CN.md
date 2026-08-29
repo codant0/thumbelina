@@ -218,7 +218,7 @@ thumbelina/
 │   ├── skills/              # 技能提取、匹配、组合、持久化
 │   ├── subagents/           # 子代理管理器、监控/工作代理、消息队列、共享状态
 │   ├── todo/                # Markdown 待办清单与随手记服务
-│   └── tools/               # 内置工具，按五类分类体系组织：base.py（ThumbelinaBaseTool 模板生命周期）+ perception / execution / communication / collaboration / event 模块；执行类工具强制安全审查 + 结果自验证
+│   └── tools/               # 内置工具，按五类分类体系组织：base.py（ThumbelinaBaseTool 模板生命周期）+ perception / execution / communication / collaboration / event_trigger 模块；执行类工具强制安全审查 + 结果自验证
 ├── tests/                   # Pytest 测试套件（镜像 src/ 结构）
 ├── frontend/                # React 19 + TypeScript + Vite
 │   └── src/

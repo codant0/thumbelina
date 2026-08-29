@@ -228,7 +228,7 @@ thumbelina/
 │   ├── skills/              # Skill extraction, matching, composition, persistence
 │   ├── subagents/           # Sub-agent manager, monitor/worker agents, message queue, shared state
 │   ├── todo/                # Markdown todo list & quick notes service
-│   └── tools/               # Built-in tools under a five-category taxonomy: base.py (ThumbelinaBaseTool template lifecycle) + perception / execution / communication / collaboration / event modules; execution tools enforce security review + result self-verification
+│   └── tools/               # Built-in tools under a five-category taxonomy: base.py (ThumbelinaBaseTool template lifecycle) + perception / execution / communication / collaboration / event_trigger modules; execution tools enforce security review + result self-verification
 ├── tests/                   # Pytest test suite (mirrors src/ structure)
 ├── frontend/                # React 19 + TypeScript + Vite
 │   └── src/
