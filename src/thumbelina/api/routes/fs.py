@@ -9,6 +9,7 @@ authoritative workspace validator.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 import subprocess
@@ -122,6 +123,43 @@ def git_branches(path: str = Query(...)) -> GitBranches:
         return GitBranches(is_git=False)
     branches = sorted(out.splitlines()) if out else []
     return GitBranches(is_git=True, current=_current_branch(resolved), branches=branches)
+
+
+class GitCheckoutRequest(BaseModel):
+    path: str
+    branch: str
+
+
+@router.post("/fs/git/checkout", response_model=GitInfo)
+async def git_checkout(body: GitCheckoutRequest) -> GitInfo:
+    """切换到指定本地分支;服务端重新枚举校验分支存在,不传 --force。
+
+    分支名只作为 ``git checkout`` 的单独 argv 参数传给 ``_run_git``
+    (list-args,无 shell 注入);校验基于服务端枚举结果,不信任客户端。
+    冲突等失败返回 409,detail 取 git stderr。
+    """
+    resolved = _resolve_dir(body.path)
+    code, out, _ = await asyncio.to_thread(
+        _run_git, str(resolved), ["for-each-ref", "refs/heads", "--format=%(refname:short)"]
+    )
+    if code != 0:
+        raise HTTPException(status_code=422, detail="目录不是 git 仓库")
+    branches = out.splitlines()
+    if body.branch not in branches:
+        raise HTTPException(status_code=422, detail=f"分支不存在: {body.branch}")
+    code, _stdout, stderr = await asyncio.to_thread(
+        _run_git, str(resolved), ["checkout", body.branch]
+    )
+    if code != 0:
+        raise HTTPException(status_code=409, detail=stderr or f"切换失败: {body.branch}")
+    # 广播到所有已连接的 /ws/chat 客户端,前端据此实时刷新状态栏。
+    # 函数内导入避免与 websocket 模块潜在循环依赖;内部已吞异常,不影响响应。
+    from thumbelina.api.websocket import broadcast_chat_message
+
+    await broadcast_chat_message(
+        {"git_branch": {"workspace": str(resolved), "branch": body.branch}}
+    )
+    return GitInfo(is_git=True, branch=body.branch)
 
 
 def _list_roots() -> list[DirEntry]:

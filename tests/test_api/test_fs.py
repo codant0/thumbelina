@@ -218,3 +218,73 @@ class TestGitBranchesEndpoints:
         resp = client.get("/api/v1/fs/git/branches", params={"path": str(plain)})
         assert resp.status_code == 200
         assert resp.json() == {"is_git": False, "current": None, "branches": []}
+
+
+class TestGitCheckoutEndpoints:
+    pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
+
+    def test_checkout_success(self, client, tmp_path) -> None:
+        repo = _init_repo(tmp_path)
+        subprocess.run(["git", "branch", "-q", "feature-a"], cwd=repo, check=True)
+        resp = client.post(
+            "/api/v1/fs/git/checkout",
+            json={"path": str(repo), "branch": "feature-a"},
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {"is_git": True, "branch": "feature-a"}
+        probe = client.get("/api/v1/fs/git", params={"path": str(repo)})
+        assert probe.json()["branch"] == "feature-a"
+
+    def test_checkout_unknown_branch(self, client, tmp_path) -> None:
+        repo = _init_repo(tmp_path)
+        resp = client.post(
+            "/api/v1/fs/git/checkout",
+            json={"path": str(repo), "branch": "does-not-exist"},
+        )
+        assert resp.status_code == 422
+        assert "分支不存在" in resp.json()["detail"]
+
+    def test_checkout_non_repo(self, client, tmp_path) -> None:
+        plain = tmp_path / "plain"
+        plain.mkdir()
+        resp = client.post(
+            "/api/v1/fs/git/checkout",
+            json={"path": str(plain), "branch": "main"},
+        )
+        assert resp.status_code == 422
+
+    def test_checkout_conflict_returns_409(self, client, tmp_path) -> None:
+        repo = _init_repo(tmp_path)
+        (repo / "file.txt").write_text("A", encoding="utf-8")
+        subprocess.run(["git", "add", "file.txt"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "a"], cwd=repo, check=True)
+        subprocess.run(["git", "checkout", "-q", "-b", "feature-a"], cwd=repo, check=True)
+        (repo / "file.txt").write_text("B", encoding="utf-8")
+        subprocess.run(["git", "commit", "-q", "-am", "b"], cwd=repo, check=True)
+        subprocess.run(["git", "checkout", "-q", "main"], cwd=repo, check=True)
+        (repo / "file.txt").write_text("uncommitted", encoding="utf-8")
+        resp = client.post(
+            "/api/v1/fs/git/checkout",
+            json={"path": str(repo), "branch": "feature-a"},
+        )
+        assert resp.status_code == 409
+        assert resp.json()["detail"]
+
+    def test_checkout_broadcasts(self, client, tmp_path, monkeypatch) -> None:
+        from unittest.mock import AsyncMock
+
+        broadcast = AsyncMock()
+        monkeypatch.setattr(
+            "thumbelina.api.websocket.broadcast_chat_message", broadcast
+        )
+        repo = _init_repo(tmp_path)
+        subprocess.run(["git", "branch", "-q", "feature-a"], cwd=repo, check=True)
+        resp = client.post(
+            "/api/v1/fs/git/checkout",
+            json={"path": str(repo), "branch": "feature-a"},
+        )
+        assert resp.status_code == 200
+        broadcast.assert_awaited_once()
+        message = broadcast.await_args.args[0]
+        assert message["git_branch"]["branch"] == "feature-a"
+        assert message["git_branch"]["workspace"] == str(repo.resolve())
