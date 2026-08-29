@@ -33,7 +33,8 @@
     "show": "Show",
     "hide": "Hide",
     "refresh": "Refresh",
-    "error": "Something went wrong"
+    "error": "Something went wrong",
+    "confirm": "Confirm"
   },
   "settings": {
     "title": "Settings",
@@ -263,7 +264,13 @@
     "stopTitle": "Stop generating",
     "generating": "Generating…",
     "viewTrajectory": "View trajectory",
-    "viewTrajectoryTitle": "Audit this conversation in the trajectory page"
+    "viewTrajectoryTitle": "Audit this conversation in the trajectory page",
+    "copy": "Copy message",
+    "copied": "Copied",
+    "regenerate": "Regenerate",
+    "scrollToBottom": "Scroll to latest",
+    "unnamed": "New Conversation",
+    "listEmpty": "No conversations yet."
   },
   "coder": {
     "sidebarTitle": "Coder Sessions",
@@ -394,7 +401,8 @@
     "categoryTitle": "Categories",
     "skillCloud": "Skill Cloud",
     "noSkills": "No skills recorded yet. Skills will appear here as the agent learns.",
-    "errors": "Failed to load skill statistics"
+    "errors": "Failed to load skill statistics",
+    "emptyHint": "Skills will appear here as the agent learns from your conversations."
   },
   "plugins": {
     "title": "Plugins",
@@ -506,5 +514,17 @@
     "light": "Light",
     "warm": "Warm",
     "changeTheme": "Change theme"
+  },
+  "codeblock": {
+    "copy": "Copy",
+    "copied": "Copied"
+  },
+  "jsonBlock": {
+    "title": "Structured data (JSON)"
+  },
+  "toolCalls": {
+    "arguments": "Arguments",
+    "result": "Result",
+    "hasResult": "has result"
   }
 }
