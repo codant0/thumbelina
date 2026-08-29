@@ -197,6 +197,12 @@ class RuntimeConfigManager:
                     await self._persist_to_db(
                         "channel", "channels.wechat.ilink_base_url", new_config.ilink_base_url
                     )
+                # 持久化凭据目录：容器重建后即使 env 缺失，加载路径也与
+                # 扫码时的保存路径保持一致（见 load_from_database）。
+                if new_config.accounts_dir:
+                    await self._persist_to_db(
+                        "channel", "channels.wechat.accounts_dir", new_config.accounts_dir
+                    )
 
             # Create and start new channel if enabled
             if new_config.enabled:
@@ -332,6 +338,8 @@ class RuntimeConfigManager:
             self._config.channels.wechat.ilink_user_id = wechat["ilink_user_id"]
         if "ilink_base_url" in wechat:
             self._config.channels.wechat.ilink_base_url = wechat["ilink_base_url"]
+        if "accounts_dir" in wechat:
+            self._config.channels.wechat.accounts_dir = wechat["accounts_dir"]
 
         # Apply rate_limit overrides
         rate_limit = db_config.get("rate_limit", {})

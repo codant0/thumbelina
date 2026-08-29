@@ -86,10 +86,14 @@ class WeChatChannel(Channel):
         """
         from thumbelina.channels.wechat_qrcode import ILinkClient
 
-        # If bot_token is empty but ilink_bot_id is set, try loading saved
-        # credentials from CHANNEL/.weclaw/accounts/{bot_id}.json.  This happens
-        # after a restart when the YAML config has been stripped of secrets.
-        if not self._config.bot_token and self._config.ilink_bot_id:
+        # If bot_token is empty, try loading saved credentials from the
+        # accounts directory.  This happens after a restart when the YAML
+        # config has been stripped of secrets.  Unlike the previous logic,
+        # this does NOT require ilink_bot_id to be pre-populated: the
+        # accounts directory is scanned and the latest credentials file is
+        # discovered automatically, so a container rebuild that lost the
+        # config/database (but kept the credentials volume) still recovers.
+        if not self._config.bot_token:
             await self._load_saved_credentials()
 
         if not self._config.bot_token:
@@ -115,42 +119,45 @@ class WeChatChannel(Channel):
             self._config.ilink_bot_id,
         )
 
-    async def _load_saved_credentials(self) -> None:
-        """Load iLink credentials from ``{accounts_dir}/{bot_id}.json``.
+    async def _load_saved_credentials(self) -> bool:
+        """Load iLink credentials from the accounts directory.
 
-        Called during :meth:`start` when ``bot_token`` is empty but
-        ``ilink_bot_id`` is available (typical after a restart when the
-        YAML config has been stripped of secrets).
+        Load order:
+        1. ``{accounts_dir}/{bot_id}.json`` — exact match when
+           ``ilink_bot_id`` is already known (from YAML/database).
+        2. Auto-discovery — scan the accounts directory and load the most
+           recently saved credentials file.  This covers the case where the
+           bot ID itself was lost (e.g. config database not persisted),
+           as long as the credentials volume survived the rebuild.
+
+        Returns ``True`` when credentials were loaded and applied to
+        ``self._config``.
         """
-        from thumbelina.channels.wechat_qrcode import (
-            _accounts_dir,
-            _normalize_id,
+        from thumbelina.channels.wechat_qrcode import load_credentials
+
+        creds = load_credentials(
+            accounts_dir=self._config.accounts_dir,
+            bot_id=self._config.ilink_bot_id,
         )
 
-        bot_id = _normalize_id(self._config.ilink_bot_id)
-        cred_path = _accounts_dir(self._config.accounts_dir) / f"{bot_id}.json"
-
-        if not cred_path.exists():
-            logger.warning("No saved credentials at %s", cred_path)
-            return
-
-        try:
-            import json
-
-            data = json.loads(cred_path.read_text(encoding="utf-8"))
-            self._config.bot_token = data.get("bot_token", "")
-            self._config.ilink_bot_id = data.get("ilink_bot_id", self._config.ilink_bot_id)
-            self._config.ilink_user_id = data.get("ilink_user_id", self._config.ilink_user_id)
-            base_url = data.get("baseurl", "")
-            if base_url:
-                self._config.ilink_base_url = base_url
-
-            logger.info(
-                "Loaded saved iLink credentials for bot %s",
-                self._config.ilink_bot_id,
+        if creds is None:
+            logger.warning(
+                "No saved iLink credentials found in %s",
+                self._config.accounts_dir or "CHANNEL/.weclaw/accounts",
             )
-        except Exception:
-            logger.warning("Failed to load saved credentials from %s", cred_path, exc_info=True)
+            return False
+
+        self._config.bot_token = creds.bot_token
+        self._config.ilink_bot_id = creds.ilink_bot_id
+        self._config.ilink_user_id = creds.ilink_user_id
+        if creds.base_url:
+            self._config.ilink_base_url = creds.base_url
+
+        logger.info(
+            "Loaded saved iLink credentials for bot %s",
+            self._config.ilink_bot_id,
+        )
+        return True
 
     async def _ensure_wechat_conversation(self) -> None:
         """Create or reuse a pinned '微信Clawbot' conversation for the agent.
