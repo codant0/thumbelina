@@ -1,4 +1,10 @@
-"""Built-in tools for the Thumbelina agent."""
+"""Built-in tools for the Thumbelina agent.
+
+工具按五类组织(spec §2):感知/执行落在本包 ``perception.py`` /
+``execution.py``,沟通/协作/事件由 ``communication.py`` /
+``collaboration.py`` / ``event.py`` 的工厂在装配期构造(需要 graph、
+通知桥等运行时依赖,不在 ``get_all_tools`` 范围内)。
+"""
 
 from __future__ import annotations
 
@@ -6,26 +12,10 @@ from typing import Any
 
 from langchain_core.tools import BaseTool
 
-from thumbelina.tools.data_tools import analyze_text, parse_csv, parse_json, search_text
-from thumbelina.tools.file_ops import list_directory, read_file, search_files, write_file
-from thumbelina.tools.shell import run_shell
-from thumbelina.tools.web_search_tools import make_web_search_tool
-from thumbelina.tools.web_tools import fetch_url
+from thumbelina.tools.execution import RunShellTool, WriteFileTool
+from thumbelina.tools.perception import perception_tools
 
-__all__ = [
-    "analyze_text",
-    "fetch_url",
-    "get_all_tools",
-    "list_directory",
-    "make_web_search_tool",
-    "parse_csv",
-    "parse_json",
-    "read_file",
-    "run_shell",
-    "search_files",
-    "search_text",
-    "write_file",
-]
+__all__ = ["get_all_tools"]
 
 
 def get_all_tools(search_config: Any = None) -> list[BaseTool]:
@@ -39,22 +29,4 @@ def get_all_tools(search_config: Any = None) -> list[BaseTool]:
         enabled, the ``web_search`` tool is included, bound to the live
         config so runtime hot-swaps take effect.
     """
-    tools: list[BaseTool] = [
-        read_file,
-        write_file,
-        list_directory,
-        search_files,
-        fetch_url,
-        run_shell,
-        parse_json,
-        parse_csv,
-        analyze_text,
-        search_text,
-    ]
-
-    if search_config is not None:
-        web_search_cfg = getattr(search_config, "web_search", None)
-        if web_search_cfg is not None and getattr(web_search_cfg, "enabled", False):
-            tools.append(make_web_search_tool(web_search_cfg))
-
-    return tools
+    return perception_tools(search_config) + [WriteFileTool(), RunShellTool()]

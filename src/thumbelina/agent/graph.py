@@ -19,7 +19,7 @@ from langchain_core.messages import (
     SystemMessage,
 )
 from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import BaseTool, tool
+from langchain_core.tools import BaseTool
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
@@ -40,11 +40,15 @@ from thumbelina.analysis.namer import AUTO_NAME_AFTER_MESSAGES, ConversationName
 from thumbelina.llm.base import LLMProvider
 from thumbelina.prompts.roles import get_role_prompt
 from thumbelina.repository.manager import RepositoryManager
-from thumbelina.scheduler.scheduler import ScheduledTask, TaskScheduler
+from thumbelina.scheduler.scheduler import TaskScheduler
 from thumbelina.scheduler.time_parser import TimeParser
 from thumbelina.skills.application import SkillApplicationEngine
 from thumbelina.skills.composition_engine import CompositionEngine
 from thumbelina.subagents.manager import SubagentManager
+from thumbelina.tools.collaboration import make_collaboration_tools
+from thumbelina.tools.communication import make_communication_tools
+from thumbelina.tools.event_trigger import make_event_tools
+from thumbelina.tools.execution_skill import make_skill_tools
 
 if TYPE_CHECKING:
     from thumbelina.config.models import ContextConfig, MemoryConfig
@@ -202,216 +206,6 @@ def _messages_state_update(
     return {"messages": replacement}
 
 
-def _make_subagent_tools(manager: SubagentManager) -> list[BaseTool]:
-    """Create LangChain tools that wrap SubagentManager operations.
-
-    Parameters
-    ----------
-    manager:
-        The SubagentManager instance to delegate to.
-
-    Returns
-    -------
-    list[BaseTool]
-        List of tool-callable functions.
-    """
-
-    @tool
-    async def create_subagent(task: str) -> str:
-        """Create and run a subagent to execute a task asynchronously."""
-        try:
-            agent = await manager.create_agent(task)
-            await manager.run_agent(agent.id)
-            return (
-                f"Subagent created with ID {agent.id}. Task: {task}. Status: {agent.status.value}"
-            )
-        except RuntimeError as exc:
-            return f"Failed to create subagent: {exc}"
-
-    @tool
-    async def list_subagents() -> str:
-        """List all subagents and their current status."""
-        agents = await manager.list_agents()
-        if not agents:
-            return "No subagents found."
-        lines = []
-        for a in agents:
-            line = f"- ID: {a.id}, Task: {a.task}, Status: {a.status.value}"
-            if a.result:
-                line += f", Result: {a.result}"
-            if a.error:
-                line += f", Error: {a.error}"
-            lines.append(line)
-        return "\n".join(lines)
-
-    return [create_subagent, list_subagents]
-
-
-def _make_scheduler_tools(scheduler: TaskScheduler) -> list[BaseTool]:
-    """Create LangChain tools that wrap TaskScheduler operations.
-
-    Parameters
-    ----------
-    scheduler:
-        The TaskScheduler instance to delegate to.
-
-    Returns
-    -------
-    list[BaseTool]
-        List of tool-callable functions.
-    """
-    time_parser = TimeParser()
-
-    @tool
-    async def schedule_task(description: str, time_expression: str) -> str:
-        """Schedule a task for a future time."""
-        parsed_time = time_parser.parse(time_expression)
-        if parsed_time is None:
-            return f"Could not parse time expression: {time_expression}"
-
-        task = ScheduledTask(
-            description=description,
-            scheduled_time=parsed_time,
-        )
-        await scheduler.add_task(task)
-        return (
-            f"Task scheduled with ID {task.id}. "
-            f"Description: {description}. "
-            f"Scheduled for: {parsed_time.isoformat()}"
-        )
-
-    @tool
-    async def list_scheduled_tasks() -> str:
-        """List all scheduled tasks and their status."""
-        tasks = await scheduler.list_tasks()
-        if not tasks:
-            return "No scheduled tasks found."
-        lines = []
-        for t in tasks:
-            lines.append(
-                f"- ID: {t.id}, Description: {t.description}, "
-                f"Scheduled: {t.scheduled_time.isoformat()}, Status: {t.status.value}"
-            )
-        return "\n".join(lines)
-
-    return [schedule_task, list_scheduled_tasks]
-
-
-def _make_composition_tools(engine: CompositionEngine) -> list[BaseTool]:
-    """Create LangChain tools that wrap CompositionEngine operations.
-
-    Parameters
-    ----------
-    engine:
-        The CompositionEngine instance to delegate to.
-
-    Returns
-    -------
-    list[BaseTool]
-        List of tool-callable functions.
-    """
-
-    @tool
-    async def create_skill_composition(skill_ids: str, name: str, description: str) -> str:
-        """Create a skill composition that chains multiple skills into a workflow.
-
-        Args:
-            skill_ids: Comma-separated list of skill IDs to chain together.
-            name: Name for the composition.
-            description: Description of what the composition does.
-        """
-        ids = [s.strip() for s in skill_ids.split(",") if s.strip()]
-        if not ids:
-            return "No skill IDs provided."
-        try:
-            composition = await engine.create_composition(
-                skill_ids=ids, name=name, description=description
-            )
-            return (
-                f"Composition created with ID {composition.id}. Name: {name}. Skills: {len(ids)}."
-            )
-        except Exception as exc:
-            return f"Failed to create composition: {exc}"
-
-    @tool
-    async def list_skill_compositions() -> str:
-        """List all skill compositions and their details."""
-        compositions = await engine.composition_repo.list_all()
-        if not compositions:
-            return "No skill compositions found."
-        lines = []
-        for c in compositions:
-            lines.append(
-                f"- ID: {c.id}, Name: {c.name}, Skills: {len(c.skill_ids)}, Usage: {c.usage_count}"
-            )
-        return "\n".join(lines)
-
-    @tool
-    async def execute_skill_composition(user_input: str) -> str:
-        """Find and execute a matching skill composition for the given input."""
-        composition = await engine.match_composition(user_input)
-        if composition is None:
-            return "No matching composition found for the input."
-        result = await engine.execute_composition(composition, user_input)
-        return result
-
-    return [create_skill_composition, list_skill_compositions, execute_skill_composition]
-
-
-def _make_channel_tools(agent: ThumbelinaAgent) -> list[BaseTool]:
-    """Create LangChain tools that send proactive messages via IM channels.
-
-    Channels are looked up at call time from the agent's registry, so they
-    may be registered after the agent (and its compiled graph) is created.
-
-    Parameters
-    ----------
-    agent:
-        The ThumbelinaAgent whose channel registry is consulted.
-
-    Returns
-    -------
-    list[BaseTool]
-        List of tool-callable functions.
-    """
-
-    @tool
-    async def notify_user_by_channel(
-        message: str, channel: str = "wechat", user_id: str = ""
-    ) -> str:
-        """Send a proactive message to a user via an IM channel.
-
-        Use this to notify the user (task completion, reminders, follow-ups)
-        instead of only replying in the current conversation. Defaults to the
-        WeChat channel and to that channel's most recent user.
-
-        Args:
-            message: The message text to send.
-            channel: Channel name, e.g. "wechat" or "qq". Defaults to "wechat".
-            user_id: Target user ID. If empty, the channel's most recent user
-                is used.
-        """
-        ch = agent.get_channel(channel)
-        if ch is None:
-            available = ", ".join(sorted(agent.list_channels())) or "none"
-            return f"Channel '{channel}' is not registered. Available channels: {available}."
-        target = user_id.strip() or getattr(ch, "last_user_id", None)
-        if not target:
-            return f"Channel '{channel}' has no recent user to notify; provide an explicit user_id."
-        try:
-            result = await ch.send_message(target, message)
-        except Exception as exc:
-            return f"Failed to send message via '{channel}': {exc}"
-        if result is None:
-            return (
-                f"Message handed to channel '{channel}' for user '{target}'; "
-                "delivery not confirmed."
-            )
-        return f"Message sent to user '{target}' via channel '{channel}'."
-
-    return [notify_user_by_channel]
-
-
 class ThumbelinaAgent:
     """Main agent class that orchestrates the LangGraph agent loop.
 
@@ -544,12 +338,12 @@ class ThumbelinaAgent:
         # this up at call time.
         self._channels: dict[str, Any] = {}
         if self.subagent_manager is not None:
-            self.tools.extend(_make_subagent_tools(self.subagent_manager))
+            self.tools.extend(make_collaboration_tools(self.subagent_manager))
         if self.scheduler is not None:
-            self.tools.extend(_make_scheduler_tools(self.scheduler))
+            self.tools.extend(make_event_tools(self.scheduler, TimeParser()))
         if self.composition_engine is not None:
-            self.tools.extend(_make_composition_tools(self.composition_engine))
-        self.tools.extend(_make_channel_tools(self))
+            self.tools.extend(make_skill_tools(self.composition_engine))
+        self.tools.extend(make_communication_tools(self))
         # 记忆工具（§7.3）：search_memory / read_memory / remember。
         if self.memory_service is not None and self.memory_config is not None:
             if self.memory_config.enabled:

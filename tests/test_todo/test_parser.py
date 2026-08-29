@@ -127,12 +127,7 @@ class TestParseTodolist:
     def test_parse_todolist_groups_by_heading(self):
         """Checkbox items are tagged with the nearest preceding '# heading'."""
         segments = parse_todolist(
-            "- [ ] 无分组条目\n"
-            "# 工作\n"
-            "- [ ] 写周报\n"
-            "- [x] 开会\n"
-            "# 学习\n"
-            "- [ ] 读论文\n"
+            "- [ ] 无分组条目\n# 工作\n- [ ] 写周报\n- [x] 开会\n# 学习\n- [ ] 读论文\n"
         )
 
         items = [segment for segment in segments if isinstance(segment, TodoItem)]
@@ -142,9 +137,7 @@ class TestParseTodolist:
 
     def test_parse_todolist_non_h1_headers_are_not_groups(self):
         """'## ...' and '### ...' lines never become group markers."""
-        segments = parse_todolist(
-            "## 子标题\n- [ ] a\n### 三级标题\n- [ ] b\n"
-        )
+        segments = parse_todolist("## 子标题\n- [ ] a\n### 三级标题\n- [ ] b\n")
 
         items = [segment for segment in segments if isinstance(segment, TodoItem)]
 
@@ -180,9 +173,7 @@ class TestParseTodolist:
 
     def test_parse_todolist_group_remark_is_not_broken_by_heading(self):
         """A heading ends any pending remark but the next item keeps its group."""
-        segments = parse_todolist(
-            "# 工作\n- [ ] a\n> 备注\n# 工作\n- [x] b\n"
-        )
+        segments = parse_todolist("# 工作\n- [ ] a\n> 备注\n# 工作\n- [x] b\n")
 
         first, second = (s for s in segments if isinstance(s, TodoItem))
 
@@ -303,14 +294,7 @@ class TestParseNotes:
 
     def test_parse_notes_heading_in_content_is_group_marker(self):
         """A heading at the end of a block still switches the group for later notes."""
-        text = (
-            "## 2026-08-14 21:30\n"
-            "内容1\n"
-            "\n"
-            "# 生活\n"
-            "## 2026-08-13 09:15\n"
-            "内容2\n"
-        )
+        text = "## 2026-08-14 21:30\n内容1\n\n# 生活\n## 2026-08-13 09:15\n内容2\n"
 
         preamble, notes = parse_notes(text)
 

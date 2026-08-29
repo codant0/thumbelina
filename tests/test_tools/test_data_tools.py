@@ -4,7 +4,17 @@ from __future__ import annotations
 
 import pytest
 
-from thumbelina.tools.data_tools import analyze_text, parse_csv, parse_json, search_text
+from thumbelina.tools.perception import (
+    AnalyzeTextTool,
+    ParseCsvTool,
+    ParseJsonTool,
+    SearchTextTool,
+)
+
+analyze_text = AnalyzeTextTool()
+parse_csv = ParseCsvTool()
+parse_json = ParseJsonTool()
+search_text = SearchTextTool()
 
 
 class TestParseJson:

@@ -4,8 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from thumbelina.tools.file_ops import list_directory, read_file, search_files, write_file
+from thumbelina.tools.execution import WriteFileTool
+from thumbelina.tools.perception import ListDirectoryTool, ReadFileTool, SearchFilesTool
 from thumbelina.tools.workspace_context import set_workspace
+
+read_file = ReadFileTool()
+list_directory = ListDirectoryTool()
+search_files = SearchFilesTool()
+write_file = WriteFileTool()
 
 
 @pytest.mark.asyncio

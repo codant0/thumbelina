@@ -6,8 +6,10 @@ import platform
 
 import pytest
 
-from thumbelina.tools.shell import run_shell
+from thumbelina.tools.execution import RunShellTool
 from thumbelina.tools.workspace_context import set_workspace
+
+run_shell = RunShellTool()
 
 
 @pytest.mark.asyncio
@@ -28,6 +30,7 @@ async def test_run_shell_invalid_command():
 async def test_run_shell_uses_workspace_cwd(tmp_path):
     set_workspace(str(tmp_path))
     try:
+        # 本机 shell 为 cmd.exe:外层单引号不是引用符,内层须用双引号包裹 -c 参数。
         result = await run_shell.ainvoke({"command": 'python -c "import os; print(os.getcwd())"'})
         assert str(tmp_path) in result
     finally:
