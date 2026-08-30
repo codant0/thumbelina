@@ -276,6 +276,42 @@
 
 ---
 
+## 增补（2026-08-30，用户确认"先干活"后）
+
+> 设计依据：设计文档 §5.4（prompt 模式执行链）。以下两个任务在 T1–T11 全部合入后执行。
+
+### Task 12: prompt 模式核心——调度器后台执行 + dispatcher 编排 + mode 参数
+
+**Files:**
+- Modify: `src/thumbelina/scheduler/scheduler.py`（`_fire_task` 按 mode 分支；`_execute_prompt` 后台执行；`_inflight` 集合；`start(on_due_task=…, on_prompt_task=…)` 增 keyword 参数默认 None）
+- Modify: `src/thumbelina/scheduler/heartbeat.py`（僵尸 RUNNING 复收跳过 `scheduler._inflight`）
+- Modify: `src/thumbelina/scheduler/dispatcher.py`（构造增 `prompt_runner: Callable[[ScheduledTask], Awaitable[str]] | None = None`；`on_prompt_task(task)`：mode 校验 → prompt_runner → 频道副本（wechat/qq 发**回复**）→ 返回 reply）
+- Modify: `src/thumbelina/tools/event_trigger.py`（`_ScheduleTaskArgs` 增 `mode: str = "prompt"`、`conversation_id: str = ""`；工厂 `make_event_tools(scheduler, time_parser, agent_ref=None)`，conversation_id 缺省取 `agent_ref.current_conversation_id`）
+- Modify: `src/thumbelina/api/routes/tasks.py`（POST /tasks 增 `mode`（默认 prompt）与 `conversation_id` 可选）
+- Modify: `src/thumbelina/config/models.py`（SchedulerConfig 增 `prompt_timeout_seconds: int = 300`）
+- Test: `tests/test_scheduler/test_scheduler.py`、`test_heartbeat.py`、`test_dispatcher.py`、`tests/test_tools/test_event_trigger.py`、`tests/test_api/test_tasks.py`
+
+**行为规格（逐条为验收标准）:**
+1. `mode="prompt"` 触发：RUNNING 持久化 → emit DUE → cron 立即前推 next_run 并持久化（状态保持 RUNNING）→ `asyncio.create_task` 后台执行 → id 入 `_inflight`；**不内联 await**（扫描循环当轮即返回，可用 0.1s 内第二个任务的触发验证不阻塞）。
+2. 后台执行：`wait_for(on_prompt_task(task), timeout=config.prompt_timeout_seconds)`；成功 → 复收防护同 notify → once COMPLETED(payload.result=reply) / cron PENDING+COMPLETED；失败/超时 → once FAILED("prompt timed out") / cron PENDING+error；`_inflight.discard` 于 finally。
+3. `on_prompt_task`：无 prompt_runner → 抛（"prompt runner not configured"）；`mode != "prompt"` → 抛（"mode not supported"）；成功返回 reply；`channel=wechat/qq` → 额外 `channel.send_message(last_user_id, reply)`（发**回复**非 content），渠道缺失/无用户 → 抛（会话内已有回复，由调度器 FAILED 定论但不回滚会话消息）。
+4. Heartbeat 僵尸复收：`RUNNING ∧ id ∈ _inflight` → 跳过；不在 inflight → 照旧 FAILED。
+5. mode 默认值：API 与工具均为 `"prompt"`（**行为变更，plan-mandated**：更新 T8/T9 中断言 `mode=="notify"` 的既有测试，注明设计 §5.4）；notify 路径行为逐字不变。
+6. 工具 `conversation_id`：空串 → `agent_ref.current_conversation_id`（工厂注入，None 则空）；API 直传。
+
+**Steps:** TDD 逐条规格写失败测试 → 实现 → `uv run pytest tests/test_scheduler tests/test_tools tests/test_api -q` 全绿 + ruff(0.15.20)/mypy 变更文件 → 提交 `feat(scheduler): prompt 模式执行链(后台执行/超时/心跳互斥/mode 参数)`。
+
+### Task 13: prompt 模式装配——run_prompt 闭包 + 对话框实时可见 + 事件流 result
+
+**Files:**
+- Modify: `src/thumbelina/api/app.py`（装配 `prompt_runner` 闭包传给 dispatcher；专用"定时任务"会话惰性创建存 `app.state.scheduler_conversation_id`；闭包 = 会话校验/回退 → `per_conversation_lock(cid)` → `agent.run(task.content, conversation_id=cid)` → `broadcast_chat_message({"channel_message": {…, source: "scheduler"}})` → 返回 reply）
+- Modify: `frontend/src/components/Tasks/TaskEventFeed.tsx`（事件行展示 `payload.result` 摘要（截断 80 字符），错误红字逻辑不变）
+- Test: `tests/test_api/test_tasks.py`（用注入的 fake agent 断言：prompt 任务触发 → agent.run 被调、消息落库（fake repository）、channel_message 广播帧含 source=scheduler 与 reply、频道副本 send_message 收到 reply；conversation_id 回退到专用会话）、`frontend TaskEventFeed.test.tsx`
+
+**Steps:** TDD → 实现 → `uv run pytest tests/test_api tests/test_scheduler -q` + `cd frontend && npm test && npm run build` 全绿 → 提交 `feat(api): prompt 模式装配(定时任务会话/对话框实时可见/频道副本)`。
+
+---
+
 ## Self-Review（计划对照设计文档）
 
 - D1 兼容 API：T5 明确保留清单 + 存量用例门禁；唯一断言修正（CANCELLED→FAILED）在 T5 显式列出并回链 D10。✔
