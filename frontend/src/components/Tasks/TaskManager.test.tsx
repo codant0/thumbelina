@@ -1,44 +1,373 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { render, screen, fireEvent, act, renderHook } from '@testing-library/react'
 import { TaskManager } from './TaskManager'
+import { useWebSocket, subscribeTaskEvents, type TaskEventPayload } from '../../hooks/useWebSocket'
+import type { ScheduledTaskVO } from '../../api/tasks'
+
+// ---------------------------------------------------------------------------
+// fixtures
+// ---------------------------------------------------------------------------
+
+function makeTask(overrides: Partial<ScheduledTaskVO> = {}): ScheduledTaskVO {
+  return {
+    id: 't-1',
+    description: 'water the plants',
+    scheduled_time: '2026-08-30T10:00:00',
+    status: 'pending',
+    trigger: 'once',
+    cron: null,
+    next_run: null,
+    last_run: null,
+    channel: 'web',
+    content: 'remember to water the plants',
+    mode: 'notify',
+    source: 'agent',
+    error: null,
+    ...overrides,
+  }
+}
+
+const CRON_TASK = makeTask({
+  id: 't-cron',
+  description: 'hourly report',
+  scheduled_time: null,
+  trigger: 'cron',
+  cron: '*/5 * * * *',
+  next_run: '2026-08-30T12:00:00',
+})
+
+function json(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), { status })
+}
+
+interface FetchCall {
+  url: string
+  init?: RequestInit
+}
+
+/** Route mock fetch responses per endpoint and record every call. */
+function setupFetch(overrides: {
+  subagents?: unknown
+  tasks?: unknown
+  events?: unknown
+  scheduler?: unknown
+} = {}): FetchCall[] {
+  const calls: FetchCall[] = []
+  vi.spyOn(globalThis, 'fetch').mockImplementation((url: string | URL | Request, init?: RequestInit) => {
+    const urlStr = typeof url === 'string' ? url : url.toString()
+    calls.push({ url: urlStr, init })
+    if (urlStr.includes('/api/v1/subagents')) {
+      return Promise.resolve(json(overrides.subagents ?? []))
+    }
+    if (urlStr.includes('/api/v1/tasks/scheduler/status')) {
+      return Promise.resolve(json(overrides.scheduler ?? { running: false, last_heartbeat_at: null, task_counts: {}, checks: {} }))
+    }
+    if (urlStr.includes('/api/v1/tasks/events')) {
+      return Promise.resolve(json(overrides.events ?? []))
+    }
+    if (urlStr.includes('/api/v1/tasks')) {
+      return Promise.resolve(json(overrides.tasks ?? []))
+    }
+    return Promise.resolve(json([]))
+  })
+  return calls
+}
+
+function listFetchCount(calls: FetchCall[]): number {
+  return calls.filter(c => c.url.endsWith('/api/v1/tasks')).length
+}
+
+/** Drain the mocked fetch promise chains so setStates land inside act(). */
+async function flushAsync(): Promise<void> {
+  for (let i = 0; i < 5; i++) await Promise.resolve()
+}
+
+// Minimal WebSocket double so a real useWebSocket instance can be driven in
+// tests (frames injected via simulateMessage).
+class MockWebSocket {
+  static instances: MockWebSocket[] = []
+  static CONNECTING = 0
+  static OPEN = 1
+  static CLOSING = 2
+  static CLOSED = 3
+  onopen: ((event: Event) => void) | null = null
+  onmessage: ((event: MessageEvent) => void) | null = null
+  onclose: ((event: CloseEvent) => void) | null = null
+  onerror: ((event: Event) => void) | null = null
+  readyState = 0
+  sentMessages: string[] = []
+  url: string
+
+  constructor(url: string) {
+    this.url = url
+    MockWebSocket.instances.push(this)
+    setTimeout(() => {
+      this.readyState = 1
+      this.onopen?.(new Event('open'))
+    }, 0)
+  }
+
+  send(data: string) {
+    this.sentMessages.push(data)
+  }
+
+  close() {
+    this.readyState = 3
+  }
+
+  simulateMessage(data: string) {
+    this.onmessage?.(new MessageEvent('message', { data }))
+  }
+}
 
 describe('TaskManager', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
-    vi.spyOn(globalThis, 'fetch').mockImplementation((url: string | URL | Request) => {
-      const urlStr = typeof url === 'string' ? url : url.toString()
-      if (urlStr.includes('/api/v1/subagents')) {
-        return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
-      }
-      if (urlStr.includes('/api/v1/tasks')) {
-        return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
-      }
-      return Promise.resolve(new Response('[]', { status: 200 }))
-    })
+    setupFetch()
   })
 
-  it('should render task manager', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('should render task manager', async () => {
     render(<TaskManager />)
+    await act(async () => {})
     expect(screen.getByTestId('task-manager')).toBeInTheDocument()
   })
 
-  it('should render subagent list section', () => {
+  it('should render subagent list section', async () => {
     render(<TaskManager />)
+    await act(async () => {})
     expect(screen.getByTestId('subagent-list')).toBeInTheDocument()
   })
 
-  it('should render task list section', () => {
+  it('should render task list section', async () => {
     render(<TaskManager />)
+    await act(async () => {})
     expect(screen.getByTestId('task-list')).toBeInTheDocument()
   })
 
-  it('should show empty state for subagents', () => {
+  it('should show empty state for subagents', async () => {
     render(<TaskManager />)
+    await act(async () => {})
     expect(screen.getByText('No active subagents')).toBeInTheDocument()
   })
 
-  it('should show empty state for tasks', () => {
+  it('should show empty state for tasks', async () => {
     render(<TaskManager />)
+    await act(async () => {})
     expect(screen.getByText('No scheduled tasks')).toBeInTheDocument()
+  })
+
+  // -----------------------------------------------------------------------
+  // trigger / channel / status badges
+  // -----------------------------------------------------------------------
+
+  it('renders a cron trigger badge with the expression and next run time', async () => {
+    setupFetch({ tasks: [CRON_TASK] })
+    render(<TaskManager />)
+    await act(async () => {})
+    const trigger = screen.getAllByTestId('task-trigger')[0]
+    expect(trigger).toHaveTextContent('Cron')
+    expect(trigger).toHaveTextContent('*/5 * * * *')
+    expect(screen.getByTestId('task-next-run')).toHaveTextContent(
+      new Date('2026-08-30T12:00:00').toLocaleString(),
+    )
+  })
+
+  it('renders a once trigger badge and the channel badge', async () => {
+    setupFetch({ tasks: [makeTask()] })
+    render(<TaskManager />)
+    await act(async () => {})
+    expect(screen.getByTestId('task-trigger')).toHaveTextContent('Once')
+    expect(screen.getByTestId('task-channel')).toHaveTextContent('web')
+  })
+
+  it('truncates long content summaries to 80 characters', async () => {
+    setupFetch({ tasks: [makeTask({ content: 'x'.repeat(100) })] })
+    render(<TaskManager />)
+    await act(async () => {})
+    const summary = screen.getByTestId('task-content')
+    expect(summary.textContent).toHaveLength(81)
+    expect(summary.textContent?.endsWith('…')).toBe(true)
+  })
+
+  it('shows failed / paused / missed status badges with distinct colors', async () => {
+    setupFetch({
+      tasks: [
+        makeTask({ id: 't-failed', description: 'f', status: 'failed' }),
+        makeTask({ id: 't-paused', description: 'p', status: 'paused', trigger: 'cron', cron: '*/5 * * * *' }),
+        makeTask({ id: 't-missed', description: 'm', status: 'missed' }),
+      ],
+    })
+    render(<TaskManager />)
+    await act(async () => {})
+    const badges = screen.getAllByTestId('task-status')
+    const failed = badges.find(b => b.textContent === 'failed')
+    const paused = badges.find(b => b.textContent === 'paused')
+    const missed = badges.find(b => b.textContent === 'missed')
+    expect(failed?.className).toContain('badge-error')
+    expect(paused?.className).toContain('badge-warning')
+    expect(missed?.style.color).toContain('--accent-secondary')
+  })
+
+  // -----------------------------------------------------------------------
+  // actions
+  // -----------------------------------------------------------------------
+
+  it('pause button POSTs /tasks/{id}/pause and refreshes', async () => {
+    const overrides: { tasks?: unknown } = { tasks: [CRON_TASK] }
+    const calls = setupFetch(overrides)
+    render(<TaskManager />)
+    await act(async () => {})
+    overrides.tasks = [{ ...CRON_TASK, status: 'paused' }]
+    await act(async () => { fireEvent.click(screen.getByTestId('pause-task')) })
+    const pauseIdx = calls.findIndex(c => c.url === '/api/v1/tasks/t-cron/pause')
+    expect(pauseIdx).toBeGreaterThanOrEqual(0)
+    expect(calls[pauseIdx].init?.method).toBe('POST')
+    // refresh after the action
+    expect(calls.slice(pauseIdx + 1).some(c => c.url === '/api/v1/tasks')).toBe(true)
+  })
+
+  it('resume button POSTs /tasks/{id}/resume and refreshes', async () => {
+    const overrides: { tasks?: unknown } = {
+      tasks: [makeTask({ trigger: 'cron', cron: '*/5 * * * *', status: 'paused' })],
+    }
+    const calls = setupFetch(overrides)
+    render(<TaskManager />)
+    await act(async () => {})
+    overrides.tasks = [CRON_TASK]
+    await act(async () => { fireEvent.click(screen.getByTestId('resume-task')) })
+    const resumeIdx = calls.findIndex(c => c.url === '/api/v1/tasks/t-1/resume')
+    expect(resumeIdx).toBeGreaterThanOrEqual(0)
+    expect(calls[resumeIdx].init?.method).toBe('POST')
+    expect(calls.slice(resumeIdx + 1).some(c => c.url === '/api/v1/tasks')).toBe(true)
+  })
+
+  it('cancel button POSTs /tasks/{id}/cancel for pending tasks', async () => {
+    const calls = setupFetch({ tasks: [makeTask()] })
+    render(<TaskManager />)
+    await act(async () => {})
+    await act(async () => { fireEvent.click(screen.getByTestId('cancel-task')) })
+    const cancel = calls.find(c => c.url === '/api/v1/tasks/t-1/cancel')
+    expect(cancel?.init?.method).toBe('POST')
+  })
+
+  it('hides action buttons for terminal states', async () => {
+    setupFetch({ tasks: [makeTask({ status: 'completed' })] })
+    render(<TaskManager />)
+    await act(async () => {})
+    expect(screen.queryByTestId('cancel-task')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('pause-task')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('resume-task')).not.toBeInTheDocument()
+  })
+
+  // -----------------------------------------------------------------------
+  // scheduler aliveness indicator
+  // -----------------------------------------------------------------------
+
+  it('shows a green scheduler dot when the heartbeat is running', async () => {
+    setupFetch({ scheduler: { running: true, last_heartbeat_at: null, task_counts: {}, checks: {} } })
+    render(<TaskManager />)
+    await act(async () => {})
+    const dot = screen.getByTestId('scheduler-status')
+    expect(dot.getAttribute('title')).toBe('Scheduler running')
+    expect(dot.style.background).toContain('--success')
+  })
+
+  it('shows a gray scheduler dot when the heartbeat is down', async () => {
+    setupFetch({ scheduler: { running: false, last_heartbeat_at: null, task_counts: {}, checks: {} } })
+    render(<TaskManager />)
+    await act(async () => {})
+    const dot = screen.getByTestId('scheduler-status')
+    expect(dot.getAttribute('title')).toBe('Scheduler offline')
+    expect(dot.style.background).not.toContain('--success')
+  })
+
+  // -----------------------------------------------------------------------
+  // WebSocket task_event driven refresh
+  // -----------------------------------------------------------------------
+
+  it('refreshes the task list when a task_event WS frame arrives (throttled to 500ms)', async () => {
+    vi.useFakeTimers()
+    const originalWS = globalThis.WebSocket
+    globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket
+    MockWebSocket.instances = []
+    const calls = setupFetch({ tasks: [makeTask()] })
+    try {
+      render(<TaskManager />)
+      renderHook(() => useWebSocket('ws://localhost/ws/chat'))
+      await act(async () => { vi.advanceTimersByTime(10) }) // open the socket
+      await act(async () => {}) // flush initial fetches
+      const before = listFetchCount(calls)
+
+      const frame: TaskEventPayload = {
+        id: 'e-1',
+        type: 'task.completed',
+        task_id: 't-1',
+        fired_at: '2026-08-30T12:00:00',
+        trigger: 'once',
+        channel: 'web',
+        content: 'hello',
+        payload: null,
+      }
+      // Leading edge: the first frame refreshes immediately.
+      await act(async () => {
+        MockWebSocket.instances[0].simulateMessage(JSON.stringify({ task_event: frame }))
+        await flushAsync()
+      })
+      expect(listFetchCount(calls)).toBe(before + 1)
+
+      // Burst within the throttle window collapses into one trailing refresh.
+      await act(async () => {
+        MockWebSocket.instances[0].simulateMessage(JSON.stringify({ task_event: { ...frame, id: 'e-2' } }))
+        MockWebSocket.instances[0].simulateMessage(JSON.stringify({ task_event: { ...frame, id: 'e-3' } }))
+        vi.advanceTimersByTime(500)
+        await flushAsync()
+      })
+      expect(listFetchCount(calls)).toBe(before + 2)
+    } finally {
+      globalThis.WebSocket = originalWS
+      vi.useRealTimers()
+    }
+  })
+
+  it('isolates listener exceptions when dispatching task_event frames', async () => {
+    vi.useFakeTimers()
+    const originalWS = globalThis.WebSocket
+    globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket
+    MockWebSocket.instances = []
+    const calls = setupFetch({ tasks: [makeTask()] })
+    const unsub = subscribeTaskEvents(() => { throw new Error('listener boom') })
+    try {
+      render(<TaskManager />)
+      renderHook(() => useWebSocket('ws://localhost/ws/chat'))
+      await act(async () => { vi.advanceTimersByTime(10) })
+      await act(async () => {})
+      const before = listFetchCount(calls)
+
+      const frame: TaskEventPayload = {
+        id: 'e-9',
+        type: 'task.due',
+        task_id: 't-1',
+        fired_at: '2026-08-30T12:00:00',
+        trigger: 'once',
+        channel: 'web',
+        content: 'hello',
+        payload: null,
+      }
+      // A throwing listener must not break the dispatch to other listeners:
+      // the frame dispatch completes and TaskManager still refreshes.
+      await act(async () => {
+        MockWebSocket.instances[0].simulateMessage(JSON.stringify({ task_event: frame }))
+        await flushAsync()
+      })
+      expect(listFetchCount(calls)).toBe(before + 1)
+    } finally {
+      unsub()
+      globalThis.WebSocket = originalWS
+      vi.useRealTimers()
+    }
   })
 })

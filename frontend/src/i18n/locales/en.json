@@ -307,7 +307,17 @@
     "scheduledTasks": "Scheduled Tasks",
     "noSubagents": "No active subagents",
     "noTasks": "No scheduled tasks",
-    "fetchFailed": "Failed to fetch data"
+    "fetchFailed": "Failed to fetch data",
+    "triggerOnce": "Once",
+    "triggerCron": "Cron",
+    "pause": "Pause",
+    "resume": "Resume",
+    "eventsTitle": "Recent Events",
+    "noEvents": "No events yet",
+    "schedulerAlive": "Scheduler running",
+    "schedulerDown": "Scheduler offline",
+    "fieldChannel": "Channel",
+    "fieldNextRun": "Next run"
   },
   "todo": {
     "title": "TODO",

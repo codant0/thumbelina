@@ -307,7 +307,17 @@
     "scheduledTasks": "计划任务",
     "noSubagents": "无活跃子代理",
     "noTasks": "无计划任务",
-    "fetchFailed": "获取数据失败"
+    "fetchFailed": "获取数据失败",
+    "triggerOnce": "一次性",
+    "triggerCron": "周期",
+    "pause": "暂停",
+    "resume": "恢复",
+    "eventsTitle": "最近触发记录",
+    "noEvents": "暂无事件",
+    "schedulerAlive": "调度器运行中",
+    "schedulerDown": "调度器离线",
+    "fieldChannel": "渠道",
+    "fieldNextRun": "下次触发"
   },
   "todo": {
     "title": "待办",

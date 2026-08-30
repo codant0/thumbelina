@@ -23,9 +23,37 @@ interface WsIncoming {
   }
   /** 后端切换 git 分支后广播的事件,携带工作区与当前分支名。 */
   git_branch?: { workspace: string; branch: string }
+  /** 任务调度器生命周期事件(设计 §8.2),与 REST 事件视图字节同构。 */
+  task_event?: TaskEventPayload
+}
+
+/** ``{task_event: …}`` 帧体;与 ``GET /tasks/events`` 的条目结构一致。 */
+export interface TaskEventPayload {
+  id: string
+  /** task.created | task.due | task.completed | task.failed | task.missed | task.cancelled */
+  type: string
+  task_id: string
+  fired_at: string
+  trigger: string
+  channel: string
+  content: string
+  payload: Record<string, unknown> | null
 }
 
 type WsListener = (msg: WsIncoming) => void
+
+type TaskEventListener = (payload: TaskEventPayload) => void
+
+// 任务事件监听器(模块级):TaskManager/TaskEventFeed 挂在聊天路由之外,拿不到
+// App 持有的 ChatSocket 实例,通过这里订阅 task_event 帧,避免为任务页另开
+// 一条 /ws/chat 连接。
+const taskEventListeners = new Set<TaskEventListener>()
+
+/** 订阅后端广播的 task_event 帧;返回退订函数。 */
+export function subscribeTaskEvents(fn: TaskEventListener): () => void {
+  taskEventListeners.add(fn)
+  return () => { taskEventListeners.delete(fn) }
+}
 
 const CHARS_PER_TICK = 3
 const TICK_INTERVAL = 30
@@ -214,6 +242,17 @@ export function useWebSocket(url: string, activeConversationId?: string) {
       if (data.git_branch) {
         for (const fn of listenersRef.current) {
           try { fn(data) } catch { /* 监听者异常不影响主流程 */ }
+        }
+      }
+
+      // 任务事件帧:与 git_branch 并列派发,notify 语义与异常隔离一致。
+      // 除 ws.subscribe() 订阅者外,还通知模块级任务事件监听者(任务页)。
+      if (data.task_event) {
+        for (const fn of listenersRef.current) {
+          try { fn(data) } catch { /* 监听者异常不影响主流程 */ }
+        }
+        for (const fn of taskEventListeners) {
+          try { fn(data.task_event) } catch { /* 监听者异常不影响主流程 */ }
         }
       }
 
@@ -681,7 +720,7 @@ export function useWebSocket(url: string, activeConversationId?: string) {
     setNewConversationId(null)
   }, [])
 
-  // 订阅后端广播事件(目前仅 git_branch);返回退订函数,组件卸载时调用。
+  // 订阅后端广播事件(git_branch / task_event);返回退订函数,组件卸载时调用。
   const subscribe = useCallback((fn: WsListener) => {
     listenersRef.current.add(fn)
     return () => { listenersRef.current.delete(fn) }
