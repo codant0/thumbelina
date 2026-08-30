@@ -5,55 +5,17 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
 from datetime import datetime
-from enum import StrEnum
+
+from thumbelina.scheduler.models import ScheduledTask, TaskStatus
+
+__all__ = ["ScheduledTask", "TaskScheduler", "TaskStatus"]
 
 logger = logging.getLogger(__name__)
 
 # How often the polling loop wakes up to check for due tasks (seconds).
 _POLL_INTERVAL = 1.0
-
-
-class TaskStatus(StrEnum):
-    """Status of a scheduled task."""
-
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    CANCELLED = "cancelled"
-
-
-@dataclass
-class ScheduledTask:
-    """A scheduled task.
-
-    Attributes
-    ----------
-    id:
-        Unique identifier.
-    description:
-        Description of the task.
-    scheduled_time:
-        When the task should run.
-    status:
-        Current status of the task.
-    result:
-        Result of the task execution.
-    condition:
-        Optional condition string for condition-based tasks
-        (e.g., ``"file_changed:/path/to/file"``).  When set, the task
-        is only executed when the ``check_condition`` callback returns True.
-    """
-
-    id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    description: str = ""
-    scheduled_time: datetime = field(default_factory=datetime.now)
-    status: TaskStatus = TaskStatus.PENDING
-    result: str | None = None
-    condition: str | None = None
 
 
 class TaskScheduler:
@@ -116,7 +78,9 @@ class TaskScheduler:
         return [
             task
             for task in self._tasks.values()
-            if task.status == TaskStatus.PENDING and task.scheduled_time <= now
+            if task.status == TaskStatus.PENDING
+            and task.scheduled_time is not None
+            and task.scheduled_time <= now
         ]
 
     async def start(
@@ -192,7 +156,7 @@ class TaskScheduler:
                 pending_times = [
                     t.scheduled_time.timestamp()
                     for t in self._tasks.values()
-                    if t.status == TaskStatus.PENDING
+                    if t.status == TaskStatus.PENDING and t.scheduled_time is not None
                 ]
                 if pending_times:
                     now_ts = time.time()
