@@ -184,6 +184,12 @@ async def create_task(request: Request, body: TaskCreateRequest) -> dict[str, An
     does not pass :func:`validate_cron` (T5 ruling — ``add_task`` does not
     validate expressions for tasks without a caller-supplied ``next_run``),
     or an unknown channel.
+
+    A tz-aware ``scheduled_time`` (e.g. a JS ``toISOString()`` value ending
+    in ``Z``) is normalized to local naive time: the whole scheduling
+    pipeline compares against naive :func:`datetime.now`, and an aware value
+    would raise ``TypeError`` inside ``get_due_tasks`` and kill the poll
+    loop (final review C1).
     """
     scheduler = _get_scheduler(request)
     if scheduler is None:
@@ -198,6 +204,10 @@ async def create_task(request: Request, body: TaskCreateRequest) -> dict[str, An
                 detail="scheduled_time is required for once tasks",
             )
         scheduled_time = body.scheduled_time
+        if scheduled_time.tzinfo is not None:
+            # tz-aware input (JS `toISOString()` "…Z") → local naive, the
+            # project-wide datetime.now() convention (final review C1).
+            scheduled_time = scheduled_time.astimezone().replace(tzinfo=None)
     else:
         if not body.cron:
             raise HTTPException(

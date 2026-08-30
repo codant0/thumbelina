@@ -99,6 +99,29 @@ describe('tasks API', () => {
     )
   })
 
+  it('createTask renders a Pydantic 422 validation array using the first message', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse(
+        {
+          detail: [
+            { loc: ['body', 'cron'], msg: 'Value error, Invalid cron expression', type: 'value_error' },
+          ],
+        },
+        422,
+      ),
+    )
+    await expect(createTask({ description: 'x', trigger: 'cron', cron: 'bad' })).rejects.toThrow(
+      'Value error, Invalid cron expression',
+    )
+  })
+
+  it('createTask falls back to the HTTP status for a validation array without messages', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({ detail: [] }, 422))
+    await expect(createTask({ description: 'x', trigger: 'cron', cron: 'bad' })).rejects.toThrow(
+      'HTTP 422',
+    )
+  })
+
   it('cancelTask POSTs to /api/v1/tasks/{id}/cancel', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       jsonResponse({ cancelled: true }),

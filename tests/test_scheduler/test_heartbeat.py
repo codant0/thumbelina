@@ -291,7 +291,10 @@ class TestCronMissed:
 
 
 class TestOnceMissed:
-    async def test_mark_policy_beyond_grace_marked_missed(self) -> None:
+    async def test_dead_loop_mark_policy_beyond_grace_marked_missed(self) -> None:
+        """I2 (final review): the missed determination only runs against a
+        DEAD scan loop (scheduler still ``running``) — recover rule 1
+        semantics (§7.3)."""
         bus = EventBus()
         log = _EventLog(bus)
         sched = TaskScheduler(bus=bus, config=_config(missed_policy="mark"))
@@ -300,8 +303,16 @@ class TestOnceMissed:
         await sched.add_task(overdue)
         await sched.add_task(within_grace)
 
+        # Simulate a crashed scan loop: scheduler intent intact, loop dead.
+        await sched.start()
+        assert sched._poll_task is not None
+        sched._poll_task.cancel()
+        await asyncio.sleep(0.05)  # let the cancellation land
+        assert sched._poll_task.done()
+
         hb = Heartbeat(sched, bus, _config())
         acted = await hb._run_checks(FIXED_NOW)
+        await sched.stop()
 
         assert overdue.status == TaskStatus.MISSED  # terminal (§5.1)
         assert within_grace.status == TaskStatus.PENDING  # grace still open
@@ -312,15 +323,77 @@ class TestOnceMissed:
         assert missed[0].payload["scheduled_for"] == overdue.scheduled_time.isoformat()
         assert missed[0].payload["policy"] == "mark"
 
-    async def test_run_policy_stays_pending_and_immediately_due(self) -> None:
+    async def test_alive_but_blocked_loop_does_not_mark_missed(self) -> None:
+        """I2: with the scan loop alive — even blocked inside a hanging
+        delivery — an overdue once task is queue backlog, not a miss.  The
+        heartbeat leaves it PENDING for the loop to deliver when it
+        unblocks; marking it MISSED here would silently drop the work."""
+        bus = EventBus()
+        log = _EventLog(bus)
+        sched = TaskScheduler(bus=bus, config=_config())
+
+        unblock = asyncio.Event()
+        entered = asyncio.Event()
+
+        async def hanging_delivery(task: ScheduledTask) -> None:
+            entered.set()
+            await unblock.wait()
+
+        first = _task("t-blocking", scheduled_time=datetime.now() - timedelta(seconds=5))
+        await sched.add_task(first)
+        await sched.start(hanging_delivery)
+        try:
+            assert await _wait_for(entered.is_set)
+            # The loop is alive — stuck inside the hanging delivery.
+            assert sched._poll_task is not None and not sched._poll_task.done()
+
+            # Becomes overdue beyond grace while the loop is blocked.
+            overdue = _task("t-backlog", scheduled_time=datetime.now() - timedelta(minutes=10))
+            await sched.add_task(overdue)
+
+            hb = Heartbeat(sched, bus, _config())
+            acted = await hb._run_checks(datetime.now())
+
+            assert "once_overdue" not in acted
+            assert overdue.status == TaskStatus.PENDING  # backlog, not missed
+            assert log.of_type(TaskEventType.MISSED) == []
+        finally:
+            unblock.set()
+            await sched.stop()
+
+    async def test_never_started_scheduler_leaves_overdue_alone(self) -> None:
+        """I2: before ``scheduler.start()`` (running=False) the missed
+        determination must not fire — the startup path is recover()'s job
+        (§7.2), and a deliberately stopped scheduler is not ours to reap."""
+        bus = EventBus()
+        log = _EventLog(bus)
+        sched = TaskScheduler(bus=bus, config=_config(missed_policy="mark"))
+        overdue = _task("t-late", scheduled_time=FIXED_NOW - timedelta(minutes=10))
+        await sched.add_task(overdue)
+
+        hb = Heartbeat(sched, bus, _config())
+        acted = await hb._run_checks(FIXED_NOW)
+
+        assert overdue.status == TaskStatus.PENDING  # recover's call, not the heartbeat's
+        assert "once_overdue" not in acted
+        assert log.of_type(TaskEventType.MISSED) == []
+
+    async def test_dead_loop_run_policy_stays_pending_and_immediately_due(self) -> None:
         bus = EventBus()
         log = _EventLog(bus)
         sched = TaskScheduler(bus=bus, config=_config(missed_policy="run"))
         overdue = _task("t-late", scheduled_time=datetime.now() - timedelta(minutes=10))
         await sched.add_task(overdue)
 
+        # I2: the missed determination only runs against a dead scan loop.
+        await sched.start()
+        assert sched._poll_task is not None
+        sched._poll_task.cancel()
+        await asyncio.sleep(0.05)
+
         hb = Heartbeat(sched, bus, _config(missed_policy="run"))
         acted = await hb._run_checks(datetime.now())
+        await sched.stop()
 
         assert overdue.status == TaskStatus.PENDING  # fires immediately, not MISSED
         assert log.of_type(TaskEventType.MISSED) == []
@@ -549,8 +622,15 @@ class TestErrorIsolation:
         late = _task("t-late", scheduled_time=FIXED_NOW - timedelta(minutes=10))
         await sched.add_task(late)
 
+        # I2: once_overdue only acts on a dead scan loop — simulate a crash.
+        await sched.start()
+        assert sched._poll_task is not None
+        sched._poll_task.cancel()
+        await asyncio.sleep(0.05)
+
         hb = Heartbeat(sched, None, _config())
         acted = await hb._run_checks(FIXED_NOW)
+        await sched.stop()
 
         assert "once_overdue" in acted  # other checks still ran
         assert late.status == TaskStatus.MISSED

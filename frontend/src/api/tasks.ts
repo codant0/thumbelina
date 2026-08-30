@@ -73,7 +73,20 @@ export interface CreateTaskInput {
 
 async function parseError(res: Response): Promise<never> {
   const data = await res.json().catch(() => ({}))
-  throw new Error(data.detail || `HTTP ${res.status}`)
+  const detail: unknown = data?.detail
+  let message = `HTTP ${res.status}`
+  if (typeof detail === 'string') {
+    message = detail
+  } else if (Array.isArray(detail)) {
+    // Pydantic 422: detail is an array of validation-error objects —
+    // surface the first human-readable message instead of "[object Object]".
+    const first: unknown = detail[0]
+    if (first !== null && typeof first === 'object' && 'msg' in first) {
+      const msg: unknown = (first as { msg: unknown }).msg
+      if (typeof msg === 'string') message = msg
+    }
+  }
+  throw new Error(message)
 }
 
 export async function listTasks(): Promise<ScheduledTaskVO[]> {

@@ -15,7 +15,12 @@ the five §7.4 inspection items:
    additionally advances ``next_run`` without firing;
 4. **once tasks overdue beyond the grace window** — recover rule 1
    semantics (§7.3): ``mark`` → terminal ``MISSED`` + ``task.missed``;
-   ``run`` → stays ``PENDING`` so the scan fires it immediately;
+   ``run`` → stays ``PENDING`` so the scan fires it immediately.  Under
+   the inline-delivery model (final review I2) this determination only
+   applies while the scan loop is dead (``running`` with ``_poll_task``
+   done/None) and runs before the poll-loop revival so the crashed loop
+   is what gets judged — an alive loop's backlog is not a miss, and the
+   startup scenario belongs to ``recover()``;
 5. **event log retention** — ``task_events`` is trimmed to
    ``event_retention`` rows via :meth:`TaskStore.prune_events`.
 
@@ -58,11 +63,14 @@ _DEFAULT_STALE_RUNNING_MINUTES = 10.0
 _DEFAULT_EVENT_RETENTION = 500
 
 # The §7.4 inspection items, in execution order; keys of status()["checks"].
+# ``once_overdue`` runs BEFORE ``poll_loop``: its "scan loop is dead"
+# judgement (I2, final review) must observe the crashed loop, not the one
+# the poll-loop check re-creates later in the same cycle.
 CHECK_NAMES: tuple[str, ...] = (
+    "once_overdue",
     "poll_loop",
     "stale_running",
     "cron_next_run",
-    "once_overdue",
     "event_prune",
 )
 
@@ -213,10 +221,10 @@ class Heartbeat:
         """
         acted: list[str] = []
         for name, check in (
+            ("once_overdue", self._check_once_overdue(now)),
             ("poll_loop", self._check_poll_loop()),
             ("stale_running", self._check_stale_running(now)),
             ("cron_next_run", self._check_cron_next_run(now)),
-            ("once_overdue", self._check_once_overdue(now)),
             ("event_prune", self._check_event_prune()),
         ):
             try:
@@ -305,13 +313,31 @@ class Heartbeat:
     async def _check_once_overdue(self, now: datetime) -> str | None:
         """Item 4: once PENDING overdue beyond grace → recover rule 1 semantics.
 
-        Delegates to the scheduler's ``_recover_overdue_once``: ``mark`` →
-        terminal MISSED + ``task.missed``; ``run`` → untouched (stays
-        PENDING, i.e. immediately due, the scan fires it — §7.3).
+        I2 (final review, inline-delivery model D5): this determination only
+        applies when the scan loop is **dead** while the scheduler still
+        intends to run (``running`` and ``_poll_task`` done/None).  While
+        the loop is alive — even blocked inside a long delivery — an
+        overdue once task is queue backlog, not a miss, and marking it
+        MISSED would silently drop work the loop is about to deliver; the
+        startup scenario (never started / deliberately stopped,
+        ``running`` False) is recover()'s job instead.  It runs before the
+        ``poll_loop`` check (see ``CHECK_NAMES``) so the crashed loop is
+        judged before that check re-creates it.
+
+        When it does apply, it delegates to the scheduler's
+        ``_recover_overdue_once``: ``mark`` → terminal MISSED +
+        ``task.missed``; ``run`` → untouched (stays PENDING, i.e.
+        immediately due, the scan fires it — §7.3).
         """
+        sched = self._scheduler
+        if not sched.running:
+            return None  # never started / deliberately stopped → recover's business
+        poll_task = sched._poll_task
+        if poll_task is not None and not poll_task.done():
+            return None  # loop alive: backlog ≠ missed under inline delivery
         acted = False
         grace_deadline = now - self._grace
-        for task in await self._scheduler.list_tasks():
+        for task in await sched.list_tasks():
             if task.trigger != TriggerKind.ONCE or task.status != TaskStatus.PENDING:
                 continue
             if task.scheduled_time is None or task.scheduled_time > grace_deadline:

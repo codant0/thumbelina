@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -892,6 +892,62 @@ class TestRecover:
         assert recovered.error == "interrupted by restart"
 
     @pytest.mark.asyncio
+    async def test_recover_fails_cron_task_with_invalid_expression(self, store):
+        """M4 (final review): a stored row whose ``cron_expr`` no longer
+        parses (hand-edited DB / external writer) must not be hydrated —
+        left schedulable it would be due on every poll cycle (1Hz delivery
+        storm).  It is failed and kept out of the working set instead."""
+        recorder = _EventRecorder()
+        task = ScheduledTask(
+            id="cron-bad-expr",
+            description="Hand-edited row",
+            trigger=TriggerKind.CRON,
+            cron_expr="not a cron",
+            scheduled_time=None,
+            next_run=datetime.now() - timedelta(minutes=1),
+        )
+        await store.upsert_task(task)
+
+        scheduler = TaskScheduler(store=store, bus=_make_bus(recorder))
+        await scheduler.recover(now=datetime.now())
+
+        # Not hydrated into the in-memory working set → never scheduled.
+        assert all(t.id != "cron-bad-expr" for t in await scheduler.list_tasks())
+        assert await scheduler.get_due_tasks() == []
+        # The store row carries the FAILED verdict.
+        persisted = await store.get_task("cron-bad-expr")
+        assert persisted is not None
+        assert persisted.status == TaskStatus.FAILED
+        assert persisted.error == "invalid cron expression"
+        failed = [e for e in recorder.events if e.type == TaskEventType.FAILED]
+        assert len(failed) == 1
+        assert failed[0].payload["error"] == "invalid cron expression"
+
+    @pytest.mark.asyncio
+    async def test_recover_fails_paused_cron_task_with_invalid_expression(self, store):
+        """A PAUSED cron task with an unparsable expression can never be
+        resumed (resume re-validates); recover fails it up front."""
+        task = ScheduledTask(
+            id="cron-bad-paused",
+            description="Paused with broken expr",
+            trigger=TriggerKind.CRON,
+            cron_expr="* * *",
+            scheduled_time=None,
+            next_run=datetime.now() + timedelta(hours=1),
+            status=TaskStatus.PAUSED,
+        )
+        await store.upsert_task(task)
+
+        scheduler = TaskScheduler(store=store)
+        await scheduler.recover(now=datetime.now())
+
+        assert all(t.id != "cron-bad-paused" for t in await scheduler.list_tasks())
+        persisted = await store.get_task("cron-bad-paused")
+        assert persisted is not None
+        assert persisted.status == TaskStatus.FAILED
+        assert persisted.error == "invalid cron expression"
+
+    @pytest.mark.asyncio
     async def test_recover_advances_overdue_cron_with_single_summary_event(self, store):
         """Rule 4 (mark): next_run jumps to the future, ONE summary task.missed."""
         recorder = _EventRecorder()
@@ -1261,6 +1317,132 @@ class TestStoreFailureDegradation:
         scheduler = TaskScheduler(store=_FailingStore())
         # Memory miss + guarded store fallback → None instead of RuntimeError.
         assert await scheduler.get_task("missing") is None
+
+
+class TestPollLoopResilience:
+    """C1 (final review): one poisoned scan round must not kill the loop,
+    and a loop that died with a real exception must not break ``stop()``."""
+
+    @pytest.mark.asyncio
+    async def test_poll_loop_survives_poison_scan_and_keeps_delivering(self, caplog):
+        """A tz-aware ``scheduled_time`` makes the naive comparison in
+        ``get_due_tasks`` raise ``TypeError`` every round.  The loop must
+        log the failure, keep polling, and deliver other tasks once the
+        poison is gone.
+        """
+        with caplog.at_level("WARNING"):
+            scheduler = TaskScheduler()
+            poison = ScheduledTask(
+                id="poison",
+                description="Aware timestamp from a hand-written row",
+                scheduled_time=datetime(2027, 1, 1, tzinfo=UTC),
+            )
+            healthy = ScheduledTask(
+                id="healthy",
+                description="Due now",
+                scheduled_time=datetime.now() - timedelta(hours=1),
+            )
+            await scheduler.add_task(poison)
+            await scheduler.add_task(healthy)
+
+            executed: list[str] = []
+
+            async def callback(t: ScheduledTask) -> None:
+                executed.append(t.id)
+
+            await scheduler.start(on_due_task=callback)
+            await asyncio.sleep(0.2)  # first scan hits the poison
+
+            # The loop is alive despite the poisoned scan round.
+            assert scheduler._poll_task is not None
+            assert not scheduler._poll_task.done()
+
+            # Remove the poison: the next round delivers the healthy task.
+            await scheduler.cancel_task("poison")
+            await asyncio.sleep(1.5)  # past the 1s poll-wake floor
+            await scheduler.stop()
+
+        assert executed == ["healthy"]
+        updated = await scheduler.get_task("healthy")
+        assert updated is not None
+        assert updated.status == TaskStatus.COMPLETED
+        assert "Scan round failed" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_stop_swallows_exception_from_dead_poll_task(self, caplog):
+        """``stop()`` must not raise when the poll task died with a real
+        exception (not cancellation) — a propagating error would break the
+        lifespan shutdown.
+        """
+        scheduler = TaskScheduler()
+
+        async def _poison() -> None:
+            raise TypeError("can't compare offset-naive and offset-aware datetimes")
+
+        scheduler._running = True
+        scheduler._poll_task = asyncio.create_task(_poison())
+        await asyncio.sleep(0.05)  # let the poison task fail
+
+        with caplog.at_level("WARNING"):
+            await scheduler.stop()  # must not raise
+
+        assert scheduler.running is False
+        assert scheduler._poll_task is None
+        assert "TypeError" in caplog.text
+
+
+class TestReapedTaskNotResurrected:
+    """I2 (final review): the Heartbeat's stale-RUNNING reaper may fail a
+    task while its delivery callback is still in flight.  When the callback
+    then returns successfully, ``_fire_task`` must keep the FAILED verdict
+    instead of overwriting it (FAILED→COMPLETED resurrection + contradictory
+    event pair)."""
+
+    @pytest.mark.asyncio
+    async def test_success_callback_after_reaping_keeps_failed(self):
+        recorder = _EventRecorder()
+        scheduler = TaskScheduler(bus=_make_bus(recorder))
+        task = ScheduledTask(
+            id="reaped-once",
+            description="Reaped mid-delivery",
+            scheduled_time=datetime.now() - timedelta(hours=1),
+        )
+        await scheduler.add_task(task)
+
+        async def reaping_callback(t: ScheduledTask) -> None:
+            # Simulate the Heartbeat reaping the RUNNING task as stale
+            # while the delivery is in flight, then delivering fine.
+            t.status = TaskStatus.FAILED
+            t.error = "stale running"
+
+        await scheduler.start(on_due_task=reaping_callback)
+        await asyncio.sleep(0.2)
+        await scheduler.stop()
+
+        updated = await scheduler.get_task("reaped-once")
+        assert updated is not None
+        assert updated.status == TaskStatus.FAILED
+        assert updated.error == "stale running"
+        assert recorder.types() == ["task.created", "task.due"]  # no COMPLETED
+
+    @pytest.mark.asyncio
+    async def test_cron_reaped_during_delivery_stays_failed(self):
+        recorder = _EventRecorder()
+        scheduler = TaskScheduler(bus=_make_bus(recorder))
+        await scheduler.add_task(_due_cron_task("reaped-cron"))
+
+        async def reaping_callback(t: ScheduledTask) -> None:
+            t.status = TaskStatus.FAILED
+            t.error = "stale running"
+
+        await scheduler.start(on_due_task=reaping_callback)
+        await asyncio.sleep(0.2)
+        await scheduler.stop()
+
+        updated = await scheduler.get_task("reaped-cron")
+        assert updated is not None
+        assert updated.status == TaskStatus.FAILED  # not resurrected to PENDING
+        assert recorder.types() == ["task.created", "task.due"]  # no COMPLETED
 
 
 class TestV2Construction:

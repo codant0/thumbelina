@@ -18,7 +18,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from typing import Any
 
-from thumbelina.scheduler.cron import CronTrigger
+from thumbelina.scheduler.cron import CronTrigger, validate_cron
 from thumbelina.scheduler.events import EventBus
 from thumbelina.scheduler.models import (
     ScheduledTask,
@@ -323,6 +323,13 @@ class TaskScheduler:
            once (skipped occurrences are never replayed);
         5. CRON RUNNING residue → same as rule 3.
 
+        During hydration, a cron task whose ``cron_expr`` no longer parses
+        (hand-edited store row / external writer, final review M4) is
+        marked FAILED (``error="invalid cron expression"``) and kept out
+        of the in-memory working set: left schedulable it would be due on
+        every poll cycle (1Hz delivery storm).  RUNNING residue is left to
+        rule 3/5 and terminal rows are not touched.
+
         Call this before :meth:`start` when a store is injected.
         """
         if self._store is None:
@@ -336,6 +343,28 @@ class TaskScheduler:
             logger.warning("Task store unavailable during recover, skipping: %s", exc)
             return
         for stored in stored_tasks:
+            if (
+                stored.trigger == TriggerKind.CRON
+                and stored.status in (TaskStatus.PENDING, TaskStatus.PAUSED)
+                and validate_cron(stored.cron_expr or "") is not None
+            ):
+                # Final review M4: re-validate at hydration — an unparsable
+                # expression in a store row would otherwise be due on every
+                # poll cycle (1Hz delivery storm).  Fail it and keep it out
+                # of the working set; RUNNING residue falls through to rule
+                # 3/5 and terminal rows are left untouched.
+                stored.status = TaskStatus.FAILED
+                stored.error = "invalid cron expression"
+                logger.warning(
+                    "Task %s has an invalid cron expression %r; marked FAILED and not scheduled",
+                    stored.id,
+                    stored.cron_expr,
+                )
+                await self._persist(stored)
+                await self._emit(
+                    self._make_event(stored, TaskEventType.FAILED, {"error": stored.error})
+                )
+                continue  # not hydrated into the working set
             self._tasks[stored.id] = stored  # hydrate the working set
         for task in list(self._tasks.values()):
             if task.status == TaskStatus.RUNNING:
@@ -452,7 +481,13 @@ class TaskScheduler:
         self._poll_task = asyncio.create_task(self._poll_loop(on_due_task))
 
     async def stop(self) -> None:
-        """Stop the background polling loop gracefully."""
+        """Stop the background polling loop gracefully.
+
+        A poll task that already died with a real exception (e.g. the
+        TypeError a tz-aware ``scheduled_time`` caused before entry
+        normalization existed) must not escape ``stop()`` — the caller is
+        the lifespan shutdown, which has to survive (final review C1).
+        """
         self._running = False
         if self._poll_task is not None:
             self._poll_task.cancel()
@@ -460,6 +495,10 @@ class TaskScheduler:
                 await self._poll_task
             except asyncio.CancelledError:
                 pass
+            except Exception as exc:
+                logger.warning(
+                    "Scheduler poll loop died with %s during stop: %s", type(exc).__name__, exc
+                )
             self._poll_task = None
 
     def _restart_loop(self) -> None:
@@ -490,20 +529,34 @@ class TaskScheduler:
         the scheduled time.  The task is only executed when the condition
         returns ``True`` — in that case it is not set to RUNNING and no
         ``task.due`` event is emitted.
+
+        Each scan round is guarded (design §11, final review C1): a single
+        poisoned round — e.g. a tz-aware ``scheduled_time`` that reached the
+        working set — is logged and skipped instead of killing the loop.
+        The sleep pacing stays outside the guard so a failing round is
+        still throttled; ``CancelledError`` from :meth:`stop` is a
+        ``BaseException`` and passes through untouched.
         """
         while self._running:
-            due = await self.get_due_tasks()
-            for task in due:
-                # 条件任务：仅在条件满足时执行
-                if task.condition and self._check_condition is not None:
-                    try:
-                        condition_met = await self._check_condition(task.condition)
-                    except Exception as exc:
-                        logger.warning("Condition check failed for task %s: %s", task.id, exc)
-                        continue
-                    if not condition_met:
-                        continue
-                await self._fire_task(task, on_due_task)
+            try:
+                due = await self.get_due_tasks()
+                for task in due:
+                    # 条件任务：仅在条件满足时执行
+                    if task.condition and self._check_condition is not None:
+                        try:
+                            condition_met = await self._check_condition(task.condition)
+                        except Exception as exc:
+                            logger.warning("Condition check failed for task %s: %s", task.id, exc)
+                            continue
+                        if not condition_met:
+                            continue
+                    await self._fire_task(task, on_due_task)
+            except Exception as exc:
+                # One poisoned round (bad comparison, store surprise, …)
+                # must not take the whole scheduler down: log and keep
+                # polling.  Fall through to the sleep below — a bare
+                # ``continue`` here would spin the loop hot.
+                logger.warning("Scan round failed, continuing: %s", exc, exc_info=True)
             # Calculate dynamic sleep interval based on nearest pending task
             next_wake = _POLL_INTERVAL  # default
             if self._tasks:
@@ -574,6 +627,17 @@ class TaskScheduler:
                     logger.warning("Cannot advance cron next_run for task %s: %s", task.id, adv_exc)
             await self._persist(task)
             await self._emit(self._make_event(task, TaskEventType.FAILED, payload))
+            return
+
+        if task.status == TaskStatus.FAILED:
+            # I2 (final review): the Heartbeat's stale-RUNNING reaper may
+            # have failed this task while the callback was in flight.  Its
+            # FAILED verdict is terminal — do not resurrect the task to
+            # COMPLETED/PENDING or emit a contradictory COMPLETED event.
+            logger.warning(
+                "Task %s was reaped as FAILED during delivery; keeping the FAILED verdict",
+                task.id,
+            )
             return
 
         payload = {"duration_ms": int((time.monotonic() - started) * 1000)}

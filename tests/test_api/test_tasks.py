@@ -262,6 +262,49 @@ async def test_create_once_task_201(task_client: TestClient) -> None:
     assert stored_task.description == "remind me"
 
 
+async def test_create_once_task_tz_aware_time_normalized_to_local_naive(
+    task_client: TestClient,
+) -> None:
+    """A ``Z``-suffixed timestamp (JS ``toISOString()``) must come back naive.
+
+    The scheduler compares against naive ``datetime.now()``; an aware value
+    would raise ``TypeError`` inside ``get_due_tasks`` and kill the poll
+    loop (C1).  The API normalizes tz-aware input to local naive time.
+    """
+    client = task_client
+    resp = client.post(
+        "/api/v1/tasks",
+        json={
+            "description": "tz once",
+            "trigger": "once",
+            "scheduled_time": "2027-01-01T08:30:00Z",
+        },
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["scheduled_time"] is not None
+    assert not body["scheduled_time"].endswith("+00:00")
+    expected = (
+        datetime.fromisoformat("2027-01-01T08:30:00+00:00")
+        .astimezone()
+        .replace(tzinfo=None)
+        .isoformat()
+    )
+    assert body["scheduled_time"] == expected
+
+    # The stored task is naive and the scheduler's naive comparison works.
+    scheduler: TaskScheduler = client.app.state.task_scheduler
+    task = await scheduler.get_task(body["id"])
+    assert task is not None
+    assert task.scheduled_time is not None
+    assert task.scheduled_time.tzinfo is None
+    await scheduler.get_due_tasks()  # would raise TypeError on an aware value
+
+    items = client.get("/api/v1/tasks").json()
+    created = next(i for i in items if i["id"] == body["id"])
+    assert not created["scheduled_time"].endswith("+00:00")
+
+
 async def test_create_once_task_content_defaults_to_description(
     task_client: TestClient,
 ) -> None:
