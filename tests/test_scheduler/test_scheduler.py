@@ -1445,6 +1445,74 @@ class TestReapedTaskNotResurrected:
         assert recorder.types() == ["task.created", "task.due"]  # no COMPLETED
 
 
+class TestReapedTaskFailurePathGuarded:
+    """I2 (final review): the success path of ``_fire_task`` already keeps
+    the Heartbeat reaper's FAILED verdict; the failure path (callback
+    raises) must respect it too — no PENDING resurrection, no ``next_run``
+    advance, and no second ``task.failed`` on top of the reaper's own
+    (contradictory event pair)."""
+
+    @pytest.mark.asyncio
+    async def test_cron_failure_callback_after_reaping_stays_failed(self):
+        recorder = _EventRecorder()
+        scheduler = TaskScheduler(bus=_make_bus(recorder))
+        task = _due_cron_task("reaped-cron-fail")
+        await scheduler.add_task(task)
+        reaped_next_run = task.next_run
+
+        async def reaping_then_failing_callback(t: ScheduledTask) -> None:
+            # Simulate the Heartbeat reaping the RUNNING task as stale
+            # while the delivery is in flight, then the delivery failing.
+            t.status = TaskStatus.FAILED
+            t.error = "stale running"
+            raise RuntimeError("boom")
+
+        await scheduler.start(on_due_task=reaping_then_failing_callback)
+        await asyncio.sleep(0.2)
+        await scheduler.stop()
+
+        updated = await scheduler.get_task("reaped-cron-fail")
+        assert updated is not None
+        assert updated.status == TaskStatus.FAILED  # not resurrected to PENDING
+        assert updated.error == "stale running"  # reaper's verdict, not "boom"
+        assert updated.next_run == reaped_next_run  # not advanced past the reap
+        assert recorder.types() == ["task.created", "task.due"]  # no second task.failed
+
+    @pytest.mark.asyncio
+    async def test_once_failure_callback_after_reaping_keeps_single_failed(self):
+        recorder = _EventRecorder()
+        scheduler = TaskScheduler(bus=_make_bus(recorder))
+        task = ScheduledTask(
+            id="reaped-once-fail",
+            description="Reaped mid-delivery, delivery then fails",
+            scheduled_time=datetime.now() - timedelta(hours=1),
+        )
+        await scheduler.add_task(task)
+
+        async def reaping_then_failing_callback(t: ScheduledTask) -> None:
+            # Simulate the full stale-RUNNING reaper disposition (heartbeat
+            # _check_stale_running): FAILED verdict + task.failed event,
+            # then the delivery fails anyway.
+            t.status = TaskStatus.FAILED
+            t.error = "stale running"
+            await scheduler._persist(t)
+            await scheduler._emit(
+                scheduler._make_event(t, TaskEventType.FAILED, {"error": "stale running"})
+            )
+            raise RuntimeError("boom")
+
+        await scheduler.start(on_due_task=reaping_then_failing_callback)
+        await asyncio.sleep(0.2)
+        await scheduler.stop()
+
+        updated = await scheduler.get_task("reaped-once-fail")
+        assert updated is not None
+        assert updated.status == TaskStatus.FAILED
+        assert updated.error == "stale running"  # reaper's verdict, not "boom"
+        # Exactly one task.failed — the reaper's own, no contradictory pair.
+        assert recorder.types() == ["task.created", "task.due", "task.failed"]
+
+
 class TestV2Construction:
     """v2: all constructor parameters are optional (graceful degradation)."""
 

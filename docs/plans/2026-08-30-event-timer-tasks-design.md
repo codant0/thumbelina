@@ -305,7 +305,7 @@ CREATE INDEX ix_task_events_task ON task_events(task_id, created_at DESC);
 | `task_events` 超过 `event_retention`（默认 500 行） | 按 created_at 修剪到上限 |
 | 维护 `last_heartbeat_at`（内存） | 供 `GET /tasks/scheduler/status` 展示存活 |
 
-注（最终评审裁定，内联交付模型 D5）：错过判定（once 过期超宽限 → MISSED，及 cron `next_run` 落后的 §7.3 处置）仅作用于**扫描循环死亡**（`running` 且 `_poll_task` done/None）或启动 `recover()` 场景——循环存活（含被交付阻塞）时队列积压 ≠ 错过，heartbeat 不标 MISSED，防静默丢弃排队任务；僵尸 `RUNNING` 的 `FAILED` 定论（stale running 复收）**优先于回调晚到的完成**——交付回调返回后 `_fire_task` 不覆写状态、不补发 `COMPLETED`/`PENDING`。
+注（最终评审裁定，内联交付模型 D5）：once 过期超宽限 → MISSED 的判定仅作用于**扫描循环死亡**（`running` 且 `_poll_task` done/None）或启动 `recover()` 场景——循环存活（含被交付阻塞）时队列积压 ≠ 错过，heartbeat 不标 MISSED，防静默丢弃排队任务；cron `next_run` 落后的 §7.3 处置（前推 + 汇总 `task.missed`）则**在循环存活时也运行**——该场次已被消费，不构成工作丢失。僵尸 `RUNNING` 的 `FAILED` 定论（stale running 复收）**优先于回调晚到的完成**——交付回调返回后 `_fire_task` 不覆写状态、不补发 `COMPLETED`/`PENDING`。
 
 ---
 

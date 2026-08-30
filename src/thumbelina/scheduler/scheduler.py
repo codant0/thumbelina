@@ -606,6 +606,20 @@ class TaskScheduler:
                 if receipt is not None:
                     delivered = str(receipt)
         except Exception as exc:
+            if task.status == TaskStatus.FAILED:
+                # I2 (final review): the Heartbeat's stale-RUNNING reaper may
+                # have failed this task while the callback was in flight.  Its
+                # FAILED verdict is terminal here too — keep it: do not
+                # overwrite the reaper's error, do not resurrect the task to
+                # PENDING or advance ``next_run``, and do not emit a second,
+                # contradictory ``task.failed`` event.
+                logger.warning(
+                    "Task %s was reaped as FAILED during delivery; keeping the "
+                    "FAILED verdict (delivery error: %s)",
+                    task.id,
+                    exc,
+                )
+                return
             logger.warning("Scheduled task %s failed: %s", task.id, exc)
             payload: dict[str, Any] = {
                 "error": str(exc),
