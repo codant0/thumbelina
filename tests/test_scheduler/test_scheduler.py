@@ -538,10 +538,59 @@ class TestCronTasks:
         assert updated is not None
         assert updated.status == TaskStatus.PENDING
         assert updated.error == "boom"
+        assert updated.next_run is not None
+        assert updated.next_run > datetime.now()  # failed slot consumed (R1)
         persisted = await store.get_task("cron-fail")
         assert persisted is not None
         assert persisted.status == TaskStatus.PENDING
         assert persisted.error == "boom"
+        assert persisted.next_run is not None
+        assert persisted.next_run > datetime.now()  # advanced next_run persisted
+
+    @pytest.mark.asyncio
+    async def test_cron_failure_consumes_slot_and_does_not_retry_next_poll(self):
+        """A failed cron round consumes its slot (review ruling R1).
+
+        next_run advances to the next future occurrence, so the next poll
+        round neither calls the callback nor emits ``task.due`` again —
+        no 1Hz retry storm.  The daily ``0 23 * * *`` expression keeps the
+        recomputed next_run hours away, making the second-poll assertion
+        deterministic.
+        """
+        recorder = _EventRecorder()
+        scheduler = TaskScheduler(bus=_make_bus(recorder))
+        now = datetime.now()
+        task = ScheduledTask(
+            id="cron-fail-once",
+            description="Daily 23:00, failing delivery",
+            trigger=TriggerKind.CRON,
+            cron_expr="0 23 * * *",
+            scheduled_time=None,
+            next_run=now - timedelta(minutes=1),  # due now
+        )
+        await scheduler.add_task(task)
+
+        calls: list[str] = []
+
+        async def failing_callback(t: ScheduledTask) -> None:
+            calls.append(t.id)
+            raise RuntimeError("boom")
+
+        await scheduler.start(on_due_task=failing_callback)
+        await asyncio.sleep(0.2)  # first round fires and fails
+        assert await scheduler.get_due_tasks() == []  # slot consumed
+        await asyncio.sleep(1.2)  # past the next poll wake-up (floor is 1s)
+        await scheduler.stop()
+
+        assert calls == ["cron-fail-once"]
+        due_events = [e for e in recorder.events if e.type == TaskEventType.DUE]
+        assert len(due_events) == 1
+        updated = await scheduler.get_task("cron-fail-once")
+        assert updated is not None
+        assert updated.status == TaskStatus.PENDING
+        assert updated.error == "boom"
+        assert updated.next_run is not None
+        assert updated.next_run > now
 
     @pytest.mark.asyncio
     async def test_add_task_computes_next_run_fallback(self, scheduler):
@@ -872,6 +921,63 @@ class TestRecover:
         assert len(missed) == 1  # one summary, not one per skipped occurrence
         assert missed[0].payload["skipped_occurrences"] == 2
         assert missed[0].payload["policy"] == "mark"
+
+    @pytest.mark.asyncio
+    async def test_recover_run_policy_emits_summary_missed_and_fires_once(self, store):
+        """Rule 4 under ``run`` policy (review ruling R2).
+
+        A single summary ``task.missed`` is emitted under both policies;
+        ``run`` differs from ``mark`` only in that the backlog fires at
+        most once (next_run is left untouched so the scan consumes it).
+        """
+        recorder = _EventRecorder()
+        config = SimpleNamespace(missed_policy="run", missed_grace_minutes=5)
+        overdue = datetime.now() - timedelta(minutes=1)
+        task = ScheduledTask(
+            id="cron-run-backlog",
+            description="Every minute, run policy",
+            trigger=TriggerKind.CRON,
+            cron_expr="* * * * *",
+            scheduled_time=None,
+            next_run=overdue,
+        )
+        await store.upsert_task(task)
+
+        scheduler = TaskScheduler(store=store, bus=_make_bus(recorder), config=config)
+        await scheduler.recover(now=datetime.now())
+
+        recovered = await scheduler.get_task("cron-run-backlog")
+        assert recovered is not None
+        assert recovered.status == TaskStatus.PENDING
+        assert recovered.next_run is not None
+        # recover left next_run untouched (the backlog still fires via scan)
+        assert abs((recovered.next_run - overdue).total_seconds()) < 1
+
+        missed = [e for e in recorder.events if e.type == TaskEventType.MISSED]
+        assert len(missed) == 1  # one summary event under run policy too
+        assert missed[0].payload["policy"] == "run"
+        assert missed[0].payload["skipped_occurrences"] >= 1
+
+        # Align to just after a minute boundary so the *next* scheduled
+        # occurrence is ~59s away — "fires exactly once" stays deterministic.
+        while datetime.now().second > 57:
+            await asyncio.sleep(0.2)
+
+        executed: list[str] = []
+
+        async def callback(t: ScheduledTask) -> None:
+            executed.append(t.id)
+
+        await scheduler.start(on_due_task=callback)
+        await asyncio.sleep(0.2)
+        await scheduler.stop()
+
+        assert executed == ["cron-run-backlog"]  # fired exactly once
+        fired = await scheduler.get_task("cron-run-backlog")
+        assert fired is not None
+        assert fired.status == TaskStatus.PENDING
+        assert fired.next_run is not None
+        assert fired.next_run > datetime.now() - timedelta(seconds=5)
 
     @pytest.mark.asyncio
     async def test_recover_run_policy_keeps_overdue_once_pending(self, store):

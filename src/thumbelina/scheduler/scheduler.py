@@ -295,10 +295,12 @@ class TaskScheduler:
            (the scan loop fires it within seconds);
         3. ONCE RUNNING residue → FAILED (``error="interrupted by restart"``)
            + ``task.failed``;
-        4. CRON PENDING with ``next_run <= now`` → under ``mark`` the
-           ``next_run`` is advanced to the nearest future occurrence with a
-           single summary ``task.missed`` (skipped occurrences are never
-           replayed); under ``run`` the task fires at most once via the scan;
+        4. CRON PENDING with ``next_run <= now`` → a single summary
+           ``task.missed`` event is emitted for the skipped occurrences
+           under both policies; ``mark`` additionally advances ``next_run``
+           to the nearest future occurrence without firing, while ``run``
+           leaves ``next_run`` as-is so the scan fires the backlog at most
+           once (skipped occurrences are never replayed);
         5. CRON RUNNING residue → same as rule 3.
 
         Call this before :meth:`start` when a store is injected.
@@ -358,26 +360,32 @@ class TaskScheduler:
         )
 
     async def _recover_overdue_cron(self, task: ScheduledTask, now: datetime) -> None:
-        """Rule 4: a cron task whose next_run passed while the process was down."""
+        """Rule 4: a cron task whose next_run passed while the process was down.
+
+        Both policies emit a single summary ``task.missed`` for the skipped
+        occurrences (review ruling R2 — the §7.3 "no replay of skipped
+        occurrences" limit caps the firing count, not observability).  They
+        differ only in firing: ``mark`` advances ``next_run`` to the nearest
+        future occurrence without firing; ``run`` leaves ``next_run`` as-is
+        so the scan fires the backlog at most once, after which §5.2
+        advances it normally.
+        """
         assert task.next_run is not None  # guarded by the caller
-        if self._missed_policy == "run":
-            # §7.3: fire at most once for the backlog — leave next_run as-is
-            # so the scan consumes it immediately; the remaining skipped
-            # occurrences are never replayed.
-            return
-        skipped = _count_skipped_occurrences(task.cron_expr or "", task.next_run, now)
-        try:
-            task.next_run = CronTrigger(task.cron_expr or "").next_after(now)
-        except ValueError as exc:
-            logger.warning("Cannot advance cron next_run for task %s: %s", task.id, exc)
-            return
-        await self._persist(task)
+        old_next_run = task.next_run
+        skipped = _count_skipped_occurrences(task.cron_expr or "", old_next_run, now)
+        if self._missed_policy != "run":
+            try:
+                task.next_run = CronTrigger(task.cron_expr or "").next_after(now)
+            except ValueError as exc:
+                logger.warning("Cannot advance cron next_run for task %s: %s", task.id, exc)
+                return
+            await self._persist(task)
         await self._emit(
             self._make_event(
                 task,
                 TaskEventType.MISSED,
                 {
-                    "scheduled_for": _iso(task.next_run),
+                    "scheduled_for": _iso(old_next_run),
                     "policy": self._missed_policy,
                     "skipped_occurrences": skipped,
                 },
@@ -479,9 +487,11 @@ class TaskScheduler:
         """Run one firing round (§5.2): RUNNING → DUE → callback → terminal.
 
         ONCE tasks end in COMPLETED (success) or FAILED (error, D10).  CRON
-        tasks return to PENDING: on success with ``next_run`` advanced to
-        the next occurrence; on failure with ``next_run`` untouched and the
-        error recorded, so the next polling round retries delivery.
+        tasks return to PENDING with ``next_run`` advanced to the next
+        future occurrence in both outcomes — the consumed slot is never
+        re-fired on the next poll cycle: after success delivery continues
+        on the next scheduled round, after failure the error is recorded
+        and delivery retries on the next scheduled round (review R1).
         """
         started = time.monotonic()
         scheduled_for = (
@@ -504,11 +514,19 @@ class TaskScheduler:
                 "scheduled_for": _iso(scheduled_for),
                 "duration_ms": int((time.monotonic() - started) * 1000),
             }
+            task.error = str(exc)
             if task.trigger == TriggerKind.ONCE:
                 task.status = TaskStatus.FAILED  # D10: failure ≠ cancellation
             else:
-                task.status = TaskStatus.PENDING  # wait for the next round
-            task.error = str(exc)
+                # The failed slot is consumed: return to PENDING and advance
+                # next_run to the next future occurrence, so delivery retries
+                # on the next scheduled round — not on the next poll cycle
+                # (review ruling R1, aligned with recover rule 4).
+                task.status = TaskStatus.PENDING
+                try:
+                    task.next_run = CronTrigger(task.cron_expr or "").next_after(datetime.now())
+                except ValueError as adv_exc:
+                    logger.warning("Cannot advance cron next_run for task %s: %s", task.id, adv_exc)
             await self._persist(task)
             await self._emit(self._make_event(task, TaskEventType.FAILED, payload))
             return
