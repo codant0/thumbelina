@@ -18,7 +18,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from typing import Any
 
-from thumbelina.scheduler.cron import CronTrigger, validate_cron
+from thumbelina.scheduler.cron import CRONITER_AVAILABLE, CronTrigger, validate_cron
 from thumbelina.scheduler.events import EventBus
 from thumbelina.scheduler.models import (
     ScheduledTask,
@@ -330,6 +330,11 @@ class TaskScheduler:
         every poll cycle (1Hz delivery storm).  RUNNING residue is left to
         rule 3/5 and terminal rows are not touched.
 
+        When :mod:`croniter` is not installed, cron rows are kept out of
+        the working set **without** a FAILED verdict — the store rows stay
+        untouched and recover again (properly) once croniter is available;
+        one-shot tasks keep working (graceful degradation).
+
         Call this before :meth:`start` when a store is injected.
         """
         if self._store is None:
@@ -342,7 +347,14 @@ class TaskScheduler:
             # Design §11: a dead store degrades to memory-only operation.
             logger.warning("Task store unavailable during recover, skipping: %s", exc)
             return
+        skipped_no_croniter = 0
         for stored in stored_tasks:
+            if stored.trigger == TriggerKind.CRON and not CRONITER_AVAILABLE:
+                # croniter missing → cron scheduling disabled.  Leave the
+                # store row untouched (an "invalid expression" verdict here
+                # would be a lie) and keep it out of the working set.
+                skipped_no_croniter += 1
+                continue
             if (
                 stored.trigger == TriggerKind.CRON
                 and stored.status in (TaskStatus.PENDING, TaskStatus.PAUSED)
@@ -366,6 +378,12 @@ class TaskScheduler:
                 )
                 continue  # not hydrated into the working set
             self._tasks[stored.id] = stored  # hydrate the working set
+        if skipped_no_croniter:
+            logger.warning(
+                "croniter is not installed: %d cron task(s) left unscheduled in the store; "
+                "install croniter and restart to schedule them",
+                skipped_no_croniter,
+            )
         for task in list(self._tasks.values()):
             if task.status == TaskStatus.RUNNING:
                 # rules 3 & 5: residue from a previous process

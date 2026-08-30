@@ -169,3 +169,26 @@ class TestDescribe:
 
     def test_descriptor_preserved(self):
         assert CronTrigger("@daily").describe() == "@daily"
+
+
+class TestCroniterMissing:
+    """croniter 缺失时的优雅降级（monkeypatch 模拟 ImportError 场景）：
+    validate_cron 拒绝一切表达式并给出安装提示，CronTrigger 抛 ValueError——
+    上游（工具 Error: 文案 / API 422 / recover 跳过水合）据此降级，而不是
+    让 import 崩掉整个服务。"""
+
+    def test_validate_cron_rejects_everything_with_hint(self, monkeypatch):
+        import thumbelina.scheduler.cron as cron_module
+
+        monkeypatch.setattr(cron_module, "CRONITER_AVAILABLE", False)
+        message = validate_cron("*/5 * * * *")
+
+        assert message is not None
+        assert "croniter is not installed" in message
+
+    def test_cron_trigger_raises_with_hint(self, monkeypatch):
+        import thumbelina.scheduler.cron as cron_module
+
+        monkeypatch.setattr(cron_module, "CRONITER_AVAILABLE", False)
+        with pytest.raises(ValueError, match="croniter is not installed"):
+            CronTrigger("*/5 * * * *")

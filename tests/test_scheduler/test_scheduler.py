@@ -948,6 +948,45 @@ class TestRecover:
         assert persisted.error == "invalid cron expression"
 
     @pytest.mark.asyncio
+    async def test_recover_skips_cron_tasks_without_croniter(self, store, monkeypatch):
+        """croniter 缺失时的优雅降级：cron 任务不水合、**不**判 FAILED——
+        store 行原样保留（装回 croniter 后重启可正常 recover），一次性任务
+        不受影响。直接 FAILED 会是对正常行的错误定论。"""
+        import thumbelina.scheduler.scheduler as scheduler_module
+
+        monkeypatch.setattr(scheduler_module, "CRONITER_AVAILABLE", False)
+        recorder = _EventRecorder()
+        cron_task = ScheduledTask(
+            id="cron-no-lib",
+            description="Hourly",
+            trigger=TriggerKind.CRON,
+            cron_expr="0 * * * *",
+            scheduled_time=None,
+            next_run=datetime.now() - timedelta(minutes=30),
+        )
+        once_task = ScheduledTask(
+            id="once-still-works",
+            description="Reminder",
+            trigger=TriggerKind.ONCE,
+            scheduled_time=datetime.now() + timedelta(hours=1),
+        )
+        await store.upsert_task(cron_task)
+        await store.upsert_task(once_task)
+
+        scheduler = TaskScheduler(store=store, bus=_make_bus(recorder))
+        await scheduler.recover(now=datetime.now())
+
+        # cron 任务未水合，且 store 行保持 PENDING 原样。
+        assert all(t.trigger != TriggerKind.CRON for t in await scheduler.list_tasks())
+        persisted = await store.get_task("cron-no-lib")
+        assert persisted is not None
+        assert persisted.status == TaskStatus.PENDING
+        assert persisted.error is None
+        # 一次性任务照常水合，且没有 FAILED/事件副作用。
+        assert any(t.id == "once-still-works" for t in await scheduler.list_tasks())
+        assert recorder.events == []
+
+    @pytest.mark.asyncio
     async def test_recover_advances_overdue_cron_with_single_summary_event(self, store):
         """Rule 4 (mark): next_run jumps to the future, ONE summary task.missed."""
         recorder = _EventRecorder()

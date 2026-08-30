@@ -10,16 +10,31 @@ Semantics (design ``docs/plans/2026-08-30-event-timer-tasks-design.md`` §6):
   DST transitions are deliberately not handled;
 - :mod:`croniter` is an implementation detail: its exception hierarchy
   derives from :class:`ValueError`, so every failure surfaces to callers as
-  :class:`ValueError` carrying the original expression.
+  :class:`ValueError` carrying the original expression;
+- the dependency is declared in ``pyproject`` but the import is guarded:
+  a missing :mod:`croniter` degrades cron scheduling (``validate_cron``
+  rejects every expression with an install hint) instead of bricking the
+  whole server at import time — one-shot tasks keep working. Mirrors the
+  lazy-import convention used for ``botpy``/chromadb.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
 
-from croniter import croniter  # type: ignore[import-untyped]
+try:
+    from croniter import croniter  # type: ignore[import-untyped]
+except ImportError:  # pragma: no cover - exercised via monkeypatched flag
+    croniter = None
 
-__all__ = ["CronTrigger", "validate_cron"]
+__all__ = ["CRONITER_AVAILABLE", "CronTrigger", "validate_cron"]
+
+CRONITER_AVAILABLE = croniter is not None
+
+_CRONITER_HINT = (
+    "croniter is not installed; cron scheduling is disabled "
+    "(install it, e.g. 'uv sync' or 'pip install -e .')"
+)
 
 
 def validate_cron(expr: str) -> str | None:
@@ -28,6 +43,8 @@ def validate_cron(expr: str) -> str | None:
     Returns ``None`` when the expression is valid, otherwise a human
     readable error message quoting the offending expression.
     """
+    if not CRONITER_AVAILABLE:
+        return _CRONITER_HINT
     fields = expr.split()
     if not expr.strip().startswith("@") and len(fields) != 5:
         return (
@@ -60,8 +77,10 @@ class CronTrigger:
         """Return the first fire time strictly after *dt* (local naive).
 
         A *dt* landing exactly on a fire time is consumed: the result is
-        the following occurrence.
+        the following occurrence.  Only reachable when :mod:`croniter` is
+        installed — :meth:`__init__` already validated availability.
         """
+        assert croniter is not None
         nxt: datetime = croniter(self.expr, dt).get_next(datetime)
         return nxt
 
