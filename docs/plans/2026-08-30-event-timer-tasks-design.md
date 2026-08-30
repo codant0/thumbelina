@@ -32,7 +32,7 @@
 
 ### 1.3 明确不做（本期范围外，均留扩展点）
 
-- **prompt 模式**（到期后把内容作为 prompt 跑 agent 并交付回复）：只预留 `mode` 字段与分发器 action 接口，不实现。总规划主题五修改点 2（agent.clone 执行链）依赖主题三/四装配，另行落地。
+- ~~prompt 模式~~ → **已转入实现（§5.4 执行链）**：用户确认期望"先干活，结果进对话框，频道任务再经频道发一次"。
 - 前端"新建任务"表单（API 先行：`POST /tasks`）。
 - 条件触发器注册表（总规划主题五修改点 3，独立任务）。
 - WS ping/pong 心跳协议（总规划主题五/主题六管辖，与本设计的调度 Heartbeat 无关）。
@@ -226,6 +226,45 @@ for ev_type in TaskEventType:
 渠道交付需要 `wechat_channel`/`qq_channel` 引用：从 `app.state` 取，装配为 `DeliveryDispatcher(channels={"wechat": ch, "qq": ch}, web_push=broadcast_chat_message)`。渠道未启用时该渠道任务在交付期产出 `FAILED`（error="channel not available"），服务不降级。
 
 优雅降级保持现状：scheduler/heartbeat 初始化失败 → `logger.warning` + 路由 503/空列表，服务器照常启动。
+
+### 5.4 prompt 模式执行链（触发后"先干活"，结果进对话框 + 频道副本）
+
+> 用户确认的期望行为：任务到期 → 把任务内容作为 prompt 跑 agent → 回复写入会话（对话框可见）→ 若任务渠道为 wechat/qq，回复再经渠道发送一次。notify 模式行为不变。
+
+**触发与执行解耦**（LLM 调用可达数十秒，不得阻塞扫描循环）：
+
+```
+_fire_task(task.mode == "prompt"):
+  status → RUNNING（持久化）→ emit DUE
+  cron 任务：立即前推 next_run 并持久化（槽位已消费，与执行时长解耦；状态保持 RUNNING）
+  asyncio.create_task(self._execute_prompt(task))，task.id 记入 _inflight: set[str]
+
+_execute_prompt(task):
+  try: reply = await wait_for(dispatcher.on_prompt_task(task), timeout=prompt_timeout_seconds(默认 300))
+       → finalize 成功：once→COMPLETED(payload.result=reply)；cron→PENDING + COMPLETED
+  except TimeoutError/Exception → finalize 失败：once→FAILED；cron→PENDING（error 落库）
+  finally: _inflight.discard(task.id)
+  （事件发射仍由调度器统一—— ruling 不变；复收防护与 §7.4 一致）
+```
+
+**执行链（app.py 注入 `prompt_runner` 闭包，dispatcher 仅编排）**：
+
+1. 会话归属：`task.conversation_id` 非空且存在 → 该会话；否则使用**专用"定时任务"会话**（lifespan 惰性创建一次、存 `app.state`，复用）。
+2. `per_conversation_lock(cid)` 串行化（与 HTTP/WS/渠道三入口一致，防 checkpoint 脏写）。
+3. `agent.run(task.content, conversation_id=cid)` —— agent 自身持久化用户消息与回复（graph.py `_persist_message` 双向），**对话框经历史拉取可见**。
+4. 实时性：完成后 `broadcast_chat_message({"channel_message": {channel:"scheduler", conversation_id, user_message: task.content, response: reply, source: "scheduler"}})` —— 复用现有微信同步帧：会话打开时消息实时追加，未打开时会话列表更新。
+5. 频道副本：`task.channel ∈ {wechat, qq}` → `channel.send_message(last_user_id, reply)`（发送的是**回复**，notify 模式发送的是 content）；渠道缺失/无最近用户 → 记 FAILED 事件（会话内已有回复，不回滚）。
+
+**入口面**：
+
+- `mode` 默认值统一改为 **"prompt"**（API `POST /tasks` 与工具 `schedule_task` 一致）——用户期望"定时任务默认干活"；纯提醒类任务显式传 `mode="notify"`（content 原样交付，不跑 agent）。工具/路由的 description 注明两种模式。
+- 工具 `schedule_task` 增可选 `conversation_id`（缺省 = 当前会话，经 `agent_ref.current_conversation_id` 注入工厂）。
+- API `POST /tasks` 增可选 `conversation_id`。
+
+**互斥与健壮性**：
+
+- Heartbeat 僵尸 RUNNING 复收**跳过 `_inflight` 中的任务**（长 LLM 调用不被误杀；`_fire_task` 的复收防护仍兜底竞态窗口）。
+- `prompt_timeout_seconds`（SchedulerConfig，默认 300）防 agent 挂起永久占用；超时 → FAILED（error="prompt timed out"），cron 保持 PENDING 等下一场次。
 
 ---
 
