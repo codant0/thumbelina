@@ -79,11 +79,17 @@ class EventTriggerTool(ThumbelinaBaseTool):
 
 class ScheduleTaskTool(EventTriggerTool):
     name: str = "schedule_task"
-    description: str = "Schedule a task for a future time."
+    description: str = (
+        "Schedule a task for a future time (one-off) or on a recurring cron "
+        "schedule; optionally specify a delivery channel (web, wechat, or qq)."
+    )
     args_schema: type[BaseModel] = _ScheduleTaskArgs
     scheduler: Any = None
 
-    async def _execute(
+    # mypy[override]: 基类 _execute(**kwargs) 由 _arun 以 args_schema 校验后的
+    # 具名参数调用;具名签名是刻意的收窄(与项目其他工具一致),类型安全由
+    # pydantic args_schema 保证,故精准豁免而非改成 **kwargs 取参。
+    async def _execute(  # type: ignore[override]
         self,
         description: str,
         time_expression: str = "",
@@ -147,7 +153,8 @@ class ListScheduledTasksTool(EventTriggerTool):
     args_schema: type[BaseModel] = _ListScheduledTasksArgs
     scheduler: Any = None
 
-    async def _execute(self) -> str:
+    # mypy[override]: 同 ScheduleTaskTool——无参收窄由空 args_schema 保证。
+    async def _execute(self) -> str:  # type: ignore[override]
         tasks = await self.scheduler.list_tasks()
         if not tasks:
             return "No scheduled tasks found."

@@ -213,3 +213,18 @@ async def test_list_scheduled_tasks_shows_trigger_and_channel():
     assert "Next: 2026-01-01T09:30:00" in out
     assert "Trigger: once" in out
     assert out.count("Channel: web") == 2
+
+
+# --- Task 11 收尾: 顶层 description 覆盖 cron/渠道(T9 评审裁定) --------------
+
+
+def test_schedule_task_description_covers_cron_and_channel():
+    """LLM 先读顶层 description 决定是否用工具,须提及一次性/cron 循环与渠道。"""
+    tool = ScheduleTaskTool(scheduler=FakeScheduler(), time_parser=FakeTimeParser())
+    desc = tool.description.lower()
+    assert "cron" in desc
+    assert "channel" in desc
+    assert "one-off" in desc or "recurring" in desc
+    # name/参数不变:args_schema 仍含四个字段。
+    props = tool.args_schema.model_json_schema()["properties"]
+    assert set(props) == {"description", "time_expression", "cron_expression", "channel"}
