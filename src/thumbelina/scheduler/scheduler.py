@@ -108,6 +108,9 @@ class TaskScheduler:
         self._tasks: dict[str, ScheduledTask] = {}
         self._running = False
         self._poll_task: asyncio.Task[None] | None = None
+        # Retained so the Heartbeat (§7.4) can re-create a dead polling loop
+        # with the exact delivery callback this scheduler was started with.
+        self._on_due_task: DueCallback | None = None
         self._check_condition = check_condition
         self._store = store
         self._bus = bus
@@ -443,6 +446,7 @@ class TaskScheduler:
         if self._running:
             raise RuntimeError("Scheduler polling loop is already running")
 
+        self._on_due_task = on_due_task
         self._running = True
         self._poll_task = asyncio.create_task(self._poll_loop(on_due_task))
 
@@ -456,6 +460,23 @@ class TaskScheduler:
             except asyncio.CancelledError:
                 pass
             self._poll_task = None
+
+    def _restart_loop(self) -> None:
+        """Re-create a dead polling loop (Heartbeat liveness check, §7.4).
+
+        No-op unless the scheduler believes it is running *and* the previous
+        loop task has actually finished — a deliberately stopped scheduler is
+        never resurrected, and a live loop is never duplicated.  Reuses the
+        ``on_due_task`` callback captured by :meth:`start` so a restarted
+        loop delivers exactly like the original one.  Must be called from
+        within the running event loop (the Heartbeat loop is).
+        """
+        if not self._running:
+            return
+        old = self._poll_task
+        if old is not None and not old.done():
+            return
+        self._poll_task = asyncio.create_task(self._poll_loop(self._on_due_task))
 
     async def _poll_loop(
         self,
