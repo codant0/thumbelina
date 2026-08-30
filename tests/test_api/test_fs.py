@@ -146,13 +146,22 @@ def test_limit_constant_positive() -> None:
 def _init_repo(tmp_path) -> pathlib.Path:
     repo = tmp_path / "repo"
     repo.mkdir()
+    subprocess.run(["git", "-c", "init.defaultBranch=main", "init", "-q"], cwd=repo, check=True)
     subprocess.run(
-        ["git", "-c", "init.defaultBranch=main", "init", "-q"], cwd=repo, check=True
-    )
-    subprocess.run(
-        ["git", "-c", "user.name=T", "-c", "user.email=t@t",
-         "commit", "--allow-empty", "-q", "-m", "init"],
-        cwd=repo, check=True,
+        [
+            "git",
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "--allow-empty",
+            "-q",
+            "-m",
+            "init",
+        ],
+        cwd=repo,
+        check=True,
     )
     return repo
 
@@ -274,9 +283,7 @@ class TestGitCheckoutEndpoints:
         from unittest.mock import AsyncMock
 
         broadcast = AsyncMock()
-        monkeypatch.setattr(
-            "thumbelina.api.websocket.broadcast_chat_message", broadcast
-        )
+        monkeypatch.setattr("thumbelina.api.websocket.broadcast_chat_message", broadcast)
         repo = _init_repo(tmp_path)
         subprocess.run(["git", "branch", "-q", "feature-a"], cwd=repo, check=True)
         resp = client.post(

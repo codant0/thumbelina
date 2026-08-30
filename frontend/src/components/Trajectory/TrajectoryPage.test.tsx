@@ -61,9 +61,13 @@ function mockTrajectoryFetch() {
 async function selectConversation() {
   const select = await screen.findByTestId('trajectory-select')
   fireEvent.change(select, { target: { value: 'c1' } })
-  await waitFor(() => {
-    expect(screen.getAllByTestId('turn-card').length).toBeGreaterThan(0)
-  })
+  // CI 负载下 1s 默认超时偶发不足（曾致 turn-card 找不到的 flake），放宽到 3s。
+  await waitFor(
+    () => {
+      expect(screen.getAllByTestId('turn-card').length).toBeGreaterThan(0)
+    },
+    { timeout: 3_000 },
+  )
 }
 
 describe('collapseMiddle', () => {
