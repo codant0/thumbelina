@@ -18,6 +18,7 @@ from thumbelina.config.models import (
     LoggingConfig,
     QQChannelConfig,
     RepositoryConfig,
+    SchedulerConfig,
     WeChatChannelConfig,
 )
 from thumbelina.config.persistence import save_config
@@ -32,6 +33,7 @@ __all__ = [
     "RepositoryConfig",
     "QQChannelConfig",
     "RuntimeConfigManager",
+    "SchedulerConfig",
     "WeChatChannelConfig",
     "import_yaml_to_db",
     "load_config",

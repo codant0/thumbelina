@@ -73,6 +73,13 @@ packages = ["src/thumbelina"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_mode = "auto"
+filterwarnings = [
+    # The API-test conftest mocks RepositoryManager, so the lifespan wires a
+    # TaskStore onto a MagicMock "engine"; MagicMock's truthy auto-attributes
+    # trip SQLAlchemy's open-transaction check on every session. Mock-only
+    # artifact — real engines (tests/test_scheduler, production) are unaffected.
+    "ignore:The engine provided as bind produced a connection that is already in a transaction",
+]
 
 [tool.ruff]
 src = ["src"]
