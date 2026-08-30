@@ -3,9 +3,9 @@
 - 日期：2026-08-30
 - 状态：待评审
 - 关联文档：
-  - `docs/plans/2026-08-29-architecture-refactoring-plan.md` 总规划 **主题五**（调度真执行、持久化、recover——本设计是其"调度事件化"方向的落地细化，且可独立合入，不阻塞在其迁移上）
-  - `docs/plans/2026-08-29-storage-refactor-design.md` §1.8 `scheduled_tasks` 表骨架（本设计扩展该骨架）
+  - `docs/plans/2026-08-29-architecture-refactoring-plan.md` 总规划 **主题五**（调度真执行、持久化、recover——本设计是其"调度事件化"方向的落地细化，且可独立合入）
   - `docs/specs/2026-08-29-tools-taxonomy-design.md` 事件触发工具分类（本设计只扩展 `tools/event_trigger.py`，不动基类体系）
+  - 注：总规划主题二（存储重构）已回退、不再进行——本设计对它**零依赖**（见 D3），建表走现有 `init_db` 的 `create_all`。
 
 ---
 
@@ -46,7 +46,7 @@
 |---|---|---|---|
 | D1 | **原地演进 `scheduler/`**，TaskScheduler v2 保持公共 API 兼容（`add_task/get_task/list_tasks/cancel_task/start(on_due_task=)/stop`） | agent 工具、路由、41 个现有测试、`agent.clone()` 共享实例都挂在现 API 上；兼容层让本设计可小步合入 | 新建 `tasks/` 子系统并行：双调度器并存必然混乱，否决 |
 | D2 | cron 解析用 **`croniter>=2.0`**（纯 Python、MIT、零依赖） | 5 字段 cron + `@daily` 描述符 + 边界语义久经考验；手写解析器 ~150 行且 DST/月末边界易错 | 手写：维护成本不值；APScheduler：全家桶过重 |
-| D3 | 持久化走**现有 `Base` metadata**（`repository/db.py:init_db` 的 `create_all` 自动建表），ORM 模型声明在 `scheduler/store.py` | `migrations/versions/` 目前为空，存储重构 M4 迁移未落地；挂到同一 metadata 后主题二落地时表已存在、互不阻塞；所有权留在 scheduler/ | 等 M4：被大重构阻塞，否决；独立 engine：违背存储统一方向 |
+| D3 | 持久化走**现有 `Base` metadata**（`repository/db.py:init_db` 的 `create_all` 自动建表），ORM 模型声明在 `scheduler/store.py`，engine 复用 `repository.engine` | 零迁移基建依赖（存储重构已回退，不引入 Alembic）；同一 metadata 保证全局唯一建表入口；所有权留在 scheduler/，与 `repository/` 仅共享引擎与 metadata，无反向耦合 | 引入 Alembic 独立迁移：当前无迁移基建且无多库诉求，YAGNI；独立 engine：一库多 engine 是既有债务，不再新增 |
 | D4 | **进程内 EventBus**（async pub/sub + hook 注册表），不引入外部消息队列 | 单进程 FastAPI 应用，事件量极小；YAGNI | redis/asyncio.Queue 广播：无跨进程需求 |
 | D5 | 到期执行保持**内联 await** 模型（调度器 await `on_due_task`），分发器作为该回调注册 | 与现有语义、现有测试一致；任务量小无并发饥饿风险；cron 任务完成后立即回 PENDING 并算 `next_run` | fire-and-forget create_task：异常难归位、压测无必要 |
 | D6 | 错过策略：一次性任务超过宽限未触发 → 标 `MISSED` 并发事件，**默认不补跑**（`missed_policy=mark`，可选 `run`） | 补跑一批过期任务可能产生意外副作用/成本（总规划主题五已有同样顾虑） | 默认补跑：休眠后醒来突然执行 N 个旧任务，不可预期 |
@@ -148,7 +148,7 @@ class ScheduledTask:
     result: str | None = None
     error: str | None = None
     source: str = "agent"               # agent / web / api
-    conversation_id: str | None = None  # 预留（主题二骨架的 FK 落位）
+    conversation_id: str | None = None  # 预留（会话关联；外键暂不落）
     created_at / updated_at: datetime
 ```
 
@@ -240,7 +240,7 @@ for ev_type in TaskEventType:
 
 ## 7. 持久化与恢复
 
-### 7.1 表结构（扩展主题二 §1.8 骨架；M4 落地时本表已存在，互不阻塞）
+### 7.1 表结构（新建；由现有 `init_db` 的 `Base.metadata.create_all` 自动创建，无迁移脚本）
 
 ```sql
 CREATE TABLE scheduled_tasks (
@@ -280,7 +280,7 @@ CREATE TABLE task_events (
 CREATE INDEX ix_task_events_task ON task_events(task_id, created_at DESC);
 ```
 
-> 状态值统一小写，与 `TaskStatus.value`（StrEnum 小写成员）逐字一致——注意主题二 §1.8 骨架原用大写 `PENDING`，以其为本表落地时的对齐项（M4 幂等跳过已有表）。
+> 状态值统一小写，与 `TaskStatus.value`（StrEnum 小写成员）逐字一致；存量消息/会话表不受影响。
 
 ### 7.2 启动 recover（`scheduler.recover()`，`start()` 前调用）
 
@@ -389,5 +389,5 @@ class SchedulerConfig(BaseModel):
 
 ## 13. 交付边界
 
-- 单独可合入，不阻塞/不等待主题二～五；主题二 M4 迁移落地时 `scheduled_tasks`/`task_events` 已存在（幂等跳过）。
+- 单独可合入，不依赖任何重构主题（存储重构已回退，本设计对其零依赖）；两张表由现有 `init_db` 的 `create_all` 自动创建，无迁移脚本，revert 代码后保留表无害。
 - 主题五修改点 2（agent 执行链）后续落地时：`mode="prompt"` 走 Dispatcher 的 action 扩展点，事件管线与任务页零改动。
