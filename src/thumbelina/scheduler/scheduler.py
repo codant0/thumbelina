@@ -149,9 +149,7 @@ class TaskScheduler:
         try:
             await self._store.upsert_task(task)
         except Exception as exc:
-            logger.warning(
-                "Task store unavailable, task %s kept in memory only: %s", task.id, exc
-            )
+            logger.warning("Task store unavailable, task %s kept in memory only: %s", task.id, exc)
 
     async def _emit(self, event: TaskEvent) -> None:
         """Publish an event on the bus (silently dropped when absent)."""
@@ -201,8 +199,7 @@ class TaskScheduler:
         if task.trigger == TriggerKind.CRON and task.next_run is None:
             if not task.cron_expr:
                 raise ValueError(
-                    f"Invalid cron expression: {task.cron_expr!r} "
-                    "(cron tasks require a cron_expr)"
+                    f"Invalid cron expression: {task.cron_expr!r} (cron tasks require a cron_expr)"
                 )
             base = task.scheduled_time if task.scheduled_time is not None else datetime.now()
             try:
@@ -514,9 +511,7 @@ class TaskScheduler:
                 for t in self._tasks.values():
                     if t.status != TaskStatus.PENDING:
                         continue
-                    trigger_time = (
-                        t.scheduled_time if t.trigger == TriggerKind.ONCE else t.next_run
-                    )
+                    trigger_time = t.scheduled_time if t.trigger == TriggerKind.ONCE else t.next_run
                     if trigger_time is not None:
                         pending_times.append(trigger_time.timestamp())
                 if pending_times:
@@ -543,9 +538,7 @@ class TaskScheduler:
         and delivery retries on the next scheduled round (review R1).
         """
         started = time.monotonic()
-        scheduled_for = (
-            task.scheduled_time if task.trigger == TriggerKind.ONCE else task.next_run
-        )
+        scheduled_for = task.scheduled_time if task.trigger == TriggerKind.ONCE else task.next_run
         task.status = TaskStatus.RUNNING
         task.last_run = datetime.now()
         task.error = None

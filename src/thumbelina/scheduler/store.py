@@ -129,9 +129,7 @@ class TaskStore:
     @overload
     def _to_record(self, obj: TaskEvent) -> TaskEventRecord: ...
 
-    def _to_record(
-        self, obj: ScheduledTask | TaskEvent
-    ) -> ScheduledTaskRecord | TaskEventRecord:
+    def _to_record(self, obj: ScheduledTask | TaskEvent) -> ScheduledTaskRecord | TaskEventRecord:
         """Map a domain dataclass onto its ORM record."""
         if isinstance(obj, ScheduledTask):
             return ScheduledTaskRecord(
@@ -326,9 +324,7 @@ class TaskStore:
         return await asyncio.to_thread(self._prune_events_sync, keep)
 
     def _counts_sync(self) -> dict[str, int]:
-        stmt = select(ScheduledTaskRecord.status, func.count()).group_by(
-            ScheduledTaskRecord.status
-        )
+        stmt = select(ScheduledTaskRecord.status, func.count()).group_by(ScheduledTaskRecord.status)
         with self._get_session() as session:
             return {status: count for status, count in session.execute(stmt).all()}
 

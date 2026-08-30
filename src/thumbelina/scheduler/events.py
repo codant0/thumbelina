@@ -77,9 +77,7 @@ class EventBus:
             try:
                 await hook(event)
             except Exception:
-                logger.warning(
-                    "Event hook %r raised on %s", hook, event.type.value, exc_info=True
-                )
+                logger.warning("Event hook %r raised on %s", hook, event.type.value, exc_info=True)
             else:
                 dispatched += 1
         return dispatched

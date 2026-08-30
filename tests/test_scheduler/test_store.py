@@ -161,9 +161,7 @@ class TestListDue:
                 next_run=NOW - timedelta(minutes=1),
             )
         )
-        await store.upsert_task(
-            _task("future-once", scheduled_time=NOW + timedelta(hours=1))
-        )
+        await store.upsert_task(_task("future-once", scheduled_time=NOW + timedelta(hours=1)))
         await store.upsert_task(
             _task(
                 "future-cron",

@@ -233,9 +233,7 @@ def _make_event_log_hook(store: TaskStore) -> Hook:
         try:
             await store.append_event(event)
         except Exception:
-            logger.warning(
-                "Task event log write failed for %s", event.type.value, exc_info=True
-            )
+            logger.warning("Task event log write failed for %s", event.type.value, exc_info=True)
 
     return _event_log_hook
 

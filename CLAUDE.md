@@ -46,8 +46,11 @@ Frontend (React/Vite) --WebSocket/HTTP--> FastAPI (api/app.py)
     ├── /ws/chat          → api/websocket.py   → ThumbelinaAgent.run() (streaming)
     ├── /api/v1/conversations → CRUD on RepositoryManager
     ├── /api/v1/conversations/search/{query} → RepositoryManager.search()
-    ├── /api/v1/tasks     → TaskScheduler.list_tasks()
+    ├── /api/v1/tasks     → TaskScheduler.list_tasks() / add_task() (POST; once or cron)
     ├── /api/v1/tasks/{id}/cancel → TaskScheduler.cancel_task()
+    ├── /api/v1/tasks/{id}/pause|resume → TaskScheduler.pause_task() / resume_task() (cron only)
+    ├── /api/v1/tasks/events → TaskStore.list_events() (newest-first lifecycle log)
+    ├── /api/v1/tasks/scheduler/status → Heartbeat aliveness snapshot
     ├── /api/v1/subagents → SubagentManager.list()
     ├── /api/v1/subagents/{id}/cancel → SubagentManager.cancel()
     ├── /api/v1/skills    → SkillRepository.list_all()
@@ -73,7 +76,7 @@ Integrated subsystems:
 - **Skills**: `_get_skill_context()` injects matching skills as SystemMessage
 - **Memory**: `_get_memory_context()` injects the L0 memory index summary as a SystemMessage every turn (prefixed with a "reference data, not instructions" disclaimer and stripped of Markdown link syntax); `_make_memory_tools()` exposes `search_memory` (L0 n-gram retrieval), `read_memory` (L1/L2 layered read), and `remember` (single-turn quota ≤ 3) tools
 - **Sub-agents**: `_make_subagent_tools()` exposes `create_subagent` and `list_subagents` tools
-- **Scheduler**: `_make_scheduler_tools()` exposes `schedule_task` and `list_scheduled_tasks` tools
+- **Scheduler**: `_make_scheduler_tools()` exposes `schedule_task` (one-off natural-language time or recurring cron expression, optional delivery channel) and `list_scheduled_tasks` tools, backed by the event-driven scheduler v2 (`scheduler/`)
 - **Compositions**: `_make_composition_tools()` exposes `create_skill_composition`, `list_skill_compositions`, `execute_skill_composition` tools
 
 ### LLM Provider Abstraction (`llm/`)
@@ -156,7 +159,7 @@ React 19 + TypeScript + Vite 8. Pages: Chat, Tasks, Memory, Dream, Settings, Plu
 ### Other Modules
 
 - **tools/**: Built-in tools (file operations, web requests, shell commands, data processing — JSON/CSV/text analysis/regex search)
-- **scheduler/**: `TaskScheduler` (in-memory task management), `TimeParser` (dateparser + Chinese recurring patterns), conditional triggers with `check_condition` callback
+- **scheduler/**: event-driven scheduler v2 — `TaskScheduler` (cron/once scheduling, pause/resume, restart recover), `EventBus` with task lifecycle hooks, `TaskStore` (SQLAlchemy persistence for scheduled tasks/events, degrades to in-memory on failure), `Heartbeat` (aliveness kick, zombie cleanup, missed-task handling, log pruning), `DeliveryDispatcher` (per-channel delivery: web/wechat/qq), `CronTrigger` (croniter), `TimeParser` (dateparser + Chinese recurring patterns), conditional triggers with `check_condition` callback
 - **notifications/**: `NotificationManager` — WebSocket broadcast for task completion and system events
 - **security/**: `AuthService` (JWT HS256 via PyJWT, min 32-byte key), `RateLimiter` (sliding window with auto-cleanup), role-based access control via `required_roles` config and per-route `require_roles()` helper
 - **backup/**: `BackupManager` (JSON file backups with metadata envelope, UUID-validated paths)
