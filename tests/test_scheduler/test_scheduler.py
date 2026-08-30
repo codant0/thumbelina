@@ -1187,6 +1187,82 @@ class TestEventEmission:
         assert updated.status == TaskStatus.COMPLETED
 
 
+class _FailingStore:
+    """A store whose every operation raises — simulates a dead database."""
+
+    async def upsert_task(self, task: ScheduledTask) -> None:
+        raise RuntimeError("db down")
+
+    async def get_task(self, task_id: str) -> ScheduledTask | None:
+        raise RuntimeError("db down")
+
+    async def list_tasks(self) -> list[ScheduledTask]:
+        raise RuntimeError("db down")
+
+
+class TestStoreFailureDegradation:
+    """设计 §11: 存储不可用 → 调度器回退内存 dict 运行 + logger.warning，服务器不挂。"""
+
+    @pytest.mark.asyncio
+    async def test_scheduler_survives_store_failure(self, caplog):
+        """A raising store must not kill the poll loop or lose in-memory state.
+
+        Two due tasks are added up front: without the guard the first
+        persist failure would propagate out of ``add_task`` / the poll loop;
+        with the guard both tasks still fire and complete.
+        """
+        with caplog.at_level("WARNING"):
+            scheduler = TaskScheduler(store=_FailingStore())
+            await scheduler.add_task(
+                ScheduledTask(
+                    id="degrade-a",
+                    description="First due",
+                    scheduled_time=datetime.now() - timedelta(hours=1),
+                )
+            )
+            await scheduler.add_task(
+                ScheduledTask(
+                    id="degrade-b",
+                    description="Second due",
+                    scheduled_time=datetime.now() - timedelta(hours=1),
+                )
+            )
+
+            executed: list[str] = []
+
+            async def callback(t: ScheduledTask) -> None:
+                executed.append(t.id)
+
+            await scheduler.start(on_due_task=callback)
+            await asyncio.sleep(0.3)
+            assert scheduler.running is True  # loop survived the store errors
+            await scheduler.stop()
+            assert scheduler.running is False
+
+        assert executed == ["degrade-a", "degrade-b"]
+        first = await scheduler.get_task("degrade-a")
+        assert first is not None
+        assert first.status == TaskStatus.COMPLETED
+        second = await scheduler.get_task("degrade-b")
+        assert second is not None
+        assert second.status == TaskStatus.COMPLETED
+        assert "Task store" in caplog.text  # degradation was warned about
+
+    @pytest.mark.asyncio
+    async def test_recover_with_failing_store_does_not_raise(self, caplog):
+        with caplog.at_level("WARNING"):
+            scheduler = TaskScheduler(store=_FailingStore())
+            await scheduler.recover()  # must not raise
+        assert await scheduler.list_tasks() == []
+        assert "Task store" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_get_task_with_failing_store_returns_none(self):
+        scheduler = TaskScheduler(store=_FailingStore())
+        # Memory miss + guarded store fallback → None instead of RuntimeError.
+        assert await scheduler.get_task("missing") is None
+
+
 class TestV2Construction:
     """v2: all constructor parameters are optional (graceful degradation)."""
 

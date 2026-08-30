@@ -133,9 +133,20 @@ class TaskScheduler:
     # ------------------------------------------------------------------
 
     async def _persist(self, task: ScheduledTask) -> None:
-        """Write a status transition through to the store (when injected)."""
-        if self._store is not None:
+        """Write a status transition through to the store (when injected).
+
+        A store failure never breaks scheduling (design §11): the error is
+        logged and the transition lives on in memory only — degraded to v1
+        behaviour, the server keeps running.
+        """
+        if self._store is None:
+            return
+        try:
             await self._store.upsert_task(task)
+        except Exception as exc:
+            logger.warning(
+                "Task store unavailable, task %s kept in memory only: %s", task.id, exc
+            )
 
     async def _emit(self, event: TaskEvent) -> None:
         """Publish an event on the bus (silently dropped when absent)."""
@@ -155,10 +166,17 @@ class TaskScheduler:
         )
 
     async def _lookup_task(self, task_id: str) -> ScheduledTask | None:
-        """Memory-first lookup with a store fallback (cached on hit)."""
+        """Memory-first lookup with a store fallback (cached on hit).
+
+        A store read failure is logged and treated as a miss (design §11).
+        """
         task = self._tasks.get(task_id)
         if task is None and self._store is not None:
-            task = await self._store.get_task(task_id)
+            try:
+                task = await self._store.get_task(task_id)
+            except Exception as exc:
+                logger.warning("Task store read failed for task %s: %s", task_id, exc)
+                return None
             if task is not None:
                 self._tasks[task_id] = task
         return task
@@ -309,7 +327,13 @@ class TaskScheduler:
             return
         now = now if now is not None else datetime.now()
         grace_deadline = now - self._missed_grace
-        for stored in await self._store.list_tasks():
+        try:
+            stored_tasks = await self._store.list_tasks()
+        except Exception as exc:
+            # Design §11: a dead store degrades to memory-only operation.
+            logger.warning("Task store unavailable during recover, skipping: %s", exc)
+            return
+        for stored in stored_tasks:
             self._tasks[stored.id] = stored  # hydrate the working set
         for task in list(self._tasks.values()):
             if task.status == TaskStatus.RUNNING:
