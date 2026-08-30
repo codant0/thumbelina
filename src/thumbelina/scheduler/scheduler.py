@@ -44,7 +44,9 @@ _DEFAULT_MISSED_GRACE_MINUTES = 5
 # missed backlog — keeps recover() bounded across absurdly long downtimes.
 _MAX_SKIPPED_OCCURRENCES = 10_000
 
-DueCallback = Callable[[ScheduledTask], Awaitable[None]]
+# The callback may return a delivery receipt (DeliveryDispatcher); a
+# non-None return is recorded in the COMPLETED event payload ``result``.
+DueCallback = Callable[[ScheduledTask], Awaitable[Any]]
 ConditionCallback = Callable[[str], Awaitable[bool]]
 
 
@@ -435,8 +437,10 @@ class TaskScheduler:
             Optional async callback invoked for each due task.  The
             scheduler sets the task status to ``RUNNING`` (and emits
             ``task.due``) before calling and to ``COMPLETED`` on success /
-            ``FAILED`` on error (D10).  Without a callback due tasks are
-            simply marked completed (v1 behaviour).
+            ``FAILED`` on error (D10).  A non-``None`` return value (a
+            delivery receipt) is recorded in the COMPLETED payload
+            ``result``.  Without a callback due tasks are simply marked
+            completed (v1 behaviour).
 
         Raises
         ------
@@ -549,9 +553,12 @@ class TaskScheduler:
         await self._emit(
             self._make_event(task, TaskEventType.DUE, {"scheduled_for": _iso(scheduled_for)})
         )
+        delivered: str | None = None
         try:
             if on_due_task is not None:
-                await on_due_task(task)
+                receipt = await on_due_task(task)
+                if receipt is not None:
+                    delivered = str(receipt)
         except Exception as exc:
             logger.warning("Scheduled task %s failed: %s", task.id, exc)
             payload: dict[str, Any] = {
@@ -577,6 +584,8 @@ class TaskScheduler:
             return
 
         payload = {"duration_ms": int((time.monotonic() - started) * 1000)}
+        if delivered is not None:
+            payload["result"] = delivered
         if task.trigger == TriggerKind.CRON:
             task.status = TaskStatus.PENDING
             try:
