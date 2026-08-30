@@ -29,6 +29,7 @@ dependencies = [
     "httpx>=0.27",
     "llama-index-core>=0.14.23",
     "loguru>=0.7.0",
+    "croniter>=2.0",
 ]
 
 [project.optional-dependencies]
