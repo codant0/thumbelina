@@ -1,11 +1,17 @@
-"""Tests for the DeliveryDispatcher (design §5.1/§8.2, review ruling).
+"""Tests for the DeliveryDispatcher (design §5.1, review rulings).
 
-Contract under the post-task-5 review ruling (which amends the brief):
-COMPLETED/FAILED events are emitted *solely* by the scheduler, so the
-dispatcher never subscribes to the bus and never emits on it — it either
-returns a receipt string (the scheduler records it in the COMPLETED
-payload ``result``) or raises (the scheduler catches and settles the
-FAILED verdict with ``payload.error=str(exc)``).
+Contracts under the review rulings (which amend the original brief):
+
+- Task-5 ruling: COMPLETED/FAILED events are emitted *solely* by the
+  scheduler, so the dispatcher never subscribes to the bus and never
+  emits on it — it either returns a receipt string (the scheduler records
+  it in the COMPLETED payload ``result``) or raises (the scheduler
+  catches and settles the FAILED verdict with ``payload.error=str(exc)``).
+- T7-R1 ruling (fix round 1): **web 渠道交付 = 事件管线本身** — for
+  ``channel=web`` the dispatcher only returns a receipt; the T8-assembled
+  WebPushHook observer broadcasts each event (including the scheduler's
+  COMPLETED event) to the frontend exactly once.  There is no
+  ``web_push`` injection point and the dispatcher builds no frames.
 """
 
 from __future__ import annotations
@@ -30,6 +36,7 @@ from thumbelina.scheduler.models import (
 from thumbelina.scheduler.scheduler import TaskScheduler
 
 CONTENT = "早安简报已生成"
+WEB_RECEIPT = "delivered via web event pipeline"
 
 
 # ----------------------------------------------------------------------
@@ -81,19 +88,6 @@ class SpyBus(EventBus):
         return await super().emit(event)
 
 
-class WebPushSpy:
-    """Async callable matching broadcast_chat_message's signature."""
-
-    def __init__(self) -> None:
-        self.frames: list[dict[str, Any]] = []
-        self.error: Exception | None = None
-
-    async def __call__(self, message: dict[str, Any]) -> None:
-        self.frames.append(message)
-        if self.error is not None:
-            raise self.error
-
-
 def _task(**overrides: Any) -> ScheduledTask:
     """Build a minimal due task; overrides bypass enum typing on purpose."""
     values: dict[str, Any] = {
@@ -109,75 +103,40 @@ def _task(**overrides: Any) -> ScheduledTask:
 
 
 # ----------------------------------------------------------------------
-# web delivery
+# web delivery (= the event pipeline itself, T7-R1)
 # ----------------------------------------------------------------------
 
 
 class TestWebDelivery:
-    """web channel → web_push({"task_event": …}) per design §8.2."""
+    """web channel → receipt only; the event pipeline does the pushing."""
 
-    async def test_pushes_completed_frame_with_design_shape(self):
-        """The frame body matches §8.2 exactly and carries the receipt."""
-        spy = WebPushSpy()
-        dispatcher = DeliveryDispatcher(channels={}, web_push=spy)
-        task = _task(trigger=TriggerKind.CRON, cron_expr="0 9 * * *")
+    async def test_web_delivery_returns_receipt_without_any_push(self):
+        """A web task succeeds instantly: receipt + zero direct pushes."""
+        spy_bus = SpyBus()  # no injection point exists — spy bus stays clean
+        dispatcher = DeliveryDispatcher(channels={}, bus=spy_bus)
+        task = _task()
 
         receipt = await dispatcher.on_due_task(task)
 
         assert isinstance(receipt, str) and receipt
-        assert len(spy.frames) == 1
-        frame = spy.frames[0]
-        assert set(frame) == {"task_event"}
-        body = frame["task_event"]
-        assert set(body) == {
-            "id",
-            "type",
-            "task_id",
-            "fired_at",
-            "trigger",
-            "channel",
-            "content",
-            "payload",
-        }
-        assert body["type"] == "task.completed"
-        assert body["task_id"] == task.id
-        assert body["trigger"] == "cron"
-        assert body["channel"] == "web"
-        assert body["content"] == CONTENT
-        assert isinstance(body["id"], str) and body["id"]
-        fired_at = datetime.fromisoformat(body["fired_at"])
-        assert abs((datetime.now() - fired_at).total_seconds()) < 5
-        assert body["payload"]["result"] == receipt
+        assert spy_bus.emitted == []
 
-    async def test_web_push_none_is_success_noop(self):
-        """Without a wired web_push the delivery is a successful skip."""
-        dispatcher = DeliveryDispatcher(channels={})
+    def test_constructor_no_longer_accepts_web_push(self):
+        """T7-R1 removed the web_push injection point — enforce mechanically."""
+        with pytest.raises(TypeError):
+            DeliveryDispatcher(channels={}, web_push=lambda m: None)  # type: ignore[call-arg]
 
-        receipt = await dispatcher.on_due_task(_task())
-
-        assert isinstance(receipt, str) and receipt
-
-    async def test_web_push_failure_propagates(self):
-        """A raising web_push surfaces to the scheduler (→ FAILED)."""
-        spy = WebPushSpy()
-        spy.error = RuntimeError("ws closed")
-        dispatcher = DeliveryDispatcher(channels={}, web_push=spy)
-
-        with pytest.raises(RuntimeError, match="ws closed"):
-            await dispatcher.on_due_task(_task())
-
-    async def test_repeated_calls_deliver_independently(self):
-        """No dedup: the same task due twice yields two distinct frames."""
-        spy = WebPushSpy()
-        dispatcher = DeliveryDispatcher(channels={}, web_push=spy)
+    async def test_repeated_web_calls_are_pure_receipts(self):
+        """No dedup needed and no side effects: two calls, two receipts."""
+        spy_bus = SpyBus()
+        dispatcher = DeliveryDispatcher(channels={}, bus=spy_bus)
         task = _task()
 
-        await dispatcher.on_due_task(task)
-        await dispatcher.on_due_task(task)
+        first = await dispatcher.on_due_task(task)
+        second = await dispatcher.on_due_task(task)
 
-        assert len(spy.frames) == 2
-        first, second = (f["task_event"] for f in spy.frames)
-        assert first["id"] != second["id"]
+        assert first == second == WEB_RECEIPT
+        assert spy_bus.emitted == []
 
 
 # ----------------------------------------------------------------------
@@ -233,6 +192,17 @@ class TestImChannelDelivery:
         assert excinfo.value is boom
         assert channel.sent == [("u-1", CONTENT)]  # attempt happened first
 
+    async def test_repeated_calls_deliver_independently(self):
+        """No dedup: the same task due twice yields two independent sends."""
+        channel = FakeChannel(last_user_id="u-1")
+        dispatcher = DeliveryDispatcher(channels={"wechat": channel})
+        task = _task(channel=DeliveryChannel.WECHAT)
+
+        await dispatcher.on_due_task(task)
+        await dispatcher.on_due_task(task)
+
+        assert len(channel.sent) == 2
+
 
 # ----------------------------------------------------------------------
 # unsupported deliveries
@@ -248,24 +218,21 @@ class TestUnsupportedDeliveries:
 
     async def test_prompt_mode_raises_not_supported(self):
         """mode != notify is a reserved failure (prompt lands later)."""
-        spy = WebPushSpy()
-        dispatcher = DeliveryDispatcher(channels={}, web_push=spy)
+        dispatcher = DeliveryDispatcher(channels={})
 
         with pytest.raises(DeliveryError, match="mode not supported yet"):
             await dispatcher.on_due_task(_task(mode="prompt"))
 
-        assert spy.frames == []
-
-    async def test_unknown_channel_value_raises(self):
-        """An out-of-enum channel value fails with 'unknown channel'."""
+    async def test_unknown_channel_value_raises_with_actual_value(self):
+        """An out-of-enum channel value fails, naming the offending value."""
         dispatcher = DeliveryDispatcher(channels={})
 
-        with pytest.raises(DeliveryError, match="unknown channel"):
+        with pytest.raises(DeliveryError, match="unknown channel: sms"):
             await dispatcher.on_due_task(_task(channel="sms"))
 
 
 # ----------------------------------------------------------------------
-# double-emission regression (review ruling)
+# double-emission regression (task-5 review ruling)
 # ----------------------------------------------------------------------
 
 
@@ -281,7 +248,6 @@ class TestDispatcherNeverEmits:
         spy_bus = SpyBus()
         dispatcher = DeliveryDispatcher(
             channels={"wechat": FakeChannel()},
-            web_push=WebPushSpy(),
             bus=spy_bus,
         )
 
@@ -293,9 +259,7 @@ class TestDispatcherNeverEmits:
     async def test_no_emit_on_failure_paths(self):
         """Failing deliveries raise instead of emitting a FAILED event."""
         spy_bus = SpyBus()
-        dispatcher = DeliveryDispatcher(
-            channels={}, web_push=None, bus=spy_bus
-        )
+        dispatcher = DeliveryDispatcher(channels={}, bus=spy_bus)
 
         with pytest.raises(DeliveryError):
             await dispatcher.on_due_task(_task(channel=DeliveryChannel.QQ))
@@ -329,8 +293,13 @@ async def _wait_for_status(
 class TestSchedulerIntegration:
     """Full chain: once task due → dispatcher delivers → one COMPLETED."""
 
-    async def test_once_task_delivers_and_completes_exactly_once(self):
-        """Single delivery, single scheduler COMPLETED, silent dispatcher bus."""
+    async def test_web_task_full_chain_single_completed_event(self):
+        """Web task: 0 direct frames (no injection point), 1 COMPLETED.
+
+        The frontend frame comes from the T8 WebPushHook observer that
+        broadcasts this single COMPLETED event — the dispatcher's role is
+        only the receipt (recorded as payload.result by the scheduler).
+        """
         scheduler_bus = EventBus()
         due_events: list[TaskEvent] = []
         completed: list[TaskEvent] = []
@@ -340,10 +309,7 @@ class TestSchedulerIntegration:
         scheduler_bus.subscribe(TaskEventType.FAILED, failed.append)
 
         dispatcher_bus = SpyBus()  # the dispatcher's own bus — must stay silent
-        web_push = WebPushSpy()
-        dispatcher = DeliveryDispatcher(
-            channels={}, web_push=web_push, bus=dispatcher_bus
-        )
+        dispatcher = DeliveryDispatcher(channels={}, bus=dispatcher_bus)
         scheduler = TaskScheduler(bus=scheduler_bus)
         task = _task(id="once-1", scheduled_time=datetime.now() - timedelta(seconds=1))
         await scheduler.add_task(task)
@@ -355,17 +321,46 @@ class TestSchedulerIntegration:
             await scheduler.stop()
 
         assert settled.status is TaskStatus.COMPLETED
-        assert len(web_push.frames) == 1  # delivered exactly once
-        assert web_push.frames[0]["task_event"]["task_id"] == "once-1"
         assert len(due_events) == 1  # single trigger, no double-fire
         assert len(completed) == 1  # the scheduler is the sole emitter
         assert failed == []
-        # The dispatcher's receipt reached the scheduler COMPLETED payload.
-        frame_result = web_push.frames[0]["task_event"]["payload"]["result"]
-        assert completed[0].payload["result"] == frame_result
+        # The dispatcher's receipt reached the scheduler COMPLETED payload;
+        # that one event is the sole web push (T8 hook broadcasts it).
+        assert completed[0].payload["result"] == WEB_RECEIPT
         assert "duration_ms" in completed[0].payload
-        # And the dispatcher never emitted anything itself.
+        # And the dispatcher never emitted / pushed anything itself.
         assert dispatcher_bus.emitted == []
+
+    async def test_wechat_task_full_chain_delivers_via_channel(self):
+        """IM task: one send_message through the channel, one COMPLETED."""
+        scheduler_bus = EventBus()
+        completed: list[TaskEvent] = []
+        failed: list[TaskEvent] = []
+        scheduler_bus.subscribe(TaskEventType.COMPLETED, completed.append)
+        scheduler_bus.subscribe(TaskEventType.FAILED, failed.append)
+
+        channel = FakeChannel(last_user_id="wx-user-7")
+        dispatcher = DeliveryDispatcher(channels={"wechat": channel})
+        scheduler = TaskScheduler(bus=scheduler_bus)
+        task = _task(
+            id="once-3",
+            channel=DeliveryChannel.WECHAT,
+            scheduled_time=datetime.now() - timedelta(seconds=1),
+        )
+        await scheduler.add_task(task)
+
+        await scheduler.start(on_due_task=dispatcher.on_due_task)
+        try:
+            settled = await _wait_for_status(scheduler, "once-3", TaskStatus.COMPLETED)
+        finally:
+            await scheduler.stop()
+
+        assert settled.status is TaskStatus.COMPLETED
+        assert channel.sent == [("wx-user-7", CONTENT)]  # delivered exactly once
+        assert len(completed) == 1
+        assert failed == []
+        assert "wx-user-7" in completed[0].payload["result"]
+        assert "wechat" in completed[0].payload["result"]
 
     async def test_once_task_delivery_failure_ends_failed(self):
         """A raising dispatcher is settled by the scheduler as FAILED."""
@@ -375,8 +370,6 @@ class TestSchedulerIntegration:
         scheduler_bus.subscribe(TaskEventType.COMPLETED, completed.append)
         scheduler_bus.subscribe(TaskEventType.FAILED, failed.append)
 
-        # No web_push, no channels: the web task skips, so make it fail via
-        # an unknown IM channel instead — "channel not available".
         dispatcher = DeliveryDispatcher(channels={})
         scheduler = TaskScheduler(bus=scheduler_bus)
         task = _task(

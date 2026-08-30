@@ -2,21 +2,31 @@
 
 Registered as the scheduler's ``on_due_task`` callback (design §5.2/§5.3,
 decision D5 inline-await): when a task fires, the dispatcher hands its
-content to the channel selected by ``task.channel`` — ``web`` goes to the
-injected WebSocket push callback, ``wechat``/``qq`` go to the matching
-:class:`~thumbelina.channels.base.Channel`'s most recent user.
+content to the channel selected by ``task.channel``.  For IM channels
+(``wechat``/``qq``) that is a :class:`~thumbelina.channels.base.Channel`
+send to the channel's most recent user.  For ``web`` there is nothing to
+send here — see the T7-R1 ruling below.
 
-Review ruling (recorded in the task ledger, amending the original brief):
-COMPLETED/FAILED events are emitted **solely by the scheduler** — the
-dispatcher neither subscribes to the bus nor emits on it (a second
-emission would double-fire every observer).  The delivery contract is
-therefore:
+Review ruling T7-R1 (fix round 1, recorded in the task ledger): **web
+渠道交付 = 事件管线本身**.  T8 assembles a WebPushHook observer that
+subscribes to every :class:`~thumbelina.scheduler.models.TaskEventType`
+and broadcasts each event to the frontend via
+``broadcast_chat_message`` — so every event reaches the frontend exactly
+once, as the canonical event (event-log id, ``duration_ms`` in payload).
+The scheduler's COMPLETED event already carries the receipt this method
+returns (``payload.result``).  The dispatcher therefore neither builds
+COMPLETED frames nor takes a ``web_push`` callback: an earlier
+``web_push`` constructor parameter (and its fabricated-frame path) was
+removed by this ruling — do not restore it, a direct push here would
+double every web event.  (Design §5.3's ``DeliveryDispatcher(channels=…,
+web_push=…, bus=bus)`` sketch is superseded; T8 wires
+``DeliveryDispatcher(channels=…, bus=bus)``.)
 
-- success → return a receipt string; the scheduler records it in the
-  ``task.completed`` payload ``result``;
-- failure → raise :class:`DeliveryError` (or re-raise the channel's own
-  exception untouched); the scheduler catches it, settles the
-  ``task.failed`` verdict and records ``payload.error=str(exc)``.
+Delivery contract (task-5 review ruling, still in force): success →
+return a receipt string; failure → raise :class:`DeliveryError` (or
+re-raise the channel's own exception untouched); the scheduler catches it,
+settles the ``task.failed`` verdict and records
+``payload.error=str(exc)``.  The dispatcher never emits on the bus.
 
 See ``docs/plans/2026-08-30-event-timer-tasks-design.md`` (§5.1 dispatcher
 row, §8.2 WebSocket frame) and D7 for the channel semantics.
@@ -24,29 +34,15 @@ row, §8.2 WebSocket frame) and D7 for the channel semantics.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
-from enum import StrEnum
-from typing import Any
-
 from thumbelina.channels.base import Channel
 from thumbelina.scheduler.events import EventBus
-from thumbelina.scheduler.models import (
-    DeliveryChannel,
-    ScheduledTask,
-    TaskEvent,
-    TaskEventType,
-)
+from thumbelina.scheduler.models import DeliveryChannel, ScheduledTask
 
-__all__ = ["DeliveryDispatcher", "DeliveryError", "WebPush"]
+__all__ = ["DeliveryDispatcher", "DeliveryError"]
 
-# Injected WebSocket broadcast callback; T8 wires
-# ``api.websocket.broadcast_chat_message`` here at assembly time.
-WebPush = Callable[[dict[str, Any]], Awaitable[None]]
-
-# Receipts (the scheduler copies the return value into the COMPLETED
-# payload ``result``, so their wording is part of the delivery contract).
-_WEB_PUSH_DELIVERED = "web push delivered"
-_WEB_PUSH_SKIPPED = "web push skipped: no web_push callback wired"
+# Receipt for web tasks (the scheduler copies the return value into the
+# COMPLETED payload ``result``, so their wording is part of the contract).
+_WEB_RECEIPT = "delivered via web event pipeline"
 
 
 class DeliveryError(RuntimeError):
@@ -55,27 +51,8 @@ class DeliveryError(RuntimeError):
     Deliberately a :class:`RuntimeError`: the scheduler's ``_fire_task``
     catches it generically and turns the message into the ``task.failed``
     payload ``error`` (``"channel not available"``, ``"no recent user on
-    channel"``, ``"mode not supported yet"``, ``"unknown channel"``).
+    channel"``, ``"mode not supported yet"``, ``"unknown channel: …"``).
     """
-
-
-def _plain(value: Any) -> str:
-    """Plain string for a StrEnum member (or an already-plain string)."""
-    return value.value if isinstance(value, StrEnum) else str(value)
-
-
-def _frame_body(event: TaskEvent) -> dict[str, Any]:
-    """Serialize a TaskEvent into the §8.2 ``task_event`` frame body."""
-    return {
-        "id": event.id,
-        "type": event.type.value,
-        "task_id": event.task_id,
-        "fired_at": event.fired_at.isoformat(),
-        "trigger": _plain(event.trigger),
-        "channel": _plain(event.channel),
-        "content": event.content,
-        "payload": event.payload,
-    }
 
 
 class DeliveryDispatcher:
@@ -87,26 +64,23 @@ class DeliveryDispatcher:
         IM channel table keyed by channel name (``"wechat"``/``"qq"``).
         A task naming a channel missing from the table fails delivery
         (``"channel not available"``) — the service does not degrade
-        silently (design §5.3).
-    web_push:
-        Async callback receiving ``{"task_event": …}`` frames (§8.2);
-        T8 injects ``broadcast_chat_message``.  ``None`` means the
-        frontend push is not wired — a web delivery is then a successful
-        skip, not a failure.
+        silently (design §5.3).  ``web`` tasks need no entry: their
+        delivery is the event pipeline itself (T7-R1, see module
+        docstring).
     bus:
         Retained as the future prompt-mode extension point (design §13).
-        **Never used for emission**: per the review ruling the scheduler
-        alone emits COMPLETED/FAILED, so this parameter is inert today.
+        **Never used for emission**: per the review rulings the scheduler
+        alone emits COMPLETED/FAILED (task-5 ruling), and web delivery is
+        the event pipeline itself (T7-R1), so this parameter is inert
+        today.
     """
 
     def __init__(
         self,
         channels: dict[str, Channel],
-        web_push: WebPush | None = None,
         bus: EventBus | None = None,
     ) -> None:
         self._channels = dict(channels)
-        self._web_push = web_push
         # Inert by ruling; kept so T8/prompt-mode wiring needs no change.
         self._bus = bus
 
@@ -136,28 +110,14 @@ class DeliveryDispatcher:
         try:
             channel = DeliveryChannel(task.channel)
         except ValueError:
-            raise DeliveryError("unknown channel") from None
+            raise DeliveryError(f"unknown channel: {task.channel}") from None
         if channel is DeliveryChannel.WEB:
-            return await self._deliver_web(task, channel)
+            # Ruling T7-R1: web delivery IS the event pipeline.  The
+            # scheduler's COMPLETED event (payload.result = this receipt,
+            # plus duration_ms) is broadcast exactly once by the WebPushHook
+            # observer (T8); a direct push here would double every event.
+            return _WEB_RECEIPT
         return await self._deliver_im(task, channel)
-
-    async def _deliver_web(self, task: ScheduledTask, channel: DeliveryChannel) -> str:
-        """Push the COMPLETED task_event frame to the frontend (§8.2)."""
-        if self._web_push is None:
-            # Frontend not wired (T8 assembles broadcast_chat_message):
-            # nothing to deliver to, nothing failed — a successful skip.
-            return _WEB_PUSH_SKIPPED
-        receipt = _WEB_PUSH_DELIVERED
-        event = TaskEvent(
-            type=TaskEventType.COMPLETED,
-            task_id=task.id,
-            trigger=task.trigger,
-            channel=channel,
-            content=task.content,
-            payload={"result": receipt},
-        )
-        await self._web_push({"task_event": _frame_body(event)})
-        return receipt
 
     async def _deliver_im(self, task: ScheduledTask, channel: DeliveryChannel) -> str:
         """Send the content to the channel's most recent user (D7)."""
