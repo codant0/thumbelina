@@ -6,6 +6,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -1920,3 +1921,107 @@ class TestPromptMode:
 
         assert settled.status is TaskStatus.PENDING
         assert settled.error == "prompt timed out"
+
+    @pytest.mark.asyncio
+    async def test_stop_waits_for_inflight_prompt_tasks(self):
+        """T13: shutdown must wait for in-flight prompt executions instead of
+        cutting them off — the runner's reply still lands its COMPLETED verdict
+        (and the persist/emit run while the loop is alive)."""
+        scheduler = TaskScheduler()
+        task = _prompt_once_task("prompt-stop-wait")
+        await scheduler.add_task(task)
+
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def runner(t: ScheduledTask) -> str:
+            entered.set()
+            await release.wait()
+            return "done during stop"
+
+        await scheduler.start(on_prompt_task=runner)
+        try:
+            assert await _wait_for(entered.is_set)
+            assert task.id in scheduler._inflight
+
+            # stop() must block until the in-flight runner settles.
+            stop_task = asyncio.create_task(scheduler.stop())
+            await asyncio.sleep(0.1)
+            assert not stop_task.done()
+            release.set()
+            await asyncio.wait_for(stop_task, timeout=5)
+        finally:
+            if scheduler.running:
+                await scheduler.stop()
+
+        updated = await scheduler.get_task("prompt-stop-wait")
+        assert updated is not None and updated.status == TaskStatus.COMPLETED
+        assert task.id not in scheduler._inflight
+
+    @pytest.mark.asyncio
+    async def test_stop_retrieves_exception_from_inflight_execution(self, caplog, monkeypatch):
+        """T13 / Task 12 Minor 4: stop() awaits each in-flight execution task's
+        result, so an unexpected background exception is retrieved (and logged)
+        instead of leaking as 'Task exception was never retrieved'."""
+        scheduler = TaskScheduler()
+        task = _prompt_once_task("prompt-stop-exc")
+        await scheduler.add_task(task)
+
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def runner(t: ScheduledTask) -> str:
+            entered.set()
+            await release.wait()
+            return "ok"
+
+        original_settle = scheduler._settle_prompt
+
+        async def exploding_settle(*args: Any, **kwargs: Any) -> None:
+            await original_settle(*args, **kwargs)
+            raise RuntimeError("settle exploded")
+
+        monkeypatch.setattr(scheduler, "_settle_prompt", exploding_settle)
+
+        await scheduler.start(on_prompt_task=runner)
+        try:
+            assert await _wait_for(entered.is_set)
+            stop_task = asyncio.create_task(scheduler.stop())
+            await asyncio.sleep(0.1)
+            assert not stop_task.done()
+            with caplog.at_level("WARNING"):
+                release.set()
+                await asyncio.wait_for(stop_task, timeout=5)
+        finally:
+            if scheduler.running:
+                await scheduler.stop()
+
+        assert task.id not in scheduler._inflight
+        assert "settle exploded" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_prompt_cron_failure_scheduled_for_is_fired_slot(self):
+        """T13 / Task 12 review item (b): a failed cron prompt round's FAILED
+        payload.scheduled_for must point at the *fired* slot (the next_run that
+        triggered this round), not the newly-advanced next_run — aligned with
+        the notify path's captured slot."""
+        recorder = _EventRecorder()
+        scheduler = TaskScheduler(bus=_make_bus(recorder))
+        fired = datetime.now() - timedelta(minutes=1)
+        task = _prompt_cron_task("prompt-cron-slot")
+        task.next_run = fired
+        await scheduler.add_task(task)
+
+        async def boom(t: ScheduledTask) -> str:
+            raise RuntimeError("boom")
+
+        await scheduler.start(on_prompt_task=boom)
+        try:
+            settled = await _wait_for_settled(scheduler, "prompt-cron-slot")
+        finally:
+            await scheduler.stop()
+
+        failed = [e for e in recorder.events if e.type == TaskEventType.FAILED]
+        assert len(failed) == 1
+        assert failed[0].payload["scheduled_for"] == fired.isoformat()
+        assert settled.next_run is not None and settled.next_run > fired

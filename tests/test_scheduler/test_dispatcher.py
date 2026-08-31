@@ -354,6 +354,13 @@ class TestUnsupportedDeliveries:
         """All dispatcher failures are RuntimeError subclasses (ruling)."""
         assert issubclass(DeliveryError, RuntimeError)
 
+    def test_delivery_error_docstring_says_mode_not_supported(self):
+        """T13 / Task 12 Minor 1: the docstring's stale 'not supported yet'
+        (reserved-until-prompt-mode wording) is gone — prompt mode is live, the
+        wording is 'mode not supported'."""
+        assert "mode not supported yet" not in (DeliveryError.__doc__ or "")
+        assert "mode not supported" in (DeliveryError.__doc__ or "")
+
     async def test_prompt_mode_raises_not_supported(self):
         """on_due_task does not handle prompt tasks — those go through the
         dedicated on_prompt_task entry (design §5.4)."""

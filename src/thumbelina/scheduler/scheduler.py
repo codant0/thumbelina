@@ -123,6 +123,11 @@ class TaskScheduler:
         # (§5.4): the Heartbeat's stale-RUNNING reaper skips them so a long
         # LLM call is not killed mid-flight.  Discarded on settlement.
         self._inflight: set[str] = set()
+        # Asyncio task handles for those executions: :meth:`stop` awaits them
+        # during graceful shutdown (T13) and retrieves each result so an
+        # unexpected background exception is surfaced instead of leaked
+        # (Task 12 Minor 4).  Discarded by the done callback on settlement.
+        self._inflight_tasks: set[asyncio.Task[Any]] = set()
         self._check_condition = check_condition
         self._store = store
         self._bus = bus
@@ -534,6 +539,17 @@ class TaskScheduler:
     async def stop(self) -> None:
         """Stop the background polling loop gracefully.
 
+        Shutdown semantics are "wait for background work to settle": prompt
+        executions that are still in flight (:meth:`_execute_prompt`,
+        §5.4) are awaited to completion — their COMPLETED/FAILED verdict is
+        persisted and emitted while the event loop is still alive, and their
+        result is retrieved so an unexpected background exception is surfaced
+        and logged instead of leaking as "Task exception was never retrieved"
+        (Task 12 Minor 4).  Note: with no configured runner a synchronous
+        settle path is used and there is nothing to wait for; a prompt task
+        whose runner ignores cancellation is only bounded by its
+        ``prompt_timeout_seconds``.
+
         A poll task that already died with a real exception (e.g. the
         TypeError a tz-aware ``scheduled_time`` caused before entry
         normalization existed) must not escape ``stop()`` — the caller is
@@ -551,6 +567,42 @@ class TaskScheduler:
                     "Scheduler poll loop died with %s during stop: %s", type(exc).__name__, exc
                 )
             self._poll_task = None
+        # Graceful drain: await every in-flight prompt execution, retrieving
+        # each result so a stray exception is surfaced, not leaked.  The task
+        # handles are pruned by their done callback as they settle; the loop
+        # re-checks so a task settled while we were awaiting another is never
+        # awaited twice.
+        while self._inflight_tasks:
+            for execution in list(self._inflight_tasks):
+                try:
+                    await execution
+                except asyncio.CancelledError:
+                    pass
+                except Exception as exc:
+                    logger.warning(
+                        "Prompt execution task died during stop: %s (%s)",
+                        exc,
+                        type(exc).__name__,
+                    )
+
+    def _on_execution_done(self, task: asyncio.Task[Any]) -> None:
+        """Done callback for an in-flight prompt execution.
+
+        Retrieves the result (surfacing an unexpected background exception as
+        a warning — Task 12 Minor 4) and removes the handle from
+        ``_inflight_tasks`` so :meth:`stop` can determine when the drain is
+        complete.
+        """
+        self._inflight_tasks.discard(task)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.warning(
+                "Prompt execution for task failed unexpectedly: %s (%s)",
+                exc,
+                type(exc).__name__,
+            )
 
     def _restart_loop(self) -> None:
         """Re-create a dead polling loop (Heartbeat liveness check, §7.4).
@@ -681,11 +733,20 @@ class TaskScheduler:
                 # No runner configured → settle directly (the prompt-mode
                 # analogue of the notify ``on_due_task=None`` direct path).
                 await self._settle_prompt(
-                    task, error="prompt runner not configured", started=started
+                    task,
+                    error="prompt runner not configured",
+                    started=started,
+                    scheduled_for=scheduled_for,
                 )
                 return
             self._inflight.add(task.id)
-            asyncio.create_task(self._execute_prompt(task, on_prompt_task, started))
+            execution = asyncio.create_task(
+                self._execute_prompt(task, on_prompt_task, started, scheduled_for)
+            )
+            # Keep the handle so :meth:`stop` can drain it at shutdown and
+            # retrieve a stray exception (Task 12 Minor 4).
+            self._inflight_tasks.add(execution)
+            execution.add_done_callback(self._on_execution_done)
             return
 
         delivered: str | None = None
@@ -765,6 +826,7 @@ class TaskScheduler:
         task: ScheduledTask,
         on_prompt_task: DueCallback,
         started: float,
+        scheduled_for: datetime | None,
     ) -> None:
         """Background execution for a prompt-mode task (§5.4).
 
@@ -775,6 +837,12 @@ class TaskScheduler:
         I2 reaper guard: if the Heartbeat failed the task while the runner
         was in flight (it should not — ``_inflight`` excludes it, but the
         startup/recover residue path can), that FAILED verdict is kept.
+
+        ``scheduled_for`` is the *fired* slot — for cron tasks the ``next_run``
+        that triggered this round, captured by :meth:`_fire_task` before the
+        slot was consumed — so a FAILED settlement names the consumed
+        occurrence rather than the newly-advanced ``next_run`` (Task 12
+        review item b).
         """
         try:
             try:
@@ -782,13 +850,19 @@ class TaskScheduler:
                     on_prompt_task(task), timeout=float(self._prompt_timeout)
                 )
             except TimeoutError:
-                await self._settle_prompt(task, error="prompt timed out", started=started)
+                await self._settle_prompt(
+                    task, error="prompt timed out", started=started, scheduled_for=scheduled_for
+                )
                 return
             except Exception as exc:
                 logger.warning("Prompt task %s failed: %s", task.id, exc)
-                await self._settle_prompt(task, error=str(exc), started=started)
+                await self._settle_prompt(
+                    task, error=str(exc), started=started, scheduled_for=scheduled_for
+                )
                 return
-            await self._settle_prompt(task, reply=str(reply), started=started)
+            await self._settle_prompt(
+                task, reply=str(reply), started=started, scheduled_for=scheduled_for
+            )
         finally:
             self._inflight.discard(task.id)
 
@@ -797,6 +871,7 @@ class TaskScheduler:
         task: ScheduledTask,
         *,
         started: float,
+        scheduled_for: datetime | None = None,
         reply: str | None = None,
         error: str | None = None,
     ) -> None:
@@ -805,8 +880,10 @@ class TaskScheduler:
         Success: once → COMPLETED with ``payload.result=reply``, cron →
         PENDING (``next_run`` was already advanced at fire time).  Failure:
         once → FAILED / cron → PENDING, ``error`` recorded in both the task
-        and the ``task.failed`` payload.  ``_inflight`` is cleaned up by the
-        caller (:meth:`_execute_prompt`'s ``finally``).
+        and the ``task.failed`` payload.  ``scheduled_for`` is the fired slot
+        (pre-advance ``next_run`` for cron) so the FAILED payload names the
+        consumed occurrence, aligned with the notify path.  ``_inflight`` is
+        cleaned up by the caller (:meth:`_execute_prompt`'s ``finally``).
         """
         if task.status == TaskStatus.FAILED:
             # I2: keep the Heartbeat's FAILED verdict (normally excluded by
@@ -829,9 +906,13 @@ class TaskScheduler:
                     {
                         "error": error,
                         "scheduled_for": _iso(
-                            task.scheduled_time
-                            if task.trigger == TriggerKind.ONCE
-                            else task.next_run
+                            scheduled_for
+                            if scheduled_for is not None
+                            else (
+                                task.scheduled_time
+                                if task.trigger == TriggerKind.ONCE
+                                else task.next_run
+                            )
                         ),
                         "duration_ms": int((time.monotonic() - started) * 1000),
                     },

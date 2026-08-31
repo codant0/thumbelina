@@ -169,7 +169,15 @@ class TaskCreateRequest(BaseModel):
     content: str | None = None
     # §5.4: mode 默认 prompt——任务到期后由 AI 执行内容并把回复写入会话;
     # 纯提醒类任务显式传 "notify"(content 原样交付,不跑 agent)。
-    mode: Literal["prompt", "notify"] = "prompt"
+    mode: Literal["prompt", "notify"] = Field(
+        default="prompt",
+        description=(
+            "Execution mode when the task fires: prompt=the AI performs the "
+            "task content and writes the reply into the conversation "
+            "(default); notify=the content is delivered as-is as a reminder "
+            "without running the AI."
+        ),
+    )
     conversation_id: str | None = Field(
         default=None,
         description="prompt 模式回复写入的会话;缺省由调度链路决定",

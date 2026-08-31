@@ -51,7 +51,7 @@ from thumbelina.channels.base import Channel
 from thumbelina.scheduler.events import EventBus
 from thumbelina.scheduler.models import DeliveryChannel, ScheduledTask
 
-__all__ = ["DeliveryDispatcher", "DeliveryError"]
+__all__ = ["DeliveryDispatcher", "DeliveryError", "PromptRunner"]
 
 # Receipt for web tasks (the scheduler copies the return value into the
 # COMPLETED payload ``result``, so their wording is part of the contract).
@@ -69,7 +69,7 @@ class DeliveryError(RuntimeError):
     Deliberately a :class:`RuntimeError`: the scheduler's ``_fire_task``
     catches it generically and turns the message into the ``task.failed``
     payload ``error`` (``"channel not available"``, ``"no recent user on
-    channel"``, ``"mode not supported yet"``, ``"unknown channel: …"``).
+    channel"``, ``"mode not supported"``, ``"unknown channel: …"``).
     """
 
 
