@@ -220,43 +220,43 @@ function MessageListInner({ messages, waitingForReply, isStreaming, awaitingMore
     setShowJump(distanceFromBottom > 320)
   }
 
+  // Stream / user-sent messages: snap to bottom (one rAF so the browser
+  // has measured the freshly appended children). Skipped entirely when
+  // the user has scrolled up to read.
+  useEffect(() => {
+    const el = listRef.current
+    if (!el) return
+    // The newest message is one the user just sent — force-follow even if
+    // they had scrolled up earlier in the session.
+    const last = messages[messages.length - 1]
+    const userSentNow = last?.role === 'user'
+    if (!userSentNow && !stickToBottomRef.current) return
+
+    const raf = requestAnimationFrame(() => {
+      const node = listRef.current
+      if (node) node.scrollTop = node.scrollHeight
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [messages, waitingForReply])
+
+  // On conversation switch / history reload (first message id changed)
+  // jump to the latest message synchronously after layout. Runs only on
+  // first mount and on head-of-list changes — independent of the
+  // stream-follow effect above, which only fires when already at bottom.
   useLayoutEffect(() => {
     const el = listRef.current
     if (!el) return
-    // The list was replaced entirely (conversation switch / history reload) —
-    // resume following and jump to the latest message.
-    const firstId = messages[0]?.id
-    if (firstId !== firstMsgIdRef.current) {
-      firstMsgIdRef.current = firstId
+    if (firstMsgIdRef.current === undefined) {
+      // First mount: place at the bottom.
+      firstMsgIdRef.current = messages[0]?.id
+      el.scrollTop = el.scrollHeight
+    } else if (messages[0]?.id !== firstMsgIdRef.current) {
+      // Head of the list was replaced — treat as a new conversation.
+      firstMsgIdRef.current = messages[0]?.id
       stickToBottomRef.current = true
+      el.scrollTop = el.scrollHeight
     }
-    // Always jump to the bottom when the newest message is one the user just sent.
-    const last = messages[messages.length - 1]
-    if (last?.role === 'user') {
-      stickToBottomRef.current = true
-    }
-    if (!stickToBottomRef.current) return
-
-    // Defer to the next animation frame so the new messages have been
-    // laid out and `scrollHeight` reflects the real content height. Without
-    // this, switching into a conversation with prior history lands the
-    // scroll position at 0 (the top) because the effect fires before layout
-    // and reads scrollHeight=0.
-    let raf2 = 0
-    const raf = requestAnimationFrame(() => {
-      const node = listRef.current
-      if (!node) return
-      // Two frames cover Chrome's layout flush + async image/code render.
-      raf2 = requestAnimationFrame(() => {
-        const n = listRef.current
-        if (n) n.scrollTop = n.scrollHeight
-      })
-    })
-    return () => {
-      cancelAnimationFrame(raf)
-      if (raf2) cancelAnimationFrame(raf2)
-    }
-  }, [messages, waitingForReply])
+  }, [messages])
 
   const streamingMsgId = isStreaming
     ? [...messages].reverse().find(m => m.role === 'assistant' && m.id.startsWith('stream-'))?.id
