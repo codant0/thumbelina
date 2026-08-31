@@ -68,6 +68,7 @@ def _serialize_task(task: ScheduledTask) -> dict[str, Any]:
         "mode": task.mode,
         "source": task.source,
         "error": task.error,
+        "conversation_id": task.conversation_id,
     }
 
 
@@ -166,6 +167,13 @@ class TaskCreateRequest(BaseModel):
     cron: str | None = None
     channel: Literal["web", "wechat", "qq"] | None = None
     content: str | None = None
+    # §5.4: mode 默认 prompt——任务到期后由 AI 执行内容并把回复写入会话;
+    # 纯提醒类任务显式传 "notify"(content 原样交付,不跑 agent)。
+    mode: Literal["prompt", "notify"] = "prompt"
+    conversation_id: str | None = Field(
+        default=None,
+        description="prompt 模式回复写入的会话;缺省由调度链路决定",
+    )
 
     @field_validator("description")
     @classmethod
@@ -228,6 +236,8 @@ async def create_task(request: Request, body: TaskCreateRequest) -> dict[str, An
         scheduled_time=scheduled_time,
         channel=DeliveryChannel(body.channel or default_channel),
         content=body.content or body.description,
+        mode=body.mode,
+        conversation_id=body.conversation_id,
         source="web",
     )
     try:

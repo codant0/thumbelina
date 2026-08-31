@@ -8,6 +8,12 @@ event-timer-tasks 扩展(design §4.3/§6): ``schedule_task`` 增可选
 ``cron_expression``/``channel`` 参数(cron 循环任务 + 交付渠道,渠道名大小写
 不敏感、空串默认 web),``list_scheduled_tasks`` 每行增 Trigger/Channel 字段;
 旧两参调用 ``schedule_task(description, time_expression)`` 的返回文案逐字不变。
+
+Task 12(design §5.4): ``schedule_task`` 再增 ``mode`` 与 ``conversation_id``。
+``mode`` 默认 **prompt**——任务到期后由 AI 执行内容并把回复写入会话
+(plan-mandated 行为变更);纯提醒任务显式传 ``mode="notify"`` 原样交付。
+``conversation_id`` 缺省取当前会话(``agent_ref.current_conversation_id``,
+经工厂 ``make_event_tools(..., agent_ref=None)`` 注入)。
 """
 
 from __future__ import annotations
@@ -23,6 +29,7 @@ from thumbelina.scheduler.models import DeliveryChannel, ScheduledTask, TriggerK
 from thumbelina.tools.base import ThumbelinaBaseTool, ToolCategory
 
 _AVAILABLE_CHANNELS = ", ".join(c.value for c in DeliveryChannel)
+_AVAILABLE_MODES = "prompt, notify"
 
 
 def _resolve_channel(name: str) -> DeliveryChannel | None:
@@ -41,6 +48,11 @@ def _resolve_channel(name: str) -> DeliveryChannel | None:
 def _unknown_channel_error(name: str) -> str:
     """Design §6 wording; *name* is echoed verbatim as the caller typed it."""
     return f"Error: Unknown channel '{name}'. Available: {_AVAILABLE_CHANNELS}."
+
+
+def _unknown_mode_error(mode: str) -> str:
+    """Design §5.4 wording; *mode* is echoed verbatim as the caller typed it."""
+    return f"Error: Unknown mode '{mode}'. Available: {_AVAILABLE_MODES}."
 
 
 class _ScheduleTaskArgs(BaseModel):
@@ -62,6 +74,22 @@ class _ScheduleTaskArgs(BaseModel):
     channel: str = Field(
         "",
         description=f"Delivery channel: {_AVAILABLE_CHANNELS}. Defaults to web.",
+    )
+    mode: str = Field(
+        "prompt",
+        description=(
+            "Execution mode when the task fires: prompt=the AI performs the task "
+            "content and writes the reply into the conversation (default); "
+            "notify=the content is delivered as-is as a reminder without running "
+            "the AI."
+        ),
+    )
+    conversation_id: str = Field(
+        "",
+        description=(
+            "Conversation to write the prompt-mode reply into; empty defaults "
+            "to the current conversation."
+        ),
     )
 
 
@@ -85,6 +113,17 @@ class ScheduleTaskTool(EventTriggerTool):
     )
     args_schema: type[BaseModel] = _ScheduleTaskArgs
     scheduler: Any = None
+    # §5.4: 提供 conversation_id 缺省值（当前会话）。经工厂
+    # ``make_event_tools(..., agent_ref=...)`` 注入;None 则 conversation_id 为空。
+    agent_ref: Any = None
+
+    def _resolve_conversation_id(self, conversation_id: str) -> str:
+        """空串 → 当前会话(``agent_ref.current_conversation_id``,无则空)。"""
+        if conversation_id:
+            return conversation_id
+        if self.agent_ref is not None:
+            return getattr(self.agent_ref, "current_conversation_id", None) or ""
+        return ""
 
     # mypy[override]: 基类 _execute(**kwargs) 由 _arun 以 args_schema 校验后的
     # 具名参数调用;具名签名是刻意的收窄(与项目其他工具一致),类型安全由
@@ -95,9 +134,16 @@ class ScheduleTaskTool(EventTriggerTool):
         time_expression: str = "",
         cron_expression: str = "",
         channel: str = "",
+        mode: str = "prompt",
+        conversation_id: str = "",
     ) -> str:
         if time_expression and cron_expression:
             return "Error: provide either time_expression or cron_expression, not both."
+
+        if mode not in ("prompt", "notify"):
+            return _unknown_mode_error(mode)
+
+        conversation = self._resolve_conversation_id(conversation_id)
 
         if cron_expression:
             # cron 分支(design §6):先 validate_cron 拒绝非法表达式,再渠道白名单。
@@ -114,6 +160,8 @@ class ScheduleTaskTool(EventTriggerTool):
                 scheduled_time=None,
                 channel=delivery,
                 content=description,
+                mode=mode,
+                conversation_id=conversation,
                 source="agent",
             )
             try:
@@ -138,6 +186,8 @@ class ScheduleTaskTool(EventTriggerTool):
             scheduled_time=parsed,
             channel=delivery,
             content=description,
+            mode=mode,
+            conversation_id=conversation,
             source="agent",
         )
         await self.scheduler.add_task(task)
@@ -181,9 +231,13 @@ class ListScheduledTasksTool(EventTriggerTool):
         return ", ".join(parts)
 
 
-def make_event_tools(scheduler: Any, time_parser: Any) -> list[BaseTool]:
-    """返回封装 ``TaskScheduler`` 的事件触发工具对(迁移自 ``_make_scheduler_tools``)。"""
+def make_event_tools(scheduler: Any, time_parser: Any, agent_ref: Any = None) -> list[BaseTool]:
+    """返回封装 ``TaskScheduler`` 的事件触发工具对(迁移自 ``_make_scheduler_tools``)。
+
+    ``agent_ref``(Task 12, §5.4)为可选的 agent 引用:提供 ``current_conversation_id``
+    作为 ``schedule_task`` 缺省会话,None 则 conversation_id 为空。
+    """
     return [
-        ScheduleTaskTool(scheduler=scheduler, time_parser=time_parser),
+        ScheduleTaskTool(scheduler=scheduler, time_parser=time_parser, agent_ref=agent_ref),
         ListScheduledTasksTool(scheduler=scheduler, time_parser=time_parser),
     ]

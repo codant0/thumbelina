@@ -310,6 +310,13 @@ class SchedulerConfig(BaseModel):
         default=500,
         description="task_events 事件日志保留条数（Heartbeat 周期修剪）",
     )
+    prompt_timeout_seconds: int = Field(
+        default=300,
+        description=(
+            "prompt 模式任务后台执行的超时（秒）：LLM 调用超过该时长即按 "
+            "'prompt timed out' 结算 FAILED（cron 保持 PENDING 等下一场次）"
+        ),
+    )
     default_channel: Literal["web", "wechat", "qq"] = Field(
         default="web",
         description="web 端创建任务未指定渠道时的默认交付渠道",

@@ -193,8 +193,10 @@ def test_schedule_task_new_args_are_optional():
     props = schema["properties"]
     assert "cron_expression" in props
     assert "channel" in props
+    assert "mode" in props
+    assert "conversation_id" in props
     required = schema.get("required", [])
-    for field in ("time_expression", "cron_expression", "channel"):
+    for field in ("time_expression", "cron_expression", "channel", "mode", "conversation_id"):
         assert field not in required
 
 
@@ -225,6 +227,97 @@ def test_schedule_task_description_covers_cron_and_channel():
     assert "cron" in desc
     assert "channel" in desc
     assert "one-off" in desc or "recurring" in desc
-    # name/参数不变:args_schema 仍含四个字段。
+    # name/参数不变:args_schema 仍含全部字段(含 Task 12 新增 mode/conversation_id)。
     props = tool.args_schema.model_json_schema()["properties"]
-    assert set(props) == {"description", "time_expression", "cron_expression", "channel"}
+    assert set(props) == {
+        "description",
+        "time_expression",
+        "cron_expression",
+        "channel",
+        "mode",
+        "conversation_id",
+    }
+
+
+# --- Task 12: mode 默认 prompt + conversation_id 注入(设计 §5.4) --------------
+
+
+@pytest.mark.asyncio
+async def test_schedule_task_defaults_to_prompt_mode():
+    """mode 缺省为 prompt:任务到期后由 AI 执行并写回复进会话(plan-mandated 行为变更,
+    设计 §5.4:定时任务默认'干活';纯提醒显式 mode='notify')。"""
+    sched = FakeScheduler()
+    tool = ScheduleTaskTool(scheduler=sched, time_parser=FakeTimeParser())
+    await tool._arun(description="call mom", time_expression="in 1 hour")
+    assert sched.added[0].mode == "prompt"
+
+
+@pytest.mark.asyncio
+async def test_schedule_task_explicit_notify_mode():
+    sched = FakeScheduler()
+    tool = ScheduleTaskTool(scheduler=sched, time_parser=FakeTimeParser())
+    await tool._arun(description="remind", time_expression="in 1 hour", mode="notify")
+    task = sched.added[0]
+    assert task.mode == "notify"
+
+
+@pytest.mark.asyncio
+async def test_schedule_task_cron_prompt_mode_passes_through():
+    sched = CronFallbackScheduler()
+    tool = ScheduleTaskTool(scheduler=sched, time_parser=FakeTimeParser())
+    await tool._arun(
+        description="hourly", cron_expression="*/30 * * * *", mode="prompt", channel="web"
+    )
+    task = sched.added[0]
+    assert task.trigger == TriggerKind.CRON
+    assert task.mode == "prompt"
+
+
+@pytest.mark.asyncio
+async def test_schedule_task_unknown_mode_error():
+    sched = FakeScheduler()
+    tool = ScheduleTaskTool(scheduler=sched, time_parser=FakeTimeParser())
+    out = await tool._arun(description="x", time_expression="in 1 hour", mode="bogus")
+    assert out == "Error: Unknown mode 'bogus'. Available: prompt, notify."
+    assert sched.added == []
+    # once/cron 分支同样校验,错误文案保留调用方原始写法。
+    out_cron = await tool._arun(description="x", cron_expression="*/30 * * * *", mode="BOGUS")
+    assert out_cron == "Error: Unknown mode 'BOGUS'. Available: prompt, notify."
+    assert sched.added == []
+
+
+class _AgentRef:
+    current_conversation_id = "conv-1"
+
+
+@pytest.mark.asyncio
+async def test_schedule_task_conversation_id_from_agent_ref():
+    """conversation_id 缺省取 agent_ref.current_conversation_id(工厂注入)。"""
+    sched = FakeScheduler()
+    tool = ScheduleTaskTool(scheduler=sched, time_parser=FakeTimeParser(), agent_ref=_AgentRef())
+    await tool._arun(description="x", time_expression="in 1 hour")
+    assert sched.added[0].conversation_id == "conv-1"
+
+
+@pytest.mark.asyncio
+async def test_schedule_task_explicit_conversation_id_wins():
+    sched = FakeScheduler()
+    tool = ScheduleTaskTool(scheduler=sched, time_parser=FakeTimeParser(), agent_ref=_AgentRef())
+    await tool._arun(description="x", time_expression="in 1 hour", conversation_id="conv-2")
+    assert sched.added[0].conversation_id == "conv-2"
+
+
+@pytest.mark.asyncio
+async def test_schedule_task_no_agent_ref_yields_empty_conversation():
+    """无 agent_ref(或 current_conversation_id 为 None)时 conversation_id 为空串。"""
+    sched = FakeScheduler()
+    tool = ScheduleTaskTool(scheduler=sched, time_parser=FakeTimeParser())
+    await tool._arun(description="x", time_expression="in 1 hour")
+    assert sched.added[0].conversation_id == ""
+
+
+def test_make_event_tools_passes_agent_ref():
+    agent_ref = object()
+    tools = make_event_tools(FakeScheduler(), FakeTimeParser(), agent_ref=agent_ref)
+    schedule_tool = next(t for t in tools if t.name == "schedule_task")
+    assert schedule_tool.agent_ref is agent_ref

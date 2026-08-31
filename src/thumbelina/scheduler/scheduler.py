@@ -49,6 +49,11 @@ _MAX_SKIPPED_OCCURRENCES = 10_000
 DueCallback = Callable[[ScheduledTask], Awaitable[Any]]
 ConditionCallback = Callable[[str], Awaitable[bool]]
 
+# How long a prompt-mode task may keep the ``on_prompt_task`` runner busy
+# before the scheduler settles it as timed out (§5.4).  Default 300s; the
+# duck-typed config value (``config.prompt_timeout_seconds``) overrides it.
+_DEFAULT_PROMPT_TIMEOUT_SECONDS = 300
+
 
 def _iso(value: datetime | None) -> str | None:
     """JSON-safe ISO rendering for event payloads."""
@@ -113,6 +118,11 @@ class TaskScheduler:
         # Retained so the Heartbeat (§7.4) can re-create a dead polling loop
         # with the exact delivery callback this scheduler was started with.
         self._on_due_task: DueCallback | None = None
+        self._on_prompt_task: DueCallback | None = None
+        # Ids of prompt-mode tasks currently executing in the background
+        # (§5.4): the Heartbeat's stale-RUNNING reaper skips them so a long
+        # LLM call is not killed mid-flight.  Discarded on settlement.
+        self._inflight: set[str] = set()
         self._check_condition = check_condition
         self._store = store
         self._bus = bus
@@ -127,6 +137,13 @@ class TaskScheduler:
             else _DEFAULT_MISSED_GRACE_MINUTES
         )
         self._missed_grace = timedelta(minutes=grace_minutes)
+        # §5.4: prompt-mode tasks run the LLM, so a runaway agent call must
+        # not occupy the runner slot forever.
+        self._prompt_timeout = (
+            getattr(config, "prompt_timeout_seconds", _DEFAULT_PROMPT_TIMEOUT_SECONDS)
+            if config is not None
+            else _DEFAULT_PROMPT_TIMEOUT_SECONDS
+        )
 
     @property
     def running(self) -> bool:
@@ -472,19 +489,34 @@ class TaskScheduler:
     async def start(
         self,
         on_due_task: DueCallback | None = None,
+        on_prompt_task: DueCallback | None = None,
     ) -> None:
         """Start the background polling loop.
 
         Parameters
         ----------
         on_due_task:
-            Optional async callback invoked for each due task.  The
-            scheduler sets the task status to ``RUNNING`` (and emits
-            ``task.due``) before calling and to ``COMPLETED`` on success /
-            ``FAILED`` on error (D10).  A non-``None`` return value (a
-            delivery receipt) is recorded in the COMPLETED payload
+            Optional async callback invoked for each ``mode="notify"`` due
+            task.  The scheduler sets the task status to ``RUNNING`` (and
+            emits ``task.due``) before calling and to ``COMPLETED`` on
+            success / ``FAILED`` on error (D10).  A non-``None`` return
+            value (a delivery receipt) is recorded in the COMPLETED payload
             ``result``.  Without a callback due tasks are simply marked
             completed (v1 behaviour).
+        on_prompt_task:
+            Optional async callback invoked **in the background** for each
+            ``mode="prompt"`` due task (§5.4).  Firing stays synchronous up
+            to ``RUNNING`` + ``task.due`` (and the cron ``next_run`` advance,
+            decoupled from execution duration); the callback itself is
+            awaited as its own asyncio task with a
+            ``config.prompt_timeout_seconds`` (default 300) cap, so a long
+            LLM call never blocks the scan loop.  A returned reply string is
+            recorded in the COMPLETED payload ``result``; timeouts settle as
+            ``error="prompt timed out"``, other exceptions as
+            ``error=str(exc)``.  Without a callback a prompt task is settled
+            synchronously with ``error="prompt runner not configured"``
+            (once → FAILED, cron → PENDING) — the direct-complete analogue
+            of ``on_due_task=None``.
 
         Raises
         ------
@@ -495,8 +527,9 @@ class TaskScheduler:
             raise RuntimeError("Scheduler polling loop is already running")
 
         self._on_due_task = on_due_task
+        self._on_prompt_task = on_prompt_task
         self._running = True
-        self._poll_task = asyncio.create_task(self._poll_loop(on_due_task))
+        self._poll_task = asyncio.create_task(self._poll_loop(on_due_task, on_prompt_task))
 
     async def stop(self) -> None:
         """Stop the background polling loop gracefully.
@@ -525,20 +558,23 @@ class TaskScheduler:
         No-op unless the scheduler believes it is running *and* the previous
         loop task has actually finished — a deliberately stopped scheduler is
         never resurrected, and a live loop is never duplicated.  Reuses the
-        ``on_due_task`` callback captured by :meth:`start` so a restarted
-        loop delivers exactly like the original one.  Must be called from
-        within the running event loop (the Heartbeat loop is).
+        ``on_due_task``/``on_prompt_task`` callbacks captured by :meth:`start`
+        so a restarted loop delivers exactly like the original one.  Must be
+        called from within the running event loop (the Heartbeat loop is).
         """
         if not self._running:
             return
         old = self._poll_task
         if old is not None and not old.done():
             return
-        self._poll_task = asyncio.create_task(self._poll_loop(self._on_due_task))
+        self._poll_task = asyncio.create_task(
+            self._poll_loop(self._on_due_task, self._on_prompt_task)
+        )
 
     async def _poll_loop(
         self,
         on_due_task: DueCallback | None,
+        on_prompt_task: DueCallback | None = None,
     ) -> None:
         """Internal: periodically check for and execute due tasks.
 
@@ -568,7 +604,7 @@ class TaskScheduler:
                             continue
                         if not condition_met:
                             continue
-                    await self._fire_task(task, on_due_task)
+                    await self._fire_task(task, on_due_task, on_prompt_task)
             except Exception as exc:
                 # One poisoned round (bad comparison, store surprise, …)
                 # must not take the whole scheduler down: log and keep
@@ -598,8 +634,20 @@ class TaskScheduler:
             if not self._running:
                 break
 
-    async def _fire_task(self, task: ScheduledTask, on_due_task: DueCallback | None) -> None:
-        """Run one firing round (§5.2): RUNNING → DUE → callback → terminal.
+    async def _fire_task(
+        self,
+        task: ScheduledTask,
+        on_due_task: DueCallback | None,
+        on_prompt_task: DueCallback | None = None,
+    ) -> None:
+        """Run one firing round (§5.2/§5.4): RUNNING → DUE → delivery → terminal.
+
+        ``mode="notify"`` tasks follow the §5.2 inline path: the callback is
+        awaited in place (a slow delivery therefore blocks the scan round —
+        by design for notify).  ``mode="prompt"`` tasks fire synchronously up
+        to ``RUNNING`` + ``task.due`` and then hand off to
+        :meth:`_execute_prompt` as a background task (design §5.4) so a
+        potentially long LLM call never blocks the scan loop.
 
         ONCE tasks end in COMPLETED (success) or FAILED (error, D10).  CRON
         tasks return to PENDING with ``next_run`` advanced to the next
@@ -617,6 +665,29 @@ class TaskScheduler:
         await self._emit(
             self._make_event(task, TaskEventType.DUE, {"scheduled_for": _iso(scheduled_for)})
         )
+
+        if task.mode == "prompt":
+            # §5.4: cron slot is consumed at fire time, decoupled from the
+            # execution duration — next_run advances while still RUNNING so
+            # the scan never re-fires this round and the execution length is
+            # irrelevant to the schedule.
+            if task.trigger == TriggerKind.CRON:
+                try:
+                    task.next_run = CronTrigger(task.cron_expr or "").next_after(datetime.now())
+                except ValueError as exc:
+                    logger.warning("Cannot advance cron next_run for task %s: %s", task.id, exc)
+                await self._persist(task)
+            if on_prompt_task is None:
+                # No runner configured → settle directly (the prompt-mode
+                # analogue of the notify ``on_due_task=None`` direct path).
+                await self._settle_prompt(
+                    task, error="prompt runner not configured", started=started
+                )
+                return
+            self._inflight.add(task.id)
+            asyncio.create_task(self._execute_prompt(task, on_prompt_task, started))
+            return
+
         delivered: str | None = None
         try:
             if on_due_task is not None:
@@ -688,3 +759,99 @@ class TaskScheduler:
             task.status = TaskStatus.COMPLETED
             await self._persist(task)
         await self._emit(self._make_event(task, TaskEventType.COMPLETED, payload))
+
+    async def _execute_prompt(
+        self,
+        task: ScheduledTask,
+        on_prompt_task: DueCallback,
+        started: float,
+    ) -> None:
+        """Background execution for a prompt-mode task (§5.4).
+
+        The runner is capped by ``config.prompt_timeout_seconds`` (default
+        300) so a runaway LLM call settles as ``error="prompt timed out"``
+        instead of occupying the runner slot forever.  Settlement is
+        otherwise identical in semantics to the notify path — including the
+        I2 reaper guard: if the Heartbeat failed the task while the runner
+        was in flight (it should not — ``_inflight`` excludes it, but the
+        startup/recover residue path can), that FAILED verdict is kept.
+        """
+        try:
+            try:
+                reply = await asyncio.wait_for(
+                    on_prompt_task(task), timeout=float(self._prompt_timeout)
+                )
+            except TimeoutError:
+                await self._settle_prompt(task, error="prompt timed out", started=started)
+                return
+            except Exception as exc:
+                logger.warning("Prompt task %s failed: %s", task.id, exc)
+                await self._settle_prompt(task, error=str(exc), started=started)
+                return
+            await self._settle_prompt(task, reply=str(reply), started=started)
+        finally:
+            self._inflight.discard(task.id)
+
+    async def _settle_prompt(
+        self,
+        task: ScheduledTask,
+        *,
+        started: float,
+        reply: str | None = None,
+        error: str | None = None,
+    ) -> None:
+        """Settle a prompt-mode task's terminal/next-round state (§5.4).
+
+        Success: once → COMPLETED with ``payload.result=reply``, cron →
+        PENDING (``next_run`` was already advanced at fire time).  Failure:
+        once → FAILED / cron → PENDING, ``error`` recorded in both the task
+        and the ``task.failed`` payload.  ``_inflight`` is cleaned up by the
+        caller (:meth:`_execute_prompt`'s ``finally``).
+        """
+        if task.status == TaskStatus.FAILED:
+            # I2: keep the Heartbeat's FAILED verdict (normally excluded by
+            # _inflight, but a recover residue could still trip it).
+            logger.warning(
+                "Prompt task %s was reaped as FAILED; keeping the FAILED verdict", task.id
+            )
+            return
+        if error is not None:
+            task.error = error
+            if task.trigger == TriggerKind.ONCE:
+                task.status = TaskStatus.FAILED
+            else:
+                task.status = TaskStatus.PENDING
+            await self._persist(task)
+            await self._emit(
+                self._make_event(
+                    task,
+                    TaskEventType.FAILED,
+                    {
+                        "error": error,
+                        "scheduled_for": _iso(
+                            task.scheduled_time
+                            if task.trigger == TriggerKind.ONCE
+                            else task.next_run
+                        ),
+                        "duration_ms": int((time.monotonic() - started) * 1000),
+                    },
+                )
+            )
+            return
+        payload: dict[str, Any] = {"duration_ms": int((time.monotonic() - started) * 1000)}
+        if reply is not None:
+            payload["result"] = reply
+        if task.trigger == TriggerKind.CRON:
+            task.status = TaskStatus.PENDING
+        else:
+            task.status = TaskStatus.COMPLETED
+        await self._persist(task)
+        await self._emit(self._make_event(task, TaskEventType.COMPLETED, payload))
+
+    # Reaper coordination for the Heartbeat (§5.4/§7.4): a prompt task whose
+    # id is in _inflight is executing in the background — the stale-RUNNING
+    # check skips it so a long LLM call is not killed mid-flight.
+    @property
+    def inflight(self) -> frozenset[str]:
+        """Ids of prompt-mode tasks currently executing in the background."""
+        return frozenset(self._inflight)

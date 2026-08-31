@@ -267,12 +267,24 @@ class Heartbeat:
         return "poll_loop"
 
     async def _check_stale_running(self, now: datetime) -> str | None:
-        """Item 2: RUNNING longer than stale_running_minutes → FAILED."""
+        """Item 2: RUNNING longer than stale_running_minutes → FAILED.
+
+        Prompt-mode tasks whose id is in the scheduler's ``_inflight`` set
+        are executing in the background (§5.4) — a long LLM call must not be
+        killed mid-flight — so they are skipped even when their ``last_run``
+        looks stale.  Everything else is reaped as before.
+        """
         acted = False
+        inflight = self._scheduler.inflight
         for task in await self._scheduler.list_tasks():
             if task.status != TaskStatus.RUNNING or task.last_run is None:
                 continue  # no reliable start reference → leave it alone
             if now - task.last_run <= self._stale_running:
+                continue
+            if task.id in inflight:
+                # §5.4 mutual exclusion: background prompt execution owns the
+                # task; the _execute_prompt finally guarantees settlement.
+                logger.debug("Task %s RUNNING but in-flight; skipping stale-running reap", task.id)
                 continue
             scheduled_for = (
                 task.scheduled_time if task.trigger == TriggerKind.ONCE else task.next_run

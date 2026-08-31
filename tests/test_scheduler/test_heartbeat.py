@@ -196,6 +196,40 @@ class TestStaleRunning:
         assert row.error == "stale running"
 
 
+class TestStaleRunningSkipsInflight:
+    """Task 12 (§5.4 互斥): 后台 prompt 执行中的 RUNNING 任务被 _inflight 保护，
+    heartbeat 僵尸复收跳过；不在 inflight 的照旧 FAILED。"""
+
+    async def test_inflight_prompt_task_not_reaped_while_other_is(self) -> None:
+        bus = EventBus()
+        log = _EventLog(bus)
+        sched = TaskScheduler(bus=bus)
+        # 模拟后台 prompt 执行中：任务卡 RUNNING 超时，但 id 在 _inflight。
+        sched._inflight.add("t-inflight")
+        inflight = _task(
+            "t-inflight",
+            status=TaskStatus.RUNNING,
+            last_run=FIXED_NOW - timedelta(minutes=11),
+        )
+        stale = _task(
+            "t-stale",
+            status=TaskStatus.RUNNING,
+            last_run=FIXED_NOW - timedelta(minutes=11),
+        )
+        await sched.add_task(inflight)
+        await sched.add_task(stale)
+
+        hb = Heartbeat(sched, bus, _config())
+        await hb._run_checks(FIXED_NOW)
+
+        # In-flight task survives; the other stale RUNNING is reaped as usual.
+        assert inflight.status == TaskStatus.RUNNING
+        assert stale.status == TaskStatus.FAILED
+        assert stale.error == "stale running"
+        failed = log.of_type(TaskEventType.FAILED)
+        assert [e.task_id for e in failed] == ["t-stale"]
+
+
 # ----------------------------------------------------------------------
 # §7.4 row 3: cron next_run behind now → advance + summary task.missed
 # ----------------------------------------------------------------------

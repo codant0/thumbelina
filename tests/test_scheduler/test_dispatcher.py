@@ -205,6 +205,144 @@ class TestImChannelDelivery:
 
 
 # ----------------------------------------------------------------------
+# Task 12: on_prompt_task — 编排 prompt_runner + 频道副本 (§5.4)
+# ----------------------------------------------------------------------
+
+
+REPLY = "早安简报已生成（prompt 回复）"
+
+
+class TestPromptModeDelivery:
+    """dispatcher.on_prompt_task: mode 校验 → prompt_runner → 频道副本（wechat/qq
+    发送的是**回复**）→ 返回 reply。dispatcher 永不 emit（与 notify 同裁定）。"""
+
+    async def test_without_runner_raises(self):
+        dispatcher = DeliveryDispatcher(channels={})
+
+        with pytest.raises(DeliveryError, match="prompt runner not configured"):
+            await dispatcher.on_prompt_task(_task(mode="prompt"))
+
+    async def test_notify_mode_raises(self):
+        async def runner(task: ScheduledTask) -> str:
+            return "unused"
+
+        dispatcher = DeliveryDispatcher(channels={}, prompt_runner=runner)
+
+        with pytest.raises(DeliveryError, match="mode not supported"):
+            await dispatcher.on_prompt_task(_task(mode="notify"))
+
+    async def test_web_returns_reply_without_any_copy(self):
+        """web prompt task: reply returned, zero channel sends, bus silent."""
+        spy_bus = SpyBus()
+        received: list[str] = []
+
+        async def runner(task: ScheduledTask) -> str:
+            received.append(task.id)
+            return REPLY
+
+        dispatcher = DeliveryDispatcher(channels={}, bus=spy_bus, prompt_runner=runner)
+
+        reply = await dispatcher.on_prompt_task(_task(mode="prompt"))
+
+        assert reply == REPLY
+        assert received == ["task-1"]
+        assert spy_bus.emitted == []
+
+    @pytest.mark.parametrize(
+        ("name", "enum"),
+        [("wechat", DeliveryChannel.WECHAT), ("qq", DeliveryChannel.QQ)],
+    )
+    async def test_im_channel_sends_reply(self, name, enum):
+        """IM prompt task: the REPLY (not task.content) goes out via send_message."""
+        channel = FakeChannel(last_user_id="wx-user-7")
+        sent_tasks: list[str] = []
+
+        async def runner(task: ScheduledTask) -> str:
+            sent_tasks.append(task.id)
+            return REPLY
+
+        dispatcher = DeliveryDispatcher(channels={name: channel}, prompt_runner=runner)
+
+        reply = await dispatcher.on_prompt_task(_task(mode="prompt", channel=enum))
+
+        assert reply == REPLY
+        assert sent_tasks == ["task-1"]
+        assert channel.sent == [("wx-user-7", REPLY)]  # the reply, not CONTENT
+
+    async def test_missing_channel_raises(self):
+        async def runner(task: ScheduledTask) -> str:
+            return REPLY
+
+        dispatcher = DeliveryDispatcher(channels={}, prompt_runner=runner)
+
+        with pytest.raises(DeliveryError, match="channel not available"):
+            await dispatcher.on_prompt_task(_task(mode="prompt", channel=DeliveryChannel.WECHAT))
+
+    async def test_no_recent_user_raises(self):
+        channel = FakeChannel(last_user_id=None)
+
+        async def runner(task: ScheduledTask) -> str:
+            return REPLY
+
+        dispatcher = DeliveryDispatcher(channels={"wechat": channel}, prompt_runner=runner)
+
+        with pytest.raises(DeliveryError, match="no recent user on channel"):
+            await dispatcher.on_prompt_task(_task(mode="prompt", channel=DeliveryChannel.WECHAT))
+
+        assert channel.sent == []
+
+    async def test_runner_exception_propagates_unchanged(self):
+        async def boom(task: ScheduledTask) -> str:
+            raise ValueError("model down")
+
+        dispatcher = DeliveryDispatcher(channels={}, prompt_runner=boom)
+
+        with pytest.raises(ValueError, match="model down"):  # noqa: PT011 - exact type matters
+            await dispatcher.on_prompt_task(_task(mode="prompt"))
+
+    async def test_unknown_channel_value_raises(self):
+        async def runner(task: ScheduledTask) -> str:
+            return REPLY
+
+        dispatcher = DeliveryDispatcher(channels={}, prompt_runner=runner)
+
+        with pytest.raises(DeliveryError, match="unknown channel: sms"):
+            await dispatcher.on_prompt_task(_task(mode="prompt", channel="sms"))
+
+    async def test_no_emit_on_prompt_paths(self):
+        """Success and failure prompt deliveries leave the injected bus silent."""
+        spy_bus = SpyBus()
+        channel = FakeChannel(last_user_id="u-1")
+
+        async def runner(task: ScheduledTask) -> str:
+            return REPLY
+
+        dispatcher = DeliveryDispatcher(
+            channels={"wechat": channel}, bus=spy_bus, prompt_runner=runner
+        )
+
+        await dispatcher.on_prompt_task(_task(mode="prompt"))
+        await dispatcher.on_prompt_task(_task(mode="prompt", channel=DeliveryChannel.WECHAT))
+
+        with pytest.raises(DeliveryError):
+            await dispatcher.on_prompt_task(_task(mode="notify"))
+
+        assert spy_bus.emitted == []
+
+
+class _PromptRunner:
+    """A prompt_runner stub that records the task it received."""
+
+    def __init__(self, reply: str) -> None:
+        self.reply = reply
+        self.seen: list[str] = []
+
+    async def __call__(self, task: ScheduledTask) -> str:
+        self.seen.append(task.id)
+        return self.reply
+
+
+# ----------------------------------------------------------------------
 # unsupported deliveries
 # ----------------------------------------------------------------------
 
@@ -217,10 +355,11 @@ class TestUnsupportedDeliveries:
         assert issubclass(DeliveryError, RuntimeError)
 
     async def test_prompt_mode_raises_not_supported(self):
-        """mode != notify is a reserved failure (prompt lands later)."""
+        """on_due_task does not handle prompt tasks — those go through the
+        dedicated on_prompt_task entry (design §5.4)."""
         dispatcher = DeliveryDispatcher(channels={})
 
-        with pytest.raises(DeliveryError, match="mode not supported yet"):
+        with pytest.raises(DeliveryError, match="mode not supported"):
             await dispatcher.on_due_task(_task(mode="prompt"))
 
     async def test_unknown_channel_value_raises_with_actual_value(self):
@@ -390,3 +529,71 @@ class TestSchedulerIntegration:
         assert completed == []
         assert len(failed) == 1
         assert failed[0].payload["error"] == "channel not available"
+
+    async def test_prompt_task_full_chain_single_completed_with_reply(self):
+        """Full chain: prompt once task → on_prompt_task runs the runner → the
+        reply lands in the COMPLETED payload.result; no channel copy for web."""
+        scheduler_bus = EventBus()
+        completed: list[TaskEvent] = []
+        failed: list[TaskEvent] = []
+        scheduler_bus.subscribe(TaskEventType.COMPLETED, completed.append)
+        scheduler_bus.subscribe(TaskEventType.FAILED, failed.append)
+
+        runner = _PromptRunner(REPLY)
+        dispatcher = DeliveryDispatcher(channels={}, prompt_runner=runner)
+        scheduler = TaskScheduler(bus=scheduler_bus)
+        task = _task(
+            id="prompt-1",
+            mode="prompt",
+            scheduled_time=datetime.now() - timedelta(seconds=1),
+        )
+        await scheduler.add_task(task)
+
+        await scheduler.start(
+            on_due_task=dispatcher.on_due_task, on_prompt_task=dispatcher.on_prompt_task
+        )
+        try:
+            settled = await _wait_for_status(scheduler, "prompt-1", TaskStatus.COMPLETED)
+        finally:
+            await scheduler.stop()
+
+        assert settled.status is TaskStatus.COMPLETED
+        assert runner.seen == ["prompt-1"]
+        assert len(completed) == 1
+        assert completed[0].payload["result"] == REPLY
+        assert "duration_ms" in completed[0].payload
+        assert failed == []
+
+    async def test_prompt_im_task_full_chain_sends_reply_via_channel(self):
+        """Full chain: prompt wechat task → runner reply → send_message(reply)."""
+        scheduler_bus = EventBus()
+        completed: list[TaskEvent] = []
+        failed: list[TaskEvent] = []
+        scheduler_bus.subscribe(TaskEventType.COMPLETED, completed.append)
+        scheduler_bus.subscribe(TaskEventType.FAILED, failed.append)
+
+        channel = FakeChannel(last_user_id="wx-user-7")
+        runner = _PromptRunner(REPLY)
+        dispatcher = DeliveryDispatcher(channels={"wechat": channel}, prompt_runner=runner)
+        scheduler = TaskScheduler(bus=scheduler_bus)
+        task = _task(
+            id="prompt-3",
+            mode="prompt",
+            channel=DeliveryChannel.WECHAT,
+            scheduled_time=datetime.now() - timedelta(seconds=1),
+        )
+        await scheduler.add_task(task)
+
+        await scheduler.start(
+            on_due_task=dispatcher.on_due_task, on_prompt_task=dispatcher.on_prompt_task
+        )
+        try:
+            settled = await _wait_for_status(scheduler, "prompt-3", TaskStatus.COMPLETED)
+        finally:
+            await scheduler.stop()
+
+        assert settled.status is TaskStatus.COMPLETED
+        assert channel.sent == [("wx-user-7", REPLY)]  # the reply, not the content
+        assert len(completed) == 1
+        assert completed[0].payload["result"] == REPLY
+        assert failed == []

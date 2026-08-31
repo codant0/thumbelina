@@ -108,6 +108,7 @@ def test_scheduler_config_defaults() -> None:
     assert cfg.stale_running_minutes == 10
     assert cfg.event_retention == 500
     assert cfg.default_channel == "web"
+    assert cfg.prompt_timeout_seconds == 300
 
 
 def test_scheduler_config_yaml_override(tmp_path) -> None:
@@ -168,6 +169,7 @@ async def test_list_tasks_returns_legacy_and_new_fields(task_client: TestClient)
             scheduled_time=datetime(2027, 1, 1, 10, 0, 0),
             channel=DeliveryChannel.WEB,
             content="hello",
+            mode="prompt",  # §5.4: web 创建任务默认 prompt(直接构造仍默认 notify,故显式传)
             source="web",
         )
     )
@@ -189,9 +191,10 @@ async def test_list_tasks_returns_legacy_and_new_fields(task_client: TestClient)
     assert item["last_run"] is None
     assert item["channel"] == "web"
     assert item["content"] == "hello"
-    assert item["mode"] == "notify"
+    assert item["mode"] == "prompt"  # §5.4: mode 默认 prompt 的行为变更
     assert item["source"] == "web"
     assert item["error"] is None
+    assert item["conversation_id"] is None
 
 
 async def test_list_tasks_cron_scheduled_time_null(task_client: TestClient) -> None:
@@ -386,6 +389,91 @@ def test_create_scheduler_unavailable_503(client: TestClient) -> None:
     client.app.state.task_scheduler = None
     resp = client.post("/api/v1/tasks", json={"description": "x"})
     assert resp.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# POST /tasks — mode 默认 prompt / 显式 notify / conversation_id 透传 (§5.4)
+# ---------------------------------------------------------------------------
+
+
+async def test_create_task_defaults_to_prompt_mode(task_client: TestClient) -> None:
+    """mode 缺省为 prompt(plan-mandated 行为变更,设计 §5.4:定时任务默认'干活')。"""
+    resp = task_client.post(
+        "/api/v1/tasks",
+        json={
+            "description": "default mode",
+            "trigger": "once",
+            "scheduled_time": "2027-01-01T09:00:00",
+        },
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["mode"] == "prompt"
+    scheduler: TaskScheduler = task_client.app.state.task_scheduler
+    task = await scheduler.get_task(body["id"])
+    assert task is not None and task.mode == "prompt"
+
+
+async def test_create_task_explicit_notify_mode(task_client: TestClient) -> None:
+    resp = task_client.post(
+        "/api/v1/tasks",
+        json={
+            "description": "explicit notify",
+            "trigger": "once",
+            "scheduled_time": "2027-01-01T09:00:00",
+            "mode": "notify",
+        },
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["mode"] == "notify"
+    scheduler: TaskScheduler = task_client.app.state.task_scheduler
+    task = await scheduler.get_task(body["id"])
+    assert task is not None and task.mode == "notify"
+
+
+async def test_create_cron_task_defaults_to_prompt_mode(task_client: TestClient) -> None:
+    resp = task_client.post(
+        "/api/v1/tasks",
+        json={"description": "loop", "trigger": "cron", "cron": "*/5 * * * *"},
+    )
+    assert resp.status_code == 201
+    assert resp.json()["mode"] == "prompt"
+
+
+def test_create_task_invalid_mode_422(task_client: TestClient) -> None:
+    resp = task_client.post(
+        "/api/v1/tasks",
+        json={
+            "description": "x",
+            "trigger": "once",
+            "scheduled_time": "2027-01-01T09:00:00",
+            "mode": "bogus",
+        },
+    )
+    assert resp.status_code == 422
+
+
+async def test_create_task_conversation_id_passthrough(task_client: TestClient) -> None:
+    """conversation_id 直传:落库的 ScheduledTask 与序列化响应均携带。"""
+    resp = task_client.post(
+        "/api/v1/tasks",
+        json={
+            "description": "with conversation",
+            "trigger": "once",
+            "scheduled_time": "2027-01-01T09:00:00",
+            "conversation_id": "conv-9",
+        },
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["conversation_id"] == "conv-9"
+    scheduler: TaskScheduler = task_client.app.state.task_scheduler
+    task = await scheduler.get_task(body["id"])
+    assert task is not None and task.conversation_id == "conv-9"
+    stored: TaskStore = task_client.app.state.task_store
+    stored_task = await stored.get_task(body["id"])
+    assert stored_task is not None and stored_task.conversation_id == "conv-9"
 
 
 # ---------------------------------------------------------------------------

@@ -479,6 +479,70 @@ def _due_cron_task(task_id: str = "cron-due") -> ScheduledTask:
     )
 
 
+def _prompt_once_task(task_id: str = "prompt-once") -> ScheduledTask:
+    """A PENDING once task, mode=prompt, due now."""
+    return ScheduledTask(
+        id=task_id,
+        description="Prompt once",
+        scheduled_time=datetime.now() - timedelta(hours=1),
+        mode="prompt",
+    )
+
+
+def _prompt_cron_task(task_id: str = "prompt-cron") -> ScheduledTask:
+    """A PENDING cron task, mode=prompt, whose next_run is already in the past."""
+    return ScheduledTask(
+        id=task_id,
+        description="Every minute prompt",
+        trigger=TriggerKind.CRON,
+        cron_expr="* * * * *",
+        scheduled_time=None,
+        next_run=datetime.now() - timedelta(minutes=1),
+        mode="prompt",
+    )
+
+
+async def _wait_for(predicate, timeout: float = 5.0) -> bool:
+    """Poll ``predicate`` until it holds or ``timeout`` (real seconds) pass."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        if predicate():
+            return True
+        await asyncio.sleep(0.01)
+    return predicate()
+
+
+async def _wait_for_status(
+    scheduler: TaskScheduler, task_id: str, status: TaskStatus
+) -> ScheduledTask:
+    """Poll until the task reaches ``status`` (bounded)."""
+    deadline = asyncio.get_running_loop().time() + 5.0
+    while True:
+        task = await scheduler.get_task(task_id)
+        if task is not None and task.status == status:
+            return task
+        if asyncio.get_running_loop().time() > deadline:
+            seen = task.status.value if task is not None else "missing"
+            raise AssertionError(f"task {task_id} never reached {status} (saw {seen})")
+        await asyncio.sleep(0.01)
+
+
+async def _wait_for_settled(scheduler: TaskScheduler, task_id: str) -> ScheduledTask:
+    """Poll until a prompt task is fully settled (out of _inflight with a
+    non-None error, or terminal status).  Unlike _wait_for_status this does
+    not short-circuit on a still-pending cron task that has not fired yet."""
+    deadline = asyncio.get_running_loop().time() + 5.0
+    while True:
+        task = await scheduler.get_task(task_id)
+        if task is not None and task.id not in scheduler._inflight and task.error is not None:
+            return task
+        if asyncio.get_running_loop().time() > deadline:
+            seen = f"status={task.status.value}" if task is not None else "missing"
+            raise AssertionError(f"task {task_id} never settled (saw {seen})")
+        await asyncio.sleep(0.01)
+
+
 @pytest.fixture
 def engine(tmp_path: Path):
     """File-backed sqlite engine with both scheduler tables created."""
@@ -1590,3 +1654,269 @@ class TestV2Construction:
         await scheduler.stop()
 
         assert executed == ["no-recover"]
+
+
+class TestPromptMode:
+    """Task 12: mode="prompt" — 后台执行、cron 槽位提前消费、超时、_inflight
+    （设计 §5.4）。notify 路径行为逐字不变；这些用例只针对 prompt 分支。"""
+
+    @pytest.mark.asyncio
+    async def test_prompt_fire_does_not_block_scan_and_tracks_inflight(self):
+        """A slow prompt execution must not block the scan round: a second due
+        task fires while the prompt task is still executing, and the prompt
+        task id is in ``_inflight`` until it settles."""
+        scheduler = TaskScheduler()
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def slow_runner(task: ScheduledTask) -> str:
+            entered.set()
+            await release.wait()
+            return "slow reply"
+
+        prompt = _prompt_once_task("prompt-slow")
+        second = ScheduledTask(
+            id="prompt-second",
+            description="Second task",
+            scheduled_time=datetime.now() - timedelta(hours=1),
+            mode="notify",
+        )
+        await scheduler.add_task(prompt)
+        await scheduler.add_task(second)
+
+        executed: list[str] = []
+
+        async def on_due(t: ScheduledTask) -> None:
+            executed.append(t.id)
+
+        await scheduler.start(on_due_task=on_due, on_prompt_task=slow_runner)
+        try:
+            assert await _wait_for(entered.is_set)
+            # The scan round was not blocked: the second task already fired
+            # while the prompt execution is still in flight.
+            assert "prompt-second" in executed
+            assert prompt.id in scheduler._inflight
+            running = await scheduler.get_task("prompt-slow")
+            assert running is not None and running.status == TaskStatus.RUNNING
+        finally:
+            release.set()
+            assert await _wait_for(lambda: prompt.id not in scheduler._inflight)
+            await scheduler.stop()
+
+        updated = await scheduler.get_task("prompt-slow")
+        assert updated is not None and updated.status == TaskStatus.COMPLETED
+
+    @pytest.mark.asyncio
+    async def test_prompt_once_completed_records_reply_result(self):
+        recorder = _EventRecorder()
+        scheduler = TaskScheduler(bus=_make_bus(recorder))
+        task = _prompt_once_task("prompt-once")
+        await scheduler.add_task(task)
+
+        async def runner(t: ScheduledTask) -> str:
+            return "早安简报已生成"
+
+        await scheduler.start(on_prompt_task=runner)
+        try:
+            settled = await _wait_for_status(scheduler, "prompt-once", TaskStatus.COMPLETED)
+        finally:
+            await scheduler.stop()
+
+        assert settled.status is TaskStatus.COMPLETED
+        assert recorder.types() == ["task.created", "task.due", "task.completed"]
+        completed = [e for e in recorder.events if e.type == TaskEventType.COMPLETED]
+        assert len(completed) == 1
+        assert completed[0].payload["result"] == "早安简报已生成"
+        assert task.id not in scheduler._inflight
+
+    @pytest.mark.asyncio
+    async def test_prompt_cron_advances_next_run_immediately_while_running(self, store):
+        """The cron slot is consumed at fire time, decoupled from the execution
+        duration: next_run is advanced and persisted while the task is still
+        RUNNING, and the advanced value is kept at settle time."""
+        recorder = _EventRecorder()
+        scheduler = TaskScheduler(store=store, bus=_make_bus(recorder))
+        now = datetime.now()
+        task = _prompt_cron_task("prompt-cron-advance")
+        task.next_run = now - timedelta(minutes=1)
+        await scheduler.add_task(task)
+
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def runner(t: ScheduledTask) -> str:
+            entered.set()
+            await release.wait()
+            return "cron reply"
+
+        await scheduler.start(on_prompt_task=runner)
+        try:
+            assert await _wait_for(entered.is_set)
+            running = await scheduler.get_task("prompt-cron-advance")
+            assert running is not None and running.status == TaskStatus.RUNNING
+            assert running.next_run is not None and running.next_run > now
+            persisted = await store.get_task("prompt-cron-advance")
+            assert persisted is not None
+            assert persisted.status == TaskStatus.RUNNING
+            assert persisted.next_run is not None and persisted.next_run == running.next_run
+        finally:
+            release.set()
+            assert await _wait_for(lambda: task.id not in scheduler._inflight)
+            await scheduler.stop()
+
+        updated = await scheduler.get_task("prompt-cron-advance")
+        assert updated is not None and updated.status == TaskStatus.PENDING
+        assert updated.next_run == running.next_run  # not recomputed at settle time
+        completed = [e for e in recorder.events if e.type == TaskEventType.COMPLETED]
+        assert len(completed) == 1
+        assert completed[0].payload["result"] == "cron reply"
+
+    @pytest.mark.asyncio
+    async def test_prompt_timeout_fails_once_with_error(self):
+        recorder = _EventRecorder()
+        scheduler = TaskScheduler(
+            bus=_make_bus(recorder), config=SimpleNamespace(prompt_timeout_seconds=1)
+        )
+        task = _prompt_once_task("prompt-timeout")
+        await scheduler.add_task(task)
+
+        async def forever(t: ScheduledTask) -> str:
+            await asyncio.sleep(30)
+
+        await scheduler.start(on_prompt_task=forever)
+        try:
+            settled = await _wait_for_status(scheduler, "prompt-timeout", TaskStatus.FAILED)
+        finally:
+            await scheduler.stop()
+
+        assert settled.status is TaskStatus.FAILED
+        assert settled.error == "prompt timed out"
+        failed = [e for e in recorder.events if e.type == TaskEventType.FAILED]
+        assert len(failed) == 1
+        assert failed[0].payload["error"] == "prompt timed out"
+        assert task.id not in scheduler._inflight
+
+    @pytest.mark.asyncio
+    async def test_prompt_runner_exception_fails_once(self):
+        recorder = _EventRecorder()
+        scheduler = TaskScheduler(bus=_make_bus(recorder))
+        task = _prompt_once_task("prompt-exc")
+        await scheduler.add_task(task)
+
+        async def boom(t: ScheduledTask) -> str:
+            raise RuntimeError("llm exploded")
+
+        await scheduler.start(on_prompt_task=boom)
+        try:
+            settled = await _wait_for_status(scheduler, "prompt-exc", TaskStatus.FAILED)
+        finally:
+            await scheduler.stop()
+
+        assert settled.status is TaskStatus.FAILED
+        assert settled.error == "llm exploded"
+        failed = [e for e in recorder.events if e.type == TaskEventType.FAILED]
+        assert len(failed) == 1
+        assert failed[0].payload["error"] == "llm exploded"
+
+    @pytest.mark.asyncio
+    async def test_prompt_cron_failure_returns_pending_with_error(self, store):
+        scheduler = TaskScheduler(store=store)
+        now = datetime.now()
+        task = _prompt_cron_task("prompt-cron-fail")
+        task.next_run = now - timedelta(minutes=1)
+        await scheduler.add_task(task)
+
+        async def boom(t: ScheduledTask) -> str:
+            raise RuntimeError("boom")
+
+        await scheduler.start(on_prompt_task=boom)
+        try:
+            # Wait for the settle (error recorded), not the PENDING status —
+            # the cron task is already PENDING before it fires.
+            settled = await _wait_for_settled(scheduler, "prompt-cron-fail")
+        finally:
+            await scheduler.stop()
+
+        assert settled.status is TaskStatus.PENDING
+        assert settled.error == "boom"
+        assert settled.next_run is not None and settled.next_run > now
+        persisted = await store.get_task("prompt-cron-fail")
+        assert persisted is not None
+        assert persisted.status == TaskStatus.PENDING
+        assert persisted.error == "boom"
+        assert persisted.next_run is not None and persisted.next_run > now
+
+    @pytest.mark.asyncio
+    async def test_prompt_without_runner_directly_fails(self):
+        """start() without on_prompt_task settles prompt tasks synchronously:
+        once → FAILED, cron → PENDING (aligned with notify's
+        start(on_due_task=None) direct-complete)."""
+        recorder = _EventRecorder()
+        scheduler = TaskScheduler(bus=_make_bus(recorder))
+        once = _prompt_once_task("prompt-norunner-once")
+        cron = _prompt_cron_task("prompt-norunner-cron")
+        await scheduler.add_task(once)
+        await scheduler.add_task(cron)
+
+        await scheduler.start()  # no callbacks at all
+        try:
+            await asyncio.sleep(0.2)
+        finally:
+            await scheduler.stop()
+
+        settled_once = await scheduler.get_task("prompt-norunner-once")
+        assert settled_once is not None and settled_once.status == TaskStatus.FAILED
+        assert settled_once.error == "prompt runner not configured"
+        settled_cron = await scheduler.get_task("prompt-norunner-cron")
+        assert settled_cron is not None and settled_cron.status == TaskStatus.PENDING
+        assert settled_cron.error == "prompt runner not configured"
+        assert once.id not in scheduler._inflight
+        failed = [e for e in recorder.events if e.type == TaskEventType.FAILED]
+        assert len(failed) == 2
+        assert all(e.payload["error"] == "prompt runner not configured" for e in failed)
+
+    @pytest.mark.asyncio
+    async def test_inflight_removed_after_settlement(self):
+        """_inflight contains the task id while executing and is discarded
+        after settlement, driven by a controllable prompt runner."""
+        scheduler = TaskScheduler()
+        task = _prompt_once_task("prompt-inflight")
+        await scheduler.add_task(task)
+
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def runner(t: ScheduledTask) -> str:
+            entered.set()
+            await release.wait()
+            return "ok"
+
+        await scheduler.start(on_prompt_task=runner)
+        try:
+            assert await _wait_for(entered.is_set)
+            assert task.id in scheduler._inflight
+            release.set()
+            assert await _wait_for(lambda: task.id not in scheduler._inflight)
+        finally:
+            await scheduler.stop()
+
+        updated = await scheduler.get_task("prompt-inflight")
+        assert updated is not None and updated.status == TaskStatus.COMPLETED
+
+    @pytest.mark.asyncio
+    async def test_prompt_cron_timeout_returns_pending_with_timeout_error(self):
+        scheduler = TaskScheduler(config=SimpleNamespace(prompt_timeout_seconds=1))
+        task = _prompt_cron_task("prompt-cron-timeout")
+        await scheduler.add_task(task)
+
+        async def forever(t: ScheduledTask) -> str:
+            await asyncio.sleep(30)
+
+        await scheduler.start(on_prompt_task=forever)
+        try:
+            settled = await _wait_for_settled(scheduler, "prompt-cron-timeout")
+        finally:
+            await scheduler.stop()
+
+        assert settled.status is TaskStatus.PENDING
+        assert settled.error == "prompt timed out"
