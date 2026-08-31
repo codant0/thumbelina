@@ -36,6 +36,19 @@ function payloadError(payload: TaskEventVO['payload']): string | null {
   return null
 }
 
+function payloadResult(payload: TaskEventVO['payload']): string | null {
+  if (payload && typeof payload === 'object' && 'result' in payload && payload.result != null) {
+    return String(payload.result)
+  }
+  return null
+}
+
+// Long LLM replies are summarized in the feed; full text stays in the
+// conversation history (§5.4).  The ellipsis counts toward the limit.
+function truncate(text: string, max = 80): string {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text
+}
+
 /** 「最近触发记录」卡片:任务生命周期事件流(GET /tasks/events + WS 增量)。 */
 export function TaskEventFeed() {
   const [events, setEvents] = useState<TaskEventVO[]>([])
@@ -69,6 +82,7 @@ export function TaskEventFeed() {
         ) : (
           events.map(event => {
             const error = payloadError(event.payload)
+            const result = payloadResult(event.payload)
             return (
               <div key={event.id} className="task-item" data-testid="event-item">
                 <div className="task-info">
@@ -86,6 +100,15 @@ export function TaskEventFeed() {
                     </span>
                   </div>
                   {event.content && <div className="task-title">{event.content}</div>}
+                  {result && (
+                    <div
+                      className="task-meta event-result"
+                      data-testid="event-result"
+                      style={{ color: 'var(--success)' }}
+                    >
+                      {truncate(result)}
+                    </div>
+                  )}
                   {error && (
                     <div
                       className="task-meta event-error"

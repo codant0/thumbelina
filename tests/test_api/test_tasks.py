@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import sys
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -30,7 +30,7 @@ from thumbelina.config.models import (
 if TYPE_CHECKING:
     from thumbelina.scheduler.events import EventBus
     from thumbelina.scheduler.heartbeat import Heartbeat
-    from thumbelina.scheduler.models import TaskEvent
+    from thumbelina.scheduler.models import ScheduledTask, TaskEvent
     from thumbelina.scheduler.scheduler import TaskScheduler
     from thumbelina.scheduler.store import TaskStore
 
@@ -394,6 +394,20 @@ def test_create_scheduler_unavailable_503(client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 # POST /tasks — mode 默认 prompt / 显式 notify / conversation_id 透传 (§5.4)
 # ---------------------------------------------------------------------------
+
+
+def test_create_task_mode_field_describes_both_modes(task_client: TestClient) -> None:
+    """T13 / Task 12 Minor 3: the API mode field's description names both
+    prompt and notify modes (the default is prompt, per §5.4)."""
+    openapi = task_client.app.openapi()
+    post = openapi["paths"]["/api/v1/tasks"]["post"]
+    schema_ref = post["requestBody"]["content"]["application/json"]["schema"]["$ref"]
+    schema = openapi["components"]["schemas"][schema_ref.rsplit("/", 1)[-1]]
+    mode = schema["properties"]["mode"]
+    assert mode["default"] == "prompt"
+    assert mode["enum"] == ["prompt", "notify"]
+    description = mode.get("description", "")
+    assert "prompt" in description and "notify" in description
 
 
 async def test_create_task_defaults_to_prompt_mode(task_client: TestClient) -> None:
@@ -798,3 +812,229 @@ async def test_lifespan_bus_has_hooks_wired(client: TestClient, monkeypatch) -> 
 
     assert len(frames) == 1
     assert frames[0]["task_event"]["type"] == "task.created"
+
+
+# ---------------------------------------------------------------------------
+# T13: prompt 模式装配——run_prompt 闭包(会话归属/串行化/agent.clone().run/
+# 对话框实时可见) + 事件流 result (§5.4)
+# ---------------------------------------------------------------------------
+
+
+class _FakeChannel:
+    """Minimal Channel double recording send_message calls (T13)."""
+
+    def __init__(self) -> None:
+        self.last_user_id = "u-1"
+        self.sent: list[tuple[str, str]] = []
+
+    async def send_message(
+        self,
+        user_id: str,
+        text: str,
+        context_token: str = "",
+    ) -> dict[str, Any]:
+        self.sent.append((user_id, text))
+        return {"ok": True}
+
+
+def _prompt_task(**overrides: Any) -> ScheduledTask:
+    """A minimal once prompt-mode task; overrides bypass enum typing on purpose."""
+    from thumbelina.scheduler.models import ScheduledTask, TriggerKind
+
+    values: dict[str, Any] = {
+        "id": "prompt-assembly",
+        "description": "assembly",
+        "content": "do the thing",
+        "mode": "prompt",
+        "trigger": TriggerKind.ONCE,
+    }
+    values.update(overrides)
+    return ScheduledTask(**values)
+
+
+async def _capture_frames(monkeypatch) -> list[dict]:
+    """Monkeypatch broadcast_chat_message to record frames; return the list."""
+    import thumbelina.api.app as app_module
+
+    frames: list[dict] = []
+
+    async def _capture(message: dict) -> None:
+        frames.append(message)
+
+    monkeypatch.setattr(app_module, "broadcast_chat_message", _capture)
+    return frames
+
+
+async def test_prompt_runner_uses_task_conversation_when_it_exists(
+    task_client: TestClient, monkeypatch
+) -> None:
+    """§5.4 step 1/3/4: a task with an existing conversation_id runs the agent
+    on that conversation (clone().run(content)), and the scheduler
+    channel_message frame carries source='scheduler' + the reply."""
+    import thumbelina.api.app as app_module
+
+    frames = await _capture_frames(monkeypatch)
+    app = task_client.app
+    agent = app.state.agent
+    runner = app_module._make_prompt_runner(app, app.state.repository_manager)
+
+    reply = await runner(_prompt_task(conversation_id="test-conv-id"))
+
+    assert reply == "Agent response"
+    agent.clone.assert_called_once()
+    agent.run.assert_awaited_once_with("do the thing")
+    assert agent.current_conversation_id == "test-conv-id"
+    assert frames == [
+        {
+            "channel_message": {
+                "channel": "scheduler",
+                "conversation_id": "test-conv-id",
+                "user_message": "do the thing",
+                "response": "Agent response",
+                "source": "scheduler",
+            }
+        }
+    ]
+
+
+async def test_prompt_runner_falls_back_to_dedicated_conversation_when_missing(
+    task_client: TestClient, monkeypatch
+) -> None:
+    """§5.4 step 1: no conversation_id (or a non-existent one) falls back to
+    the dedicated '定时任务' conversation, created lazily once and cached on
+    app.state.scheduler_conversation_id."""
+    import thumbelina.api.app as app_module
+
+    frames = await _capture_frames(monkeypatch)
+    app = task_client.app
+    agent = app.state.agent
+    repository = app.state.repository_manager
+    runner = app_module._make_prompt_runner(app, repository)
+
+    first = await runner(_prompt_task(id="prompt-fallback-1", content="first"))
+    assert first == "Agent response"
+    dedicated = app.state.scheduler_conversation_id
+    assert dedicated is not None
+    assert dedicated != "test-conv-id"
+    assert agent.current_conversation_id == dedicated
+    repository.create_conversation.assert_awaited_once()
+
+    # A missing conversation_id also lands on the same dedicated conversation,
+    # and the cached id is reused — no second create.
+    repository.create_conversation.reset_mock()
+    second = await runner(_prompt_task(id="prompt-fallback-2", content="second"))
+    assert second == "Agent response"
+    repository.create_conversation.assert_not_awaited()
+    assert app.state.scheduler_conversation_id == dedicated
+    assert agent.current_conversation_id == dedicated
+
+    assert len(frames) == 2
+    assert all(f["channel_message"]["source"] == "scheduler" for f in frames)
+    assert frames[0]["channel_message"]["conversation_id"] == dedicated
+    assert frames[1]["channel_message"]["conversation_id"] == dedicated
+
+
+async def test_prompt_runner_nonexistent_conversation_falls_back(
+    task_client: TestClient, monkeypatch
+) -> None:
+    """A conversation_id that names no existing conversation is treated like a
+    missing one — the dedicated conversation is used (§5.4 step 1 '存在')."""
+    import thumbelina.api.app as app_module
+
+    frames = await _capture_frames(monkeypatch)
+    app = task_client.app
+    agent = app.state.agent
+    runner = app_module._make_prompt_runner(app, app.state.repository_manager)
+
+    await runner(_prompt_task(conversation_id="no-such-conv"))
+
+    dedicated = app.state.scheduler_conversation_id
+    assert dedicated is not None
+    assert dedicated != "no-such-conv"
+    assert agent.current_conversation_id == dedicated
+    assert frames[0]["channel_message"]["conversation_id"] == dedicated
+
+
+async def _wait_for_task_status(
+    scheduler: TaskScheduler, task_id: str, status: Any
+) -> ScheduledTask:
+    """Poll until the task reaches ``status`` (bounded)."""
+    import asyncio
+
+    deadline = asyncio.get_running_loop().time() + 5.0
+    while True:
+        task = await scheduler.get_task(task_id)
+        if task is not None and task.status == status:
+            return task
+        if asyncio.get_running_loop().time() > deadline:
+            seen = task.status.value if task is not None else "missing"
+            raise AssertionError(f"task {task_id} never reached {status} (saw {seen})")
+        await asyncio.sleep(0.01)
+
+
+async def test_prompt_task_full_chain_via_dispatcher_and_runner(
+    task_client: TestClient, monkeypatch
+) -> None:
+    """End-to-end §5.4 chain: prompt wechat task fires → scheduler background
+    execution → dispatcher.on_prompt_task → run_prompt closure (clone().run +
+    scheduler channel_message frame) → wechat channel copy gets the REPLY →
+    COMPLETED payload.result carries the reply."""
+    import thumbelina.api.app as app_module
+    from thumbelina.scheduler.dispatcher import DeliveryDispatcher
+    from thumbelina.scheduler.models import DeliveryChannel, TaskEventType, TaskStatus
+
+    frames = await _capture_frames(monkeypatch)
+    app = task_client.app
+    scheduler: TaskScheduler = app.state.task_scheduler
+    agent = app.state.agent
+
+    channel = _FakeChannel()
+    runner = app_module._make_prompt_runner(app, app.state.repository_manager)
+    dispatcher = DeliveryDispatcher(
+        channels={"wechat": channel},
+        bus=app.state.task_event_bus,
+        prompt_runner=runner,
+    )
+    # Register the task BEFORE starting the loop: an in-memory StaticPool
+    # engine shares one sqlite connection across ``asyncio.to_thread``
+    # workers, so a poll round firing while add_task's persist is still in
+    # flight corrupts that shared connection (sqlite InterfaceError).  The
+    # production engine (file-backed, pooled) does not have this artifact.
+    task = _prompt_task(
+        id="chain-once",
+        channel=DeliveryChannel.WECHAT,
+        scheduled_time=datetime.now() - timedelta(hours=1),
+    )
+    await scheduler.add_task(task)
+    # Mirror the real lifespan wiring before events flow: the event-log hook
+    # must be subscribed to the injected bus for events to land in the store.
+    store: TaskStore = app.state.task_store
+    bus = app.state.task_event_bus
+    assert bus is not None
+    for event_type in TaskEventType:
+        bus.subscribe(event_type, app_module._make_event_log_hook(store))
+    await scheduler.start(
+        on_due_task=dispatcher.on_due_task,
+        on_prompt_task=dispatcher.on_prompt_task,
+    )
+    try:
+        settled = await _wait_for_task_status(scheduler, "chain-once", TaskStatus.COMPLETED)
+    finally:
+        await scheduler.stop()
+
+    assert settled.status is TaskStatus.COMPLETED
+    # clone().run called with the task content; dedicated conversation used.
+    agent.clone.assert_called_once()
+    agent.run.assert_awaited_once_with("do the thing")
+    assert agent.current_conversation_id == app.state.scheduler_conversation_id
+    # Realtime dialog frame: source=scheduler + reply.
+    assert frames and frames[0]["channel_message"]["source"] == "scheduler"
+    assert frames[0]["channel_message"]["response"] == "Agent response"
+    assert frames[0]["channel_message"]["conversation_id"] == app.state.scheduler_conversation_id
+    # Channel copy got the REPLY (not the content), and only once.
+    assert channel.sent == [("u-1", "Agent response")]
+    # The COMPLETED event payload.result carries the reply.
+    events = await store.list_events(limit=10)
+    completed = [e for e in events if e.type is TaskEventType.COMPLETED]
+    assert len(completed) == 1
+    assert completed[0].payload["result"] == "Agent response"

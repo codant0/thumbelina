@@ -51,16 +51,17 @@ from thumbelina.api.routes.tasks import serialize_task_event
 from thumbelina.api.websocket import broadcast_chat_message
 from thumbelina.api.websocket import router as ws_router
 from thumbelina.channels.base import Channel
+from thumbelina.concurrency import per_conversation_lock
 from thumbelina.config import AppConfig, load_config
 from thumbelina.llm.endpoint_manager import EndpointManager
 from thumbelina.llm.factory import create_provider
 from thumbelina.llm.preset_manager import PresetManager
 from thumbelina.notifications import NotificationManager
 from thumbelina.repository.manager import RepositoryManager
-from thumbelina.scheduler.dispatcher import DeliveryDispatcher
+from thumbelina.scheduler.dispatcher import DeliveryDispatcher, PromptRunner
 from thumbelina.scheduler.events import EventBus, Hook
 from thumbelina.scheduler.heartbeat import Heartbeat
-from thumbelina.scheduler.models import TaskEvent, TaskEventType
+from thumbelina.scheduler.models import ScheduledTask, TaskEvent, TaskEventType
 from thumbelina.scheduler.scheduler import TaskScheduler
 from thumbelina.scheduler.store import TaskStore
 from thumbelina.security.auth import AuthService
@@ -281,6 +282,81 @@ def _make_web_push_hook(
                 logger.warning("task_completed notification broadcast failed", exc_info=True)
 
     return _web_push_hook
+
+
+def _make_prompt_runner(app: FastAPI, repository: RepositoryManager) -> PromptRunner:
+    """Build the prompt runner for ``mode="prompt"`` tasks (design §5.4).
+
+    Wired as the ``DeliveryDispatcher(prompt_runner=…)`` callback and, through
+    it, as the scheduler's ``on_prompt_task``.  Implements the §5.4 execution
+    chain steps 1-5:
+
+    1. 会话归属: ``task.conversation_id`` non-empty and naming an existing
+       conversation → run in that conversation; otherwise (missing, blank, or
+       deleted) use the dedicated 定时任务 conversation — created lazily once
+       per process and cached on ``app.state.scheduler_conversation_id``.
+    2. ``per_conversation_lock(cid)`` serializes the turn against HTTP /
+       WebSocket / channel rounds on the same conversation (checkpoint safety).
+    3. A **clone** of the shared main agent runs the task content with
+       ``current_conversation_id`` pinned to ``cid`` — mirroring the
+       per-connection clone in the WebSocket handler, so a prompt turn neither
+       pollutes the main agent's state nor shares checkpoint state with other
+       conversations.  ``agent.run`` persists the user message + reply itself
+       (graph.py ``_persist_message``) — nothing is persisted here.
+    4. The reply is broadcast as a realtime 对话框 frame: ``channel_message``
+       with ``channel="scheduler"`` and ``source="scheduler"`` — the frontend
+       appends it to an open conversation or updates the conversation list
+       otherwise (same frame the WeChat sync uses).
+    5. The reply is returned; the dispatcher additionally sends it through the
+       task's IM channel as a channel copy.
+
+    Failures (``agent.run``, repository, …) propagate to the scheduler, which
+    settles the FAILED verdict — except the realtime broadcast, which is
+    best-effort: the reply already lives in the conversation history, so a
+    dead WebSocket client must not fail the whole task.
+    """
+
+    async def _run_prompt(task: ScheduledTask) -> str:
+        cid: str | None = task.conversation_id or None
+        if cid is not None:
+            try:
+                conversation = await repository.get_conversation(cid)
+            except Exception:
+                conversation = None
+            if conversation is None:
+                # Names a deleted / unknown conversation → treat as absent.
+                cid = None
+        if cid is None:
+            dedicated = getattr(app.state, "scheduler_conversation_id", None)
+            if dedicated is None:
+                dedicated = await repository.create_conversation()
+                app.state.scheduler_conversation_id = dedicated
+            cid = dedicated
+
+        async with per_conversation_lock(cid):
+            # Clone like the WebSocket/HTTP per-request pattern: isolated
+            # conversation state, shared provider/repository/checkpointer.
+            isolated = app.state.agent.clone()
+            isolated.current_conversation_id = cid
+            reply: str = await isolated.run(task.content)
+
+        try:
+            await broadcast_chat_message(
+                {
+                    "channel_message": {
+                        "channel": "scheduler",
+                        "conversation_id": cid,
+                        "user_message": task.content,
+                        "response": reply,
+                        "source": "scheduler",
+                    }
+                }
+            )
+        except Exception:
+            logger.warning("Scheduler channel_message broadcast failed", exc_info=True)
+        return reply
+
+    return _run_prompt
 
 
 @asynccontextmanager
@@ -777,8 +853,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             if qq_channel_ref is not None:
                 channels["qq"] = qq_channel_ref
 
-            task_dispatcher = DeliveryDispatcher(channels=channels, bus=task_event_bus)
-            await task_scheduler.start(on_due_task=task_dispatcher.on_due_task)
+            # §5.4 prompt 模式：run_prompt 闭包（会话归属 → per-conversation 锁
+            # → agent.clone().run → 对话框实时广播），dispatcher 负责频道副本。
+            prompt_runner = _make_prompt_runner(app, repository)
+            task_dispatcher = DeliveryDispatcher(
+                channels=channels,
+                bus=task_event_bus,
+                prompt_runner=prompt_runner,
+            )
+            await task_scheduler.start(
+                on_due_task=task_dispatcher.on_due_task,
+                on_prompt_task=task_dispatcher.on_prompt_task,
+            )
             task_heartbeat = Heartbeat(task_scheduler, task_event_bus, config.scheduler)
             await task_heartbeat.start()
             logger.info("Task scheduler loop and heartbeat started")

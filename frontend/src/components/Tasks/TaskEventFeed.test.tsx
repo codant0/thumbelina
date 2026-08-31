@@ -121,6 +121,52 @@ describe('TaskEventFeed', () => {
     expect(err.style.color).toContain('--error')
   })
 
+  it('renders the payload result summary in the success color', async () => {
+    const withResult: TaskEventVO[] = [
+      {
+        id: 'e-3',
+        type: 'task.completed',
+        task_id: 't-3',
+        fired_at: '2026-08-30T12:00:05',
+        trigger: 'once',
+        channel: 'web',
+        content: 'briefing',
+        payload: { result: '早安简报已生成，今日天气晴，气温 20–28℃。' },
+      },
+    ]
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(json(withResult))
+    render(<TaskEventFeed />)
+    await act(async () => {})
+    const result = screen.getByTestId('event-result')
+    expect(result).toHaveTextContent('早安简报已生成，今日天气晴，气温 20–28℃。')
+    expect(result.style.color).toContain('--success')
+    expect(screen.queryByTestId('event-error')).toBeNull()
+  })
+
+  it('truncates a long payload result at 80 characters', async () => {
+    const longResult = 'x'.repeat(200)
+    const withLongResult: TaskEventVO[] = [
+      {
+        id: 'e-4',
+        type: 'task.completed',
+        task_id: 't-4',
+        fired_at: '2026-08-30T12:00:05',
+        trigger: 'once',
+        channel: 'web',
+        content: 'long briefing',
+        payload: { result: longResult },
+      },
+    ]
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(json(withLongResult))
+    render(<TaskEventFeed />)
+    await act(async () => {})
+    const result = screen.getByTestId('event-result')
+    const text = result.textContent ?? ''
+    expect(text.length).toBeLessThanOrEqual(80)
+    // 80 字符含省略号:截断到 max-1 个字符 + '…'。
+    expect(text).toBe(`${'x'.repeat(79)}…`)
+  })
+
   it('shows the empty state when there are no events', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(json([]))
     render(<TaskEventFeed />)
