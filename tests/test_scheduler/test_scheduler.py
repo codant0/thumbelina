@@ -1997,7 +1997,11 @@ class TestPromptMode:
                 await scheduler.stop()
 
         assert task.id not in scheduler._inflight
-        assert "settle exploded" in caplog.text
+        # Minor-3 (review): the background exception is retrieved and logged
+        # exactly once — by the done callback; stop()'s drain swallows without
+        # a second log record.
+        matches = [r for r in caplog.records if "settle exploded" in r.getMessage()]
+        assert len(matches) == 1
 
     @pytest.mark.asyncio
     async def test_prompt_cron_failure_scheduled_for_is_fired_slot(self):

@@ -11,6 +11,7 @@ teardown needs no cross-thread bookkeeping.
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -955,12 +956,51 @@ async def test_prompt_runner_nonexistent_conversation_falls_back(
     assert frames[0]["channel_message"]["conversation_id"] == dedicated
 
 
+async def test_prompt_runner_concurrent_fires_create_dedicated_conversation_once(
+    task_client: TestClient, monkeypatch
+) -> None:
+    """Minor-1 (review): two prompt tasks firing concurrently (same poll round)
+    must not race the lazy dedicated-conversation check-and-create — exactly
+    one ``create_conversation`` call, both tasks land on the same conversation.
+
+    A slow ``create_conversation`` makes the race window observable: without
+    the ``scheduler_conversation_lock`` guard both tasks would pass the
+    ``is None`` check and each call ``create_conversation``.
+    """
+    import thumbelina.api.app as app_module
+
+    frames = await _capture_frames(monkeypatch)
+    app = task_client.app
+    agent = app.state.agent
+    repository = app.state.repository_manager
+    runner = app_module._make_prompt_runner(app, repository)
+
+    release = asyncio.Event()
+
+    async def _slow_create(*args, **kwargs) -> str:
+        await release.wait()
+        return "dedicated-conv-race"
+
+    repository.create_conversation.side_effect = _slow_create
+
+    first = asyncio.create_task(runner(_prompt_task(id="prompt-race-1", content="first")))
+    second = asyncio.create_task(runner(_prompt_task(id="prompt-race-2", content="second")))
+    await asyncio.sleep(0.05)  # both enter _run_prompt; one holds the lock
+    release.set()
+    await asyncio.gather(first, second)
+
+    repository.create_conversation.assert_awaited_once()
+    dedicated = app.state.scheduler_conversation_id
+    assert dedicated == "dedicated-conv-race"
+    assert agent.current_conversation_id == dedicated
+    assert len(frames) == 2
+    assert all(f["channel_message"]["conversation_id"] == dedicated for f in frames)
+
+
 async def _wait_for_task_status(
     scheduler: TaskScheduler, task_id: str, status: Any
 ) -> ScheduledTask:
     """Poll until the task reaches ``status`` (bounded)."""
-    import asyncio
-
     deadline = asyncio.get_running_loop().time() + 5.0
     while True:
         task = await scheduler.get_task(task_id)

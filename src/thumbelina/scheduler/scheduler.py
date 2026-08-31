@@ -567,31 +567,34 @@ class TaskScheduler:
                     "Scheduler poll loop died with %s during stop: %s", type(exc).__name__, exc
                 )
             self._poll_task = None
-        # Graceful drain: await every in-flight prompt execution, retrieving
-        # each result so a stray exception is surfaced, not leaked.  The task
-        # handles are pruned by their done callback as they settle; the loop
-        # re-checks so a task settled while we were awaiting another is never
-        # awaited twice.
+        # Graceful drain: await every in-flight prompt execution to completion.
+        # The exception is NOT re-logged here — ``_on_execution_done`` already
+        # retrieved it (and logged once) when the task finished, and that
+        # callback runs before this await resumes (Task 12 Minor 4 /
+        # review Minor 3: single retrieval, single log record).  Awaiting here
+        # just prevents the exception from escaping ``stop()``.
         while self._inflight_tasks:
             for execution in list(self._inflight_tasks):
                 try:
                     await execution
                 except asyncio.CancelledError:
                     pass
-                except Exception as exc:
-                    logger.warning(
-                        "Prompt execution task died during stop: %s (%s)",
-                        exc,
-                        type(exc).__name__,
-                    )
+                except Exception:
+                    # Retrieved + logged by the done callback; swallow so the
+                    # lifespan shutdown survives.
+                    pass
 
     def _on_execution_done(self, task: asyncio.Task[Any]) -> None:
         """Done callback for an in-flight prompt execution.
 
-        Retrieves the result (surfacing an unexpected background exception as
-        a warning — Task 12 Minor 4) and removes the handle from
-        ``_inflight_tasks`` so :meth:`stop` can determine when the drain is
-        complete.
+        The single exception-retrieval point (Task 12 Minor 4): the result is
+        retrieved here — surfacing an unexpected background exception as one
+        warning — and the handle is removed from ``_inflight_tasks`` so
+        :meth:`stop` can determine when the drain is complete.  ``stop()``'s
+        drain awaits the same tasks but swallows their exception silently
+        (review Minor 3: one retrieval, one log record).  Runs before any
+        pending ``await`` on the task resumes, so the handle is already pruned
+        when :meth:`stop`'s loop re-checks the set.
         """
         self._inflight_tasks.discard(task)
         if task.cancelled():

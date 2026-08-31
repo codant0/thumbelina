@@ -314,6 +314,13 @@ def _make_prompt_runner(app: FastAPI, repository: RepositoryManager) -> PromptRu
     settles the FAILED verdict — except the realtime broadcast, which is
     best-effort: the reply already lives in the conversation history, so a
     dead WebSocket client must not fail the whole task.
+
+    Review minor-1 fix: the lazy dedicated-conversation check-and-create is
+    guarded by an ``asyncio.Lock`` cached on ``app.state``
+    (``scheduler_conversation_lock``).  Without it, several prompt tasks
+    firing concurrently in the same poll round would all pass the ``is None``
+    check and each call ``create_conversation`` — two "定时任务" conversations
+    with the messages split between them.
     """
 
     async def _run_prompt(task: ScheduledTask) -> str:
@@ -327,11 +334,19 @@ def _make_prompt_runner(app: FastAPI, repository: RepositoryManager) -> PromptRu
                 # Names a deleted / unknown conversation → treat as absent.
                 cid = None
         if cid is None:
-            dedicated = getattr(app.state, "scheduler_conversation_id", None)
-            if dedicated is None:
-                dedicated = await repository.create_conversation()
-                app.state.scheduler_conversation_id = dedicated
-            cid = dedicated
+            # Guard the check-and-create: concurrent fires must agree on one
+            # dedicated conversation.  The lock is created once per process
+            # (``asyncio.Lock`` is cheap and bound to the event loop).
+            lock = getattr(app.state, "scheduler_conversation_lock", None)
+            if lock is None:
+                lock = asyncio.Lock()
+                app.state.scheduler_conversation_lock = lock
+            async with lock:
+                dedicated = getattr(app.state, "scheduler_conversation_id", None)
+                if dedicated is None:
+                    dedicated = await repository.create_conversation()
+                    app.state.scheduler_conversation_id = dedicated
+                cid = dedicated
 
         async with per_conversation_lock(cid):
             # Clone like the WebSocket/HTTP per-request pattern: isolated
