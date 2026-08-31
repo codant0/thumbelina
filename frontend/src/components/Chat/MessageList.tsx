@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { Message, ToolCall } from '../../types/chat'
 import { ArrowDown, Brain, Check, ChevronDown, Copy, RefreshCcw, Wrench } from 'lucide-react'
 import { useTranslation } from '../../i18n'
@@ -220,7 +220,7 @@ function MessageListInner({ messages, waitingForReply, isStreaming, awaitingMore
     setShowJump(distanceFromBottom > 320)
   }
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = listRef.current
     if (!el) return
     // The list was replaced entirely (conversation switch / history reload) —
@@ -235,8 +235,26 @@ function MessageListInner({ messages, waitingForReply, isStreaming, awaitingMore
     if (last?.role === 'user') {
       stickToBottomRef.current = true
     }
-    if (stickToBottomRef.current) {
-      el.scrollTop = el.scrollHeight
+    if (!stickToBottomRef.current) return
+
+    // Defer to the next animation frame so the new messages have been
+    // laid out and `scrollHeight` reflects the real content height. Without
+    // this, switching into a conversation with prior history lands the
+    // scroll position at 0 (the top) because the effect fires before layout
+    // and reads scrollHeight=0.
+    let raf2 = 0
+    const raf = requestAnimationFrame(() => {
+      const node = listRef.current
+      if (!node) return
+      // Two frames cover Chrome's layout flush + async image/code render.
+      raf2 = requestAnimationFrame(() => {
+        const n = listRef.current
+        if (n) n.scrollTop = n.scrollHeight
+      })
+    })
+    return () => {
+      cancelAnimationFrame(raf)
+      if (raf2) cancelAnimationFrame(raf2)
     }
   }, [messages, waitingForReply])
 
