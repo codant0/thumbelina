@@ -65,6 +65,14 @@ def test_thinking_kwargs_openai():
     assert _thinking_kwargs("openai", False, "high") == {}
 
 
+def test_thinking_kwargs_openai_responses():
+    """Responses API 通道与 Chat Completions 共用 reasoning_effort 注入。"""
+    from thumbelina.api.routes.chat import _thinking_kwargs
+
+    assert _thinking_kwargs("openai-responses", True, "high") == {"reasoning_effort": "high"}
+    assert _thinking_kwargs("openai-responses", False, "high") == {}
+
+
 def test_thinking_kwargs_anthropic():
     """Anthropic thinking injection uses budget_tokens and max_tokens."""
     from thumbelina.api.routes.chat import _thinking_kwargs
