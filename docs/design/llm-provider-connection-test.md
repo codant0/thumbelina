@@ -90,6 +90,16 @@ POST /api/v1/config/llm/test-connection
 }
 ```
 
+`provider` 取值：`openai`（Chat Completions）、`openai-responses`（Responses API）、`anthropic`、`ollama`。
+
+base_url 约定：
+
+- `openai` / `openai-responses`：填到 `/v1`（如 `https://api.openai.com/v1`）。
+- `anthropic`：带或不带 `/v1` 均可，provider 内部双向归一化——原生 HTTP 探测打
+  `<host>/v1/...`，传给 ChatAnthropic（SDK 会拼接请求路径）的地址剥掉 `/v1`。
+- `openai-responses` 的 Level 3 探测打 `/v1/responses`；端点返回 404/405 时报
+  "Endpoint does not implement the Responses API"，提示改用 Chat Completions 通道。
+
 响应体：
 
 ```json
@@ -581,7 +591,8 @@ interface ConnectionTestResultDisplayProps {
 | 文件 | 修改内容 |
 |------|----------|
 | `src/thumbelina/llm/base.py` | 新增 `ConnectionTestStep`, `ConnectionTestDetails`, `ConnectionTestResult` dataclass；新增 `test_connection()` 抽象方法 |
-| `src/thumbelina/llm/openai.py` | 实现 `test_connection()` 方法（三层逐步检测） |
+| `src/thumbelina/llm/openai.py` | 实现 `test_connection()` 方法（三层逐步检测，Level 3 探测为可覆写的 `_probe_chat()`） |
+| `src/thumbelina/llm/openai_responses.py` | Responses API 通道（继承 OpenAIProvider，覆写 `_probe_chat()`/`speed_test()` 走 `/v1/responses`） |
 | `src/thumbelina/llm/anthropic.py` | 实现 `test_connection()` 方法（Anthropic API 兼容） |
 | `src/thumbelina/llm/ollama.py` | 实现 `test_connection()` 方法（Ollama API 兼容） |
 | `src/thumbelina/llm/endpoint_manager.py` | 新增 `test_connection()` 方法 |

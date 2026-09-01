@@ -47,7 +47,7 @@ from pydantic import BaseModel, Field
 class LLMPresetCreate(BaseModel):
     """创建预设的请求体。"""
     name: str = Field(..., min_length=1, max_length=100, description="用户自定义预设名称")
-    provider: str = Field(..., min_length=1, description="LLM provider 名称, 如 openai/anthropic/ollama")
+    provider: str = Field(..., min_length=1, description="LLM provider 名称, 如 openai/openai-responses/anthropic/ollama")
     base_url: str | None = Field(default=None, description="API base URL")
     api_key: str = Field(default="", description="API key")
     model: str = Field(default="", description="默认模型标识")
@@ -349,7 +349,7 @@ function PresetList({ presets, activeId, onActivate, onEdit, onDelete }) {
 创建/编辑预设的表单：
 
 - 预设名称（必填）
-- Provider 下拉选择（openai / anthropic / ollama）
+- Provider 下拉选择（openai / openai-responses / anthropic / ollama）
 - Base URL（可选，默认隐藏 placeholder）
 - API Key（密码输入框，编辑时留空表示不修改）
 - Model（文本输入 + ModelSelector 集成）

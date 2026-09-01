@@ -6,7 +6,7 @@ An AI-powered personal assistant built with [FastAPI](https://fastapi.tiangolo.c
 
 ## Features
 
-- **Multi-Provider LLM** — Pluggable support for OpenAI, Anthropic, and Ollama via a unified abstraction layer, with named presets for quick switching and one-click connectivity testing
+- **Multi-Provider LLM** — Pluggable support for OpenAI (Chat Completions), OpenAI Responses API, Anthropic, and Ollama via a unified abstraction layer, with named presets for quick switching and one-click connectivity testing
 - **LLM Preset Management** — Save multiple LLM configurations (provider, base URL, API key, model) with custom names and activate any preset with one click
 - **LLM Connection Test** — Three-level connectivity verification (network reachability → auth validity → service availability) for any provider endpoint
 - **DeepSeek API Support** — Compatible via `openai` provider with graceful fallback for `/models` endpoint
@@ -211,7 +211,7 @@ thumbelina/
 │   ├── channels/            # IM channels (QQ Bot, WeChat via weixin-bot)
 │   ├── cli/                 # Click CLI with prompt_toolkit chat session
 │   ├── config/              # YAML + env var config loader, Pydantic models
-│   ├── llm/                 # LLM provider abstraction (OpenAI, Anthropic, Ollama)
+│   ├── llm/                 # LLM provider abstraction (OpenAI, OpenAI Responses, Anthropic, Ollama)
 │   ├── repository/          # Conversation persistence, search, vector store, feedback, trajectory
 │   ├── analysis/            # LLM analysis services: title summarizer, conversation namer
 │   ├── filestore/           # Shared atomic file I/O + per-key async file locks (used by todo/memory)
@@ -559,7 +559,7 @@ Role prompt files live in `src/thumbelina/prompts/roles/` — adding a new role 
 |-------|------------|
 | Backend | FastAPI, Uvicorn, httpx |
 | Agent Framework | LangGraph, LangChain |
-| LLM Providers | OpenAI, Anthropic, Ollama (via LangChain) |
+| LLM Providers | OpenAI (Chat Completions / Responses API), Anthropic, Ollama (via LangChain) |
 | RAG | llama-index-core (embeddings, vector retrieval) |
 | Database | SQLAlchemy + SQLite |
 | Vector Store | ChromaDB |
