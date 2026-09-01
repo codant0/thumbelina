@@ -193,6 +193,29 @@ class OpenAIProvider(LLMProvider):
             logger.warning("Failed to fetch models from %s", url, exc_info=True)
             return []
 
+    async def _probe_chat(
+        self, url: str, headers: dict[str, str], model_name: str
+    ) -> httpx.Response:
+        """Post the minimal single-token request for test_connection Level 3.
+
+        Overridable so wire-format variants (e.g. the Responses API
+        subclass) can swap the request shape while reusing the
+        candidate-fallback logic in :meth:`test_connection`.
+        """
+        payload = {
+            "model": model_name,
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 1,
+            "stream": False,
+        }
+        async with httpx.AsyncClient() as client:
+            return await client.post(
+                f"{url}/chat/completions",
+                headers=headers | {"Content-Type": "application/json"},
+                json=payload,
+                timeout=15.0,
+            )
+
     async def test_connection(
         self,
         *,
@@ -283,21 +306,6 @@ class OpenAIProvider(LLMProvider):
         # a model and the endpoint rejects the default with 400, fall back to
         # the first model reported by /models so we don't blindly pin ``gpt-4o``
         # on providers that don't host it.
-        async def _post_chat(model_name: str) -> httpx.Response:
-            payload = {
-                "model": model_name,
-                "messages": [{"role": "user", "content": "hi"}],
-                "max_tokens": 1,
-                "stream": False,
-            }
-            async with httpx.AsyncClient() as client:
-                return await client.post(
-                    f"{url}/chat/completions",
-                    headers=headers | {"Content-Type": "application/json"},
-                    json=payload,
-                    timeout=15.0,
-                )
-
         candidates = [self._resolve_model(model, url, self._model_name)]
         if not model:
             try:
@@ -312,7 +320,7 @@ class OpenAIProvider(LLMProvider):
         for candidate in candidates:
             try:
                 t0 = time.perf_counter()
-                resp = await _post_chat(candidate)
+                resp = await self._probe_chat(url, headers, candidate)
                 resp.raise_for_status()
                 total_latency = int((time.perf_counter() - t0) * 1000)
                 steps.service = ConnectionTestStep(ok=True, latency_ms=total_latency)
