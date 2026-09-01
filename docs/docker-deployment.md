@@ -64,7 +64,7 @@ compose 会把仓库根目录的 `thumbelina.yaml` 以只读方式挂载到容�
 
 ```yaml
 llm:
-  provider: openai                 # openai / anthropic / ollama
+  provider: openai                 # openai / openai-responses / anthropic / ollama
   model: gpt-4o
   api_key: ''                      # 留空时用环境变量 THUMBELINA_LLM__API_KEY
   base_url: ''                     # 自定义 OpenAI 兼容端点时填写

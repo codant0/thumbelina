@@ -1097,6 +1097,10 @@
   background: linear-gradient(135deg, #10a37f, #1a7f64);
 }
 
+.endpoint-provider-logo--openai-responses {
+  background: linear-gradient(135deg, #0ea5a0, #0d7d78);
+}
+
 .endpoint-provider-logo--anthropic {
   background: linear-gradient(135deg, #d97757, #b45343);
 }

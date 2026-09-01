@@ -17,9 +17,11 @@ def _get_registry() -> dict[str, type[LLMProvider]]:
         from thumbelina.llm.anthropic import AnthropicProvider
         from thumbelina.llm.ollama import OllamaProvider
         from thumbelina.llm.openai import OpenAIProvider
+        from thumbelina.llm.openai_responses import OpenAIResponsesProvider
 
         _registry = {
             "openai": OpenAIProvider,
+            "openai-responses": OpenAIResponsesProvider,
             "anthropic": AnthropicProvider,
             "ollama": OllamaProvider,
         }
@@ -32,8 +34,8 @@ def create_provider(name: str, **kwargs: Any) -> LLMProvider:
     Parameters
     ----------
     name:
-        Provider identifier (``"openai"``, ``"anthropic"``, or ``"ollama"``).
-        Case-insensitive.
+        Provider identifier (``"openai"``, ``"openai-responses"``,
+        ``"anthropic"``, or ``"ollama"``). Case-insensitive.
     **kwargs:
         Keyword arguments forwarded to the provider constructor.
 

@@ -29,7 +29,7 @@ def _thinking_kwargs(provider: str, enabled: bool, effort: str) -> dict[str, Any
     """Build provider kwargs that enable thinking mode at the given intensity."""
     if not enabled:
         return {}
-    if provider == "openai":
+    if provider in ("openai", "openai-responses"):
         return {"reasoning_effort": effort}
     if provider == "anthropic":
         budget = _THINKING_BUDGETS.get(effort, _THINKING_BUDGETS["medium"])

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import type { EndpointFormData, LLMEndpoint, LLMModelConfig, ModelList } from '../../api/llmConfig'
+import type { EndpointFormData, LLMEndpoint, LLMModelConfig, LLMProviderKind, ModelList } from '../../api/llmConfig'
 import { useTranslation } from '../../i18n'
 import { ConnectionTestButton } from './ConnectionTestButton'
 import { Cpu, Tag, Server, KeyRound, Box, Star, Save, Download, X, Loader2, Gauge, Images, Plus } from 'lucide-react'
@@ -17,7 +17,7 @@ function toModel(name: string): LLMModelConfig {
 
 export function EndpointForm({ initialValues, onSubmit, onCancel }: EndpointFormProps) {
   const { t } = useTranslation()
-  const [provider, setProvider] = useState<'openai' | 'ollama' | 'anthropic'>(initialValues?.provider ?? 'openai')
+  const [provider, setProvider] = useState<LLMProviderKind>(initialValues?.provider ?? 'openai')
   const [name, setName] = useState(initialValues?.name ?? '')
   const [baseUrl, setBaseUrl] = useState(initialValues?.base_url ?? '')
   const [models, setModels] = useState<LLMModelConfig[]>(initialValues?.models ?? [])
@@ -28,7 +28,9 @@ export function EndpointForm({ initialValues, onSubmit, onCancel }: EndpointForm
   const [fetching, setFetching] = useState(false)
   const [manualModel, setManualModel] = useState('')
 
-  const supported = provider === 'openai'
+  // 模型列表拉取：OpenAI/Responses 走 /v1/models，Anthropic 走原生 /v1/models；
+  // ollama 的模型发现由端点自身维护，不在此列。
+  const supported = provider === 'openai' || provider === 'anthropic' || provider === 'openai-responses'
 
   const handleFetchModels = async () => {
     if (!supported || !provider || !baseUrl || !apiKey && !initialValues?.api_key_set) return
@@ -107,9 +109,10 @@ export function EndpointForm({ initialValues, onSubmit, onCancel }: EndpointForm
           className="form-select"
           data-testid="endpoint-provider-select"
           value={provider}
-          onChange={e => setProvider(e.target.value as 'openai' | 'ollama' | 'anthropic')}
+          onChange={e => setProvider(e.target.value as LLMProviderKind)}
         >
           <option value="openai">OpenAI</option>
+          <option value="openai-responses">OpenAI (Responses)</option>
           <option value="anthropic">Anthropic</option>
           <option value="ollama">Ollama</option>
         </select>

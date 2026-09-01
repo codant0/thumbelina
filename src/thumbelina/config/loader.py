@@ -175,7 +175,7 @@ def _resolve_api_key(config: dict[str, Any]) -> dict[str, Any]:
     if not api_key:
         # Check standard environment variables
         provider = llm.get("provider", "openai")
-        if provider == "openai":
+        if provider in ("openai", "openai-responses"):
             api_key = os.environ.get("OPENAI_API_KEY", "")
         elif provider == "anthropic":
             api_key = os.environ.get("ANTHROPIC_API_KEY", "")

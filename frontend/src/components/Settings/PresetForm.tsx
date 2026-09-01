@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import type { LLMPreset, PresetFormData } from '../../api/llmConfig'
+import type { LLMPreset, LLMProviderKind, PresetFormData } from '../../api/llmConfig'
 import { Loader2, Save } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 
@@ -11,8 +11,8 @@ interface PresetFormProps {
 
 export function PresetForm({ initialValues, onSubmit, onCancel }: PresetFormProps) {
   const [name, setName] = useState(initialValues?.name ?? '')
-  const [provider, setProvider] = useState<'openai' | 'ollama' | 'anthropic'>(
-    (initialValues?.provider as 'openai' | 'ollama' | 'anthropic') ?? 'openai'
+  const [provider, setProvider] = useState<LLMProviderKind>(
+    (initialValues?.provider as LLMProviderKind) ?? 'openai'
   )
   const [baseUrl, setBaseUrl] = useState(initialValues?.base_url ?? '')
   const [apiKey, setApiKey] = useState('')
@@ -81,9 +81,10 @@ export function PresetForm({ initialValues, onSubmit, onCancel }: PresetFormProp
           className="form-select"
           data-testid="preset-provider-select"
           value={provider}
-          onChange={e => setProvider(e.target.value as 'openai' | 'ollama' | 'anthropic')}
+          onChange={e => setProvider(e.target.value as LLMProviderKind)}
         >
           <option value="openai">OpenAI</option>
+          <option value="openai-responses">OpenAI (Responses)</option>
           <option value="anthropic">Anthropic</option>
           <option value="ollama">Ollama</option>
         </select>

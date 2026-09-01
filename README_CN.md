@@ -6,7 +6,7 @@
 
 ## 功能特性
 
-- **多 LLM 提供商** — 通过统一抽象层插件式支持 OpenAI、Anthropic、Ollama，支持命名预设快速切换和一键连通性测试
+- **多 LLM 提供商** — 通过统一抽象层插件式支持 OpenAI（Chat Completions）、OpenAI Responses API、Anthropic、Ollama，支持命名预设快速切换和一键连通性测试
 - **LLM 预设管理** — 长期保存多种 LLM 配置（提供商、base URL、API 密钥、模型），支持自定义命名，一键激活任意预设
 - **LLM 连接测试** — 三层连通性验证（网络可达 → 鉴权有效 → 服务可用），覆盖任意 provider 端点
 - **DeepSeek API 兼容** — 通过 openai provider 接入，/models 端点自动降级处理
@@ -199,7 +199,7 @@ thumbelina/
 │   ├── channels/            # IM 频道（QQ Bot、微信 via weixin-bot）
 │   ├── cli/                 # Click CLI + prompt_toolkit 聊天会话
 │   ├── config/              # YAML + 环境变量配置加载、Pydantic 模型
-│   ├── llm/                 # LLM 提供商抽象层（OpenAI, Anthropic, Ollama）
+│   ├── llm/                 # LLM 提供商抽象层（OpenAI, OpenAI Responses, Anthropic, Ollama）
 │   ├── repository/          # 对话持久化、搜索、向量存储、反馈、轨迹
 │   ├── analysis/            # LLM 分析服务：标题摘要、对话命名
 │   ├── filestore/           # 公共原子文件 I/O + 按 key 异步文件锁（todo/memory 复用）
@@ -545,7 +545,7 @@ memory:
 |------|------|
 | 后端框架 | FastAPI, Uvicorn, httpx |
 | 代理框架 | LangGraph, LangChain |
-| LLM 提供商 | OpenAI, Anthropic, Ollama（通过 LangChain） |
+| LLM 提供商 | OpenAI（Chat Completions / Responses API）、Anthropic、Ollama（通过 LangChain） |
 | RAG | llama-index-core（嵌入模型、向量检索） |
 | 数据库 | SQLAlchemy + SQLite |
 | 向量存储 | ChromaDB |

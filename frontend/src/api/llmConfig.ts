@@ -1,3 +1,6 @@
+/** Supported LLM provider identifiers (kept in sync with the backend factory registry). */
+export type LLMProviderKind = 'openai' | 'ollama' | 'anthropic' | 'openai-responses'
+
 export interface LLMModelConfig {
   name: string
   /** Context window like "128K"/"200K"; empty or null falls back to the global default. */
@@ -8,7 +11,7 @@ export interface LLMModelConfig {
 
 export interface LLMEndpoint {
   id: string
-  provider: 'openai' | 'ollama' | 'anthropic'
+  provider: LLMProviderKind
   name: string
   base_url: string
   models: LLMModelConfig[]
@@ -22,7 +25,7 @@ export interface LLMEndpoint {
 }
 
 export interface EndpointFormData {
-  provider: 'openai' | 'ollama' | 'anthropic'
+  provider: LLMProviderKind
   name: string
   base_url: string
   models: LLMModelConfig[]
@@ -72,7 +75,7 @@ export interface ConnectionTestResult {
 export interface LLMPreset {
   id: string
   name: string
-  provider: 'openai' | 'ollama' | 'anthropic'
+  provider: LLMProviderKind
   base_url: string
   api_key_set: boolean
   model: string
@@ -84,7 +87,7 @@ export interface LLMPreset {
 
 export interface PresetFormData {
   name: string
-  provider: 'openai' | 'ollama' | 'anthropic'
+  provider: LLMProviderKind
   base_url: string
   api_key: string
   model: string
