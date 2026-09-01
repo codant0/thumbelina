@@ -232,7 +232,16 @@
 .message-list {
   flex: 1;
   overflow-y: auto;
+  /* Our ResizeObserver clamp owns scroll anchoring — the browser's native
+     anchoring fights it when earlier content expands (images, fonts). */
+  overflow-anchor: none;
   padding: var(--sp-4) var(--sp-5);
+}
+
+/* Inner wrapper observed by ResizeObserver: its height tracks the content,
+   so any post-commit growth (streaming text, async render, font swap)
+   fires the clamp-to-bottom while the user is following. */
+.message-list-content {
   display: flex;
   flex-direction: column;
   gap: var(--sp-4);

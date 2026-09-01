@@ -192,6 +192,7 @@ const MessageItem = memo(function MessageItem({
 
 function MessageListInner({ messages, waitingForReply, isStreaming, awaitingMoreContent, onRegenerate }: MessageListProps) {
   const listRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
   // Whether to keep following new content. False once the user scrolls up to read.
   const stickToBottomRef = useRef(true)
   const firstMsgIdRef = useRef<string | undefined>(undefined)
@@ -258,6 +259,29 @@ function MessageListInner({ messages, waitingForReply, isStreaming, awaitingMore
     }
   }, [messages])
 
+  // Content-height watchdog: whenever the rendered content changes height
+  // (streaming text, async expansion, font swap, native scroll anchoring),
+  // clamp to the bottom while the user is following. One-shot rAF passes
+  // cannot cover sources that grow AFTER the commit — this observer can.
+  useEffect(() => {
+    const content = contentRef.current
+    if (!content || typeof ResizeObserver === 'undefined') return
+    let raf = 0
+    const ro = new ResizeObserver(() => {
+      if (!stickToBottomRef.current) return
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => {
+        const node = listRef.current
+        if (node) node.scrollTop = node.scrollHeight
+      })
+    })
+    ro.observe(content)
+    return () => {
+      ro.disconnect()
+      cancelAnimationFrame(raf)
+    }
+  }, [])
+
   const streamingMsgId = isStreaming
     ? [...messages].reverse().find(m => m.role === 'assistant' && m.id.startsWith('stream-'))?.id
     : undefined
@@ -285,36 +309,38 @@ function MessageListInner({ messages, waitingForReply, isStreaming, awaitingMore
         onScroll={handleScroll}
         {...(isStreaming ? {} : { 'data-streaming-idle': '' })}
       >
-        {messages.map(msg => (
-          <MessageItem
-            key={msg.id}
-            msg={msg}
-            isStreamingMsg={msg.id === streamingMsgId}
-            canRegenerate={msg.id === lastAssistantId && Boolean(handleRegenerate)}
-            onRegenerate={handleRegenerate}
-          />
-        ))}
-        {waitingForReply && (
-          <div className="message assistant typing-indicator" data-testid="typing-indicator">
-            <span className="msg-role">{t('chat.roleAssistant')}</span>
-            <div className="typing-dots">
-              <span className="typing-dot" />
-              <span className="typing-dot" />
-              <span className="typing-dot" />
+        <div className="message-list-content" ref={contentRef}>
+          {messages.map(msg => (
+            <MessageItem
+              key={msg.id}
+              msg={msg}
+              isStreamingMsg={msg.id === streamingMsgId}
+              canRegenerate={msg.id === lastAssistantId && Boolean(handleRegenerate)}
+              onRegenerate={handleRegenerate}
+            />
+          ))}
+          {waitingForReply && (
+            <div className="message assistant typing-indicator" data-testid="typing-indicator">
+              <span className="msg-role">{t('chat.roleAssistant')}</span>
+              <div className="typing-dots">
+                <span className="typing-dot" />
+                <span className="typing-dot" />
+                <span className="typing-dot" />
+              </div>
             </div>
-          </div>
-        )}
-        {showGenerating && !waitingForReply && (
-          <div className="message assistant generating-indicator" data-testid="generating-indicator">
-            <span className="msg-role">{t('chat.roleAssistant')}</span>
-            <div className="generating-dots" aria-hidden="true">
-              <span className="generating-dot" />
-              <span className="generating-dot" />
-              <span className="generating-dot" />
+          )}
+          {showGenerating && !waitingForReply && (
+            <div className="message assistant generating-indicator" data-testid="generating-indicator">
+              <span className="msg-role">{t('chat.roleAssistant')}</span>
+              <div className="generating-dots" aria-hidden="true">
+                <span className="generating-dot" />
+                <span className="generating-dot" />
+                <span className="generating-dot" />
+              </div>
+              <span className="generating-label">{t('chat.generating')}</span>
             </div>
-            <span className="generating-label">{t('chat.generating')}</span>
-          </div>
-        )}
+          )}
+        </div>
       </div>
       {showJump && (
         <button

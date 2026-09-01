@@ -290,6 +290,51 @@ describe('MessageList', () => {
     expect(list.scrollTop).toBe(list.scrollHeight)
   })
 
+  it('clamps back to the bottom when content grows while following (ResizeObserver)', async () => {
+    // 回归：切会话后异步内容增长（图片/字体/原生锚定等）曾把“当时的底部”
+    // 变成“现在的中间”。RO 钳制保证跟随状态下内容一变高就贴回底部。
+    const roCallbacks: ResizeObserverCallback[] = []
+    class MockResizeObserver {
+      constructor(cb: ResizeObserverCallback) {
+        roCallbacks.push(cb)
+      }
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+    }
+    vi.stubGlobal('ResizeObserver', MockResizeObserver)
+    try {
+      const history: Message[] = Array.from({ length: 40 }, (_, i) => ({
+        id: `old-${i}`,
+        role: i % 2 ? 'assistant' : 'user',
+        content: 'x',
+        timestamp: '2024-01-01T00:00:00Z',
+      }))
+      render(<MessageList messages={history} />)
+      const list = screen.getByTestId('message-list')
+      const geometry = { height: 4000, top: 3600 } // at bottom
+      mockListGeometry(list, geometry)
+
+      const lastCallback = () => roCallbacks[roCallbacks.length - 1]
+
+      // 提交后内容增长：4000 → 6000（异步展开），跟随状态下钳回底部。
+      geometry.height = 6000
+      lastCallback()([], {} as ResizeObserver)
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+      expect(list.scrollTop).toBe(6000)
+
+      // 用户上滚后：不再钳制，保持用户位置。
+      geometry.top = 500
+      fireEvent.scroll(list)
+      geometry.height = 7000
+      lastCallback()([], {} as ResizeObserver)
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+      expect(list.scrollTop).toBe(500)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('renders fenced code as a highlighted block with a copy button', () => {
     const messages: Message[] = [
       { id: '1', role: 'assistant', content: '```python\ndef f():\n    return 1\n```', timestamp: '2024-01-01T00:00:00Z' },
