@@ -129,6 +129,8 @@ class OpenAIProvider(LLMProvider):
                 "base_url": self._base_url,
                 "reasoning_effort": self.reasoning_effort,
                 "stream_usage": True,
+                # MiniMax 私有参数，仅 MiniMax-M3 消费；
+                "extra_body": {"reasoning_split": True},
             }
             kwargs.update(self._chat_model_kwargs)
             self._chat_model = chat_openai_cls(**kwargs)
