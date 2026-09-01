@@ -15,6 +15,7 @@ interface EndpointListProps {
 
 const PROVIDER_LABEL: Record<string, string> = {
   openai: 'OpenAI',
+  'openai-responses': 'OpenAI (Responses)',
   anthropic: 'Anthropic',
   ollama: 'Ollama',
 }
