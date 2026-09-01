@@ -1,31 +1,62 @@
 import { useState, useRef, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
-import { Send, Square } from 'lucide-react'
+import { Clock, Send, Square, Zap } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 
 interface InputBoxProps {
   onSend: (message: string) => void
   disabled?: boolean
   toolbar?: ReactNode
-  /** While the model is replying, the send button morphs into a stop button. */
+  /** While the model is replying, a stop button appears next to the send button. */
   isStreaming?: boolean
   /** Called when the user stops generation (only used while isStreaming). */
   onStop?: () => void
+  /** Queued message for the active conversation (single slot); null = none. */
+  pendingMessage?: string | null
+  /** The queued message is held because the previous reply ended abnormally. */
+  pendingHeld?: boolean
+  /** Submitting while streaming queues the message instead of sending it. */
+  onQueueSend?: (message: string) => void
+  /** Send the queued message now (stops the running reply first when needed). */
+  onSendPendingNow?: () => void
+  onCancelPending?: () => void
 }
 
-export function InputBox({ onSend, disabled, toolbar, isStreaming, onStop }: InputBoxProps) {
+export function InputBox({
+  onSend,
+  disabled,
+  toolbar,
+  isStreaming,
+  onStop,
+  pendingMessage,
+  pendingHeld,
+  onQueueSend,
+  onSendPendingNow,
+  onCancelPending,
+}: InputBoxProps) {
   const [text, setText] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const { t } = useTranslation()
 
-  const handleSend = () => {
-    if (isStreaming) return
-    const trimmed = text.trim()
-    if (!trimmed) return
-    onSend(trimmed)
+  const clearTextarea = () => {
     setText('')
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
     }
+  }
+
+  const handleSend = () => {
+    const trimmed = text.trim()
+    if (!trimmed) return
+    if (isStreaming) {
+      // 流式进行中:排队为待发消息(悬浮条展示,默认当前回复结束后自动发送)
+      onQueueSend?.(trimmed)
+      clearTextarea()
+      return
+    }
+    // 单条队列:已有待发消息时,先通过悬浮条「立即执行/取消」处理
+    if (pendingMessage) return
+    onSend(trimmed)
+    clearTextarea()
   }
 
   const handleSubmit = (e: FormEvent) => {
@@ -36,7 +67,7 @@ export function InputBox({ onSend, disabled, toolbar, isStreaming, onStop }: Inp
   const handleKeyDown = (e: KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      if (!isStreaming) handleSend()
+      handleSend()
     }
   }
 
@@ -50,6 +81,37 @@ export function InputBox({ onSend, disabled, toolbar, isStreaming, onStop }: Inp
 
   return (
     <div className="input-box">
+      {pendingMessage && (
+        <div className="pending-float" data-testid="pending-message" role="status">
+          <div className="pending-float-head">
+            <Clock size={14} />
+            <span className="pending-float-title">{t('chat.pendingTitle')}</span>
+            <span className="pending-float-hint">
+              {pendingHeld ? t('chat.pendingHeldHint') : t('chat.pendingHint')}
+            </span>
+          </div>
+          <div className="pending-float-text">{pendingMessage}</div>
+          <div className="pending-float-actions">
+            <button
+              type="button"
+              className="btn btn-primary"
+              data-testid="pending-send-now"
+              onClick={onSendPendingNow}
+            >
+              <Zap size={13} />
+              {t('chat.sendNow')}
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              data-testid="pending-cancel"
+              onClick={onCancelPending}
+            >
+              {t('common.cancel')}
+            </button>
+          </div>
+        </div>
+      )}
       {toolbar && <div className="input-toolbar">{toolbar}</div>}
       <form onSubmit={handleSubmit}>
         <textarea
@@ -62,7 +124,7 @@ export function InputBox({ onSend, disabled, toolbar, isStreaming, onStop }: Inp
           disabled={disabled}
           rows={1}
         />
-        {isStreaming ? (
+        {isStreaming && (
           <button
             type="button"
             className="stop-send-btn"
@@ -74,12 +136,15 @@ export function InputBox({ onSend, disabled, toolbar, isStreaming, onStop }: Inp
             <Square size={16} />
             {t('chat.stop')}
           </button>
-        ) : (
-          <button type="submit" disabled={disabled}>
-            <Send size={16} />
-            {t('chat.send')}
-          </button>
         )}
+        <button
+          type="submit"
+          disabled={disabled || !!pendingMessage}
+          title={pendingMessage ? t('chat.pendingBlockTitle') : undefined}
+        >
+          <Send size={16} />
+          {t('chat.send')}
+        </button>
       </form>
     </div>
   )

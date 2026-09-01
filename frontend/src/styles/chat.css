@@ -444,6 +444,8 @@
 
 /* ===== Input Box ===== */
 .input-box {
+  /* 定位上下文:待发消息悬浮条(.pending-float)锚定在输入框上方 */
+  position: relative;
   padding: var(--sp-3) var(--sp-4);
   border-top: 1px solid var(--border);
   background: var(--bg-surface);
@@ -513,7 +515,7 @@
   cursor: not-allowed;
 }
 
-/* Stop button: replaces the send button in the same slot while streaming. */
+/* Stop button: sits next to the send button while streaming (send queues). */
 .input-box .stop-send-btn {
   display: inline-flex;
   align-items: center;

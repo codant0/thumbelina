@@ -1067,3 +1067,79 @@
   font-size: var(--fs-sm);
 }
 
+
+/* ===== Queued message bar (pending send, floats above the input box) ===== */
+.pending-float {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: var(--sp-4);
+  right: var(--sp-4);
+  z-index: var(--z-dropdown);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--sp-2) var(--sp-3);
+  box-shadow: var(--shadow-md);
+  animation: pending-float-in var(--dur-fast) var(--ease-out);
+}
+
+@keyframes pending-float-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pending-float {
+    animation: none;
+  }
+}
+
+.pending-float-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  min-width: 0;
+}
+
+.pending-float-head svg {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.pending-float-title {
+  font-weight: var(--fw-med);
+  color: var(--text-heading, var(--text-primary));
+  flex-shrink: 0;
+}
+
+.pending-float-hint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pending-float-text {
+  max-height: 96px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+}
+
+.pending-float-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}

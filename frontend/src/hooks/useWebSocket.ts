@@ -62,6 +62,12 @@ const TICK_INTERVAL = 30
 // when the backend LLM call hangs or the WS frame is silently dropped.
 const REPLY_TIMEOUT_MS = 90_000
 
+/** 流式进行中排队的待发消息(单条/会话)。held:上次回复异常结束(出错/超时),暂停自动发送。 */
+interface PendingEntry {
+  text: string
+  held?: boolean
+}
+
 export function useWebSocket(url: string, activeConversationId?: string) {
   const [messages, setMessages] = useState<Message[]>([])
   const [isConnected, setIsConnected] = useState(false)
@@ -80,6 +86,9 @@ export function useWebSocket(url: string, activeConversationId?: string) {
   const sessionConvRef = useRef<string | null>(null)
   const [streamingConvId, setStreamingConvId] = useState<string | null>(null)
   const [waitingConvIds, setWaitingConvIds] = useState<string[]>([])
+  // 待发消息按会话隔离;ref 镜像供 onmessage 闭包同步读取。
+  const [pendingByConv, setPendingByConv] = useState<Record<string, PendingEntry>>({})
+  const pendingRef = useRef<Record<string, PendingEntry>>({})
   const bufferRef = useRef('')
   const reasoningBufferRef = useRef('')
   const displayedRef = useRef(0)
@@ -125,6 +134,30 @@ export function useWebSocket(url: string, activeConversationId?: string) {
     setWaitingConvIds(prev => (prev.includes(convId) ? prev.filter(id => id !== convId) : prev))
   }, [])
 
+  // 写入/清除一个会话的待发消息(entry=null 清除)。同步维护 ref 镜像。
+  const setPendingFor = useCallback((convId: string, entry: PendingEntry | null) => {
+    if (entry) {
+      pendingRef.current[convId] = entry
+      setPendingByConv(prev => ({ ...prev, [convId]: entry }))
+    } else {
+      delete pendingRef.current[convId]
+      setPendingByConv(prev => {
+        if (!(convId in prev)) return prev
+        const next = { ...prev }
+        delete next[convId]
+        return next
+      })
+    }
+  }, [])
+
+  // 回复异常结束(出错/超时):该会话的待发消息不自动发送,挂起等用户处理。
+  const markPendingHeld = useCallback((convId: string | null | undefined) => {
+    if (!convId) return
+    const entry = pendingRef.current[convId]
+    if (!entry || entry.held) return
+    setPendingFor(convId, { ...entry, held: true })
+  }, [setPendingFor])
+
   const clearReplyTimer = useCallback(() => {
     if (replyTimerRef.current) {
       clearTimeout(replyTimerRef.current)
@@ -155,13 +188,104 @@ export function useWebSocket(url: string, activeConversationId?: string) {
     setStreamingConvId(null)
   }, [setAwaitingMore])
 
+  const startReplyTimer = useCallback(() => {
+    clearReplyTimer()
+    replyTimerRef.current = setTimeout(() => {
+      replyTimerRef.current = null
+      const timedOutConv = sessionConvRef.current
+      stopTypewriter()
+      sessionConvRef.current = null
+      setStreamingConvId(null)
+      setWaitingConvIds([])
+      if (timedOutConv && timedOutConv !== '@pending') markPendingHeld(timedOutConv)
+      setMessages(prev => [
+        ...prev,
+        {
+          id: String(msgIdRef.current++),
+          role: 'system',
+          content: 'Request timed out. The model may be unresponsive — please try again.',
+          timestamp: new Date().toISOString(),
+        },
+      ])
+    }, REPLY_TIMEOUT_MS)
+  }, [clearReplyTimer, stopTypewriter, markPendingHeld])
+
+  const sendMessage = useCallback((message: string, conversationId?: string) => {
+    const targetConv = conversationId ?? lastConversationIdRef.current ?? '@pending'
+    const inFlight = sessionConvRef.current !== null
+    // Only reset stream buffers when no other conversation's reply is in
+    // flight — the backend serializes replies, so this send simply queues.
+    if (!inFlight) {
+      stopTypewriter()
+      bufferRef.current = ''
+      reasoningBufferRef.current = ''
+      displayedRef.current = 0
+      completedContentRef.current = null
+      streamConvRef.current = targetConv
+      sessionConvRef.current = targetConv
+    }
+
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      setMessages(prev => [
+        ...prev,
+        {
+          id: String(msgIdRef.current++),
+          role: 'user',
+          content: message,
+          timestamp: new Date().toISOString(),
+        },
+      ])
+      setWaitingConvIds(prev => (prev.includes(targetConv) ? prev : [...prev, targetConv]))
+      startReplyTimer()
+      const payload: Record<string, string> = { message }
+      if (conversationId) {
+        payload.conversation_id = conversationId
+      }
+      try {
+        wsRef.current.send(JSON.stringify(payload))
+      } catch {
+        clearReplyTimer()
+        setWaitingConvIds(prev => prev.filter(id => id !== targetConv))
+        if (sessionConvRef.current === targetConv) {
+          sessionConvRef.current = null
+        }
+        setMessages(prev => [
+          ...prev,
+          {
+            id: String(msgIdRef.current++),
+            role: 'system',
+            content: 'Failed to send message. Please try again.',
+            timestamp: new Date().toISOString(),
+          },
+        ])
+      }
+    }
+  }, [stopTypewriter, startReplyTimer, clearReplyTimer])
+
+  // 消费并发送一个会话的待发消息(原子取出,保证 done/stopped 先后到达只发一次)。
+  // 连接不可用时放回,保留给用户手动处理。
+  const firePendingFor = useCallback((convId: string | null | undefined) => {
+    if (!convId || convId === '@pending') return
+    const entry = pendingRef.current[convId]
+    if (!entry) return
+    setPendingFor(convId, null)
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      sendMessage(entry.text, convId)
+    } else {
+      setPendingFor(convId, entry)
+    }
+  }, [sendMessage, setPendingFor])
+
   const startTypewriter = useCallback(() => {
     if (twTimerRef.current) clearInterval(twTimerRef.current)
     twTimerRef.current = setInterval(() => {
       const total = bufferRef.current.length
       if (displayedRef.current >= total) {
         if (streamDoneRef.current) {
+          // 回复已完成且打字机追平 → 终结消息,该会话的流就此结束,
+          // 触发该会话待发消息的自动发送(streamConvRef 仍指向刚结束的会话)。
           stopTypewriter(String(msgIdRef.current++))
+          firePendingFor(streamConvRef.current)
         } else {
           // Everything buffered so far is on screen, but the reply has not
           // finished — flag "waiting for more content" so the UI can show a
@@ -197,27 +321,51 @@ export function useWebSocket(url: string, activeConversationId?: string) {
         return updated
       })
     }, TICK_INTERVAL)
-  }, [stopTypewriter, setAwaitingMore])
+  }, [stopTypewriter, setAwaitingMore, firePendingFor])
 
-  const startReplyTimer = useCallback(() => {
-    clearReplyTimer()
-    replyTimerRef.current = setTimeout(() => {
-      replyTimerRef.current = null
-      stopTypewriter()
-      sessionConvRef.current = null
-      setStreamingConvId(null)
-      setWaitingConvIds([])
-      setMessages(prev => [
-        ...prev,
-        {
-          id: String(msgIdRef.current++),
-          role: 'system',
-          content: 'Request timed out. The model may be unresponsive — please try again.',
-          timestamp: new Date().toISOString(),
-        },
-      ])
-    }, REPLY_TIMEOUT_MS)
-  }, [clearReplyTimer, stopTypewriter])
+  const stopGeneration = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      const payload: Record<string, string | boolean> = { stop: true }
+      if (activeConversationRef.current) {
+        payload.conversation_id = activeConversationRef.current
+      }
+      wsRef.current.send(JSON.stringify(payload))
+    }
+  }, [])
+
+  // 排队待发消息(流式进行中提交)。该会话已无进行中的回复时直接发送,
+  // 避免悬浮条在流结束后死等;否则进入单条队列(覆盖旧的待发内容)。
+  const queuePendingMessage = useCallback((message: string, conversationId?: string) => {
+    const conv = conversationId ?? lastConversationIdRef.current
+    if (!conv || sessionConvRef.current !== conv) {
+      sendMessage(message, conversationId)
+      return
+    }
+    setPendingFor(conv, { text: message })
+  }, [sendMessage, setPendingFor])
+
+  // 「立即执行」:回复进行中则停止当前回复(stopped 帧到达后由 firePendingFor
+  // 统一发送);否则直接消费并发送。
+  const sendPendingNow = useCallback((conversationId?: string) => {
+    const conv = conversationId ?? lastConversationIdRef.current
+    if (!conv) return
+    const entry = pendingRef.current[conv]
+    if (!entry) return
+    if (sessionConvRef.current === conv) {
+      stopGeneration()
+      return
+    }
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      setPendingFor(conv, null)
+      sendMessage(entry.text, conversationId)
+    }
+  }, [stopGeneration, sendMessage, setPendingFor])
+
+  const cancelPendingMessage = useCallback((conversationId?: string) => {
+    const conv = conversationId ?? lastConversationIdRef.current
+    if (!conv) return
+    setPendingFor(conv, null)
+  }, [setPendingFor])
 
   useEffect(() => {
     const ws = new WebSocket(url)
@@ -275,6 +423,8 @@ export function useWebSocket(url: string, activeConversationId?: string) {
           sessionConvRef.current = null
           setStreamingConvId(null)
         }
+        // 异常结束:待发消息不自动发送,挂起等用户处理
+        if (conv) markPendingHeld(conv)
         // Only surface the error in the conversation it belongs to
         if (!conv || conv === activeConversationRef.current) {
           setMessages(prev => [
@@ -379,6 +529,9 @@ export function useWebSocket(url: string, activeConversationId?: string) {
         // so this conversation's stream starts with clean buffers.
         if (twMsgIdRef.current && conv && session !== conv) {
           stopTypewriter(String(msgIdRef.current++))
+          // 上一会话的流就此结束(done 可能刚被收下、打字机还没来得及追平),
+          // 同样要触发其待发消息的自动发送。
+          firePendingFor(streamConvRef.current)
         }
         if (conv && session !== conv) {
           sessionConvRef.current = conv
@@ -457,6 +610,8 @@ export function useWebSocket(url: string, activeConversationId?: string) {
         bufferRef.current = ''
         reasoningBufferRef.current = ''
         displayedRef.current = 0
+        // 流就此结束(用户停止或「立即执行」)→ 触发待发消息自动发送
+        firePendingFor(conv)
         return
       }
 
@@ -501,6 +656,8 @@ export function useWebSocket(url: string, activeConversationId?: string) {
           }
           return prev
         })
+        // 流正常结束 → 触发待发消息自动发送
+        firePendingFor(conv)
         return
       }
 
@@ -537,6 +694,8 @@ export function useWebSocket(url: string, activeConversationId?: string) {
             },
           ])
         }
+        // 回复正常结束(非流式整段回复)→ 触发待发消息自动发送
+        firePendingFor(conv)
       }
     }
 
@@ -567,68 +726,6 @@ export function useWebSocket(url: string, activeConversationId?: string) {
       ws.close()
     }
   }, [url])
-
-  const sendMessage = useCallback((message: string, conversationId?: string) => {
-    const targetConv = conversationId ?? lastConversationIdRef.current ?? '@pending'
-    const inFlight = sessionConvRef.current !== null
-    // Only reset stream buffers when no other conversation's reply is in
-    // flight — the backend serializes replies, so this send simply queues.
-    if (!inFlight) {
-      stopTypewriter()
-      bufferRef.current = ''
-      reasoningBufferRef.current = ''
-      displayedRef.current = 0
-      completedContentRef.current = null
-      streamConvRef.current = targetConv
-      sessionConvRef.current = targetConv
-    }
-
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      setMessages(prev => [
-        ...prev,
-        {
-          id: String(msgIdRef.current++),
-          role: 'user',
-          content: message,
-          timestamp: new Date().toISOString(),
-        },
-      ])
-      setWaitingConvIds(prev => (prev.includes(targetConv) ? prev : [...prev, targetConv]))
-      startReplyTimer()
-      const payload: Record<string, string> = { message }
-      if (conversationId) {
-        payload.conversation_id = conversationId
-      }
-      try {
-        wsRef.current.send(JSON.stringify(payload))
-      } catch {
-        clearReplyTimer()
-        setWaitingConvIds(prev => prev.filter(id => id !== targetConv))
-        if (sessionConvRef.current === targetConv) {
-          sessionConvRef.current = null
-        }
-        setMessages(prev => [
-          ...prev,
-          {
-            id: String(msgIdRef.current++),
-            role: 'system',
-            content: 'Failed to send message. Please try again.',
-            timestamp: new Date().toISOString(),
-          },
-        ])
-      }
-    }
-  }, [stopTypewriter, startReplyTimer, clearReplyTimer])
-
-  const stopGeneration = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      const payload: Record<string, string | boolean> = { stop: true }
-      if (activeConversationRef.current) {
-        payload.conversation_id = activeConversationRef.current
-      }
-      wsRef.current.send(JSON.stringify(payload))
-    }
-  }, [])
 
   const switchConversation = useCallback((conversationId: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -714,7 +811,10 @@ export function useWebSocket(url: string, activeConversationId?: string) {
       displayedRef.current = 0
       completedContentRef.current = null
     }
-  }, [stopTypewriter])
+    // 显式清空某会话上下文时,连带清掉该会话的待发消息;
+    // 无参调用(切换会话视图)不影响任何待发消息。
+    if (conversationId) setPendingFor(conversationId, null)
+  }, [stopTypewriter, setPendingFor])
 
   const clearNewConversation = useCallback(() => {
     setNewConversationId(null)
@@ -726,16 +826,17 @@ export function useWebSocket(url: string, activeConversationId?: string) {
     return () => { listenersRef.current.delete(fn) }
   }, [])
 
-  // Expose streaming/waiting state relative to the active conversation so a
-  // busy conversation does not lock the others. A null streamingConvId means
-  // the reply did not report a conversation — treat it as the active one.
+  // Expose streaming/waiting/pending state relative to the active conversation
+  // so a busy conversation does not lock the others. A null streamingConvId
+  // means the reply did not report a conversation — treat it as the active one.
   const isStreamingActive =
     isStreaming && (streamingConvId === null || streamingConvId === activeConversationId)
   const waitingForReply =
     (activeConversationId && waitingConvIds.includes(activeConversationId)) ||
     (!activeConversationId && waitingConvIds.includes('@pending')) || false
+  const activePending = activeConversationId ? pendingByConv[activeConversationId] : undefined
 
-  return { messages, isConnected, isStreaming: isStreamingActive, streamingMode, waitingForReply, awaitingMoreContent, lastConversationId, newConversationId, clearNewConversation, sendMessage, stopGeneration, clearMessages, switchConversation, loadHistory, subscribe }
+  return { messages, isConnected, isStreaming: isStreamingActive, streamingMode, waitingForReply, awaitingMoreContent, lastConversationId, newConversationId, clearNewConversation, pendingMessage: activePending?.text ?? null, pendingHeld: activePending?.held ?? false, queuePendingMessage, sendPendingNow, cancelPendingMessage, sendMessage, stopGeneration, clearMessages, switchConversation, loadHistory, subscribe }
 }
 
 export type ChatSocket = ReturnType<typeof useWebSocket>

@@ -71,28 +71,109 @@ describe('InputBox', () => {
   })
 
   it('renders a stop button while streaming and stops on click', async () => {
-    const onSend = vi.fn()
     const onStop = vi.fn()
     const user = userEvent.setup()
 
-    render(<InputBox onSend={onSend} isStreaming onStop={onStop} />)
+    render(<InputBox onSend={vi.fn()} isStreaming onStop={onStop} onQueueSend={vi.fn()} />)
 
-    expect(screen.queryByRole('button', { name: /Send/i })).not.toBeInTheDocument()
     const stop = screen.getByTestId('stop-generation')
     await user.click(stop)
     expect(onStop).toHaveBeenCalled()
-    expect(onSend).not.toHaveBeenCalled()
   })
 
-  it('does not send on Enter while streaming', async () => {
+  it('renders stop and send buttons side by side while streaming', () => {
+    render(<InputBox onSend={vi.fn()} isStreaming onStop={vi.fn()} onQueueSend={vi.fn()} />)
+
+    expect(screen.getByTestId('stop-generation')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
+  })
+
+  it('queues the message on Enter while streaming instead of blocking', async () => {
     const onSend = vi.fn()
+    const onQueueSend = vi.fn()
     const user = userEvent.setup()
 
-    render(<InputBox onSend={onSend} isStreaming />)
+    render(<InputBox onSend={onSend} isStreaming onQueueSend={onQueueSend} />)
 
     const input = screen.getByPlaceholderText(/Type a message/i)
     await user.type(input, 'Hello{enter}')
 
     expect(onSend).not.toHaveBeenCalled()
+    expect(onQueueSend).toHaveBeenCalledWith('Hello')
+    expect(input).toHaveValue('')
+  })
+
+  it('queues the message when clicking send while streaming', async () => {
+    const onSend = vi.fn()
+    const onQueueSend = vi.fn()
+    const user = userEvent.setup()
+
+    render(<InputBox onSend={onSend} isStreaming onQueueSend={onQueueSend} />)
+
+    const input = screen.getByPlaceholderText(/Type a message/i)
+    await user.type(input, 'Hello')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+
+    expect(onSend).not.toHaveBeenCalled()
+    expect(onQueueSend).toHaveBeenCalledWith('Hello')
+  })
+
+  it('blocks submitting while a pending message exists (single slot)', async () => {
+    const onSend = vi.fn()
+    const user = userEvent.setup()
+
+    render(
+      <InputBox
+        onSend={onSend}
+        pendingMessage="queued text"
+        onSendPendingNow={vi.fn()}
+        onCancelPending={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
+
+    const input = screen.getByPlaceholderText(/Type a message/i)
+    await user.type(input, 'Hello{enter}')
+    expect(onSend).not.toHaveBeenCalled()
+  })
+
+  it('renders the pending float with actions to send now or cancel', async () => {
+    const onSendPendingNow = vi.fn()
+    const onCancelPending = vi.fn()
+    const user = userEvent.setup()
+
+    render(
+      <InputBox
+        onSend={vi.fn()}
+        pendingMessage="queued text"
+        onSendPendingNow={onSendPendingNow}
+        onCancelPending={onCancelPending}
+      />,
+    )
+
+    expect(screen.getByTestId('pending-message')).toHaveTextContent('queued text')
+    expect(screen.getByText(/Will be sent when the current reply finishes/i)).toBeInTheDocument()
+
+    await user.click(screen.getByTestId('pending-send-now'))
+    expect(onSendPendingNow).toHaveBeenCalledTimes(1)
+
+    await user.click(screen.getByTestId('pending-cancel'))
+    expect(onCancelPending).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows the held hint when the previous reply ended abnormally', () => {
+    render(
+      <InputBox
+        onSend={vi.fn()}
+        pendingMessage="queued"
+        pendingHeld
+        onSendPendingNow={vi.fn()}
+        onCancelPending={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText(/auto-send paused/i)).toBeInTheDocument()
+    expect(screen.queryByText(/Will be sent when the current reply finishes/i)).not.toBeInTheDocument()
   })
 })
