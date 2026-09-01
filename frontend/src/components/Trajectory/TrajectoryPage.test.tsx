@@ -58,12 +58,18 @@ function mockTrajectoryFetch() {
   })
 }
 
+/** 触发会话选择前必须先等 option 挂载:受控 <select> 赋值尚不存在的 option 会被
+ *  归一化为 ''，onChange 收到空值导致轨迹永不加载(CI 偶发 flake 的根因，与超时无关)。 */
 async function selectConversation() {
   const select = await screen.findByTestId('trajectory-select')
+  await screen.findByText('会话1')
   fireEvent.change(select, { target: { value: 'c1' } })
-  await waitFor(() => {
-    expect(screen.getAllByTestId('turn-card').length).toBeGreaterThan(0)
-  })
+  await waitFor(
+    () => {
+      expect(screen.getAllByTestId('turn-card').length).toBeGreaterThan(0)
+    },
+    { timeout: 3_000 },
+  )
 }
 
 describe('collapseMiddle', () => {
@@ -359,6 +365,7 @@ describe('TrajectoryPage', () => {
     })
     renderWithI18n(<TrajectoryPage />)
     const select = await screen.findByTestId('trajectory-select')
+    await screen.findByText('会话1')
     fireEvent.change(select, { target: { value: 'c1' } })
     expect(await screen.findByTestId('trajectory-error')).toBeInTheDocument()
 

@@ -1,59 +1,80 @@
-"""Task scheduler for managing scheduled tasks."""
+"""Task scheduler for managing scheduled tasks.
+
+v2 (design ``docs/plans/2026-08-30-event-timer-tasks-design.md``): the
+scheduler is event-driven — every status transition can be persisted to a
+:class:`~thumbelina.scheduler.store.TaskStore` and is announced as a
+structured :class:`~thumbelina.scheduler.models.TaskEvent` on an
+:class:`~thumbelina.scheduler.events.EventBus`, while the public v1 API
+(``add_task/get_task/list_tasks/cancel_task/complete_task/get_due_tasks/
+start(on_due_task=)/stop``) keeps its signatures and semantics.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
-import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
-from datetime import datetime
-from enum import StrEnum
+from datetime import datetime, timedelta
+from typing import Any
+
+from thumbelina.scheduler.cron import CRONITER_AVAILABLE, CronTrigger, validate_cron
+from thumbelina.scheduler.events import EventBus
+from thumbelina.scheduler.models import (
+    ScheduledTask,
+    TaskEvent,
+    TaskEventType,
+    TaskStatus,
+    TriggerKind,
+)
+from thumbelina.scheduler.store import TaskStore
+
+__all__ = ["ScheduledTask", "TaskScheduler", "TaskStatus"]
 
 logger = logging.getLogger(__name__)
 
 # How often the polling loop wakes up to check for due tasks (seconds).
 _POLL_INTERVAL = 1.0
 
+# Defaults when no ``config`` object is supplied (design §10).
+_DEFAULT_MISSED_POLICY = "mark"
+_DEFAULT_MISSED_GRACE_MINUTES = 5
 
-class TaskStatus(StrEnum):
-    """Status of a scheduled task."""
+# Upper bound for counting skipped cron occurrences when summarising a
+# missed backlog — keeps recover() bounded across absurdly long downtimes.
+_MAX_SKIPPED_OCCURRENCES = 10_000
 
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    CANCELLED = "cancelled"
+# The callback may return a delivery receipt (DeliveryDispatcher); a
+# non-None return is recorded in the COMPLETED event payload ``result``.
+DueCallback = Callable[[ScheduledTask], Awaitable[Any]]
+ConditionCallback = Callable[[str], Awaitable[bool]]
+
+# How long a prompt-mode task may keep the ``on_prompt_task`` runner busy
+# before the scheduler settles it as timed out (§5.4).  Default 300s; the
+# duck-typed config value (``config.prompt_timeout_seconds``) overrides it.
+_DEFAULT_PROMPT_TIMEOUT_SECONDS = 300
 
 
-@dataclass
-class ScheduledTask:
-    """A scheduled task.
+def _iso(value: datetime | None) -> str | None:
+    """JSON-safe ISO rendering for event payloads."""
+    return value.isoformat() if value is not None else None
 
-    Attributes
-    ----------
-    id:
-        Unique identifier.
-    description:
-        Description of the task.
-    scheduled_time:
-        When the task should run.
-    status:
-        Current status of the task.
-    result:
-        Result of the task execution.
-    condition:
-        Optional condition string for condition-based tasks
-        (e.g., ``"file_changed:/path/to/file"``).  When set, the task
-        is only executed when the ``check_condition`` callback returns True.
-    """
 
-    id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    description: str = ""
-    scheduled_time: datetime = field(default_factory=datetime.now)
-    status: TaskStatus = TaskStatus.PENDING
-    result: str | None = None
-    condition: str | None = None
+def _count_skipped_occurrences(expr: str, after: datetime, now: datetime) -> int:
+    """Count cron fire times in ``(after, now]``, capped for safety."""
+    count = 0
+    try:
+        trigger = CronTrigger(expr)
+        cursor = after
+        while count < _MAX_SKIPPED_OCCURRENCES:
+            nxt = trigger.next_after(cursor)
+            if nxt > now:
+                break
+            count += 1
+            cursor = nxt
+    except ValueError:
+        return count
+    return count
 
 
 class TaskScheduler:
@@ -61,76 +82,446 @@ class TaskScheduler:
 
     Parameters
     ----------
+    store:
+        Optional persistence backend (:class:`TaskStore`).  Every status
+        transition is written through when injected; without it the
+        scheduler runs purely in memory (v1 behaviour).
+    bus:
+        Optional :class:`EventBus`.  Lifecycle events (``task.created``,
+        ``task.due``, ``task.completed``, ``task.failed``, ``task.missed``,
+        ``task.cancelled``) are emitted through it; without a bus events
+        are silently dropped.
     check_condition:
         Optional async callback that evaluates a condition string and
         returns ``True`` when the condition is satisfied.  Used for
         condition-based tasks (those with a ``condition`` field set).
+    config:
+        Optional duck-typed settings object exposing ``missed_policy``
+        (``"mark"``/``"run"``, design §7.3/§10) and ``missed_grace_minutes``;
+        defaults to ``mark`` / ``5``.
 
-    Call :meth:`start` to begin the background polling loop, and
-    :meth:`stop` to shut it down gracefully.
+    Call :meth:`recover` before :meth:`start` when a store is injected
+    (§7.2), :meth:`start` to begin the background polling loop, and
+    :meth:`stop` to shut down gracefully.
     """
 
     def __init__(
         self,
-        check_condition: Callable[[str], Awaitable[bool]] | None = None,
+        store: TaskStore | None = None,
+        bus: EventBus | None = None,
+        check_condition: ConditionCallback | None = None,
+        config: Any = None,
     ) -> None:
         self._tasks: dict[str, ScheduledTask] = {}
         self._running = False
         self._poll_task: asyncio.Task[None] | None = None
+        # Retained so the Heartbeat (§7.4) can re-create a dead polling loop
+        # with the exact delivery callback this scheduler was started with.
+        self._on_due_task: DueCallback | None = None
+        self._on_prompt_task: DueCallback | None = None
+        # Ids of prompt-mode tasks currently executing in the background
+        # (§5.4): the Heartbeat's stale-RUNNING reaper skips them so a long
+        # LLM call is not killed mid-flight.  Discarded on settlement.
+        self._inflight: set[str] = set()
+        # Asyncio task handles for those executions: :meth:`stop` awaits them
+        # during graceful shutdown (T13) and retrieves each result so an
+        # unexpected background exception is surfaced instead of leaked
+        # (Task 12 Minor 4).  Discarded by the done callback on settlement.
+        self._inflight_tasks: set[asyncio.Task[Any]] = set()
         self._check_condition = check_condition
+        self._store = store
+        self._bus = bus
+        self._missed_policy: str = (
+            getattr(config, "missed_policy", _DEFAULT_MISSED_POLICY)
+            if config is not None
+            else _DEFAULT_MISSED_POLICY
+        )
+        grace_minutes = (
+            getattr(config, "missed_grace_minutes", _DEFAULT_MISSED_GRACE_MINUTES)
+            if config is not None
+            else _DEFAULT_MISSED_GRACE_MINUTES
+        )
+        self._missed_grace = timedelta(minutes=grace_minutes)
+        # §5.4: prompt-mode tasks run the LLM, so a runaway agent call must
+        # not occupy the runner slot forever.
+        self._prompt_timeout = (
+            getattr(config, "prompt_timeout_seconds", _DEFAULT_PROMPT_TIMEOUT_SECONDS)
+            if config is not None
+            else _DEFAULT_PROMPT_TIMEOUT_SECONDS
+        )
 
     @property
     def running(self) -> bool:
         """Whether the background polling loop is active."""
         return self._running
 
+    # ------------------------------------------------------------------
+    # internal helpers
+    # ------------------------------------------------------------------
+
+    async def _persist(self, task: ScheduledTask) -> None:
+        """Write a status transition through to the store (when injected).
+
+        A store failure never breaks scheduling (design §11): the error is
+        logged and the transition lives on in memory only — degraded to v1
+        behaviour, the server keeps running.
+        """
+        if self._store is None:
+            return
+        try:
+            await self._store.upsert_task(task)
+        except Exception as exc:
+            logger.warning("Task store unavailable, task %s kept in memory only: %s", task.id, exc)
+
+    async def _emit(self, event: TaskEvent) -> None:
+        """Publish an event on the bus (silently dropped when absent)."""
+        if self._bus is not None:
+            await self._bus.emit(event)
+
+    def _make_event(
+        self, task: ScheduledTask, event_type: TaskEventType, payload: dict[str, Any]
+    ) -> TaskEvent:
+        return TaskEvent(
+            type=event_type,
+            task_id=task.id,
+            trigger=task.trigger,
+            channel=task.channel,
+            content=task.content,
+            payload=payload,
+        )
+
+    async def _lookup_task(self, task_id: str) -> ScheduledTask | None:
+        """Memory-first lookup with a store fallback (cached on hit).
+
+        A store read failure is logged and treated as a miss (design §11).
+        """
+        task = self._tasks.get(task_id)
+        if task is None and self._store is not None:
+            try:
+                task = await self._store.get_task(task_id)
+            except Exception as exc:
+                logger.warning("Task store read failed for task %s: %s", task_id, exc)
+                return None
+            if task is not None:
+                self._tasks[task_id] = task
+        return task
+
+    # ------------------------------------------------------------------
+    # public CRUD API (v1 signatures preserved)
+    # ------------------------------------------------------------------
+
     async def add_task(self, task: ScheduledTask) -> None:
-        """Add a task to the scheduler."""
+        """Add a task to the scheduler.
+
+        For cron tasks without a caller-supplied ``next_run`` the next fire
+        time is computed from ``cron_expr`` as a fallback.  An invalid or
+        never-firing expression (e.g. ``0 0 31 2 *``) raises ``ValueError``
+        and the task is not created (design §6).
+        """
+        if task.trigger == TriggerKind.CRON and task.next_run is None:
+            if not task.cron_expr:
+                raise ValueError(
+                    f"Invalid cron expression: {task.cron_expr!r} (cron tasks require a cron_expr)"
+                )
+            base = task.scheduled_time if task.scheduled_time is not None else datetime.now()
+            try:
+                task.next_run = CronTrigger(task.cron_expr).next_after(base)
+            except ValueError as exc:
+                raise ValueError(f"Invalid cron expression: {task.cron_expr!r} ({exc})") from exc
         self._tasks[task.id] = task
+        await self._persist(task)
+        await self._emit(self._make_event(task, TaskEventType.CREATED, {"source": task.source}))
 
     async def get_task(self, task_id: str) -> ScheduledTask | None:
-        """Get a task by ID."""
-        return self._tasks.get(task_id)
+        """Get a task by ID (falls back to the store when injected)."""
+        return await self._lookup_task(task_id)
 
     async def list_tasks(self) -> list[ScheduledTask]:
         """List all tasks."""
         return list(self._tasks.values())
 
     async def cancel_task(self, task_id: str) -> bool:
-        """Cancel a task."""
-        task = self._tasks.get(task_id)
+        """Cancel a task (PAUSED cron tasks included)."""
+        task = await self._lookup_task(task_id)
         if not task:
             return False
         task.status = TaskStatus.CANCELLED
+        await self._persist(task)
+        # ``task.cancelled`` is reserved for user-initiated termination;
+        # pause/resume are deliberately excluded from it (design §3).
+        await self._emit(self._make_event(task, TaskEventType.CANCELLED, {"by": "scheduler"}))
         return True
 
     async def complete_task(self, task_id: str) -> None:
         """Mark a task as completed."""
-        task = self._tasks.get(task_id)
+        task = await self._lookup_task(task_id)
         if task:
             task.status = TaskStatus.COMPLETED
+            await self._persist(task)
 
     async def get_due_tasks(self) -> list[ScheduledTask]:
-        """Get tasks that are due to run."""
+        """Get tasks that are due to run.
+
+        A task is due when ``status=PENDING`` and its trigger time has
+        passed: ``scheduled_time`` for ONCE tasks, ``next_run`` for CRON
+        tasks.  PAUSED (and all other non-pending) tasks are skipped.
+        """
         now = datetime.now()
-        return [
-            task
-            for task in self._tasks.values()
-            if task.status == TaskStatus.PENDING and task.scheduled_time <= now
-        ]
+        due: list[ScheduledTask] = []
+        for task in self._tasks.values():
+            if task.status != TaskStatus.PENDING:
+                continue
+            trigger_time = (
+                task.scheduled_time if task.trigger == TriggerKind.ONCE else task.next_run
+            )
+            if trigger_time is not None and trigger_time <= now:
+                due.append(task)
+        return due
+
+    # ------------------------------------------------------------------
+    # pause / resume (cron only)
+    # ------------------------------------------------------------------
+
+    async def pause_task(self, task_id: str) -> bool:
+        """Pause a PENDING cron task; it will not fire until resumed.
+
+        Returns ``False`` for unknown ids and for anything that is not a
+        PENDING cron task.  No event is emitted: none of the existing
+        ``TaskEventType`` values fits a pause (``task.cancelled`` explicitly
+        excludes pause per design §3) and adding enum values is out of
+        scope — the state change is persisted and visible via the task API.
+        """
+        task = await self._lookup_task(task_id)
+        if task is None:
+            return False
+        if task.trigger != TriggerKind.CRON or task.status != TaskStatus.PENDING:
+            return False
+        task.status = TaskStatus.PAUSED
+        await self._persist(task)
+        return True
+
+    async def resume_task(self, task_id: str) -> bool:
+        """Resume a PAUSED cron task, recomputing ``next_run`` from now.
+
+        Returns ``False`` for unknown ids and for anything that is not a
+        PAUSED cron task (including tasks whose expression can no longer be
+        evaluated).
+        """
+        task = await self._lookup_task(task_id)
+        if task is None:
+            return False
+        if task.trigger != TriggerKind.CRON or task.status != TaskStatus.PAUSED:
+            return False
+        try:
+            task.next_run = CronTrigger(task.cron_expr or "").next_after(datetime.now())
+        except ValueError as exc:
+            logger.warning("Cannot resume task %s: %s", task_id, exc)
+            return False
+        task.status = TaskStatus.PENDING
+        await self._persist(task)
+        return True
+
+    # ------------------------------------------------------------------
+    # startup recovery (design §7.2)
+    # ------------------------------------------------------------------
+
+    async def recover(self, now: datetime | None = None) -> None:
+        """Apply the five startup-recovery rules (§7.2); no-op without a store.
+
+        Hydrates every persisted task into memory, then:
+
+        1. ONCE PENDING due before ``now - grace`` → per missed policy
+           (§7.3): ``mark`` → MISSED terminal + ``task.missed``; ``run`` →
+           stays PENDING (fires immediately on the next scan);
+        2. ONCE PENDING due within ``(now - grace, now]`` → stays PENDING
+           (the scan loop fires it within seconds);
+        3. ONCE RUNNING residue → FAILED (``error="interrupted by restart"``)
+           + ``task.failed``;
+        4. CRON PENDING with ``next_run <= now`` → a single summary
+           ``task.missed`` event is emitted for the skipped occurrences
+           under both policies; ``mark`` additionally advances ``next_run``
+           to the nearest future occurrence without firing, while ``run``
+           leaves ``next_run`` as-is so the scan fires the backlog at most
+           once (skipped occurrences are never replayed);
+        5. CRON RUNNING residue → same as rule 3.
+
+        During hydration, a cron task whose ``cron_expr`` no longer parses
+        (hand-edited store row / external writer, final review M4) is
+        marked FAILED (``error="invalid cron expression"``) and kept out
+        of the in-memory working set: left schedulable it would be due on
+        every poll cycle (1Hz delivery storm).  RUNNING residue is left to
+        rule 3/5 and terminal rows are not touched.
+
+        When :mod:`croniter` is not installed, cron rows are kept out of
+        the working set **without** a FAILED verdict — the store rows stay
+        untouched and recover again (properly) once croniter is available;
+        one-shot tasks keep working (graceful degradation).
+
+        Call this before :meth:`start` when a store is injected.
+        """
+        if self._store is None:
+            return
+        now = now if now is not None else datetime.now()
+        grace_deadline = now - self._missed_grace
+        try:
+            stored_tasks = await self._store.list_tasks()
+        except Exception as exc:
+            # Design §11: a dead store degrades to memory-only operation.
+            logger.warning("Task store unavailable during recover, skipping: %s", exc)
+            return
+        skipped_no_croniter = 0
+        for stored in stored_tasks:
+            if stored.trigger == TriggerKind.CRON and not CRONITER_AVAILABLE:
+                # croniter missing → cron scheduling disabled.  Leave the
+                # store row untouched (an "invalid expression" verdict here
+                # would be a lie) and keep it out of the working set.
+                skipped_no_croniter += 1
+                continue
+            if (
+                stored.trigger == TriggerKind.CRON
+                and stored.status in (TaskStatus.PENDING, TaskStatus.PAUSED)
+                and validate_cron(stored.cron_expr or "") is not None
+            ):
+                # Final review M4: re-validate at hydration — an unparsable
+                # expression in a store row would otherwise be due on every
+                # poll cycle (1Hz delivery storm).  Fail it and keep it out
+                # of the working set; RUNNING residue falls through to rule
+                # 3/5 and terminal rows are left untouched.
+                stored.status = TaskStatus.FAILED
+                stored.error = "invalid cron expression"
+                logger.warning(
+                    "Task %s has an invalid cron expression %r; marked FAILED and not scheduled",
+                    stored.id,
+                    stored.cron_expr,
+                )
+                await self._persist(stored)
+                await self._emit(
+                    self._make_event(stored, TaskEventType.FAILED, {"error": stored.error})
+                )
+                continue  # not hydrated into the working set
+            self._tasks[stored.id] = stored  # hydrate the working set
+        if skipped_no_croniter:
+            logger.warning(
+                "croniter is not installed: %d cron task(s) left unscheduled in the store; "
+                "install croniter and restart to schedule them",
+                skipped_no_croniter,
+            )
+        for task in list(self._tasks.values()):
+            if task.status == TaskStatus.RUNNING:
+                # rules 3 & 5: residue from a previous process
+                scheduled_for = (
+                    task.scheduled_time if task.trigger == TriggerKind.ONCE else task.next_run
+                )
+                task.status = TaskStatus.FAILED
+                task.error = "interrupted by restart"
+                await self._persist(task)
+                await self._emit(
+                    self._make_event(
+                        task,
+                        TaskEventType.FAILED,
+                        {"error": task.error, "scheduled_for": _iso(scheduled_for)},
+                    )
+                )
+            elif (
+                task.trigger == TriggerKind.ONCE
+                and task.status == TaskStatus.PENDING
+                and task.scheduled_time is not None
+            ):
+                if task.scheduled_time <= grace_deadline:
+                    await self._recover_overdue_once(task)
+                # else: rule 2 — within grace, the scan fires it shortly
+            elif (
+                task.trigger == TriggerKind.CRON
+                and task.status == TaskStatus.PENDING
+                and task.next_run is not None
+                and task.next_run <= now
+            ):
+                await self._recover_overdue_cron(task, now)
+
+    async def _recover_overdue_once(self, task: ScheduledTask) -> None:
+        """Rule 1: a once task overdue beyond the grace window."""
+        if self._missed_policy == "run":
+            # §7.3: late tasks fire immediately — keep PENDING so the scan
+            # loop picks them up (the grace limit is bypassed entirely).
+            return
+        task.status = TaskStatus.MISSED
+        await self._persist(task)
+        await self._emit(
+            self._make_event(
+                task,
+                TaskEventType.MISSED,
+                {"scheduled_for": _iso(task.scheduled_time), "policy": self._missed_policy},
+            )
+        )
+
+    async def _recover_overdue_cron(self, task: ScheduledTask, now: datetime) -> None:
+        """Rule 4: a cron task whose next_run passed while the process was down.
+
+        Both policies emit a single summary ``task.missed`` for the skipped
+        occurrences (review ruling R2 — the §7.3 "no replay of skipped
+        occurrences" limit caps the firing count, not observability).  They
+        differ only in firing: ``mark`` advances ``next_run`` to the nearest
+        future occurrence without firing; ``run`` leaves ``next_run`` as-is
+        so the scan fires the backlog at most once, after which §5.2
+        advances it normally.
+        """
+        assert task.next_run is not None  # guarded by the caller
+        old_next_run = task.next_run
+        skipped = _count_skipped_occurrences(task.cron_expr or "", old_next_run, now)
+        if self._missed_policy != "run":
+            try:
+                task.next_run = CronTrigger(task.cron_expr or "").next_after(now)
+            except ValueError as exc:
+                logger.warning("Cannot advance cron next_run for task %s: %s", task.id, exc)
+                return
+            await self._persist(task)
+        await self._emit(
+            self._make_event(
+                task,
+                TaskEventType.MISSED,
+                {
+                    "scheduled_for": _iso(old_next_run),
+                    "policy": self._missed_policy,
+                    "skipped_occurrences": skipped,
+                },
+            )
+        )
+
+    # ------------------------------------------------------------------
+    # polling loop
+    # ------------------------------------------------------------------
 
     async def start(
         self,
-        on_due_task: Callable[[ScheduledTask], Awaitable[None]] | None = None,
+        on_due_task: DueCallback | None = None,
+        on_prompt_task: DueCallback | None = None,
     ) -> None:
         """Start the background polling loop.
 
         Parameters
         ----------
         on_due_task:
-            Optional async callback invoked for each due task.  The
-            scheduler sets the task status to ``RUNNING`` before calling
-            and to ``COMPLETED`` on success.
+            Optional async callback invoked for each ``mode="notify"`` due
+            task.  The scheduler sets the task status to ``RUNNING`` (and
+            emits ``task.due``) before calling and to ``COMPLETED`` on
+            success / ``FAILED`` on error (D10).  A non-``None`` return
+            value (a delivery receipt) is recorded in the COMPLETED payload
+            ``result``.  Without a callback due tasks are simply marked
+            completed (v1 behaviour).
+        on_prompt_task:
+            Optional async callback invoked **in the background** for each
+            ``mode="prompt"`` due task (§5.4).  Firing stays synchronous up
+            to ``RUNNING`` + ``task.due`` (and the cron ``next_run`` advance,
+            decoupled from execution duration); the callback itself is
+            awaited as its own asyncio task with a
+            ``config.prompt_timeout_seconds`` (default 300) cap, so a long
+            LLM call never blocks the scan loop.  A returned reply string is
+            recorded in the COMPLETED payload ``result``; timeouts settle as
+            ``error="prompt timed out"``, other exceptions as
+            ``error=str(exc)``.  Without a callback a prompt task is settled
+            synchronously with ``error="prompt runner not configured"``
+            (once → FAILED, cron → PENDING) — the direct-complete analogue
+            of ``on_due_task=None``.
 
         Raises
         ------
@@ -140,11 +531,30 @@ class TaskScheduler:
         if self._running:
             raise RuntimeError("Scheduler polling loop is already running")
 
+        self._on_due_task = on_due_task
+        self._on_prompt_task = on_prompt_task
         self._running = True
-        self._poll_task = asyncio.create_task(self._poll_loop(on_due_task))
+        self._poll_task = asyncio.create_task(self._poll_loop(on_due_task, on_prompt_task))
 
     async def stop(self) -> None:
-        """Stop the background polling loop gracefully."""
+        """Stop the background polling loop gracefully.
+
+        Shutdown semantics are "wait for background work to settle": prompt
+        executions that are still in flight (:meth:`_execute_prompt`,
+        §5.4) are awaited to completion — their COMPLETED/FAILED verdict is
+        persisted and emitted while the event loop is still alive, and their
+        result is retrieved so an unexpected background exception is surfaced
+        and logged instead of leaking as "Task exception was never retrieved"
+        (Task 12 Minor 4).  Note: with no configured runner a synchronous
+        settle path is used and there is nothing to wait for; a prompt task
+        whose runner ignores cancellation is only bounded by its
+        ``prompt_timeout_seconds``.
+
+        A poll task that already died with a real exception (e.g. the
+        TypeError a tz-aware ``scheduled_time`` caused before entry
+        normalization existed) must not escape ``stop()`` — the caller is
+        the lifespan shutdown, which has to survive (final review C1).
+        """
         self._running = False
         if self._poll_task is not None:
             self._poll_task.cancel()
@@ -152,48 +562,120 @@ class TaskScheduler:
                 await self._poll_task
             except asyncio.CancelledError:
                 pass
+            except Exception as exc:
+                logger.warning(
+                    "Scheduler poll loop died with %s during stop: %s", type(exc).__name__, exc
+                )
             self._poll_task = None
+        # Graceful drain: await every in-flight prompt execution to completion.
+        # The exception is NOT re-logged here — ``_on_execution_done`` already
+        # retrieved it (and logged once) when the task finished, and that
+        # callback runs before this await resumes (Task 12 Minor 4 /
+        # review Minor 3: single retrieval, single log record).  Awaiting here
+        # just prevents the exception from escaping ``stop()``.
+        while self._inflight_tasks:
+            for execution in list(self._inflight_tasks):
+                try:
+                    await execution
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    # Retrieved + logged by the done callback; swallow so the
+                    # lifespan shutdown survives.
+                    pass
+
+    def _on_execution_done(self, task: asyncio.Task[Any]) -> None:
+        """Done callback for an in-flight prompt execution.
+
+        The single exception-retrieval point (Task 12 Minor 4): the result is
+        retrieved here — surfacing an unexpected background exception as one
+        warning — and the handle is removed from ``_inflight_tasks`` so
+        :meth:`stop` can determine when the drain is complete.  ``stop()``'s
+        drain awaits the same tasks but swallows their exception silently
+        (review Minor 3: one retrieval, one log record).  Runs before any
+        pending ``await`` on the task resumes, so the handle is already pruned
+        when :meth:`stop`'s loop re-checks the set.
+        """
+        self._inflight_tasks.discard(task)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.warning(
+                "Prompt execution for task failed unexpectedly: %s (%s)",
+                exc,
+                type(exc).__name__,
+            )
+
+    def _restart_loop(self) -> None:
+        """Re-create a dead polling loop (Heartbeat liveness check, §7.4).
+
+        No-op unless the scheduler believes it is running *and* the previous
+        loop task has actually finished — a deliberately stopped scheduler is
+        never resurrected, and a live loop is never duplicated.  Reuses the
+        ``on_due_task``/``on_prompt_task`` callbacks captured by :meth:`start`
+        so a restarted loop delivers exactly like the original one.  Must be
+        called from within the running event loop (the Heartbeat loop is).
+        """
+        if not self._running:
+            return
+        old = self._poll_task
+        if old is not None and not old.done():
+            return
+        self._poll_task = asyncio.create_task(
+            self._poll_loop(self._on_due_task, self._on_prompt_task)
+        )
 
     async def _poll_loop(
         self,
-        on_due_task: Callable[[ScheduledTask], Awaitable[None]] | None,
+        on_due_task: DueCallback | None,
+        on_prompt_task: DueCallback | None = None,
     ) -> None:
         """Internal: periodically check for and execute due tasks.
 
         For condition-based tasks (those with a ``condition`` field), the
         ``check_condition`` callback is called instead of relying solely on
         the scheduled time.  The task is only executed when the condition
-        returns ``True``.
+        returns ``True`` — in that case it is not set to RUNNING and no
+        ``task.due`` event is emitted.
+
+        Each scan round is guarded (design §11, final review C1): a single
+        poisoned round — e.g. a tz-aware ``scheduled_time`` that reached the
+        working set — is logged and skipped instead of killing the loop.
+        The sleep pacing stays outside the guard so a failing round is
+        still throttled; ``CancelledError`` from :meth:`stop` is a
+        ``BaseException`` and passes through untouched.
         """
         while self._running:
-            due = await self.get_due_tasks()
-            for task in due:
-                # 条件任务：仅在条件满足时执行
-                if task.condition and self._check_condition is not None:
-                    try:
-                        condition_met = await self._check_condition(task.condition)
-                    except Exception as exc:
-                        logger.warning("Condition check failed for task %s: %s", task.id, exc)
-                        continue
-                    if not condition_met:
-                        continue
-
-                task.status = TaskStatus.RUNNING
-                try:
-                    if on_due_task is not None:
-                        await on_due_task(task)
-                    task.status = TaskStatus.COMPLETED
-                except Exception as exc:
-                    logger.warning("Scheduled task %s failed: %s", task.id, exc)
-                    task.status = TaskStatus.CANCELLED
+            try:
+                due = await self.get_due_tasks()
+                for task in due:
+                    # 条件任务：仅在条件满足时执行
+                    if task.condition and self._check_condition is not None:
+                        try:
+                            condition_met = await self._check_condition(task.condition)
+                        except Exception as exc:
+                            logger.warning("Condition check failed for task %s: %s", task.id, exc)
+                            continue
+                        if not condition_met:
+                            continue
+                    await self._fire_task(task, on_due_task, on_prompt_task)
+            except Exception as exc:
+                # One poisoned round (bad comparison, store surprise, …)
+                # must not take the whole scheduler down: log and keep
+                # polling.  Fall through to the sleep below — a bare
+                # ``continue`` here would spin the loop hot.
+                logger.warning("Scan round failed, continuing: %s", exc, exc_info=True)
             # Calculate dynamic sleep interval based on nearest pending task
             next_wake = _POLL_INTERVAL  # default
             if self._tasks:
-                pending_times = [
-                    t.scheduled_time.timestamp()
-                    for t in self._tasks.values()
-                    if t.status == TaskStatus.PENDING
-                ]
+                pending_times = []
+                for t in self._tasks.values():
+                    if t.status != TaskStatus.PENDING:
+                        continue
+                    trigger_time = t.scheduled_time if t.trigger == TriggerKind.ONCE else t.next_run
+                    if trigger_time is not None:
+                        pending_times.append(trigger_time.timestamp())
                 if pending_times:
                     now_ts = time.time()
                     nearest = min(pending_times)
@@ -206,3 +688,254 @@ class TaskScheduler:
             # Re-check after sleep — stop() may have been called during sleep
             if not self._running:
                 break
+
+    async def _fire_task(
+        self,
+        task: ScheduledTask,
+        on_due_task: DueCallback | None,
+        on_prompt_task: DueCallback | None = None,
+    ) -> None:
+        """Run one firing round (§5.2/§5.4): RUNNING → DUE → delivery → terminal.
+
+        ``mode="notify"`` tasks follow the §5.2 inline path: the callback is
+        awaited in place (a slow delivery therefore blocks the scan round —
+        by design for notify).  ``mode="prompt"`` tasks fire synchronously up
+        to ``RUNNING`` + ``task.due`` and then hand off to
+        :meth:`_execute_prompt` as a background task (design §5.4) so a
+        potentially long LLM call never blocks the scan loop.
+
+        ONCE tasks end in COMPLETED (success) or FAILED (error, D10).  CRON
+        tasks return to PENDING with ``next_run`` advanced to the next
+        future occurrence in both outcomes — the consumed slot is never
+        re-fired on the next poll cycle: after success delivery continues
+        on the next scheduled round, after failure the error is recorded
+        and delivery retries on the next scheduled round (review R1).
+        """
+        started = time.monotonic()
+        scheduled_for = task.scheduled_time if task.trigger == TriggerKind.ONCE else task.next_run
+        task.status = TaskStatus.RUNNING
+        task.last_run = datetime.now()
+        task.error = None
+        await self._persist(task)
+        await self._emit(
+            self._make_event(task, TaskEventType.DUE, {"scheduled_for": _iso(scheduled_for)})
+        )
+
+        if task.mode == "prompt":
+            # §5.4: cron slot is consumed at fire time, decoupled from the
+            # execution duration — next_run advances while still RUNNING so
+            # the scan never re-fires this round and the execution length is
+            # irrelevant to the schedule.
+            if task.trigger == TriggerKind.CRON:
+                try:
+                    task.next_run = CronTrigger(task.cron_expr or "").next_after(datetime.now())
+                except ValueError as exc:
+                    logger.warning("Cannot advance cron next_run for task %s: %s", task.id, exc)
+                await self._persist(task)
+            if on_prompt_task is None:
+                # No runner configured → settle directly (the prompt-mode
+                # analogue of the notify ``on_due_task=None`` direct path).
+                await self._settle_prompt(
+                    task,
+                    error="prompt runner not configured",
+                    started=started,
+                    scheduled_for=scheduled_for,
+                )
+                return
+            self._inflight.add(task.id)
+            execution = asyncio.create_task(
+                self._execute_prompt(task, on_prompt_task, started, scheduled_for)
+            )
+            # Keep the handle so :meth:`stop` can drain it at shutdown and
+            # retrieve a stray exception (Task 12 Minor 4).
+            self._inflight_tasks.add(execution)
+            execution.add_done_callback(self._on_execution_done)
+            return
+
+        delivered: str | None = None
+        try:
+            if on_due_task is not None:
+                receipt = await on_due_task(task)
+                if receipt is not None:
+                    delivered = str(receipt)
+        except Exception as exc:
+            if task.status == TaskStatus.FAILED:
+                # I2 (final review): the Heartbeat's stale-RUNNING reaper may
+                # have failed this task while the callback was in flight.  Its
+                # FAILED verdict is terminal here too — keep it: do not
+                # overwrite the reaper's error, do not resurrect the task to
+                # PENDING or advance ``next_run``, and do not emit a second,
+                # contradictory ``task.failed`` event.
+                logger.warning(
+                    "Task %s was reaped as FAILED during delivery; keeping the "
+                    "FAILED verdict (delivery error: %s)",
+                    task.id,
+                    exc,
+                )
+                return
+            logger.warning("Scheduled task %s failed: %s", task.id, exc)
+            payload: dict[str, Any] = {
+                "error": str(exc),
+                "scheduled_for": _iso(scheduled_for),
+                "duration_ms": int((time.monotonic() - started) * 1000),
+            }
+            task.error = str(exc)
+            if task.trigger == TriggerKind.ONCE:
+                task.status = TaskStatus.FAILED  # D10: failure ≠ cancellation
+            else:
+                # The failed slot is consumed: return to PENDING and advance
+                # next_run to the next future occurrence, so delivery retries
+                # on the next scheduled round — not on the next poll cycle
+                # (review ruling R1, aligned with recover rule 4).
+                task.status = TaskStatus.PENDING
+                try:
+                    task.next_run = CronTrigger(task.cron_expr or "").next_after(datetime.now())
+                except ValueError as adv_exc:
+                    logger.warning("Cannot advance cron next_run for task %s: %s", task.id, adv_exc)
+            await self._persist(task)
+            await self._emit(self._make_event(task, TaskEventType.FAILED, payload))
+            return
+
+        if task.status == TaskStatus.FAILED:
+            # I2 (final review): the Heartbeat's stale-RUNNING reaper may
+            # have failed this task while the callback was in flight.  Its
+            # FAILED verdict is terminal — do not resurrect the task to
+            # COMPLETED/PENDING or emit a contradictory COMPLETED event.
+            logger.warning(
+                "Task %s was reaped as FAILED during delivery; keeping the FAILED verdict",
+                task.id,
+            )
+            return
+
+        payload = {"duration_ms": int((time.monotonic() - started) * 1000)}
+        if delivered is not None:
+            payload["result"] = delivered
+        if task.trigger == TriggerKind.CRON:
+            task.status = TaskStatus.PENDING
+            try:
+                task.next_run = CronTrigger(task.cron_expr or "").next_after(datetime.now())
+            except ValueError as exc:
+                # Unreachable for validated expressions (§6/§11); keep the
+                # task pending rather than crash the loop.
+                logger.warning("Cannot advance cron next_run for task %s: %s", task.id, exc)
+            await self._persist(task)
+        else:
+            task.status = TaskStatus.COMPLETED
+            await self._persist(task)
+        await self._emit(self._make_event(task, TaskEventType.COMPLETED, payload))
+
+    async def _execute_prompt(
+        self,
+        task: ScheduledTask,
+        on_prompt_task: DueCallback,
+        started: float,
+        scheduled_for: datetime | None,
+    ) -> None:
+        """Background execution for a prompt-mode task (§5.4).
+
+        The runner is capped by ``config.prompt_timeout_seconds`` (default
+        300) so a runaway LLM call settles as ``error="prompt timed out"``
+        instead of occupying the runner slot forever.  Settlement is
+        otherwise identical in semantics to the notify path — including the
+        I2 reaper guard: if the Heartbeat failed the task while the runner
+        was in flight (it should not — ``_inflight`` excludes it, but the
+        startup/recover residue path can), that FAILED verdict is kept.
+
+        ``scheduled_for`` is the *fired* slot — for cron tasks the ``next_run``
+        that triggered this round, captured by :meth:`_fire_task` before the
+        slot was consumed — so a FAILED settlement names the consumed
+        occurrence rather than the newly-advanced ``next_run`` (Task 12
+        review item b).
+        """
+        try:
+            try:
+                reply = await asyncio.wait_for(
+                    on_prompt_task(task), timeout=float(self._prompt_timeout)
+                )
+            except TimeoutError:
+                await self._settle_prompt(
+                    task, error="prompt timed out", started=started, scheduled_for=scheduled_for
+                )
+                return
+            except Exception as exc:
+                logger.warning("Prompt task %s failed: %s", task.id, exc)
+                await self._settle_prompt(
+                    task, error=str(exc), started=started, scheduled_for=scheduled_for
+                )
+                return
+            await self._settle_prompt(
+                task, reply=str(reply), started=started, scheduled_for=scheduled_for
+            )
+        finally:
+            self._inflight.discard(task.id)
+
+    async def _settle_prompt(
+        self,
+        task: ScheduledTask,
+        *,
+        started: float,
+        scheduled_for: datetime | None = None,
+        reply: str | None = None,
+        error: str | None = None,
+    ) -> None:
+        """Settle a prompt-mode task's terminal/next-round state (§5.4).
+
+        Success: once → COMPLETED with ``payload.result=reply``, cron →
+        PENDING (``next_run`` was already advanced at fire time).  Failure:
+        once → FAILED / cron → PENDING, ``error`` recorded in both the task
+        and the ``task.failed`` payload.  ``scheduled_for`` is the fired slot
+        (pre-advance ``next_run`` for cron) so the FAILED payload names the
+        consumed occurrence, aligned with the notify path.  ``_inflight`` is
+        cleaned up by the caller (:meth:`_execute_prompt`'s ``finally``).
+        """
+        if task.status == TaskStatus.FAILED:
+            # I2: keep the Heartbeat's FAILED verdict (normally excluded by
+            # _inflight, but a recover residue could still trip it).
+            logger.warning(
+                "Prompt task %s was reaped as FAILED; keeping the FAILED verdict", task.id
+            )
+            return
+        if error is not None:
+            task.error = error
+            if task.trigger == TriggerKind.ONCE:
+                task.status = TaskStatus.FAILED
+            else:
+                task.status = TaskStatus.PENDING
+            await self._persist(task)
+            await self._emit(
+                self._make_event(
+                    task,
+                    TaskEventType.FAILED,
+                    {
+                        "error": error,
+                        "scheduled_for": _iso(
+                            scheduled_for
+                            if scheduled_for is not None
+                            else (
+                                task.scheduled_time
+                                if task.trigger == TriggerKind.ONCE
+                                else task.next_run
+                            )
+                        ),
+                        "duration_ms": int((time.monotonic() - started) * 1000),
+                    },
+                )
+            )
+            return
+        payload: dict[str, Any] = {"duration_ms": int((time.monotonic() - started) * 1000)}
+        if reply is not None:
+            payload["result"] = reply
+        if task.trigger == TriggerKind.CRON:
+            task.status = TaskStatus.PENDING
+        else:
+            task.status = TaskStatus.COMPLETED
+        await self._persist(task)
+        await self._emit(self._make_event(task, TaskEventType.COMPLETED, payload))
+
+    # Reaper coordination for the Heartbeat (§5.4/§7.4): a prompt task whose
+    # id is in _inflight is executing in the background — the stale-RUNNING
+    # check skips it so a long LLM call is not killed mid-flight.
+    @property
+    def inflight(self) -> frozenset[str]:
+        """Ids of prompt-mode tasks currently executing in the background."""
+        return frozenset(self._inflight)

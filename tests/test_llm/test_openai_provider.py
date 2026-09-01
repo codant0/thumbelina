@@ -355,6 +355,26 @@ def test_chat_model_stream_usage_can_be_overridden():
     assert provider.chat_model.stream_usage is False
 
 
+def test_chat_model_defaults_reasoning_split_extra_body():
+    """默认透传 reasoning_split=true(MiniMax 思考流拆分到 reasoning_details)。"""
+    provider = OpenAIProvider(
+        api_key="test-key", model="deepseek-chat", base_url="https://api.deepseek.com/v1"
+    )
+    model = provider.chat_model
+    assert isinstance(model, ChatOpenAI)
+    assert model.extra_body == {"reasoning_split": True}
+
+
+def test_chat_model_extra_body_can_be_overridden():
+    provider = OpenAIProvider(
+        api_key="test-key",
+        model="deepseek-chat",
+        base_url="https://api.deepseek.com/v1",
+        extra_body={"reasoning_split": False},
+    )
+    assert provider.chat_model.extra_body == {"reasoning_split": False}
+
+
 def test_chat_model_preserves_raw_usage_in_response_metadata():
     """独立 usage 尾块(choices 为空)必须把原始 usage 透传到 response_metadata。
 

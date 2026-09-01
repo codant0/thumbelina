@@ -47,14 +47,23 @@ from thumbelina.api.routes import (
 from thumbelina.api.routes import (
     config as config_routes,
 )
+from thumbelina.api.routes.tasks import serialize_task_event
+from thumbelina.api.websocket import broadcast_chat_message
 from thumbelina.api.websocket import router as ws_router
+from thumbelina.channels.base import Channel
+from thumbelina.concurrency import per_conversation_lock
 from thumbelina.config import AppConfig, load_config
 from thumbelina.llm.endpoint_manager import EndpointManager
 from thumbelina.llm.factory import create_provider
 from thumbelina.llm.preset_manager import PresetManager
 from thumbelina.notifications import NotificationManager
 from thumbelina.repository.manager import RepositoryManager
-from thumbelina.scheduler.scheduler import ScheduledTask
+from thumbelina.scheduler.dispatcher import DeliveryDispatcher, PromptRunner
+from thumbelina.scheduler.events import EventBus, Hook
+from thumbelina.scheduler.heartbeat import Heartbeat
+from thumbelina.scheduler.models import ScheduledTask, TaskEvent, TaskEventType
+from thumbelina.scheduler.scheduler import TaskScheduler
+from thumbelina.scheduler.store import TaskStore
 from thumbelina.security.auth import AuthService
 from thumbelina.security.rate_limit import RateLimiter
 
@@ -211,6 +220,158 @@ class _LazyLLMProvider:
 
     def swap_provider(self, real_provider):
         self._real = real_provider
+
+
+def _make_event_log_hook(store: TaskStore) -> Hook:
+    """Build the event-log observer: persist every task event (design §5.3).
+
+    Hook-internal failures are logged and swallowed — the EventBus already
+    isolates per-hook exceptions, but the hook guards itself too so a broken
+    store can never surface outside the event pipeline.
+    """
+
+    async def _event_log_hook(event: TaskEvent) -> None:
+        try:
+            await store.append_event(event)
+        except Exception:
+            logger.warning("Task event log write failed for %s", event.type.value, exc_info=True)
+
+    return _event_log_hook
+
+
+def _make_web_push_hook(
+    notification_manager: NotificationManager | None,
+    scheduler: TaskScheduler | None = None,
+) -> Hook:
+    """Build the WebPushHook observer (review ruling T7-R1).
+
+    The web channel's delivery IS the event pipeline: every
+    :class:`~thumbelina.scheduler.models.TaskEvent` is broadcast to the
+    frontend exactly once as a canonical ``{"task_event": …}`` frame (§8.2).
+    For ``task.completed`` events the legacy
+    ``{"type": "task_completed", …}`` notification frame is additionally
+    sent, preserving the pre-existing ``NotificationManager`` behaviour.
+    The legacy frame's ``description`` is the task's own description when
+    the scheduler can resolve it (the old ``_on_due_task`` behaviour),
+    falling back to the event's content snapshot.
+    """
+
+    async def _web_push_hook(event: TaskEvent) -> None:
+        try:
+            await broadcast_chat_message({"task_event": serialize_task_event(event)})
+        except Exception:
+            logger.warning("Task event WebSocket broadcast failed", exc_info=True)
+        if event.type is TaskEventType.COMPLETED and notification_manager is not None:
+            description = event.content
+            if scheduler is not None:
+                try:
+                    task = await scheduler.get_task(event.task_id)
+                except Exception:
+                    task = None
+                if task is not None:
+                    description = task.description
+            try:
+                await notification_manager.broadcast(
+                    {
+                        "type": "task_completed",
+                        "task_id": event.task_id,
+                        "description": description,
+                    }
+                )
+            except Exception:
+                logger.warning("task_completed notification broadcast failed", exc_info=True)
+
+    return _web_push_hook
+
+
+def _make_prompt_runner(app: FastAPI, repository: RepositoryManager) -> PromptRunner:
+    """Build the prompt runner for ``mode="prompt"`` tasks (design §5.4).
+
+    Wired as the ``DeliveryDispatcher(prompt_runner=…)`` callback and, through
+    it, as the scheduler's ``on_prompt_task``.  Implements the §5.4 execution
+    chain steps 1-5:
+
+    1. 会话归属: ``task.conversation_id`` non-empty and naming an existing
+       conversation → run in that conversation; otherwise (missing, blank, or
+       deleted) use the dedicated 定时任务 conversation — created lazily once
+       per process and cached on ``app.state.scheduler_conversation_id``.
+    2. ``per_conversation_lock(cid)`` serializes the turn against HTTP /
+       WebSocket / channel rounds on the same conversation (checkpoint safety).
+    3. A **clone** of the shared main agent runs the task content with
+       ``current_conversation_id`` pinned to ``cid`` — mirroring the
+       per-connection clone in the WebSocket handler, so a prompt turn neither
+       pollutes the main agent's state nor shares checkpoint state with other
+       conversations.  ``agent.run`` persists the user message + reply itself
+       (graph.py ``_persist_message``) — nothing is persisted here.
+    4. The reply is broadcast as a realtime 对话框 frame: ``channel_message``
+       with ``channel="scheduler"`` and ``source="scheduler"`` — the frontend
+       appends it to an open conversation or updates the conversation list
+       otherwise (same frame the WeChat sync uses).
+    5. The reply is returned; the dispatcher additionally sends it through the
+       task's IM channel as a channel copy.
+
+    Failures (``agent.run``, repository, …) propagate to the scheduler, which
+    settles the FAILED verdict — except the realtime broadcast, which is
+    best-effort: the reply already lives in the conversation history, so a
+    dead WebSocket client must not fail the whole task.
+
+    Review minor-1 fix: the lazy dedicated-conversation check-and-create is
+    guarded by an ``asyncio.Lock`` cached on ``app.state``
+    (``scheduler_conversation_lock``).  Without it, several prompt tasks
+    firing concurrently in the same poll round would all pass the ``is None``
+    check and each call ``create_conversation`` — two "定时任务" conversations
+    with the messages split between them.
+    """
+
+    async def _run_prompt(task: ScheduledTask) -> str:
+        cid: str | None = task.conversation_id or None
+        if cid is not None:
+            try:
+                conversation = await repository.get_conversation(cid)
+            except Exception:
+                conversation = None
+            if conversation is None:
+                # Names a deleted / unknown conversation → treat as absent.
+                cid = None
+        if cid is None:
+            # Guard the check-and-create: concurrent fires must agree on one
+            # dedicated conversation.  The lock is created once per process
+            # (``asyncio.Lock`` is cheap and bound to the event loop).
+            lock = getattr(app.state, "scheduler_conversation_lock", None)
+            if lock is None:
+                lock = asyncio.Lock()
+                app.state.scheduler_conversation_lock = lock
+            async with lock:
+                dedicated = getattr(app.state, "scheduler_conversation_id", None)
+                if dedicated is None:
+                    dedicated = await repository.create_conversation()
+                    app.state.scheduler_conversation_id = dedicated
+                cid = dedicated
+
+        async with per_conversation_lock(cid):
+            # Clone like the WebSocket/HTTP per-request pattern: isolated
+            # conversation state, shared provider/repository/checkpointer.
+            isolated = app.state.agent.clone()
+            isolated.current_conversation_id = cid
+            reply: str = await isolated.run(task.content)
+
+        try:
+            await broadcast_chat_message(
+                {
+                    "channel_message": {
+                        "channel": "scheduler",
+                        "conversation_id": cid,
+                        "user_message": task.content,
+                        "response": reply,
+                        "source": "scheduler",
+                    }
+                }
+            )
+        except Exception:
+            logger.warning("Scheduler channel_message broadcast failed", exc_info=True)
+        return reply
+
+    return _run_prompt
 
 
 @asynccontextmanager
@@ -394,25 +555,49 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     notification_manager = NotificationManager()
     app.state.notification_manager = notification_manager
 
-    scheduler = None
-    try:
-        from thumbelina.scheduler.scheduler import TaskScheduler
+    # ------------------------------------------------------------------
+    # 事件管线装配（设计 §5.3）：TaskStore → EventBus → TaskScheduler →
+    # 观察者 hooks（event_log + web_push，订阅全部 TaskEventType）→
+    # recover()。hooks 必须在任何事件产生之前订阅完毕；web_push 需要
+    # scheduler 引用解析存量兼容帧的 description，故构造先于订阅。
+    # config.scheduler.enabled=False 或任一步失败时整体降级：相关对象置
+    # None，任务路由判空返回 503/空列表，服务器照常启动（§11）。
+    # 调度循环的启动（DeliveryDispatcher 接线 + Heartbeat）在本文件下方
+    # 渠道初始化之后执行——Dispatcher 的渠道表需要 app.state.wechat_channel
+    # / qq_channel，而渠道对象要等 agent 构造完成后才可用。
+    # ------------------------------------------------------------------
+    task_store: TaskStore | None = None
+    task_event_bus: EventBus | None = None
+    task_scheduler: TaskScheduler | None = None
+    if config.scheduler.enabled:
+        try:
+            task_store = TaskStore(repository.conversation_repository.engine)
+            task_event_bus = EventBus()
 
-        scheduler = TaskScheduler()
-
-        # 任务完成时广播通知
-        async def _on_due_task(task: ScheduledTask) -> None:
-            await notification_manager.broadcast(
-                {
-                    "type": "task_completed",
-                    "task_id": task.id,
-                    "description": task.description,
-                }
+            task_scheduler = TaskScheduler(
+                store=task_store,
+                bus=task_event_bus,
+                check_condition=None,
+                config=config.scheduler,
             )
 
-        await scheduler.start(on_due_task=_on_due_task)
-    except Exception:
-        logger.debug("Scheduler not initialized", exc_info=True)
+            event_log_hook = _make_event_log_hook(task_store)
+            web_push_hook = _make_web_push_hook(notification_manager, task_scheduler)
+            for event_type in TaskEventType:
+                task_event_bus.subscribe(event_type, event_log_hook)
+                task_event_bus.subscribe(event_type, web_push_hook)
+
+            await task_scheduler.recover()
+            logger.info("Task scheduler initialized (store + event pipeline)")
+        except Exception:
+            logger.warning("Task scheduler not initialized", exc_info=True)
+            task_store = None
+            task_event_bus = None
+            task_scheduler = None
+
+    app.state.task_store = task_store
+    app.state.task_event_bus = task_event_bus
+    app.state.task_scheduler = task_scheduler
 
     # Initialize Markdown分层记忆子系统(阶段三 §9.3 优雅降级)。
     # 失败或 disabled 时 app.state.memory_service = None,路由 503,
@@ -479,7 +664,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         request_timeout=config.llm.request_timeout,
         skill_engine=skill_engine,
         subagent_manager=subagent_manager,
-        scheduler=scheduler,
+        scheduler=task_scheduler,
         composition_engine=composition_engine,
         conversation_namer=conversation_namer,
         role=config.llm.role,
@@ -665,6 +850,47 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception:
             logger.debug("QQ channel not initialized", exc_info=True)
 
+    # ------------------------------------------------------------------
+    # 启动调度循环（设计 §5.3 后半段）：DeliveryDispatcher 作为唯一交付
+    # 入口挂到 on_due_task 回调上（绝不 bus.subscribe，防双触发），
+    # Heartbeat 开始周期巡检。渠道表从 app.state 取，缺失的渠道不进
+    # dict——未启用渠道的任务交付期产出 task.failed，服务不降级（§5.3）。
+    # ------------------------------------------------------------------
+    task_dispatcher: DeliveryDispatcher | None = None
+    task_heartbeat: Heartbeat | None = None
+    if task_scheduler is not None:
+        try:
+            channels: dict[str, Channel] = {}
+            wechat_channel_ref = getattr(app.state, "wechat_channel", None)
+            if wechat_channel_ref is not None:
+                channels["wechat"] = wechat_channel_ref
+            qq_channel_ref = getattr(app.state, "qq_channel", None)
+            if qq_channel_ref is not None:
+                channels["qq"] = qq_channel_ref
+
+            # §5.4 prompt 模式：run_prompt 闭包（会话归属 → per-conversation 锁
+            # → agent.clone().run → 对话框实时广播），dispatcher 负责频道副本。
+            prompt_runner = _make_prompt_runner(app, repository)
+            task_dispatcher = DeliveryDispatcher(
+                channels=channels,
+                bus=task_event_bus,
+                prompt_runner=prompt_runner,
+            )
+            await task_scheduler.start(
+                on_due_task=task_dispatcher.on_due_task,
+                on_prompt_task=task_dispatcher.on_prompt_task,
+            )
+            task_heartbeat = Heartbeat(task_scheduler, task_event_bus, config.scheduler)
+            await task_heartbeat.start()
+            logger.info("Task scheduler loop and heartbeat started")
+        except Exception:
+            logger.warning("Task scheduler loop not started", exc_info=True)
+            task_dispatcher = None
+            task_heartbeat = None
+
+    app.state.task_dispatcher = task_dispatcher
+    app.state.task_heartbeat = task_heartbeat
+
     yield
 
     # 取消尚未完成的 Embedding 预加载任务（底层工作线程会继续完成加载，
@@ -676,8 +902,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await qq_channel.stop()
     if wechat_channel:
         await wechat_channel.stop()
-    if scheduler:
-        await scheduler.stop()
+    if task_heartbeat:
+        await task_heartbeat.stop()
+    if task_scheduler:
+        await task_scheduler.stop()
     if feedback_repo:
         feedback_repo.close()
     if skill_repo:

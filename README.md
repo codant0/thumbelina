@@ -1,6 +1,6 @@
 # Thumbelina
 
-An AI-powered personal assistant built with [FastAPI](https://fastapi.tiangolo.com/) and [LangGraph](https://langchain-ai.github.io/langgraph/), featuring multi-provider LLM support, conversation memory with skill extraction, sub-agent orchestration, and a React-based chat UI.
+An AI-powered personal assistant built with [FastAPI](https://fastapi.tiangolo.com/) and [LangGraph](https://langchain-ai.github.io/langgraph/), featuring multi-provider LLM support, conversation memory with skill extraction, sub-agent orchestration, QQ/WeChat channel integration, and a React-based chat UI.
 
 [中文文档](README_CN.md)
 
@@ -20,9 +20,9 @@ An AI-powered personal assistant built with [FastAPI](https://fastapi.tiangolo.c
 - **Semantic Search** — Vector-based semantic search via ChromaDB, with hybrid keyword + semantic fallback
 - **Skill Extraction & Integration** — Automatically extracts reusable skills from conversations and applies them in the agent loop
 - **Skill Composition** — Chain multiple skills into workflows, with LLM-assisted suggestion
-- **Markdown Layered Memory** — File-system-backed memory stored as human-auditable Markdown under `MEMORY/`. Three-tier on-demand loading (L0 auto-generated index of one-line summaries / L1 overview / L2 full text); `MemoryExtractor` runs in the background after each user turn to extract/rewrite/delete memories (NEW/UPDATE/DELETE/NOOP); the agent injects the L0 index summary every turn (treated as reference data, never instructions) and exposes `search_memory` / `read_memory` / `remember` tools; zero embedding/vector dependency; CRUD + search via `/api/v1/memory/*` routes
+- **Markdown Layered Memory** — File-system-backed memory stored as human-auditable Markdown under `MEMORY/`. Three-tier on-demand loading (L0 auto-generated index of one-line summaries / L1 overview / L2 full text); `MemoryExtractor` runs in the background after each user turn to extract/rewrite/delete memories (NEW/UPDATE/DELETE/NOOP); the agent injects the L0 index summary every turn (treated as reference data, never instructions) and exposes `search_memory` / `read_memory` / `remember` tools; zero embedding/vector dependency; browsing, search and status via `/api/v1/memory/*` routes
 - **Sub-Agent System** — Parallel task execution with monitor/worker agents, inter-agent messaging and shared state
-- **Task Scheduler** — Natural language time parsing (Chinese & English) with conditional triggers and notification broadcast
+- **Task Scheduler** — Event-driven scheduling: one-off tasks via natural language time parsing (Chinese & English) and recurring tasks via 5-field cron expressions, delivered through configurable channels (web/wechat/qq) with conditional-trigger support; tasks persist to storage and survive restarts (missed one-offs marked MISSED or re-run per policy, cron next-run advanced), supervised by a heartbeat, with lifecycle events flowing through an EventBus for hooks and live display in the Web UI Tasks page
 - **TODO List & Quick Notes** — Local Markdown-based todo list and quick notes (`TODO/todolist.md` + `TODO/notes.md`), with per-item Markdown remarks (stored as blockquotes), grouping by top-level Markdown heading with group-filter cards, manageable from the Web UI
 - **Trajectory Recording** — Per-turn agent execution trajectory (tool calls, LLM usage) persisted per conversation, browsable with pagination in the Web UI Trajectory page; KV cache hit-rate summary exposed for the status bar
 - **Context Compression** — Conversation context is checkpointed (LangGraph checkpointer) and can be compacted on demand via `POST /api/v1/conversations/{id}/compress`, with configurable strategies (`summary_recent` / sliding window) and token-budget trigger from `config.context`
@@ -159,9 +159,11 @@ For the full deployment guide (updates, backups, data migration, FAQ, production
 │  │          │ │ /api/v1/tasks│ │                  │          │
 │  │          │ │ /api/v1/skills│ │                 │          │
 │  │          │ │ /api/v1/data │ │                  │          │
+│  │          │ │ /api/v1/todo │ │                  │          │
 │  │          │ │ /api/v1/config│ │                │          │
 │  │          │ │ /api/v1/feedback│ │              │          │
 │  │          │ │ /api/v1/plugins│ │               │          │
+│  │          │ │ /api/v1/trajectory│ │            │          │
 │  │          │ │ /api/v1/qq   │ │                  │          │
 │  │          │ │ /api/v1/wechat│ │                 │          │
 │  └──────────┘ └──────┬───────┘ └────────┬─────────┘          │
@@ -223,7 +225,7 @@ thumbelina/
 │   │   ├── knowledge_base/  # KnowledgeBase, Document, Chunk models + repository
 │   │   ├── pipeline/        # Document indexing pipeline
 │   │   └── retrieval/       # Retrieval strategies and context formatting
-│   ├── scheduler/           # Task scheduler + natural language time parser + conditional triggers
+│   ├── scheduler/           # Event-driven task scheduler v2 (cron/once, EventBus hooks, TaskStore persistence, heartbeat, per-channel dispatcher) + natural language time parser + conditional triggers
 │   ├── security/            # JWT auth + rate limiter + RBAC
 │   ├── skills/              # Skill extraction, matching, composition, persistence
 │   ├── subagents/           # Sub-agent manager, monitor/worker agents, message queue, shared state
@@ -283,7 +285,12 @@ thumbelina/
 | GET | `/api/v1/fs/git/branches` | List local branches and the current one |
 | POST | `/api/v1/fs/git/checkout` | Switch to a local branch (server-side validated; broadcasts via WebSocket) |
 | GET | `/api/v1/tasks` | List scheduled tasks |
+| POST | `/api/v1/tasks` | Create a scheduled task (`once` or `cron`, optional delivery channel) |
 | POST | `/api/v1/tasks/{id}/cancel` | Cancel a scheduled task |
+| POST | `/api/v1/tasks/{id}/pause` | Pause a pending cron task |
+| POST | `/api/v1/tasks/{id}/resume` | Resume a paused cron task |
+| GET | `/api/v1/tasks/events` | Recent task lifecycle events (newest first) |
+| GET | `/api/v1/tasks/scheduler/status` | Scheduler aliveness snapshot (heartbeat) |
 | GET | `/api/v1/subagents` | List active sub-agents |
 | POST | `/api/v1/subagents/{id}/cancel` | Cancel a running sub-agent |
 | GET | `/api/v1/skills` | List extracted skills |
@@ -387,6 +394,15 @@ WeChat integration uses the [weixin-bot](https://github.com/epiral/weixin-bot) p
 3. Scan the QR code with WeChat
 4. Poll `GET /api/v1/wechat/qrcode/status` until status is `confirmed`
 5. Call `POST /api/v1/wechat/qrcode/confirm` to save credentials and enable the channel
+
+> **Credential persistence under Docker**: after a successful QR login, the credentials
+> (`{bot_id}.json`) are saved to `channels.wechat.accounts_dir` (default
+> `CHANNEL/.weclaw/accounts`, relative to the working directory). Under Docker make sure
+> `docker-compose.yml` sets
+> `THUMBELINA_CHANNELS__WECHAT__ACCOUNTS_DIR=/app/data/CHANNEL/.weclaw/accounts`
+> (inside the data volume); otherwise the credentials land on the container layer and are
+> lost on rebuild. If credentials were already lost before an upgrade, one re-scan is
+> enough — subsequent rebuilds won't require scanning again.
 
 ### Option B: Manual Configuration
 

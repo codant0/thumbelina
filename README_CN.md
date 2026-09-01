@@ -22,7 +22,7 @@
 - **技能组合** — 将多个技能串联为工作流，支持 LLM 辅助建议
 - **Markdown 分层记忆** — 基于 Markdown 文件系统的分层记忆，存于 `MEMORY/` 目录，人类可读、可手工编辑、可 git 审计。三层按需加载（L0 自动生成的索引摘要 / L1 概览 / L2 全文）；`MemoryExtractor` 在每轮用户消息后后台异步抽取/改写/删除记忆（NEW/UPDATE/DELETE/NOOP）；Agent 每轮注入 L0 索引摘要（视为参考数据、绝非指令），并提供 `search_memory` / `read_memory` / `remember` 三个工具；零 embedding/向量依赖；通过 `/api/v1/memory/*` 路由提供浏览、搜索与状态查询
 - **子代理系统** — 并行任务执行，支持监控/工作代理、代理间消息传递和共享状态
-- **任务调度器** — 自然语言时间解析（中英文），支持条件触发和通知广播
+- **任务调度器** — 事件驱动调度：自然语言时间解析（中英文）的一次性任务与 5 字段 cron 表达式的循环任务，按可配置渠道（web/wechat/qq）交付，支持条件触发；任务持久化并在重启后恢复（错过的一次性任务按策略标记 MISSED 或补跑，cron 前推 next_run），Heartbeat 巡检保活，生命周期事件经 EventBus 供 hook 订阅并在 Web 界面任务页实时展示
 - **待办清单与随手记** — 基于本地 Markdown 文件的待办清单与随手记（`TODO/todolist.md` + `TODO/notes.md`），每项待办支持独立 Markdown 备注（块引用格式），按一级标题分组并提供分组过滤卡片，可在 Web 界面管理
 - **轨迹记录** — 每轮 agent 执行轨迹（工具调用、LLM 用量）按会话持久化，Web 界面 Trajectory 页分页浏览；KV 缓存命中率汇总供状态栏展示
 - **上下文压缩** — 会话上下文经 LangGraph checkpointer 持久化，可按需手动压缩（`POST /api/v1/conversations/{id}/compress`），压缩策略与 token 触发阈值经 `config.context` 配置（summary_recent / 滑动窗口）
@@ -213,7 +213,7 @@ thumbelina/
 │   │   ├── knowledge_base/  # KnowledgeBase、Document、Chunk 模型与仓库
 │   │   ├── pipeline/        # 文档索引流水线
 │   │   └── retrieval/       # 检索策略与上下文格式化
-│   ├── scheduler/           # 任务调度器 + 自然语言时间解析器 + 条件触发
+│   ├── scheduler/           # 事件驱动任务调度器 v2（cron/一次性、EventBus hooks、TaskStore 持久化、Heartbeat、按渠道派发）+ 自然语言时间解析器 + 条件触发
 │   ├── security/            # JWT 认证 + 限流器 + RBAC
 │   ├── skills/              # 技能提取、匹配、组合、持久化
 │   ├── subagents/           # 子代理管理器、监控/工作代理、消息队列、共享状态
@@ -273,7 +273,12 @@ thumbelina/
 | GET | `/api/v1/fs/git/branches` | 列出本地分支与当前分支 |
 | POST | `/api/v1/fs/git/checkout` | 切换本地分支（服务端校验，成功经 WebSocket 广播） |
 | GET | `/api/v1/tasks` | 列出定时任务 |
+| POST | `/api/v1/tasks` | 创建定时任务（`once` 或 `cron`，可选交付渠道） |
 | POST | `/api/v1/tasks/{id}/cancel` | 取消定时任务 |
+| POST | `/api/v1/tasks/{id}/pause` | 暂停待触发的 cron 任务 |
+| POST | `/api/v1/tasks/{id}/resume` | 恢复已暂停的 cron 任务 |
+| GET | `/api/v1/tasks/events` | 最近的任务生命周期事件（最新在前） |
+| GET | `/api/v1/tasks/scheduler/status` | 调度器存活快照（Heartbeat） |
 | GET | `/api/v1/subagents` | 列出活跃子代理 |
 | POST | `/api/v1/subagents/{id}/cancel` | 取消运行中的子代理 |
 | GET | `/api/v1/skills` | 列出已提取技能 |

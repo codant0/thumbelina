@@ -5,7 +5,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-import dateparser
+# dateparser 无类型存根(未安装 types-dateparser);与 scheduler/cron.py 的
+# croniter 同款精准豁免,模块按 Any 处理。
+import dateparser  # type: ignore[import-untyped]
 
 
 class TimeParser:
@@ -50,7 +52,8 @@ class TimeParser:
             "RETURN_AS_TIMEZONE_AWARE": False,
         }
 
-        result = dateparser.parse(text, settings=settings)
+        # 显式注解承接 dateparser.parse 的 Any 返回(未类型化库),避免 no-any-return。
+        result: datetime | None = dateparser.parse(text, settings=settings)
         return result
 
     def parse_recurring(self, text: str) -> dict[str, Any] | None:

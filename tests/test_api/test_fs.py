@@ -146,13 +146,22 @@ def test_limit_constant_positive() -> None:
 def _init_repo(tmp_path) -> pathlib.Path:
     repo = tmp_path / "repo"
     repo.mkdir()
+    subprocess.run(["git", "-c", "init.defaultBranch=main", "init", "-q"], cwd=repo, check=True)
     subprocess.run(
-        ["git", "-c", "init.defaultBranch=main", "init", "-q"], cwd=repo, check=True
-    )
-    subprocess.run(
-        ["git", "-c", "user.name=T", "-c", "user.email=t@t",
-         "commit", "--allow-empty", "-q", "-m", "init"],
-        cwd=repo, check=True,
+        [
+            "git",
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "--allow-empty",
+            "-q",
+            "-m",
+            "init",
+        ],
+        cwd=repo,
+        check=True,
     )
     return repo
 
@@ -257,10 +266,19 @@ class TestGitCheckoutEndpoints:
         repo = _init_repo(tmp_path)
         (repo / "file.txt").write_text("A", encoding="utf-8")
         subprocess.run(["git", "add", "file.txt"], cwd=repo, check=True)
-        subprocess.run(["git", "commit", "-q", "-m", "a"], cwd=repo, check=True)
+        # CI runner 无全局 git 身份，commit 必须内联提供（与 _init_repo 一致）
+        subprocess.run(
+            ["git", "-c", "user.name=T", "-c", "user.email=t@t", "commit", "-q", "-m", "a"],
+            cwd=repo,
+            check=True,
+        )
         subprocess.run(["git", "checkout", "-q", "-b", "feature-a"], cwd=repo, check=True)
         (repo / "file.txt").write_text("B", encoding="utf-8")
-        subprocess.run(["git", "commit", "-q", "-am", "b"], cwd=repo, check=True)
+        subprocess.run(
+            ["git", "-c", "user.name=T", "-c", "user.email=t@t", "commit", "-q", "-am", "b"],
+            cwd=repo,
+            check=True,
+        )
         subprocess.run(["git", "checkout", "-q", "main"], cwd=repo, check=True)
         (repo / "file.txt").write_text("uncommitted", encoding="utf-8")
         resp = client.post(
@@ -274,9 +292,7 @@ class TestGitCheckoutEndpoints:
         from unittest.mock import AsyncMock
 
         broadcast = AsyncMock()
-        monkeypatch.setattr(
-            "thumbelina.api.websocket.broadcast_chat_message", broadcast
-        )
+        monkeypatch.setattr("thumbelina.api.websocket.broadcast_chat_message", broadcast)
         repo = _init_repo(tmp_path)
         subprocess.run(["git", "branch", "-q", "feature-a"], cwd=repo, check=True)
         resp = client.post(

@@ -340,7 +340,9 @@ class ThumbelinaAgent:
         if self.subagent_manager is not None:
             self.tools.extend(make_collaboration_tools(self.subagent_manager))
         if self.scheduler is not None:
-            self.tools.extend(make_event_tools(self.scheduler, TimeParser()))
+            # agent_ref 注入(design §5.4):schedule_task 的 conversation_id
+            # 缺省取当前会话(``agent_ref.current_conversation_id``)。
+            self.tools.extend(make_event_tools(self.scheduler, TimeParser(), agent_ref=self))
         if self.composition_engine is not None:
             self.tools.extend(make_skill_tools(self.composition_engine))
         self.tools.extend(make_communication_tools(self))

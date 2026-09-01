@@ -280,6 +280,49 @@ class ToolsConfig(BaseModel):
     web_search: WebSearchConfig = Field(default_factory=WebSearchConfig)
 
 
+class SchedulerConfig(BaseModel):
+    """任务调度器配置（事件驱动定时任务，设计文档 §10）。
+
+    全部字段有默认值：YAML 缺省该段时零行为差异。
+    """
+
+    enabled: bool = Field(
+        default=True,
+        description="是否启用内置任务调度器（关闭后任务路由 503/空列表）",
+    )
+    heartbeat_interval_seconds: int = Field(
+        default=30,
+        description="Heartbeat 巡检间隔（秒）",
+    )
+    missed_policy: Literal["mark", "run"] = Field(
+        default="mark",
+        description="错过处置策略：mark=标记 MISSED 终态 / run=立即补跑一次",
+    )
+    missed_grace_minutes: int = Field(
+        default=5,
+        description="超过触发时间多久才算“错过”的宽限期（分钟）",
+    )
+    stale_running_minutes: int = Field(
+        default=10,
+        description="RUNNING 任务卡住多久后判定为僵尸并置 FAILED（分钟）",
+    )
+    event_retention: int = Field(
+        default=500,
+        description="task_events 事件日志保留条数（Heartbeat 周期修剪）",
+    )
+    prompt_timeout_seconds: int = Field(
+        default=300,
+        description=(
+            "prompt 模式任务后台执行的超时（秒）：LLM 调用超过该时长即按 "
+            "'prompt timed out' 结算 FAILED（cron 保持 PENDING 等下一场次）"
+        ),
+    )
+    default_channel: Literal["web", "wechat", "qq"] = Field(
+        default="web",
+        description="web 端创建任务未指定渠道时的默认交付渠道",
+    )
+
+
 class AppConfig(BaseModel):
     """Top-level application configuration."""
 
@@ -293,6 +336,7 @@ class AppConfig(BaseModel):
     context: ContextConfig = Field(default_factory=ContextConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
     cors_origins: list[str] = Field(
         default_factory=lambda: ["*"],
         description="Allowed CORS origins. Use ['*'] for development only.",

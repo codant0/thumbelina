@@ -50,8 +50,16 @@ def ensure_schema(engine: Engine) -> None:
 
             if column.server_default is not None and hasattr(column.server_default, "arg"):
                 arg = column.server_default.arg
-                # TextClause exposes the raw SQL via .text
-                default_val = arg.text if hasattr(arg, "text") else str(arg)
+                if hasattr(arg, "text"):
+                    # TextClause exposes the raw SQL via .text — use verbatim.
+                    default_val = arg.text
+                elif isinstance(arg, str):
+                    # String literals must be quoted; bare `DEFAULT ` (e.g. for
+                    # server_default="") is invalid SQL and the ALTER silently
+                    # fails, leaving the column missing from the live schema.
+                    default_val = f"'{arg}'"
+                else:
+                    default_val = str(arg)
                 default = f" DEFAULT {default_val}"
                 if not column.nullable:
                     nullable = " NOT NULL"

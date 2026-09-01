@@ -63,6 +63,18 @@ tools:
     provider: tavily              # tavily | duckduckgo
     api_key: ""                   # 仅 tavily 使用;保存到配置数据库(敏感例外)
 
+# Task scheduler: event-driven timer/cron task pipeline (TaskStore + EventBus
+# + Heartbeat, 设计文档 §10). All fields optional — omitting the section
+# keeps the defaults shown below.
+scheduler:
+  enabled: true                    # false → 任务路由 503 / 空列表,不启动调度循环
+  heartbeat_interval_seconds: 30   # Heartbeat 巡检间隔(秒)
+  missed_policy: mark              # 错过处置: mark=标记 MISSED / run=立即补跑
+  missed_grace_minutes: 5          # 超过触发时间多久算"错过"(分钟)
+  stale_running_minutes: 10        # RUNNING 卡住多久判定僵尸并置 FAILED(分钟)
+  event_retention: 500             # task_events 事件日志保留条数
+  default_channel: web             # web 创建任务未指定渠道时的默认交付渠道
+
 # Default context window of the active LLM model. Individual models (Web UI
 # "Settings" → endpoint) can override this via their own context_window field.
 # Supports K (thousand) / M (million) token suffixes, case-insensitive.

@@ -204,3 +204,46 @@ class TestModelRelationships:
 
         messages = db_session.query(Message).all()
         assert len(messages) == 0
+
+
+class TestEnsureSchemaStringDefault:
+    """ensure_schema 对带字符串 server_default 的缺失列必须生成合法 ALTER。
+
+    回归（PR #21）：`server_default=""` 曾被渲染成裸 `DEFAULT `（非法 SQL），
+    ALTER 失败被静默吞掉，遗留库上该列永远缺失（如 scheduled_tasks.content），
+    导致写入整表失败。"""
+
+    def test_adds_missing_string_default_column(self):
+        from sqlalchemy import text
+
+        import thumbelina.scheduler.store  # noqa: F401 - 在 Base 上注册 scheduled_tasks ORM
+        from thumbelina.repository.models import ensure_schema
+
+        engine = create_engine("sqlite:///:memory:")
+        # 模拟遗留库：表已存在但缺 content 列（无该列时模型写入必然失败）。
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "CREATE TABLE scheduled_tasks ("
+                    "id VARCHAR(36) PRIMARY KEY, description TEXT NOT NULL)"
+                )
+            )
+            conn.execute(
+                text("INSERT INTO scheduled_tasks (id, description) VALUES ('legacy', '老数据')")
+            )
+
+        ensure_schema(engine)
+
+        with engine.begin() as conn:
+            # 列已补齐，旧行拿到默认值，模型可正常读写。
+            conn.execute(
+                text(
+                    "INSERT INTO scheduled_tasks (id, description, content) "
+                    "VALUES ('new', '新数据', 'hello')"
+                )
+            )
+            row = conn.execute(
+                text("SELECT description, content FROM scheduled_tasks WHERE id='legacy'")
+            ).fetchone()
+            assert row.description == "老数据"
+            assert row.content == ""
