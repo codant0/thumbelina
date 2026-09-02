@@ -9,10 +9,13 @@ interface ModalProps {
   /** Called when the user closes the dialog (backdrop / Esc / close button). */
   onClose: () => void
   children: ReactNode
+  /** Optional extra class on the panel (e.g. ``"modal--wide"`` for the
+   *  task-detail body, which has denser meta + Markdown blocks). */
+  className?: string
 }
 
 /** Reusable centered dialog with backdrop, Esc-to-close and focus entry. */
-export function Modal({ title, onClose, children }: ModalProps) {
+export function Modal({ title, onClose, children, className }: ModalProps) {
   const { t } = useTranslation()
   const panelRef = useRef<HTMLDivElement>(null)
 
@@ -29,7 +32,7 @@ export function Modal({ title, onClose, children }: ModalProps) {
     <div className="modal-overlay" data-testid="modal-overlay" onClick={onClose}>
       <div
         ref={panelRef}
-        className="modal"
+        className={className ? `modal ${className}` : 'modal'}
         role="dialog"
         aria-modal="true"
         aria-label={title}

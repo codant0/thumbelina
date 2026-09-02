@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, act, renderHook } from '@testing-library/react'
+import { render, screen, fireEvent, act, renderHook } from '@testing-library/react'
 import { TaskEventFeed } from './TaskEventFeed'
 import { useWebSocket, type TaskEventPayload } from '../../hooks/useWebSocket'
 import type { TaskEventVO } from '../../api/tasks'
@@ -112,16 +112,17 @@ describe('TaskEventFeed', () => {
     expect(screen.getByText(new Date('2026-08-30T12:00:05').toLocaleString())).toBeInTheDocument()
   })
 
-  it('renders payload error in red', async () => {
+  it('renders payload error with the timeline preview', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(json(EVENTS))
     render(<TaskEventFeed />)
     await act(async () => {})
     const err = screen.getByTestId('event-error')
     expect(err).toHaveTextContent('channel not configured')
     expect(err.style.color).toContain('--error')
+    expect(err.className).toContain('task-preview')
   })
 
-  it('renders the payload result summary in the success color', async () => {
+  it('renders the payload result as a preview line in the timeline', async () => {
     const withResult: TaskEventVO[] = [
       {
         id: 'e-3',
@@ -139,11 +140,11 @@ describe('TaskEventFeed', () => {
     await act(async () => {})
     const result = screen.getByTestId('event-result')
     expect(result).toHaveTextContent('早安简报已生成，今日天气晴，气温 20–28℃。')
-    expect(result.style.color).toContain('--success')
+    expect(result.className).toContain('task-preview')
     expect(screen.queryByTestId('event-error')).toBeNull()
   })
 
-  it('truncates a long payload result at 80 characters', async () => {
+  it('keeps a long payload result intact in the DOM (click the row to open the full Markdown modal)', async () => {
     const longResult = 'x'.repeat(200)
     const withLongResult: TaskEventVO[] = [
       {
@@ -161,10 +162,13 @@ describe('TaskEventFeed', () => {
     render(<TaskEventFeed />)
     await act(async () => {})
     const result = screen.getByTestId('event-result')
-    const text = result.textContent ?? ''
-    expect(text.length).toBeLessThanOrEqual(80)
-    // 80 字符含省略号:截断到 max-1 个字符 + '…'。
-    expect(text).toBe(`${'x'.repeat(79)}…`)
+    // CSS line-clamp hides the overflow visually but the DOM keeps the
+    // entire string — the Markdown detail modal reads from this text.
+    expect(result.textContent).toHaveLength(200)
+
+    await act(async () => { fireEvent.click(screen.getByTestId('event-item')) })
+    const modal = screen.getByTestId('modal')
+    expect(modal.textContent).toContain('x'.repeat(200))
   })
 
   it('shows the empty state when there are no events', async () => {

@@ -51,6 +51,11 @@ function setupFetch(overrides: {
   tasks?: unknown
   events?: unknown
   scheduler?: unknown
+  /** Per-test GET /tasks/{id} detail; 404 otherwise. */
+  taskDetail?: unknown
+  /** Per-test POST /tasks/{id}/{action} body; otherwise the action fetch
+   *  falls through to the list route (which still returns 200 for POST). */
+  actionResult?: unknown
 } = {}): FetchCall[] {
   const calls: FetchCall[] = []
   vi.spyOn(globalThis, 'fetch').mockImplementation((url: string | URL | Request, init?: RequestInit) => {
@@ -64,6 +69,19 @@ function setupFetch(overrides: {
     }
     if (urlStr.includes('/api/v1/tasks/events')) {
       return Promise.resolve(json(overrides.events ?? []))
+    }
+    // GET /api/v1/tasks/{id} → detail view; must come BEFORE the action POST
+    // matcher because the action URLs also share the prefix.
+    if (init?.method !== 'POST' && /\/api\/v1\/tasks\/[A-Za-z0-9_-]+$/.test(urlStr)) {
+      const taskDetail = overrides.taskDetail
+      if (taskDetail !== undefined) {
+        return Promise.resolve(json(taskDetail))
+      }
+      return Promise.resolve(json({ detail: 'Task not found' }, 404))
+    }
+    // POST /api/v1/tasks/{id}/{action} → return the action-specific body.
+    if (init?.method === 'POST' && overrides.actionResult !== undefined) {
+      return Promise.resolve(json(overrides.actionResult))
     }
     if (urlStr.includes('/api/v1/tasks')) {
       return Promise.resolve(json(overrides.tasks ?? []))
@@ -79,7 +97,7 @@ function listFetchCount(calls: FetchCall[]): number {
 
 /** Drain the mocked fetch promise chains so setStates land inside act(). */
 async function flushAsync(): Promise<void> {
-  for (let i = 0; i < 5; i++) await Promise.resolve()
+  for (let i = 0; i < 20; i++) await Promise.resolve()
 }
 
 // Minimal WebSocket double so a real useWebSocket instance can be driven in
@@ -184,13 +202,34 @@ describe('TaskManager', () => {
     expect(screen.getByTestId('task-channel')).toHaveTextContent('web')
   })
 
-  it('truncates long content summaries to 80 characters', async () => {
-    setupFetch({ tasks: [makeTask({ content: 'x'.repeat(100) })] })
+  it('keeps full content in the DOM for the detail modal (no 80-char JS slice)', async () => {
+    const longContent = 'x'.repeat(200)
+    setupFetch({ tasks: [makeTask({ content: longContent })] })
     render(<TaskManager />)
     await act(async () => {})
     const summary = screen.getByTestId('task-content')
-    expect(summary.textContent).toHaveLength(81)
-    expect(summary.textContent?.endsWith('…')).toBe(true)
+    // CSS line-clamp hides the overflow visually but the DOM still carries the
+    // full string — the detail modal reads from this text, not a truncated copy.
+    expect(summary.textContent).toHaveLength(200)
+  })
+
+  it('opens the task detail modal when a row is clicked (and renders the full content)', async () => {
+    const full = '## full markdown\n\n- a\n- b\n\n```\ncode\n```'
+    const detail = {
+      ...makeTask({ content: full }),
+      result: 'reply body',
+      created_at: '2026-08-30T09:00:00',
+      updated_at: '2026-08-30T09:00:00',
+    }
+    setupFetch({ tasks: [makeTask({ content: full })], taskDetail: detail })
+    render(<TaskManager />)
+    await act(async () => {})
+    await act(async () => { fireEvent.click(screen.getByTestId('task-item')) })
+    // Detail modal fetched the full content + result; Markdown renders the
+    // heading markup (no 80-char truncation anywhere).
+    const body = await screen.findByTestId('detail-body')
+    expect(body.textContent).toContain('full markdown')
+    expect(body.textContent).toContain('reply body')
   })
 
   it('shows failed / paused / missed status badges with distinct colors', async () => {
@@ -208,8 +247,8 @@ describe('TaskManager', () => {
     const paused = badges.find(b => b.textContent === 'paused')
     const missed = badges.find(b => b.textContent === 'missed')
     expect(failed?.className).toContain('badge-error')
-    expect(paused?.className).toContain('badge-warning')
-    expect(missed?.style.color).toContain('--accent-secondary')
+    expect(paused?.className).toContain('badge-orange')
+    expect(missed?.className).toContain('badge-orange')
   })
 
   // -----------------------------------------------------------------------
@@ -222,11 +261,15 @@ describe('TaskManager', () => {
     render(<TaskManager />)
     await act(async () => {})
     overrides.tasks = [{ ...CRON_TASK, status: 'paused' }]
-    await act(async () => { fireEvent.click(screen.getByTestId('pause-task')) })
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('pause-task'))
+      await flushAsync()
+    })
     const pauseIdx = calls.findIndex(c => c.url === '/api/v1/tasks/t-cron/pause')
     expect(pauseIdx).toBeGreaterThanOrEqual(0)
     expect(calls[pauseIdx].init?.method).toBe('POST')
-    // refresh after the action
+    // refresh after the action (POST → list refetch lands asynchronously).
+    await act(async () => {})
     expect(calls.slice(pauseIdx + 1).some(c => c.url === '/api/v1/tasks')).toBe(true)
   })
 
@@ -238,10 +281,14 @@ describe('TaskManager', () => {
     render(<TaskManager />)
     await act(async () => {})
     overrides.tasks = [CRON_TASK]
-    await act(async () => { fireEvent.click(screen.getByTestId('resume-task')) })
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('resume-task'))
+      await flushAsync()
+    })
     const resumeIdx = calls.findIndex(c => c.url === '/api/v1/tasks/t-1/resume')
     expect(resumeIdx).toBeGreaterThanOrEqual(0)
     expect(calls[resumeIdx].init?.method).toBe('POST')
+    await act(async () => {})
     expect(calls.slice(resumeIdx + 1).some(c => c.url === '/api/v1/tasks')).toBe(true)
   })
 
@@ -267,22 +314,78 @@ describe('TaskManager', () => {
   // scheduler aliveness indicator
   // -----------------------------------------------------------------------
 
-  it('shows a green scheduler dot when the heartbeat is running', async () => {
+  it('shows a green scheduler pill when the heartbeat is running', async () => {
     setupFetch({ scheduler: { running: true, last_heartbeat_at: null, task_counts: {}, checks: {} } })
     render(<TaskManager />)
     await act(async () => {})
-    const dot = screen.getByTestId('scheduler-status')
-    expect(dot.getAttribute('title')).toBe('Scheduler running')
-    expect(dot.style.background).toContain('--success')
+    const pill = screen.getByTestId('scheduler-status')
+    expect(pill.getAttribute('title')).toBe('Scheduler running')
+    expect(pill.className).toContain('scheduler-pill--alive')
+    expect(pill.textContent).toContain('Scheduler running')
   })
 
-  it('shows a gray scheduler dot when the heartbeat is down', async () => {
+  it('shows a neutral scheduler pill when the heartbeat is down', async () => {
     setupFetch({ scheduler: { running: false, last_heartbeat_at: null, task_counts: {}, checks: {} } })
     render(<TaskManager />)
     await act(async () => {})
-    const dot = screen.getByTestId('scheduler-status')
-    expect(dot.getAttribute('title')).toBe('Scheduler offline')
-    expect(dot.style.background).not.toContain('--success')
+    const pill = screen.getByTestId('scheduler-status')
+    expect(pill.getAttribute('title')).toBe('Scheduler offline')
+    expect(pill.className).not.toContain('scheduler-pill--alive')
+    expect(pill.textContent).toContain('Scheduler offline')
+  })
+
+  it('opens the task detail modal when a row is activated with the keyboard', async () => {
+    const detail = {
+      ...makeTask(),
+      result: 'reply body',
+      created_at: '2026-08-30T09:00:00',
+      updated_at: '2026-08-30T09:00:00',
+    }
+    setupFetch({ tasks: [makeTask()], taskDetail: detail })
+    render(<TaskManager />)
+    await act(async () => {})
+    await act(async () => { fireEvent.keyDown(screen.getByTestId('task-item'), { key: 'Enter' }) })
+    expect(await screen.findByTestId('detail-body')).toBeInTheDocument()
+  })
+
+  it('filters the task list by status chips', async () => {
+    setupFetch({
+      tasks: [
+        makeTask({ id: 't-pending', description: 'p', status: 'pending' }),
+        makeTask({ id: 't-completed', description: 'c', status: 'completed' }),
+        makeTask({ id: 't-failed', description: 'f', status: 'failed' }),
+      ],
+    })
+    render(<TaskManager />)
+    await act(async () => {})
+    expect(screen.getAllByTestId('task-item')).toHaveLength(3)
+
+    await act(async () => { fireEvent.click(screen.getByTestId('task-filter-completed')) })
+    const items = screen.getAllByTestId('task-item')
+    expect(items).toHaveLength(1)
+    expect(items[0]).toHaveTextContent('c')
+
+    await act(async () => { fireEvent.click(screen.getByTestId('task-filter-all')) })
+    expect(screen.getAllByTestId('task-item')).toHaveLength(3)
+  })
+
+  it('opens the subagent result modal when the row has a result', async () => {
+    setupFetch({
+      subagents: [{
+        id: 'a-1',
+        task: 'summarize this article',
+        status: 'completed',
+        result: '## summary\n\n- key point 1\n- key point 2',
+      }],
+    })
+    render(<TaskManager />)
+    await act(async () => {})
+    await act(async () => { fireEvent.click(screen.getByTestId('view-subagent-result')) })
+    expect(await screen.findByTestId('modal')).toBeInTheDocument()
+    // Markdown rendering of the full result (no 80-char slice).
+    const modal = screen.getByTestId('modal')
+    expect(modal.textContent).toContain('key point 1')
+    expect(modal.textContent).toContain('key point 2')
   })
 
   // -----------------------------------------------------------------------

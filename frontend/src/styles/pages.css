@@ -1651,3 +1651,290 @@
   margin-top: 1px;
 }
 
+/* ===== Task Page v2 (click-to-inspect) =====
+   Extends the shared .task-* base (also used by PluginsPage) with modifier
+   classes; the base classes stay untouched. */
+
+/* Badge hues the shared palette lacked (cron trigger / paused / missed). */
+.badge-accent {
+  background: var(--accent-muted);
+  color: var(--accent);
+}
+
+.badge-orange {
+  background: var(--accent-secondary-muted);
+  color: var(--accent-secondary);
+}
+
+/* Status filter chips above the scheduled-task list. */
+.task-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: var(--sp-3);
+}
+
+.chip {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-med);
+  color: var(--text-secondary);
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border);
+  background: transparent;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.chip:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.chip--active {
+  color: var(--accent);
+  background: var(--accent-muted);
+  border-color: var(--accent-border);
+}
+
+/* Rows the user can open in the detail modal. */
+.task-item--clickable {
+  align-items: flex-start;
+  cursor: pointer;
+}
+
+.task-item--clickable:hover {
+  border-color: var(--accent-border);
+  background: var(--bg-hover);
+}
+
+.task-item--clickable:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.task-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 5px;
+  background: var(--text-secondary);
+}
+
+.task-dot--success { background: var(--success); }
+.task-dot--warning { background: var(--warning); }
+.task-dot--error { background: var(--error); }
+.task-dot--orange { background: var(--accent-secondary); }
+.task-dot--accent { background: var(--accent); }
+
+/* Two-line preview: the full text stays in the DOM (detail modal shows it). */
+.task-preview {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  margin-top: 5px;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+/* Scheduler aliveness pill (card-title is uppercase; reset it here). */
+.scheduler-pill {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-med);
+  color: var(--text-secondary);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.scheduler-pill__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+}
+
+.scheduler-pill--alive {
+  color: var(--success);
+}
+
+.scheduler-pill--alive .scheduler-pill__dot {
+  background: var(--success);
+}
+
+/* Timeline (trigger history). */
+.timeline {
+  display: flex;
+  flex-direction: column;
+}
+
+.timeline-item {
+  position: relative;
+  display: flex;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+}
+
+.timeline-item:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 22px;
+  bottom: -6px;
+  width: 1px;
+  background: var(--border);
+}
+
+.timeline-dot {
+  position: relative;
+  z-index: 1;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 4px;
+  background: var(--text-secondary);
+  box-shadow: 0 0 0 3px var(--bg-surface);
+}
+
+.timeline-dot--success { background: var(--success); }
+.timeline-dot--error { background: var(--error); }
+.timeline-dot--warning { background: var(--warning); }
+.timeline-dot--orange { background: var(--accent-secondary); }
+.timeline-dot--accent { background: var(--accent); }
+
+/* Detail modal (task / event inspect). */
+.modal--wide {
+  width: min(860px, 100%);
+}
+
+.detail-subtitle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.detail-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--sp-2) var(--sp-3);
+  padding: var(--sp-3);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  margin-bottom: var(--sp-4);
+}
+
+.detail-meta__item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.detail-meta__label {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+
+.detail-meta__value {
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+.detail-section {
+  margin-bottom: var(--sp-4);
+}
+
+.detail-section:last-child {
+  margin-bottom: 0;
+}
+
+.detail-section__label {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semi);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  margin-bottom: var(--sp-2);
+}
+
+.detail-result {
+  background: var(--success-muted);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  padding: var(--sp-3);
+}
+
+.detail-error {
+  background: var(--error-muted);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  padding: var(--sp-3);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  color: var(--error);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.detail-empty {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  text-align: center;
+  padding: var(--sp-3);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
+
+.detail-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-3);
+  padding: var(--sp-10) var(--sp-4);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  text-align: center;
+}
+
+/* Loading skeleton inside the detail modal. */
+.detail-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+}
+
+.detail-skeleton__bar {
+  height: 12px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--bg-hover) 25%, var(--bg-active) 50%, var(--bg-hover) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s ease infinite;
+}
+
+.detail-skeleton__bar--lg {
+  height: 16px;
+  width: 40%;
+}
+
+@keyframes skeleton-shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+

@@ -1,32 +1,29 @@
-import { useEffect, useState, type CSSProperties } from 'react'
+import { useEffect, useState } from 'react'
 import { History } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import { EmptyState } from '../common/EmptyState'
 import { listEvents, type TaskEventVO } from '../../api/tasks'
 import { subscribeTaskEvents } from '../../hooks/useWebSocket'
+import { MarkdownDetailModal } from './MarkdownDetailModal'
 
 const MAX_EVENTS = 50
 
-// The existing badge palette has no orange class, so the missed-event badge
-// uses theme variables on the base .badge class (kept private: react-refresh
-// forbids exporting non-components from a component file).
-const ORANGE_BADGE_STYLE: CSSProperties = {
-  background: 'var(--accent-secondary-muted)',
-  color: 'var(--accent-secondary)',
-}
+type Lifecycle = 'success' | 'error' | 'warning' | 'orange' | 'accent' | 'neutral'
 
-// Lifecycle events reuse the status badge palette; missed uses orange.
-const EVENT_TYPE_BADGE: Record<string, string> = {
-  'task.completed': 'badge-success',
-  'task.failed': 'badge-error',
+function eventTypeDot(type: string): Lifecycle {
+  if (type === 'task.completed') return 'success'
+  if (type === 'task.failed') return 'error'
+  if (type === 'task.missed') return 'orange'
+  if (type === 'task.due') return 'accent'
+  return 'neutral'
 }
 
 function eventTypeBadgeClass(type: string): string {
-  return EVENT_TYPE_BADGE[type] ?? 'badge-neutral'
-}
-
-function eventTypeBadgeStyle(type: string): CSSProperties | undefined {
-  return type === 'task.missed' ? ORANGE_BADGE_STYLE : undefined
+  if (type === 'task.completed') return 'badge-success'
+  if (type === 'task.failed') return 'badge-error'
+  if (type === 'task.missed') return 'badge-orange'
+  if (type === 'task.due') return 'badge-accent'
+  return 'badge-neutral'
 }
 
 function payloadError(payload: TaskEventVO['payload']): string | null {
@@ -43,15 +40,10 @@ function payloadResult(payload: TaskEventVO['payload']): string | null {
   return null
 }
 
-// Long LLM replies are summarized in the feed; full text stays in the
-// conversation history (§5.4).  The ellipsis counts toward the limit.
-function truncate(text: string, max = 80): string {
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text
-}
-
 /** 「最近触发记录」卡片:任务生命周期事件流(GET /tasks/events + WS 增量)。 */
 export function TaskEventFeed() {
   const [events, setEvents] = useState<TaskEventVO[]>([])
+  const [activeEvent, setActiveEvent] = useState<TaskEventVO | null>(null)
   const { t } = useTranslation()
 
   useEffect(() => {
@@ -73,6 +65,13 @@ export function TaskEventFeed() {
     [],
   )
 
+  const handleRowKey = (e: React.KeyboardEvent, event: TaskEventVO) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      setActiveEvent(event)
+    }
+  }
+
   return (
     <div className="card" data-testid="event-feed">
       <div className="card-title"><History size={14} />{t('taskManager.eventsTitle')}</div>
@@ -80,50 +79,71 @@ export function TaskEventFeed() {
         {events.length === 0 ? (
           <EmptyState compact icon={<History size={20} />} title={t('taskManager.noEvents')} />
         ) : (
-          events.map(event => {
-            const error = payloadError(event.payload)
-            const result = payloadResult(event.payload)
-            return (
-              <div key={event.id} className="task-item" data-testid="event-item">
-                <div className="task-info">
-                  <div className="task-meta">
-                    <span>{new Date(event.fired_at).toLocaleString()}</span>
-                    <span
-                      className={`badge ${eventTypeBadgeClass(event.type)}`}
-                      style={eventTypeBadgeStyle(event.type)}
-                      data-testid="event-type"
-                    >
-                      {event.type}
-                    </span>
-                    <span className="badge badge-neutral" data-testid="event-channel">
-                      {event.channel}
-                    </span>
+          <div className="timeline" data-testid="event-timeline">
+            {events.map(event => {
+              const error = payloadError(event.payload)
+              const result = payloadResult(event.payload)
+              const dotClass = `timeline-dot timeline-dot--${eventTypeDot(event.type)}`
+              return (
+                <div
+                  key={event.id}
+                  className="timeline-item task-item--clickable"
+                  data-testid="event-item"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setActiveEvent(event)}
+                  onKeyDown={e => handleRowKey(e, event)}
+                >
+                  <span className={dotClass} aria-hidden />
+                  <div className="timeline-body task-info">
+                    <div className="task-meta">
+                      <span>{new Date(event.fired_at).toLocaleString()}</span>
+                      <span
+                        className={`badge ${eventTypeBadgeClass(event.type)}`}
+                        data-testid="event-type"
+                      >
+                        {event.type}
+                      </span>
+                      <span className="badge badge-neutral" data-testid="event-channel">
+                        {event.channel}
+                      </span>
+                    </div>
+                    {event.content && <div className="task-title">{event.content}</div>}
+                    {result && (
+                      <div className="task-preview" data-testid="event-result">
+                        {result}
+                      </div>
+                    )}
+                    {error && (
+                      <div className="task-preview" data-testid="event-error" style={{ color: 'var(--error)' }}>
+                        {error}
+                      </div>
+                    )}
                   </div>
-                  {event.content && <div className="task-title">{event.content}</div>}
-                  {result && (
-                    <div
-                      className="task-meta event-result"
-                      data-testid="event-result"
-                      style={{ color: 'var(--success)' }}
-                    >
-                      {truncate(result)}
-                    </div>
-                  )}
-                  {error && (
-                    <div
-                      className="task-meta event-error"
-                      data-testid="event-error"
-                      style={{ color: 'var(--error)' }}
-                    >
-                      {error}
-                    </div>
-                  )}
                 </div>
-              </div>
-            )
-          })
+              )
+            })}
+          </div>
         )}
       </div>
+      {activeEvent && (
+        <MarkdownDetailModal
+          title={activeEvent.content || activeEvent.type}
+          subtitle={
+            <>
+              <span className={`badge ${eventTypeBadgeClass(activeEvent.type)}`}>{activeEvent.type}</span>
+              <span className="badge badge-neutral">{activeEvent.channel}</span>
+              <span style={{ color: 'var(--text-secondary)', fontSize: 'var(--fs-xs)' }}>
+                {new Date(activeEvent.fired_at).toLocaleString()}
+              </span>
+            </>
+          }
+          markdown={
+            payloadError(activeEvent.payload) ?? payloadResult(activeEvent.payload) ?? activeEvent.content ?? null
+          }
+          onClose={() => setActiveEvent(null)}
+        />
+      )}
     </div>
   )
 }

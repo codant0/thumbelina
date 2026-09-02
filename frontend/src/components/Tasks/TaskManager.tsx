@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Bot, X, CalendarClock, Pause, Play } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Bot, X, CalendarClock, Pause, Play, FileText } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import { EmptyState } from '../common/EmptyState'
 import { TaskEventFeed } from './TaskEventFeed'
+import { MarkdownDetailModal } from './MarkdownDetailModal'
+import { TaskDetailModal } from './TaskDetailModal'
 import {
   listSubagents,
   cancelSubagent,
@@ -17,33 +19,20 @@ import {
 } from '../../api/tasks'
 import { subscribeTaskEvents } from '../../hooks/useWebSocket'
 
+// Shared base classes stay unchanged (.badge-warning / .badge-success / .badge-
+// error); the cron-trigger and paused/missed badges use the new accent/orange
+// palette (declared in pages.css v2).
 const STATUS_BADGE: Record<string, string> = {
   completed: 'badge-success',
   running: 'badge-warning',
   failed: 'badge-error',
   pending: 'badge-neutral',
   cancelled: 'badge-neutral',
-  paused: 'badge-warning',
-  // missed renders with the orange badge style (no dedicated badge class)
-}
-
-// The existing badge palette has no accent(blue)/orange classes, so the cron
-// trigger and missed-status badges use theme variables on the base .badge class.
-const ACCENT_BADGE_STYLE = {
-  background: 'var(--accent-muted)',
-  color: 'var(--accent)',
-}
-const ORANGE_BADGE_STYLE = {
-  background: 'var(--accent-secondary-muted)',
-  color: 'var(--accent-secondary)',
 }
 
 function statusBadgeClass(status: string): string {
+  if (status === 'paused' || status === 'missed') return 'badge-orange'
   return STATUS_BADGE[status] ?? 'badge-neutral'
-}
-
-function statusBadgeStyle(status: string) {
-  return status === 'missed' ? ORANGE_BADGE_STYLE : undefined
 }
 
 // Polling cadence: fast list refresh + slow scheduler heartbeat probe.
@@ -52,14 +41,16 @@ const SCHEDULER_POLL_MS = 30_000
 // task_event frames can burst (cron batch); collapse them into at most one
 // refresh per window while keeping the 10s poll as the safety net.
 const WS_REFRESH_THROTTLE_MS = 500
-const SUMMARY_MAX_CHARS = 80
 // Action buttons only make sense while a task can still change state.
 const ACTIONABLE_STATUSES = new Set(['pending', 'running', 'paused'])
 
-function truncateSummary(content: string): string {
-  return content.length > SUMMARY_MAX_CHARS
-    ? `${content.slice(0, SUMMARY_MAX_CHARS)}…`
-    : content
+type TaskFilter = 'all' | 'active' | 'completed' | 'failed'
+
+function filterTasks(tasks: ScheduledTaskVO[], filter: TaskFilter): ScheduledTaskVO[] {
+  if (filter === 'all') return tasks
+  if (filter === 'active') return tasks.filter(t => t.status === 'pending' || t.status === 'running' || t.status === 'paused')
+  if (filter === 'completed') return tasks.filter(t => t.status === 'completed' || t.status === 'cancelled')
+  return tasks.filter(t => t.status === 'failed' || t.status === 'missed')
 }
 
 export function TaskManager() {
@@ -67,6 +58,9 @@ export function TaskManager() {
   const [tasks, setTasks] = useState<ScheduledTaskVO[]>([])
   const [scheduler, setScheduler] = useState<SchedulerStatusVO | null>(null)
   const [error, setError] = useState('')
+  const [taskFilter, setTaskFilter] = useState<TaskFilter>('all')
+  const [detailTaskId, setDetailTaskId] = useState<string | null>(null)
+  const [subagentResult, setSubagentResult] = useState<SubagentVO | null>(null)
   const { t } = useTranslation()
 
   const fetchData = useCallback(async () => {
@@ -86,7 +80,7 @@ export function TaskManager() {
     return () => clearInterval(interval)
   }, [fetchData])
 
-  // Scheduler aliveness: slow 30s poll of the heartbeat snapshot (green/gray dot).
+  // Scheduler aliveness: slow 30s poll of the heartbeat snapshot.
   useEffect(() => {
     let cancelled = false
     const poll = () => {
@@ -155,7 +149,17 @@ export function TaskManager() {
     } catch { /* ignore */ }
   }
 
+  const handleRowKey = (e: React.KeyboardEvent, taskId: string) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      setDetailTaskId(taskId)
+    }
+  }
+
+  const stopRow = (e: React.SyntheticEvent) => e.stopPropagation()
+
   const schedulerAlive = scheduler?.running === true
+  const filteredTasks = useMemo(() => filterTasks(tasks, taskFilter), [tasks, taskFilter])
 
   return (
     <div className="page-container" data-testid="task-manager">
@@ -176,17 +180,27 @@ export function TaskManager() {
                     <span className={`badge ${statusBadgeClass(agent.status)}`} data-testid="subagent-status">
                       {agent.status}
                     </span>
-                    {agent.result && <span>{agent.result}</span>}
                   </div>
                 </div>
-                {(agent.status === 'running' || agent.status === 'pending') && (
-                  <div className="task-actions">
+                <div className="task-actions">
+                  {agent.result && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      data-testid="view-subagent-result"
+                      onClick={() => setSubagentResult(agent)}
+                    >
+                      <FileText size={14} />
+                      {t('taskManager.viewResult')}
+                    </button>
+                  )}
+                  {(agent.status === 'running' || agent.status === 'pending') && (
                     <button className="btn btn-danger btn-sm" data-testid="cancel-subagent" onClick={() => handleCancelSubagent(agent.id)}>
                       <X size={14} />
                       {t('common.cancel')}
                     </button>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             ))
           )}
@@ -198,29 +212,45 @@ export function TaskManager() {
           <CalendarClock size={14} />{t('taskManager.scheduledTasks')}
           <span
             data-testid="scheduler-status"
+            className={schedulerAlive ? 'scheduler-pill scheduler-pill--alive' : 'scheduler-pill'}
             title={schedulerAlive ? t('taskManager.schedulerAlive') : t('taskManager.schedulerDown')}
-            style={{
-              marginLeft: 'auto',
-              width: 8,
-              height: 8,
-              flexShrink: 0,
-              borderRadius: '50%',
-              display: 'inline-block',
-              background: schedulerAlive ? 'var(--success)' : 'var(--text-secondary)',
-            }}
-          />
+          >
+            <span className="scheduler-pill__dot" />
+            {schedulerAlive ? t('taskManager.schedulerAlive') : t('taskManager.schedulerDown')}
+          </span>
+        </div>
+        <div className="task-chips" data-testid="task-filter">
+          {(['all', 'active', 'completed', 'failed'] as const).map(f => (
+            <button
+              key={f}
+              type="button"
+              className={taskFilter === f ? 'chip chip--active' : 'chip'}
+              data-testid={`task-filter-${f}`}
+              onClick={() => setTaskFilter(f)}
+            >
+              {t(`taskManager.filter${f[0].toUpperCase()}${f.slice(1)}`)}
+            </button>
+          ))}
         </div>
         <div className="task-list" data-testid="task-list">
-          {tasks.length === 0 ? (
+          {filteredTasks.length === 0 ? (
             <EmptyState compact icon={<CalendarClock size={20} />} title={t('taskManager.noTasks')} />
           ) : (
-            tasks.map(task => (
-              <div key={task.id} className="task-item" data-testid="task-item">
+            filteredTasks.map(task => (
+              <div
+                key={task.id}
+                className="task-item task-item--clickable"
+                data-testid="task-item"
+                role="button"
+                tabIndex={0}
+                onClick={() => setDetailTaskId(task.id)}
+                onKeyDown={e => handleRowKey(e, task.id)}
+              >
                 <div className="task-info">
                   <div className="task-title">{task.description}</div>
                   <div className="task-meta">
                     {task.trigger === 'cron' ? (
-                      <span className="badge" style={ACCENT_BADGE_STYLE} data-testid="task-trigger">
+                      <span className="badge badge-accent" data-testid="task-trigger">
                         {t('taskManager.triggerCron')}: {task.cron}
                       </span>
                     ) : (
@@ -228,7 +258,7 @@ export function TaskManager() {
                         {t('taskManager.triggerOnce')}
                       </span>
                     )}
-                    <span className={`badge ${statusBadgeClass(task.status)}`} style={statusBadgeStyle(task.status)} data-testid="task-status">
+                    <span className={`badge ${statusBadgeClass(task.status)}`} data-testid="task-status">
                       {task.status}
                     </span>
                     <span
@@ -249,23 +279,23 @@ export function TaskManager() {
                     )}
                   </div>
                   {task.content && (
-                    <div data-testid="task-content">{truncateSummary(task.content)}</div>
+                    <div className="task-preview" data-testid="task-content">{task.content}</div>
                   )}
                 </div>
                 {ACTIONABLE_STATUSES.has(task.status) && (
-                  <div className="task-actions">
+                  <div className="task-actions" onClick={stopRow}>
                     {task.trigger === 'cron' && (task.status === 'paused' ? (
-                      <button className="btn btn-sm" data-testid="resume-task" onClick={() => handleResumeTask(task.id)}>
+                      <button className="btn btn-sm" data-testid="resume-task" onClick={e => { stopRow(e); void handleResumeTask(task.id) }}>
                         <Play size={14} />
                         {t('taskManager.resume')}
                       </button>
                     ) : (
-                      <button className="btn btn-sm" data-testid="pause-task" onClick={() => handlePauseTask(task.id)}>
+                      <button className="btn btn-sm" data-testid="pause-task" onClick={e => { stopRow(e); void handlePauseTask(task.id) }}>
                         <Pause size={14} />
                         {t('taskManager.pause')}
                       </button>
                     ))}
-                    <button className="btn btn-danger btn-sm" data-testid="cancel-task" onClick={() => handleCancelTask(task.id)}>
+                    <button className="btn btn-danger btn-sm" data-testid="cancel-task" onClick={e => { stopRow(e); void handleCancelTask(task.id) }}>
                       <X size={14} />
                       {t('common.cancel')}
                     </button>
@@ -278,6 +308,23 @@ export function TaskManager() {
       </div>
 
       <TaskEventFeed />
+
+      <TaskDetailModal
+        taskId={detailTaskId}
+        onClose={() => setDetailTaskId(null)}
+      />
+      {subagentResult && (
+        <MarkdownDetailModal
+          title={subagentResult.task}
+          subtitle={
+            <span className={`badge ${statusBadgeClass(subagentResult.status)}`}>
+              {subagentResult.status}
+            </span>
+          }
+          markdown={subagentResult.result}
+          onClose={() => setSubagentResult(null)}
+        />
+      )}
     </div>
   )
 }
