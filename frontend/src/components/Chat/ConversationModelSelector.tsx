@@ -89,7 +89,12 @@ export function ConversationModelSelector({
         <ChevronDown size={14} />
       </button>
       {open && (
-        <ul className="conv-model-selector__menu" role="listbox" data-testid="conv-model-menu">
+        <ul
+          className="conv-model-selector__menu"
+          role="listbox"
+          data-testid="conv-model-menu"
+          data-density={groups.reduce((sum, ep) => sum + ep.models.length, 0) < 4 ? 'compact' : 'scrollable'}
+        >
           {/* Default model option */}
           <li
             role="option"

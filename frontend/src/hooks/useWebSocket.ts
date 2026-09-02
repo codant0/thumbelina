@@ -55,8 +55,10 @@ export function subscribeTaskEvents(fn: TaskEventListener): () => void {
   return () => { taskEventListeners.delete(fn) }
 }
 
-const CHARS_PER_TICK = 3
-const TICK_INTERVAL = 30
+// 打字机阶梯式提速:首批字符最快(让"开口"明显),中段最快,长文本末段降到 3/tick
+// 避免高频闪烁。整体节奏较旧 3/30 提速约 2.5-3 倍。
+const TICK_INTERVAL = 18
+const charsPerTick = (revealed: number) => (revealed < 80 ? 5 : revealed < 240 ? 6 : 3)
 // If no response arrives within this window, clear the waiting state
 // and surface a timeout message. Prevents the UI from hanging forever
 // when the backend LLM call hangs or the WS frame is silently dropped.
@@ -295,7 +297,7 @@ export function useWebSocket(url: string, activeConversationId?: string) {
         return
       }
       // Reveal characters
-      displayedRef.current = Math.min(displayedRef.current + CHARS_PER_TICK, total)
+      displayedRef.current = Math.min(displayedRef.current + charsPerTick(displayedRef.current), total)
       setAwaitingMore(false)
       const displayed = bufferRef.current.slice(0, displayedRef.current)
       setMessages(prev => {

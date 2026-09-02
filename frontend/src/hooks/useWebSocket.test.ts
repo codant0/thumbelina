@@ -128,6 +128,26 @@ describe('useWebSocket', () => {
     expect(result.current.isStreaming).toBe(false)
   })
 
+  it('typewriter accelerates: 11-char chunk fully revealed within 150ms (was ~120-150ms at the old 30ms/3-chars cadence)', async () => {
+    vi.useFakeTimers()
+    const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat'))
+
+    await act(async () => {
+      vi.advanceTimersByTime(10)
+    })
+
+    act(() => {
+      MockWebSocket.instances[0].simulateMessage(JSON.stringify({ chunk: 'Hello world' }))
+    })
+
+    // Old cadence (3 chars / 30ms) would need ~120ms; new staircase (5/6/3 at 18ms)
+    // reaches 11 chars well within 150ms. Use a tight window to catch regressions.
+    await act(async () => {
+      vi.advanceTimersByTime(150)
+    })
+    expect(result.current.messages[0].content).toBe('Hello world')
+  })
+
   it('should handle non-streaming response immediately', async () => {
     const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat'))
 

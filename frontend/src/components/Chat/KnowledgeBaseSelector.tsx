@@ -81,7 +81,12 @@ export function KnowledgeBaseSelector({
       </button>
 
       {open && (
-        <div className="kb-float__panel" role="listbox" data-testid="kb-selector-menu">
+        <div
+          className="kb-float__panel"
+          role="listbox"
+          data-testid="kb-selector-menu"
+          data-density={kbs.length < 4 ? 'compact' : 'scrollable'}
+        >
           <div className="kb-float__heading">{t('knowledgeBase.chooseKnowledgeBase')}</div>
 
           <button

@@ -74,7 +74,12 @@ export function RoleSelector({ conversationId, selectedRole, onChange }: RoleSel
       </button>
 
       {open && (
-        <div className="role-float__panel" role="listbox" data-testid="role-selector-menu">
+        <div
+          className="role-float__panel"
+          role="listbox"
+          data-testid="role-selector-menu"
+          data-density={roles.length < 4 ? 'compact' : 'scrollable'}
+        >
           <div className="role-float__heading">{t('chat.chooseRole')}</div>
 
           <button

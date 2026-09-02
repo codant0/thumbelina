@@ -73,6 +73,13 @@
   animation: kb-float-in var(--dur-fast) var(--ease-out);
 }
 
+/* 候选项少(< 4)时取消 max-height 与滚动,改为内容自然撑起,降低空旷感 */
+.kb-float__panel[data-density="compact"] {
+  max-height: none;
+  overflow-y: visible;
+  padding: 3px;
+}
+
 @keyframes kb-float-in {
   from {
     opacity: 0;
@@ -219,6 +226,12 @@
   padding: 5px;
   box-shadow: var(--shadow-md);
   animation: role-float-in var(--dur-fast) var(--ease-out);
+}
+
+.role-float__panel[data-density="compact"] {
+  max-height: none;
+  overflow-y: visible;
+  padding: 3px;
 }
 
 /* 右对齐面板(贴右缘的触发器):向右展开会溢出视口,改为向左展开 */
