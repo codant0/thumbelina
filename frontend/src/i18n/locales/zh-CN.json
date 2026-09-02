@@ -182,7 +182,14 @@
     "contextWindow": "上下文窗口",
     "multimodal": "多模态",
     "modelContextWindow": "上下文窗口",
-    "modelContextWindowPlaceholder": "如 128K（留空回落全局默认）"
+    "modelContextWindowPlaceholder": "如 128K（留空回落全局默认）",
+    "detailTitle": "端点详情",
+    "inspectAction": "查看详情",
+    "moreModels": "+{count} 更多",
+    "deleteTitle": "删除端点",
+    "deleteConfirm": "确认删除端点 \"{name}\"？此操作不可撤销。",
+    "apiKeySet": "已设置 API Key",
+    "apiKeyMissing": "未设置 API Key"
   },
   "channels": {
     "title": "频道",

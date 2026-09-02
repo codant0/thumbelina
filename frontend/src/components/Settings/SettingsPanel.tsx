@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import { EndpointManager } from './EndpointManager'
+import { PresetManager } from './PresetManager'
 import { ToolsConfig } from './ToolsConfig'
 import { useTranslation } from '../../i18n'
 import { Toast } from './Toast'
@@ -102,6 +103,9 @@ export function SettingsPanel() {
 
       {/* LLM Configuration */}
       <EndpointManager onMessage={(msg, err) => { setMessage(msg); setIsError(err) }} />
+
+      {/* LLM Presets */}
+      <PresetManager onMessage={(msg, err) => { setMessage(msg); setIsError(err) }} />
 
       {/* Tools Configuration */}
       <ToolsConfig onMessage={(msg, err) => { setMessage(msg); setIsError(err) }} />

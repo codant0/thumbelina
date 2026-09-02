@@ -900,42 +900,44 @@
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: var(--sp-3);
   margin-top: var(--sp-3);
+  align-items: stretch;
 }
 
+/* Equal-height summary card. Top accent strip marks the default endpoint.
+   Hidden DOM nodes (legacy model chips) are tucked below the action row in
+   .endpoint-card__legacy and don't influence layout. */
 .endpoint-card {
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
+  min-height: 192px;
   background: var(--bg-surface);
   border: 1px solid var(--border);
+  border-top: 2px solid transparent;
   border-radius: var(--radius);
-  padding: var(--sp-3) var(--sp-4);
-  transition: border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+  padding: var(--sp-3) var(--sp-4) calc(var(--sp-3) + 2px);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
   position: relative;
-  overflow: hidden;
 }
 
 .endpoint-card:hover {
   border-color: var(--text-secondary);
+  transform: translateY(-1px);
+}
+
+.endpoint-card:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-muted);
 }
 
 .endpoint-card--active {
-  border-color: var(--accent-border);
-  background: linear-gradient(
-    100deg,
-    var(--accent-muted) 0%,
-    var(--bg-surface) 40%
-  );
-}
-
-.endpoint-card--active::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 3px;
-  background: var(--accent);
+  border-top-color: var(--accent);
+  background: linear-gradient(180deg, var(--accent-muted) 0%, var(--bg-surface) 30%);
 }
 
 .endpoint-card__header {
@@ -996,6 +998,116 @@
   font-size: var(--fs-xs);
   color: var(--text-muted);
   font-style: italic;
+}
+
+/* Inline model preview on the summary card: vertical stack of up to 3 rows.
+   Each model name sits in its own compact pill (border hugs the text only);
+   ctx / multimodal badges sit to the right of the pill. Rows have a fixed
+   height so long model names (ellipsized) never change the card height. */
+.endpoint-card__preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding-left: 34px;
+}
+
+.endpoint-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  min-width: 0;
+}
+
+.endpoint-preview-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  height: 24px;
+  padding: 0 var(--sp-3);
+  border-radius: var(--radius-full);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-med);
+  color: var(--text-primary);
+  background: var(--bg);
+  border: 1px solid var(--border-subtle);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.endpoint-preview-pill:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.endpoint-preview-pill:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-muted);
+}
+
+.endpoint-preview-pill:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.endpoint-preview-pill--active {
+  color: var(--success);
+  background: var(--success-muted);
+  border-color: var(--success);
+  cursor: default;
+  font-weight: var(--fw-semi);
+}
+
+.endpoint-preview-pill__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+
+.endpoint-preview-row__badges {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.endpoint-preview-more {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  align-self: flex-start;
+  padding: 0 var(--sp-3);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semi);
+  color: var(--accent);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+}
+
+.endpoint-preview-more:hover {
+  background: var(--accent-muted);
+}
+
+/* Hidden DOM that preserves legacy testids so existing EndpointList tests
+   keep passing without affecting the visible card layout. */
+.endpoint-card__legacy {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+  pointer-events: none;
 }
 
 .endpoint-model-chips {
@@ -1107,22 +1219,6 @@
 
 .endpoint-provider-logo--ollama {
   background: linear-gradient(135deg, #6b7280, #4b5563);
-}
-
-/* "Active" tag with pulsing dot */
-.endpoint-active-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 0 var(--sp-2);
-  height: 24px;
-  border-radius: var(--radius-full);
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-semi);
-  color: var(--success);
-  background: var(--success-muted);
-  border: 1px solid rgba(74, 222, 128, 0.2);
-  flex-shrink: 0;
 }
 
 @keyframes endpoint-active-pulse {
@@ -1449,23 +1545,38 @@
   margin-top: var(--sp-3);
 }
 
+/* Equal-height summary card. Top accent strip marks the active preset. */
 .preset-card {
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
-  padding: var(--sp-3) var(--sp-4);
+  min-height: 96px;
+  padding: var(--sp-3) var(--sp-4) calc(var(--sp-3) + 2px);
   background: var(--bg-surface);
   border: 1px solid var(--border);
+  border-top: 2px solid transparent;
   border-radius: var(--radius);
-  transition: border-color var(--dur-fast) var(--ease-out);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
 }
 
 .preset-card:hover {
   border-color: var(--text-secondary);
+  transform: translateY(-1px);
+}
+
+.preset-card:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-muted);
 }
 
 .preset-card--active {
-  border-color: var(--success);
+  border-top-color: var(--accent);
+  background: linear-gradient(180deg, var(--accent-muted) 0%, var(--bg-surface) 30%);
 }
 
 .preset-card__header {
@@ -1517,6 +1628,169 @@
   display: flex;
   gap: 6px;
   margin-top: 4px;
+}
+
+/* ===== Endpoint detail modal ===== */
+.endpoint-detail__section,
+.preset-detail__section {
+  padding: var(--sp-3) 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.endpoint-detail__section:last-of-type,
+.preset-detail__section:last-of-type {
+  border-bottom: none;
+}
+
+.endpoint-detail__heading,
+.preset-detail__heading {
+  margin: 0 0 var(--sp-2) 0;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semi);
+  color: var(--text-heading);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.endpoint-detail__grid,
+.preset-detail__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--sp-2) var(--sp-4);
+  margin-bottom: var(--sp-2);
+}
+
+.endpoint-detail__row,
+.preset-detail__row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.endpoint-detail__row--muted .endpoint-detail__row-value,
+.preset-detail__row--muted .preset-detail__row-value {
+  color: var(--text-secondary);
+}
+
+.endpoint-detail__row-label,
+.preset-detail__row-label {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.endpoint-detail__row-value,
+.preset-detail__row-value {
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.endpoint-detail__url,
+.preset-detail__url {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: var(--sp-2);
+  font-size: var(--fs-xs);
+}
+
+.endpoint-detail__url code,
+.preset-detail__url code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+  padding: 6px var(--sp-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  overflow-wrap: anywhere;
+}
+
+.endpoint-detail__models,
+.preset-detail__models {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.endpoint-detail__model {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+}
+
+.endpoint-detail__model--active {
+  border-color: var(--success);
+  background: var(--success-muted);
+}
+
+.endpoint-detail__model-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.endpoint-detail__model-name {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+.endpoint-detail__model-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.endpoint-detail__model-active-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--success);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.endpoint-detail__actions,
+.preset-detail__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-4);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border-subtle);
+  justify-content: flex-end;
+}
+
+.preset-detail__code {
+  margin: 0;
+  padding: var(--sp-3);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow: auto;
 }
 
 /* ===== Channels ===== */

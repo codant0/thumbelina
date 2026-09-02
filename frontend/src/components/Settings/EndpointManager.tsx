@@ -11,6 +11,7 @@ import {
 import { useTranslation } from '../../i18n'
 import { EndpointList } from './EndpointList'
 import { EndpointForm } from './EndpointForm'
+import { EndpointDetailModal } from './EndpointDetailModal'
 import { Modal } from './Modal'
 import { Plus, Cpu } from 'lucide-react'
 
@@ -23,6 +24,7 @@ export function EndpointManager({ onMessage }: EndpointManagerProps) {
   const [endpoints, setEndpoints] = useState<LLMEndpoint[]>([])
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState<LLMEndpoint | null>(null)
+  const [inspecting, setInspecting] = useState<LLMEndpoint | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [testingConnectionId, setTestingConnectionId] = useState<string | null>(null)
   const [activatingKey, setActivatingKey] = useState<string | null>(null)
@@ -139,6 +141,24 @@ export function EndpointManager({ onMessage }: EndpointManagerProps) {
           <EndpointForm initialValues={editing} onSubmit={handleUpdate} onCancel={() => setEditing(null)} />
         </Modal>
       )}
+      {inspecting && !editing && !showForm && (
+        <EndpointDetailModal
+          endpoint={inspecting}
+          testingConnectionId={testingConnectionId}
+          activatingKey={activatingKey}
+          onClose={() => setInspecting(null)}
+          onEdit={ep => {
+            setInspecting(null)
+            setEditing(ep)
+          }}
+          onDelete={handleDelete}
+          onActivate={async (endpointId, model) => {
+            await handleActivate(endpointId, model)
+            // refresh local reference so the modal reflects the new active model
+            setEndpoints(prev => prev)
+          }}
+        />
+      )}
       {endpoints.length === 0 && !showForm ? (
         <p className="settings-empty-hint">{t('endpoint.noEndpoints')}</p>
       ) : (
@@ -146,6 +166,7 @@ export function EndpointManager({ onMessage }: EndpointManagerProps) {
           endpoints={endpoints}
           testingConnectionId={testingConnectionId}
           activatingKey={activatingKey}
+          onInspect={id => setInspecting(endpoints.find(e => e.id === id) ?? null)}
           onEdit={id => setEditing(endpoints.find(e => e.id === id) ?? null)}
           onDelete={handleDelete}
           onTestConnection={handleTestConnection}

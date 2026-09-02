@@ -23,6 +23,7 @@ const sampleEndpoint = {
 
 const defaultProps = {
   endpoints: [sampleEndpoint],
+  onInspect: vi.fn(),
   onEdit: vi.fn(),
   onDelete: vi.fn(),
   onTestConnection: vi.fn(),

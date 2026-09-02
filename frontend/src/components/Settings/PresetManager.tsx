@@ -8,7 +8,10 @@ import {
   activatePreset,
 } from '../../api/llmConfig'
 import { PresetForm } from './PresetForm'
-import { Plus, Check, Pencil, Trash2, Loader2, BookMarked } from 'lucide-react'
+import { PresetList } from './PresetList'
+import { PresetDetailModal } from './PresetDetailModal'
+import { Modal } from './Modal'
+import { Plus, BookMarked } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 
 interface PresetManagerProps {
@@ -20,8 +23,8 @@ export function PresetManager({ onMessage }: PresetManagerProps) {
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<LLMPreset | null>(null)
-  const [activatingId, setActivatingId] = useState<string | null>(null)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [inspecting, setInspecting] = useState<LLMPreset | null>(null)
+  const [activatingFromDetail, setActivatingFromDetail] = useState<string | null>(null)
   const { t } = useTranslation()
 
   const load = useCallback(async () => {
@@ -65,20 +68,17 @@ export function PresetManager({ onMessage }: PresetManagerProps) {
   }
 
   const handleDelete = async (id: string) => {
-    setDeletingId(id)
     try {
       await deletePreset(id)
       onMessage(t('preset.deleted'), false)
       await load()
     } catch (err) {
       onMessage(err instanceof Error ? err.message : t('preset.deleteFailed'), true)
-    } finally {
-      setDeletingId(null)
     }
   }
 
   const handleActivate = async (id: string) => {
-    setActivatingId(id)
+    setActivatingFromDetail(id)
     try {
       const result = await activatePreset(id)
       setPresets(prev => prev.map(p => ({
@@ -89,7 +89,7 @@ export function PresetManager({ onMessage }: PresetManagerProps) {
     } catch (err) {
       onMessage(err instanceof Error ? err.message : t('preset.activateFailed'), true)
     } finally {
-      setActivatingId(null)
+      setActivatingFromDetail(null)
     }
   }
 
@@ -107,66 +107,38 @@ export function PresetManager({ onMessage }: PresetManagerProps) {
         {t('preset.add')}
       </button>
       {showForm && (
-        <PresetForm onSubmit={handleCreate} onCancel={() => setShowForm(false)} />
+        <Modal title={t('preset.add')} onClose={() => setShowForm(false)}>
+          <PresetForm onSubmit={handleCreate} onCancel={() => setShowForm(false)} />
+        </Modal>
       )}
       {editing && (
-        <PresetForm initialValues={editing} onSubmit={handleUpdate} onCancel={() => setEditing(null)} />
+        <Modal title={t('preset.update')} onClose={() => setEditing(null)}>
+          <PresetForm initialValues={editing} onSubmit={handleUpdate} onCancel={() => setEditing(null)} />
+        </Modal>
       )}
-      {presets.length === 0 ? (
+      {inspecting && !editing && !showForm && (
+        <PresetDetailModal
+          preset={inspecting}
+          activating={activatingFromDetail === inspecting.id}
+          onClose={() => setInspecting(null)}
+          onEdit={p => {
+            setInspecting(null)
+            setEditing(p)
+          }}
+          onDelete={async id => {
+            await handleDelete(id)
+            setInspecting(null)
+          }}
+          onActivate={handleActivate}
+        />
+      )}
+      {presets.length === 0 && !showForm ? (
         <p className="settings-empty-hint">{t('preset.noPresets')}</p>
       ) : (
-        <div className="preset-list">
-          {presets.map(preset => (
-            <div
-              key={preset.id}
-              className={`card preset-card${preset.is_active ? ' preset-card--active' : ''}`}
-              data-testid={`preset-row-${preset.id}`}
-            >
-              <div className="preset-card__header">
-                <span className="preset-card__name">{preset.name}</span>
-                <span className="preset-card__badges">
-                  <span className="badge badge-neutral">{preset.provider}</span>
-                  {preset.is_active && <span className="badge badge-success">{t('common.active')}</span>}
-                </span>
-              </div>
-              <div className="preset-card__body">
-                <span className="preset-card__url" title={preset.base_url}>{preset.base_url}</span>
-                <span className="preset-card__model">{preset.model}</span>
-                <span className="preset-card__date">{new Date(preset.updated_at).toLocaleString()}</span>
-              </div>
-              <div className="preset-card__actions">
-                {!preset.is_active && (
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    data-testid={`activate-preset-${preset.id}`}
-                    onClick={() => handleActivate(preset.id)}
-                    disabled={activatingId === preset.id}
-                  >
-                    {activatingId === preset.id ? <Loader2 size={14} className="spin" /> : <Check size={14} />}
-                    {activatingId === preset.id ? t('common.activating') : t('common.activate')}
-                  </button>
-                )}
-                <button
-                  className="btn btn-ghost btn-sm"
-                  data-testid={`edit-preset-${preset.id}`}
-                  onClick={() => setEditing(preset)}
-                >
-                  <Pencil size={14} />
-                  {t('common.edit')}
-                </button>
-                <button
-                  className="btn btn-danger btn-sm"
-                  data-testid={`delete-preset-${preset.id}`}
-                  onClick={() => handleDelete(preset.id)}
-                  disabled={deletingId === preset.id}
-                >
-                  {deletingId === preset.id ? <Loader2 size={14} className="spin" /> : <Trash2 size={14} />}
-                  {deletingId === preset.id ? t('common.delete') : t('common.delete')}
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
+        <PresetList
+          presets={presets}
+          onInspect={id => setInspecting(presets.find(p => p.id === id) ?? null)}
+        />
       )}
     </div>
   )

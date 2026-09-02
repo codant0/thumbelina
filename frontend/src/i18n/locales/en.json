@@ -182,7 +182,14 @@
     "contextWindow": "Context window",
     "multimodal": "Multimodal",
     "modelContextWindow": "Context window",
-    "modelContextWindowPlaceholder": "e.g. 128K (empty = global default)"
+    "modelContextWindowPlaceholder": "e.g. 128K (empty = global default)",
+    "detailTitle": "Endpoint details",
+    "inspectAction": "View details",
+    "moreModels": "+{count} more",
+    "deleteTitle": "Delete endpoint",
+    "deleteConfirm": "Delete endpoint \"{name}\"? This cannot be undone.",
+    "apiKeySet": "API key configured",
+    "apiKeyMissing": "No API key set"
   },
   "channels": {
     "title": "Channels",
