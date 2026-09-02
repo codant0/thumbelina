@@ -37,6 +37,10 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
   --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.6);
+  /* 排队浮窗玻璃态:暗主题用偏黑半透 */
+  --pending-glass-bg: rgba(24, 24, 27, 0.72);
+  --pending-glass-border: rgba(255, 255, 255, 0.06);
+  --pending-radius: 12px;
 }
 
 /* ===== Light Theme ===== */
@@ -77,6 +81,10 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.10);
   --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.14);
+  /* 排队浮窗玻璃态:亮主题用偏白半透 */
+  --pending-glass-bg: rgba(255, 255, 255, 0.78);
+  --pending-glass-border: rgba(0, 0, 0, 0.06);
+  --pending-radius: 12px;
 }
 
 /* ===== Warm Theme ===== */
@@ -117,4 +125,8 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
   --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.6);
+  /* 排队浮窗玻璃态:warm 主题用偏暖灰半透 */
+  --pending-glass-bg: rgba(45, 40, 37, 0.72);
+  --pending-glass-border: rgba(255, 255, 255, 0.05);
+  --pending-radius: 12px;
 }

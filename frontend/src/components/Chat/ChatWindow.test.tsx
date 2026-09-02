@@ -24,6 +24,11 @@ const baseState: ChatSocket = {
   lastConversationId: null,
   newConversationId: null,
   clearNewConversation: vi.fn(),
+  pendingMessage: null,
+  pendingHeld: false,
+  queuePendingMessage: vi.fn(),
+  sendPendingNow: vi.fn(),
+  cancelPendingMessage: vi.fn(),
   sendMessage: vi.fn(),
   stopGeneration: vi.fn(),
   clearMessages: vi.fn(),
@@ -164,5 +169,44 @@ describe('ChatWindow', () => {
     renderWindow({ conversationId: 'conv-1', onViewTrajectory })
     fireEvent.click(screen.getByTestId('view-trajectory'))
     expect(onViewTrajectory).toHaveBeenCalledWith('conv-1')
+  })
+
+  it('queues a message submitted while streaming for the active conversation', () => {
+    wsState = {
+      ...baseState,
+      isStreaming: true,
+      messages: [
+        { id: '1', role: 'user', content: 'hi', timestamp: '' },
+        { id: 'stream-2', role: 'assistant', content: 'answ', timestamp: '' },
+      ],
+    }
+    renderWindow({ conversationId: 'conv-1' })
+
+    fireEvent.change(screen.getByPlaceholderText(/Type a message/i), {
+      target: { value: 'next question' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+    expect(baseState.queuePendingMessage).toHaveBeenCalledWith('next question', 'conv-1')
+    expect(baseState.sendMessage).not.toHaveBeenCalled()
+  })
+
+  it('renders the queued message floating bar wired to send-now and cancel', () => {
+    wsState = { ...baseState, pendingMessage: 'queued text' }
+    renderWindow({ conversationId: 'conv-1' })
+
+    expect(screen.getByTestId('pending-message')).toHaveTextContent('queued text')
+
+    fireEvent.click(screen.getByTestId('pending-send-now'))
+    expect(baseState.sendPendingNow).toHaveBeenCalledWith('conv-1')
+
+    fireEvent.click(screen.getByTestId('pending-cancel'))
+    expect(baseState.cancelPendingMessage).toHaveBeenCalledWith('conv-1')
+  })
+
+  it('marks the queued bar as held after an abnormal reply end', () => {
+    wsState = { ...baseState, pendingMessage: 'queued text', pendingHeld: true }
+    renderWindow({ conversationId: 'conv-1' })
+    expect(screen.getByText(/auto-send paused/i)).toBeInTheDocument()
   })
 })

@@ -58,11 +58,13 @@ describe('ConversationModelSelector', () => {
     expect(onChange).toHaveBeenCalledWith(null, null)
   })
 
-  it('groups endpoints by endpoint name', async () => {
+it('groups endpoints by endpoint name', async () => {
     render(
       <ConversationModelSelector conversationId="c1" onChange={vi.fn()} />,
     )
-    await waitFor(() => expect(screen.getByTestId('conv-model-trigger').textContent).toContain('Default'))
+    await waitFor(() =>
+      expect(screen.getByTestId('conv-model-trigger').textContent).toContain('Default'),
+    )
     fireEvent.click(screen.getByTestId('conv-model-trigger'))
     // Each endpoint with models is its own group
     expect(screen.getByTestId('conv-model-group-ep1')).toBeInTheDocument()
@@ -70,5 +72,14 @@ describe('ConversationModelSelector', () => {
     // Group header shows the endpoint name
     expect(screen.getByTestId('conv-model-group-ep1').textContent).toContain('Mimo')
     expect(screen.getByTestId('conv-model-group-ep2').textContent).toContain('Llama local')
+  })
+
+  it('uses compact density when there are few model options', async () => {
+    // endpoint fixtures give 3 model rows total → < 4 → compact.
+    render(<ConversationModelSelector conversationId="c1" onChange={vi.fn()} />)
+    await waitFor(() => expect(screen.getByTestId('conv-model-trigger')).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId('conv-model-trigger'))
+    const menu = screen.getByTestId('conv-model-menu')
+    expect(menu.getAttribute('data-density')).toBe('compact')
   })
 })

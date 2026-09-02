@@ -31,7 +31,7 @@ interface ChatWindowProps {
 }
 
 export function ChatWindow({ ws, conversationId, conversations, onConversationCreated, onDefaultConversation, onSetEndpoint, onSetKnowledgeBase, onSetRole, onSetThinking, onViewTrajectory }: ChatWindowProps) {
-  const { messages, isConnected, isStreaming, streamingMode: wsStreamingMode, waitingForReply, awaitingMoreContent, newConversationId, clearNewConversation, sendMessage, stopGeneration, clearMessages, switchConversation, loadHistory } = ws
+  const { messages, isConnected, isStreaming, streamingMode: wsStreamingMode, waitingForReply, awaitingMoreContent, newConversationId, clearNewConversation, pendingMessage, pendingHeld, queuePendingMessage, sendPendingNow, cancelPendingMessage, sendMessage, stopGeneration, clearMessages, switchConversation, loadHistory } = ws
   const [streamingMode, setStreamingMode] = useState(true)
   const [toggling, setToggling] = useState(false)
   const [clearing, setClearing] = useState(false)
@@ -250,6 +250,11 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
         disabled={!isConnected}
         isStreaming={isStreaming}
         onStop={handleStop}
+        pendingMessage={pendingMessage}
+        pendingHeld={pendingHeld}
+        onQueueSend={text => queuePendingMessage(text, conversationId)}
+        onSendPendingNow={() => sendPendingNow(conversationId)}
+        onCancelPending={() => cancelPendingMessage(conversationId)}
         toolbar={
           conversationId ? (
             <>

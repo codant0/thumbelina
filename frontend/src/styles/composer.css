@@ -73,6 +73,13 @@
   animation: kb-float-in var(--dur-fast) var(--ease-out);
 }
 
+/* 候选项少(< 4)时取消 max-height 与滚动,改为内容自然撑起,降低空旷感 */
+.kb-float__panel[data-density="compact"] {
+  max-height: none;
+  overflow-y: visible;
+  padding: 3px;
+}
+
 @keyframes kb-float-in {
   from {
     opacity: 0;
@@ -219,6 +226,12 @@
   padding: 5px;
   box-shadow: var(--shadow-md);
   animation: role-float-in var(--dur-fast) var(--ease-out);
+}
+
+.role-float__panel[data-density="compact"] {
+  max-height: none;
+  overflow-y: visible;
+  padding: 3px;
 }
 
 /* 右对齐面板(贴右缘的触发器):向右展开会溢出视口,改为向左展开 */
@@ -1067,3 +1080,162 @@
   font-size: var(--fs-sm);
 }
 
+
+/* ===== Queued message bar (pending send, floats above the input box) ===== */
+.pending-float {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  /* 居中 + 2/3 宽:宽度按"输入框宽 - 两端内边距"的 2/3 取,再用负 margin 居中
+     (用 transform 居中会与入场动画的 transform: translateY 冲突) */
+  width: calc((100% - var(--sp-4) * 2) * 2 / 3);
+  left: 50%;
+  margin-left: calc((100% - var(--sp-4) * 2) * -1 / 3);
+  z-index: var(--z-dropdown);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  border-radius: var(--pending-radius);
+  padding: var(--sp-3) var(--sp-3) var(--sp-2);
+  /* 半透明玻璃 + 状态色渐变浸润(右上→左下) */
+  background-image: linear-gradient(135deg, var(--accent-secondary-muted) 0%, transparent 65%);
+  background-color: var(--pending-glass-bg);
+  border: 1px solid var(--pending-glass-border);
+  box-shadow: var(--shadow-lg), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  color: var(--text-primary);
+  overflow: hidden;
+  animation: pending-float-in var(--dur-fast) var(--ease-out);
+  transition: background-image var(--dur-fast) var(--ease-out);
+}
+
+/* held:浸润色切到 warning */
+.pending-float[data-state="held"] {
+  background-image: linear-gradient(135deg, var(--warning-muted) 0%, transparent 65%);
+}
+
+@keyframes pending-float-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 头部:两行布局。第一行 icon + 标题;第二行提示文字 */
+.pending-float-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.pending-float-head-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* 头部左侧圆形背景点:内含 lucide 图标,auto 态柔呼吸 */
+.pending-float-icon-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 9999px;
+  background: var(--accent-secondary-muted);
+  color: var(--accent-secondary);
+  transition: background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+  animation: pending-pulse 2.4s ease-in-out infinite;
+}
+
+.pending-float[data-state="held"] .pending-float-icon-chip {
+  background: var(--warning-muted);
+  color: var(--warning);
+  animation: none;
+}
+
+@keyframes pending-pulse {
+  0%, 100% {
+    opacity: 0.9;
+    box-shadow: 0 0 0 0 var(--accent-secondary-muted);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 0 4px transparent;
+  }
+}
+
+.pending-float-icon-chip svg {
+  width: 13px;
+  height: 13px;
+}
+
+.pending-float-title {
+  font-weight: var(--fw-med);
+  color: var(--text-heading, var(--text-primary));
+  font-size: var(--fs-sm);
+  flex-shrink: 0;
+}
+
+.pending-float-hint {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  /* 给提示与下方文本留呼吸 */
+  margin-bottom: 2px;
+}
+
+.pending-float[data-state="held"] .pending-float-hint {
+  color: var(--warning);
+}
+
+/* 单行预览:2 行省略,超出滚动;最大 96px,保证悬浮条高度稳定 */
+.pending-float-text {
+  max-height: 96px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+  color: var(--text-primary);
+}
+
+/* 操作区:hairline 半透明分隔,无强描边感 */
+.pending-float-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--sp-2);
+  padding-top: var(--sp-3);
+  margin-top: 2px;
+  border-top: 1px solid var(--pending-glass-border);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pending-float {
+    animation: none;
+  }
+  .pending-float-icon-chip {
+    animation: none;
+  }
+}
+
+/* ===== Pill button modifier (复用 .btn 基础样式) ===== */
+.btn-pill {
+  height: 32px;
+  padding: 0 var(--sp-3);
+  border-radius: 9999px;
+  font-weight: var(--fw-med);
+  font-size: var(--fs-xs);
+}

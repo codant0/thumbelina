@@ -128,6 +128,26 @@ describe('useWebSocket', () => {
     expect(result.current.isStreaming).toBe(false)
   })
 
+  it('typewriter accelerates: 11-char chunk fully revealed within 150ms (was ~120-150ms at the old 30ms/3-chars cadence)', async () => {
+    vi.useFakeTimers()
+    const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat'))
+
+    await act(async () => {
+      vi.advanceTimersByTime(10)
+    })
+
+    act(() => {
+      MockWebSocket.instances[0].simulateMessage(JSON.stringify({ chunk: 'Hello world' }))
+    })
+
+    // Old cadence (3 chars / 30ms) would need ~120ms; new staircase (5/6/3 at 18ms)
+    // reaches 11 chars well within 150ms. Use a tight window to catch regressions.
+    await act(async () => {
+      vi.advanceTimersByTime(150)
+    })
+    expect(result.current.messages[0].content).toBe('Hello world')
+  })
+
   it('should handle non-streaming response immediately', async () => {
     const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat'))
 
@@ -516,5 +536,244 @@ describe('useWebSocket', () => {
     })
     expect(result.current.awaitingMoreContent).toBe(false)
     expect(result.current.isStreaming).toBe(false)
+  })
+
+  describe('queued messages (流式排队待发)', () => {
+    type WsHook = ReturnType<typeof useWebSocket>
+
+    const messageFrames = () =>
+      MockWebSocket.instances[0].sentMessages
+        .map(s => JSON.parse(s) as Record<string, unknown>)
+        .filter(f => typeof f.message === 'string')
+
+    // 进入"conv-1 正在流式回复"的状态(用户消息已发,chunk 已到,打字机进行中)
+    const startStream = (result: { current: WsHook }, conv = 'conv-1') => {
+      act(() => {
+        result.current.sendMessage('first', conv)
+      })
+      act(() => {
+        MockWebSocket.instances[0].simulateMessage(
+          JSON.stringify({ chunk: 'answering. ', conversation_id: conv }),
+        )
+      })
+    }
+
+    const finishWithDone = async (result: { current: WsHook }, conv = 'conv-1') => {
+      act(() => {
+        MockWebSocket.instances[0].simulateMessage(JSON.stringify({ done: true, conversation_id: conv }))
+      })
+      await act(async () => {
+        vi.advanceTimersByTime(500)
+      })
+    }
+
+    it('auto-sends the queued message after the current reply finishes', async () => {
+      vi.useFakeTimers()
+      const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-1'))
+      await act(async () => { vi.advanceTimersByTime(10) })
+
+      startStream(result)
+      expect(result.current.isStreaming).toBe(true)
+
+      act(() => {
+        result.current.queuePendingMessage('second', 'conv-1')
+      })
+      expect(result.current.pendingMessage).toBe('second')
+      // 排队不立即发送
+      expect(messageFrames()).toHaveLength(1)
+
+      await finishWithDone(result)
+
+      expect(result.current.isStreaming).toBe(false)
+      expect(result.current.pendingMessage).toBeNull()
+      const frames = messageFrames()
+      expect(frames).toHaveLength(2)
+      expect(frames[1].message).toBe('second')
+      expect(frames[1].conversation_id).toBe('conv-1')
+      // 第二条用户消息已入列(排在助手回复之后)
+      const roles = result.current.messages.map(m => m.role)
+      expect(roles.filter(r => r === 'user')).toHaveLength(2)
+      expect(roles[roles.length - 1]).toBe('user')
+    })
+
+    it('sends the queued message exactly once when done and stopped frames both arrive', async () => {
+      vi.useFakeTimers()
+      const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-1'))
+      await act(async () => { vi.advanceTimersByTime(10) })
+
+      startStream(result)
+      act(() => { result.current.queuePendingMessage('second', 'conv-1') })
+      await finishWithDone(result)
+      expect(messageFrames()).toHaveLength(2)
+
+      // 立即执行/停止的 stopped 帧随后到达(幂等回复)——不得重复发送
+      act(() => {
+        MockWebSocket.instances[0].simulateMessage(
+          JSON.stringify({ stopped: true, conversation_id: 'conv-1' }),
+        )
+      })
+      await act(async () => { vi.advanceTimersByTime(100) })
+      expect(messageFrames()).toHaveLength(2)
+      expect(result.current.pendingMessage).toBeNull()
+    })
+
+    it('sendPendingNow stops the running reply and sends the queued message after stopped', async () => {
+      vi.useFakeTimers()
+      const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-1'))
+      await act(async () => { vi.advanceTimersByTime(10) })
+
+      startStream(result)
+      act(() => { result.current.queuePendingMessage('second', 'conv-1') })
+
+      act(() => { result.current.sendPendingNow('conv-1') })
+      const stopFrames = MockWebSocket.instances[0].sentMessages
+        .map(s => JSON.parse(s) as Record<string, unknown>)
+        .filter(f => f.stop === true)
+      expect(stopFrames).toHaveLength(1)
+      expect(stopFrames[0].conversation_id).toBe('conv-1')
+      // 尚未发送第二条
+      expect(messageFrames()).toHaveLength(1)
+
+      act(() => {
+        MockWebSocket.instances[0].simulateMessage(
+          JSON.stringify({ stopped: true, conversation_id: 'conv-1' }),
+        )
+      })
+      await act(async () => { vi.advanceTimersByTime(100) })
+
+      const frames = messageFrames()
+      expect(frames).toHaveLength(2)
+      expect(frames[1].message).toBe('second')
+      expect(result.current.pendingMessage).toBeNull()
+    })
+
+    it('cancelPendingMessage drops the queued message so it is never auto-sent', async () => {
+      vi.useFakeTimers()
+      const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-1'))
+      await act(async () => { vi.advanceTimersByTime(10) })
+
+      startStream(result)
+      act(() => { result.current.queuePendingMessage('second', 'conv-1') })
+      act(() => { result.current.cancelPendingMessage('conv-1') })
+      expect(result.current.pendingMessage).toBeNull()
+
+      await finishWithDone(result)
+      expect(messageFrames()).toHaveLength(1)
+    })
+
+    it('replaces the queued message when queueing again (single slot)', async () => {
+      vi.useFakeTimers()
+      const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-1'))
+      await act(async () => { vi.advanceTimersByTime(10) })
+
+      startStream(result)
+      act(() => { result.current.queuePendingMessage('second', 'conv-1') })
+      act(() => { result.current.queuePendingMessage('third', 'conv-1') })
+      expect(result.current.pendingMessage).toBe('third')
+
+      await finishWithDone(result)
+      const frames = messageFrames()
+      expect(frames).toHaveLength(2)
+      expect(frames[1].message).toBe('third')
+    })
+
+    it('holds the queued message when the reply errors out instead of auto-sending', async () => {
+      vi.useFakeTimers()
+      const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-1'))
+      await act(async () => { vi.advanceTimersByTime(10) })
+
+      startStream(result)
+      act(() => { result.current.queuePendingMessage('second', 'conv-1') })
+
+      act(() => {
+        MockWebSocket.instances[0].simulateMessage(
+          JSON.stringify({ error: 'boom', conversation_id: 'conv-1' }),
+        )
+      })
+
+      // 异常结束:不自动发送,悬浮消息保留并标记挂起
+      expect(result.current.isStreaming).toBe(false)
+      expect(result.current.pendingMessage).toBe('second')
+      expect(result.current.pendingHeld).toBe(true)
+      expect(messageFrames()).toHaveLength(1)
+
+      // 用户手动「立即执行」补发
+      act(() => { result.current.sendPendingNow('conv-1') })
+      const frames = messageFrames()
+      expect(frames).toHaveLength(2)
+      expect(frames[1].message).toBe('second')
+      expect(result.current.pendingMessage).toBeNull()
+    })
+
+    it('holds the queued message when the reply times out', async () => {
+      vi.useFakeTimers()
+      const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-1'))
+      await act(async () => { vi.advanceTimersByTime(10) })
+
+      // 发出消息后无任何响应帧,直接排队第二条
+      act(() => { result.current.sendMessage('first', 'conv-1') })
+      act(() => { result.current.queuePendingMessage('second', 'conv-1') })
+      expect(result.current.pendingMessage).toBe('second')
+
+      await act(async () => { vi.advanceTimersByTime(91_000) })
+
+      // 超时:不自动发送,标记挂起
+      expect(result.current.messages.some(m => m.role === 'system' && m.content.includes('timed out'))).toBe(true)
+      expect(result.current.pendingMessage).toBe('second')
+      expect(result.current.pendingHeld).toBe(true)
+      expect(messageFrames()).toHaveLength(1)
+    })
+
+    it('keeps the queued message scoped to its conversation', async () => {
+      vi.useFakeTimers()
+      const { result, rerender } = renderHook(
+        ({ conv }: { conv?: string }) => useWebSocket('ws://localhost:8000/ws/chat', conv),
+        { initialProps: { conv: 'A' as string | undefined } },
+      )
+      await act(async () => { vi.advanceTimersByTime(10) })
+
+      startStream(result, 'A')
+      act(() => { result.current.queuePendingMessage('second', 'A') })
+
+      // 切到 B:B 没有待发消息
+      act(() => { rerender({ conv: 'B' }) })
+      expect(result.current.pendingMessage).toBeNull()
+
+      // A 的回复结束:待发消息仍发给 A(即使当前视图在 B)
+      await finishWithDone(result, 'A')
+      const frames = messageFrames()
+      expect(frames).toHaveLength(2)
+      expect(frames[1].message).toBe('second')
+      expect(frames[1].conversation_id).toBe('A')
+    })
+
+    it('sends directly when queueing while no reply is in flight', async () => {
+      vi.useFakeTimers()
+      const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-1'))
+      await act(async () => { vi.advanceTimersByTime(10) })
+
+      act(() => { result.current.queuePendingMessage('direct', 'conv-1') })
+      const frames = messageFrames()
+      expect(frames).toHaveLength(1)
+      expect(frames[0].message).toBe('direct')
+      expect(result.current.pendingMessage).toBeNull()
+    })
+
+    it('clears pending only on explicit conversation clear, not on view switch', async () => {
+      vi.useFakeTimers()
+      const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-1'))
+      await act(async () => { vi.advanceTimersByTime(10) })
+
+      startStream(result)
+      act(() => { result.current.queuePendingMessage('second', 'conv-1') })
+
+      // 切换会话视图(ChatWindow 走 clearMessages() 无参)不清待发
+      act(() => { result.current.clearMessages() })
+      expect(result.current.pendingMessage).toBe('second')
+
+      // 显式清空该会话上下文才清待发
+      act(() => { result.current.clearMessages('conv-1') })
+      expect(result.current.pendingMessage).toBeNull()
+    })
   })
 })
