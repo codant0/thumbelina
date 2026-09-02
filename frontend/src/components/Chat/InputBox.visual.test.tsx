@@ -79,6 +79,15 @@ describe('PendingMessageBar layout', () => {
     expect(rules).toMatch(/\.pending-float\s*\{[^}]*backdrop-filter:\s*blur\(/)
   })
 
+  it('is narrower than the input box — centered, ~2/3 width', () => {
+    // jsdom 不解析 calc()/var();断言 stylesheet 文本包含 width/居中声明。
+    const rules = allRuleText()
+    expect(rules).toMatch(/\.pending-float\s*\{[^}]*width:\s*calc\(/)
+    expect(rules).toMatch(/\.pending-float\s*\{[^}]*\/\s*3/)
+    expect(rules).toMatch(/\.pending-float\s*\{[^}]*left:\s*50%/)
+    expect(rules).toMatch(/\.pending-float\s*\{[^}]*margin-left:\s*calc\(/)
+  })
+
   it('pulses the icon chip in auto state and freezes it in held', () => {
     // jsdom 不解析 @keyframes → animation-name 始终是 none;改为断言 stylesheet 中
     // auto 规则包含 pending-pulse 动画、held 规则包含 animation:none。

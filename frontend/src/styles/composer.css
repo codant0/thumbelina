@@ -1085,8 +1085,11 @@
 .pending-float {
   position: absolute;
   bottom: calc(100% + 8px);
-  left: var(--sp-4);
-  right: var(--sp-4);
+  /* 居中 + 2/3 宽:宽度按"输入框宽 - 两端内边距"的 2/3 取,再用负 margin 居中
+     (用 transform 居中会与入场动画的 transform: translateY 冲突) */
+  width: calc((100% - var(--sp-4) * 2) * 2 / 3);
+  left: 50%;
+  margin-left: calc((100% - var(--sp-4) * 2) * -1 / 3);
   z-index: var(--z-dropdown);
   display: flex;
   flex-direction: column;
