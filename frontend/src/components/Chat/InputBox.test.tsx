@@ -205,7 +205,7 @@ describe('InputBox', () => {
     expect(container.querySelector('.pending-float-icon-chip [data-icon="Clock"]')).toBeNull()
   })
 
-  it('uses btn-sm variants and the right ordering (ghost cancel before primary send-now)', () => {
+  it('uses pill variants and the right ordering (ghost cancel before primary send-now)', () => {
     render(
       <InputBox
         onSend={vi.fn()}
@@ -216,9 +216,9 @@ describe('InputBox', () => {
     )
     const cancel = screen.getByTestId('pending-cancel')
     const sendNow = screen.getByTestId('pending-send-now')
-    expect(cancel.className).toMatch(/btn-sm/)
+    expect(cancel.className).toMatch(/btn-pill/)
     expect(cancel.className).toMatch(/btn-ghost/)
-    expect(sendNow.className).toMatch(/btn-sm/)
+    expect(sendNow.className).toMatch(/btn-pill/)
     expect(sendNow.className).toMatch(/btn-primary/)
     // DOM order: cancel first, send-now second
     expect(cancel.compareDocumentPosition(sendNow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
@@ -236,5 +236,39 @@ describe('InputBox', () => {
     const bar = screen.getByTestId('pending-message')
     expect(bar.getAttribute('role')).toBe('status')
     expect(bar.getAttribute('aria-live')).toBe('polite')
+  })
+
+  it('uses pill button variant (btn-pill, ghost before primary)', () => {
+    render(
+      <InputBox
+        onSend={vi.fn()}
+        pendingMessage="queued"
+        onSendPendingNow={vi.fn()}
+        onCancelPending={vi.fn()}
+      />,
+    )
+    const cancel = screen.getByTestId('pending-cancel')
+    const sendNow = screen.getByTestId('pending-send-now')
+    expect(cancel.className).toMatch(/btn-pill/)
+    expect(sendNow.className).toMatch(/btn-pill/)
+    // Cancel = ghost, Send-now = primary (kept from before)
+    expect(cancel.className).toMatch(/btn-ghost/)
+    expect(sendNow.className).toMatch(/btn-primary/)
+  })
+
+  it('renders the header as two stacked lines: title row + hint row', () => {
+    const { container } = render(
+      <InputBox
+        onSend={vi.fn()}
+        pendingMessage="queued"
+        onSendPendingNow={vi.fn()}
+        onCancelPending={vi.fn()}
+      />,
+    )
+    const head = container.querySelector('.pending-float-head') as HTMLElement
+    expect(head).toBeTruthy()
+    // The title and the hint now live in two separate <span>s sharing the head row group.
+    expect(head.querySelector('.pending-float-title')).toBeTruthy()
+    expect(head.querySelector('.pending-float-hint')).toBeTruthy()
   })
 })

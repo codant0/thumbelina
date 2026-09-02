@@ -1091,38 +1091,30 @@
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--pending-radius);
   padding: var(--sp-3) var(--sp-3) var(--sp-2);
-  box-shadow: var(--shadow-md);
+  /* 半透明玻璃 + 状态色渐变浸润(右上→左下) */
+  background-image: linear-gradient(135deg, var(--accent-secondary-muted) 0%, transparent 65%);
+  background-color: var(--pending-glass-bg);
+  border: 1px solid var(--pending-glass-border);
+  box-shadow: var(--shadow-lg), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  color: var(--text-primary);
   overflow: hidden;
   animation: pending-float-in var(--dur-fast) var(--ease-out);
+  transition: background-image var(--dur-fast) var(--ease-out);
 }
 
-/* 顶部 2px 横条:在 auto 时用 accent-secondary 强调"待处理";
-   held 时切到 warning 色,平滑过渡。覆盖在 border 之上,圆角继承父元素。 */
-.pending-float-accent {
-  position: absolute;
-  top: -1px;
-  left: -1px;
-  right: -1px;
-  height: 2px;
-  background: var(--accent-secondary);
-  border-top-left-radius: var(--radius);
-  border-top-right-radius: var(--radius);
-  transition: background var(--dur-fast) var(--ease-out);
-  pointer-events: none;
-}
-
-.pending-float[data-state="held"] .pending-float-accent {
-  background: var(--warning);
+/* held:浸润色切到 warning */
+.pending-float[data-state="held"] {
+  background-image: linear-gradient(135deg, var(--warning-muted) 0%, transparent 65%);
 }
 
 @keyframes pending-float-in {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateY(6px) scale(0.985);
   }
   to {
     opacity: 1;
@@ -1130,24 +1122,22 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .pending-float {
-    animation: none;
-  }
-}
-
+/* 头部:两行布局。第一行 icon + 标题;第二行提示文字 */
 .pending-float-head {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--fs-xs);
-  color: var(--text-secondary);
+  flex-direction: column;
+  gap: 4px;
   min-width: 0;
 }
 
-/* 头部左侧圆形背景点:内含 lucide 图标。
-   auto:accent-secondary-muted 背景 + accent-secondary 描边;
-   held:warning-muted 背景 + warning 描边。 */
+.pending-float-head-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* 头部左侧圆形背景点:内含 lucide 图标,auto 态柔呼吸 */
 .pending-float-icon-chip {
   display: inline-flex;
   align-items: center;
@@ -1160,11 +1150,24 @@
   color: var(--accent-secondary);
   transition: background var(--dur-fast) var(--ease-out),
     color var(--dur-fast) var(--ease-out);
+  animation: pending-pulse 2.4s ease-in-out infinite;
 }
 
 .pending-float[data-state="held"] .pending-float-icon-chip {
   background: var(--warning-muted);
   color: var(--warning);
+  animation: none;
+}
+
+@keyframes pending-pulse {
+  0%, 100% {
+    opacity: 0.9;
+    box-shadow: 0 0 0 0 var(--accent-secondary-muted);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 0 4px transparent;
+  }
 }
 
 .pending-float-icon-chip svg {
@@ -1175,39 +1178,61 @@
 .pending-float-title {
   font-weight: var(--fw-med);
   color: var(--text-heading, var(--text-primary));
+  font-size: var(--fs-sm);
   flex-shrink: 0;
-}
-
-.pending-float-sep {
-  color: var(--text-secondary);
-  flex-shrink: 0;
-  opacity: 0.6;
 }
 
 .pending-float-hint {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+  /* 给提示与下方文本留呼吸 */
+  margin-bottom: 2px;
 }
 
-/* 单行预览:优先 2 行省略,超出滚动;最大 96px,保证悬浮条高度稳定。 */
+.pending-float[data-state="held"] .pending-float-hint {
+  color: var(--warning);
+}
+
+/* 单行预览:2 行省略,超出滚动;最大 96px,保证悬浮条高度稳定 */
 .pending-float-text {
   max-height: 96px;
   overflow-y: auto;
   white-space: pre-wrap;
   word-break: break-word;
   font-size: var(--fs-sm);
+  line-height: 1.45;
   color: var(--text-primary);
-  /* 给底部按钮留一点视觉呼吸 */
-  padding: 2px 2px 4px;
-  margin: 0 -2px;
 }
 
+/* 操作区:hairline 半透明分隔,无强描边感 */
 .pending-float-actions {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
   gap: var(--sp-2);
-  padding-top: 2px;
-  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--sp-3);
+  margin-top: 2px;
+  border-top: 1px solid var(--pending-glass-border);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pending-float {
+    animation: none;
+  }
+  .pending-float-icon-chip {
+    animation: none;
+  }
+}
+
+/* ===== Pill button modifier (复用 .btn 基础样式) ===== */
+.btn-pill {
+  height: 32px;
+  padding: 0 var(--sp-3);
+  border-radius: 9999px;
+  font-weight: var(--fw-med);
+  font-size: var(--fs-xs);
 }

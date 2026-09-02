@@ -11,6 +11,21 @@ beforeAll(() => {
   document.documentElement.setAttribute('data-theme', 'dark')
 })
 
+// jsdom 不展开 var(--x) 与 @keyframes;为断言"规则已被消费"——直接遍历 stylesheet。
+const allRuleText = (): string => {
+  let buf = ''
+  for (const sheet of Array.from(document.styleSheets)) {
+    try {
+      for (const rule of Array.from(sheet.cssRules)) {
+        buf += rule.cssText + '\n'
+      }
+    } catch {
+      // cross-origin sheet — ignore
+    }
+  }
+  return buf
+}
+
 // Layout/color-shape assertions for the queued message bar.
 // jsdom computes the computed value of CSS variables, so we read what the
 // browser would actually see for the accent strip, chip background, and the
@@ -31,20 +46,6 @@ const readVar = (el: Element, varName: string): string =>
   getComputedStyle(el).getPropertyValue(varName).trim()
 
 describe('PendingMessageBar layout', () => {
-  it('renders the 2px accent-secondary top strip on the card', () => {
-    const { container } = renderBar({})
-    const card = container.querySelector('.pending-float') as HTMLElement
-    expect(card).toBeTruthy()
-    // The accent strip is a positioned overlay at the top of the card with a
-    // 2px height and an accent-secondary fill. jsdom resolves the CSS variable
-    // values from the dark theme (data-theme="dark" on <html>).
-    const accent = container.querySelector('.pending-float-accent') as HTMLElement
-    expect(accent).toBeTruthy()
-    expect(getComputedStyle(accent).height).toBe('2px')
-    const accentColor = readVar(accent, '--accent-secondary')
-    expect(accentColor).toBeTruthy()
-  })
-
   it('colors the icon chip with accent-secondary-muted in auto state', () => {
     const { container } = renderBar({})
     const chip = container.querySelector('.pending-float-icon-chip') as HTMLElement
@@ -65,5 +66,36 @@ describe('PendingMessageBar layout', () => {
     const cs = getComputedStyle(preview)
     expect(cs.overflowY).toBe('auto')
     expect(parseInt(cs.maxHeight, 10)).toBeLessThanOrEqual(96)
+  })
+
+  it('uses a 12px rounded glass card with gradient + backdrop blur', () => {
+    const { container } = renderBar({})
+    const card = container.querySelector('.pending-float') as HTMLElement
+    expect(card).toBeTruthy()
+    // jsdom 不展开 var(--x) 与 backdrop-filter;改用 stylesheet 文本断言 token 被消费。
+    const rules = allRuleText()
+    expect(rules).toMatch(/\.pending-float\s*\{[^}]*border-radius:\s*var\(--pending-radius\)/)
+    expect(rules).toMatch(/\.pending-float\s*\{[^}]*background-image:\s*linear-gradient\(/)
+    expect(rules).toMatch(/\.pending-float\s*\{[^}]*backdrop-filter:\s*blur\(/)
+  })
+
+  it('pulses the icon chip in auto state and freezes it in held', () => {
+    // jsdom 不解析 @keyframes → animation-name 始终是 none;改为断言 stylesheet 中
+    // auto 规则包含 pending-pulse 动画、held 规则包含 animation:none。
+    const rules = allRuleText()
+    expect(rules).toMatch(/\.pending-float-icon-chip\s*\{[^}]*animation:\s*pending-pulse/)
+    expect(rules).toMatch(/@keyframes\s+pending-pulse/)
+    expect(rules).toMatch(/\[data-state="held"\]\s*\.pending-float-icon-chip\s*\{[^}]*animation:\s*none/)
+  })
+
+  it('renders action buttons as pills (height 32, border-radius 9999)', () => {
+    const { container } = renderBar({})
+    const cancel = container.querySelector('[data-testid="pending-cancel"]') as HTMLElement
+    const send = container.querySelector('[data-testid="pending-send-now"]') as HTMLElement
+    for (const el of [cancel, send]) {
+      const cs = getComputedStyle(el)
+      expect(cs.borderRadius).toBe('9999px')
+      expect(parseInt(cs.height, 10)).toBe(32)
+    }
   })
 })

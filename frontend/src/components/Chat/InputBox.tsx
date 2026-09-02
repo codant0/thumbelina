@@ -91,26 +91,26 @@ export function InputBox({
           role="status"
           aria-live="polite"
         >
-          <div className="pending-float-accent" aria-hidden="true" />
           <div className="pending-float-head">
-            <span className="pending-float-icon-chip" aria-hidden="true">
-              {pendingHeld ? (
-                <AlertCircle size={14} data-icon="AlertCircle" />
-              ) : (
-                <Clock size={14} data-icon="Clock" />
-              )}
-            </span>
-            <span className="pending-float-title">{t('chat.pendingTitle')}</span>
-            <span className="pending-float-sep" aria-hidden="true">·</span>
-            <span className="pending-float-hint">
+            <div className="pending-float-head-row">
+              <span className="pending-float-icon-chip" aria-hidden="true">
+                {pendingHeld ? (
+                  <AlertCircle size={14} data-icon="AlertCircle" />
+                ) : (
+                  <Clock size={14} data-icon="Clock" />
+                )}
+              </span>
+              <span className="pending-float-title">{t('chat.pendingTitle')}</span>
+            </div>
+            <div className="pending-float-hint">
               {pendingHeld ? t('chat.pendingHeldHint') : t('chat.pendingHint')}
-            </span>
+            </div>
           </div>
           <div className="pending-float-text">{pendingMessage}</div>
           <div className="pending-float-actions">
             <button
               type="button"
-              className="btn btn-sm btn-ghost"
+              className="btn btn-pill btn-ghost"
               data-testid="pending-cancel"
               onClick={onCancelPending}
             >
@@ -119,7 +119,7 @@ export function InputBox({
             </button>
             <button
               type="button"
-              className="btn btn-sm btn-primary"
+              className="btn btn-pill btn-primary"
               data-testid="pending-send-now"
               onClick={onSendPendingNow}
             >
