@@ -29,9 +29,7 @@ class TestOpenAIResponsesBasics:
 
 class TestOpenAIResponsesChatModel:
     def test_uses_responses_api(self):
-        provider = OpenAIResponsesProvider(
-            api_key="test-key", base_url="https://api.openai.com/v1"
-        )
+        provider = OpenAIResponsesProvider(api_key="test-key", base_url="https://api.openai.com/v1")
         model = provider.chat_model
         assert isinstance(model, ChatOpenAI)
         assert model.use_responses_api is True
@@ -39,9 +37,7 @@ class TestOpenAIResponsesChatModel:
 
     def test_no_minimax_extra_body(self):
         """MiniMax 私有 reasoning_split 不透传到 Responses 通道。"""
-        provider = OpenAIResponsesProvider(
-            api_key="test-key", base_url="https://api.openai.com/v1"
-        )
+        provider = OpenAIResponsesProvider(api_key="test-key", base_url="https://api.openai.com/v1")
         assert not provider.chat_model.extra_body
 
     def test_reasoning_effort_forwarded(self):

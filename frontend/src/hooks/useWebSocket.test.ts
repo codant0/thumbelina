@@ -558,7 +558,7 @@ describe('useWebSocket', () => {
       })
     }
 
-    const finishWithDone = async (result: { current: WsHook }, conv = 'conv-1') => {
+    const finishWithDone = async (conv = 'conv-1') => {
       act(() => {
         MockWebSocket.instances[0].simulateMessage(JSON.stringify({ done: true, conversation_id: conv }))
       })
@@ -582,7 +582,7 @@ describe('useWebSocket', () => {
       // 排队不立即发送
       expect(messageFrames()).toHaveLength(1)
 
-      await finishWithDone(result)
+      await finishWithDone()
 
       expect(result.current.isStreaming).toBe(false)
       expect(result.current.pendingMessage).toBeNull()
@@ -603,7 +603,7 @@ describe('useWebSocket', () => {
 
       startStream(result)
       act(() => { result.current.queuePendingMessage('second', 'conv-1') })
-      await finishWithDone(result)
+      await finishWithDone()
       expect(messageFrames()).toHaveLength(2)
 
       // 立即执行/停止的 stopped 帧随后到达(幂等回复)——不得重复发送
@@ -657,7 +657,7 @@ describe('useWebSocket', () => {
       act(() => { result.current.cancelPendingMessage('conv-1') })
       expect(result.current.pendingMessage).toBeNull()
 
-      await finishWithDone(result)
+      await finishWithDone()
       expect(messageFrames()).toHaveLength(1)
     })
 
@@ -671,7 +671,7 @@ describe('useWebSocket', () => {
       act(() => { result.current.queuePendingMessage('third', 'conv-1') })
       expect(result.current.pendingMessage).toBe('third')
 
-      await finishWithDone(result)
+      await finishWithDone()
       const frames = messageFrames()
       expect(frames).toHaveLength(2)
       expect(frames[1].message).toBe('third')
@@ -740,7 +740,7 @@ describe('useWebSocket', () => {
       expect(result.current.pendingMessage).toBeNull()
 
       // A 的回复结束:待发消息仍发给 A(即使当前视图在 B)
-      await finishWithDone(result, 'A')
+      await finishWithDone('A')
       const frames = messageFrames()
       expect(frames).toHaveLength(2)
       expect(frames[1].message).toBe('second')

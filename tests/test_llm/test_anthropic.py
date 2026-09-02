@@ -121,12 +121,16 @@ class TestAnthropicUrlNormalization:
         assert sdk_base_url == "https://proxy.example.com"
 
     def test_nested_v1_path(self):
-        api_url, sdk_base_url = AnthropicProvider._normalize_urls("https://proxy.example.com/api/v1")
+        api_url, sdk_base_url = AnthropicProvider._normalize_urls(
+            "https://proxy.example.com/api/v1"
+        )
         assert api_url == "https://proxy.example.com/api/v1"
         assert sdk_base_url == "https://proxy.example.com/api"
 
     def test_other_path_kept_verbatim(self):
-        api_url, sdk_base_url = AnthropicProvider._normalize_urls("https://proxy.example.com/anthropic")
+        api_url, sdk_base_url = AnthropicProvider._normalize_urls(
+            "https://proxy.example.com/anthropic"
+        )
         assert api_url == "https://proxy.example.com/anthropic"
         assert sdk_base_url == "https://proxy.example.com/anthropic"
 
