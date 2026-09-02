@@ -331,6 +331,30 @@ async def scheduler_status(request: Request) -> dict[str, Any]:
     return status
 
 
+@router.get("/tasks/{task_id}")
+async def get_task(task_id: str, request: Request) -> dict[str, Any]:
+    """Single task detail for the UI's click-to-inspect view.
+
+    Declared after the literal ``/tasks/events`` route on purpose: FastAPI
+    matches routes in declaration order and ``{task_id}`` would otherwise
+    swallow it.  Unlike the list endpoint this also returns ``result`` (the
+    last successful run's output, persisted by the scheduler on completion)
+    plus ``created_at``/``updated_at`` — the list stays lean because the
+    UI polls it every 10s.
+    """
+    scheduler = _get_scheduler(request)
+    if scheduler is None:
+        raise HTTPException(status_code=503, detail="Scheduler not available")
+    task = await scheduler.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    data = _serialize_task(task)
+    data["result"] = task.result
+    data["created_at"] = task.created_at.isoformat()
+    data["updated_at"] = task.updated_at.isoformat()
+    return data
+
+
 @router.get("/plugins/dependencies")
 async def get_plugin_dependencies(request: Request) -> dict[str, Any]:
     """Return the plugin dependency graph and load order.

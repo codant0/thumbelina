@@ -70,3 +70,4 @@ node_modules/.vite/vitest/*/results.json
 
 thumbelina.db*
 cc_overview.html
+.zcode/**

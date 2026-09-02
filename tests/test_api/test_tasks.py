@@ -650,6 +650,53 @@ def test_scheduler_status_503(client: TestClient) -> None:
 
 
 # ---------------------------------------------------------------------------
+# GET /tasks/{id} — click-to-inspect detail (result + created/updated)
+# ---------------------------------------------------------------------------
+
+
+async def test_get_task_detail_includes_result_and_timestamps(task_client: TestClient) -> None:
+    from thumbelina.scheduler.models import ScheduledTask, TriggerKind
+
+    scheduler: TaskScheduler = task_client.app.state.task_scheduler
+    task = ScheduledTask(
+        description="detail job",
+        trigger=TriggerKind.ONCE,
+        scheduled_time=datetime(2027, 1, 1, 10, 0, 0),
+        content="hello",
+        mode="prompt",
+        source="web",
+    )
+    task.result = "## done\n- step a"  # as the scheduler writes it on completion
+    await scheduler.add_task(task)
+
+    resp = task_client.get(f"/api/v1/tasks/{task.id}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["id"] == task.id
+    assert body["description"] == "detail job"
+    assert body["content"] == "hello"
+    assert body["status"] == "pending"
+    assert body["result"] == "## done\n- step a"
+    assert body["created_at"] is not None
+    assert body["updated_at"] is not None
+
+    # The list endpoint stays lean (polled every 10s) — result is detail-only.
+    items = task_client.get("/api/v1/tasks").json()
+    listed = next(i for i in items if i["id"] == task.id)
+    assert "result" not in listed
+    assert "created_at" not in listed
+
+
+def test_get_task_unknown_404(task_client: TestClient) -> None:
+    assert task_client.get("/api/v1/tasks/no-such-id").status_code == 404
+
+
+def test_get_task_scheduler_unavailable_503(client: TestClient) -> None:
+    client.app.state.task_scheduler = None
+    assert client.get("/api/v1/tasks/no-such-id").status_code == 503
+
+
+# ---------------------------------------------------------------------------
 # scheduler.enabled = False → whole assembly skipped (design §10)
 # ---------------------------------------------------------------------------
 
@@ -664,6 +711,7 @@ def test_disabled_scheduler_degrades(disabled_client: TestClient) -> None:
     assert disabled_client.get("/api/v1/tasks").json() == []
     assert disabled_client.get("/api/v1/tasks/scheduler/status").status_code == 503
     assert disabled_client.get("/api/v1/tasks/events").status_code == 503
+    assert disabled_client.get("/api/v1/tasks/no-such-id").status_code == 503
     assert disabled_client.post("/api/v1/tasks", json={"description": "x"}).status_code == 503
 
 
@@ -1073,6 +1121,11 @@ async def test_prompt_task_full_chain_via_dispatcher_and_runner(
     assert frames[0]["channel_message"]["conversation_id"] == app.state.scheduler_conversation_id
     # Channel copy got the REPLY (not the content), and only once.
     assert channel.sent == [("u-1", "Agent response")]
+    # The reply is persisted on the task row (GET /tasks/{id} detail view).
+    assert settled.result == "Agent response"
+    stored_task = await store.get_task("chain-once")
+    assert stored_task is not None
+    assert stored_task.result == "Agent response"
     # The COMPLETED event payload.result carries the reply.
     events = await store.list_events(limit=10)
     completed = [e for e in events if e.type is TaskEventType.COMPLETED]

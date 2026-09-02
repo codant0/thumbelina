@@ -1724,6 +1724,7 @@ class TestPromptMode:
             await scheduler.stop()
 
         assert settled.status is TaskStatus.COMPLETED
+        assert settled.result == "早安简报已生成"
         assert recorder.types() == ["task.created", "task.due", "task.completed"]
         completed = [e for e in recorder.events if e.type == TaskEventType.COMPLETED]
         assert len(completed) == 1
@@ -1768,9 +1769,37 @@ class TestPromptMode:
         updated = await scheduler.get_task("prompt-cron-advance")
         assert updated is not None and updated.status == TaskStatus.PENDING
         assert updated.next_run == running.next_run  # not recomputed at settle time
+        assert updated.result == "cron reply"
         completed = [e for e in recorder.events if e.type == TaskEventType.COMPLETED]
         assert len(completed) == 1
         assert completed[0].payload["result"] == "cron reply"
+        # The reply is durably persisted on the task row (GET /tasks/{id}).
+        persisted = await store.get_task("prompt-cron-advance")
+        assert persisted is not None
+        assert persisted.result == "cron reply"
+
+    @pytest.mark.asyncio
+    async def test_notify_fire_persists_receipt_as_task_result(self, store):
+        """A notify callback's receipt is persisted as the task's result —
+        the durable record behind GET /tasks/{id}, not just the event payload."""
+        scheduler = TaskScheduler(store=store)
+        task = _due_cron_task("notify-receipt")
+        await scheduler.add_task(task)
+
+        async def callback(t: ScheduledTask) -> str:
+            return "delivered via web event pipeline"
+
+        await scheduler.start(on_due_task=callback)
+        await asyncio.sleep(0.2)
+        await scheduler.stop()
+
+        updated = await scheduler.get_task("notify-receipt")
+        assert updated is not None
+        assert updated.status == TaskStatus.PENDING
+        assert updated.result == "delivered via web event pipeline"
+        persisted = await store.get_task("notify-receipt")
+        assert persisted is not None
+        assert persisted.result == "delivered via web event pipeline"
 
     @pytest.mark.asyncio
     async def test_prompt_timeout_fails_once_with_error(self):

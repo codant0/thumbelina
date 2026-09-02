@@ -809,6 +809,10 @@ class TaskScheduler:
 
         payload = {"duration_ms": int((time.monotonic() - started) * 1000)}
         if delivered is not None:
+            # Persist on the task row too (GET /tasks/{id} detail view); the
+            # event log is pruned to ``event_retention`` and cannot serve as
+            # a durable record of the last output.
+            task.result = delivered
             payload["result"] = delivered
         if task.trigger == TriggerKind.CRON:
             task.status = TaskStatus.PENDING
@@ -924,6 +928,10 @@ class TaskScheduler:
             return
         payload: dict[str, Any] = {"duration_ms": int((time.monotonic() - started) * 1000)}
         if reply is not None:
+            # Persist on the task row too (GET /tasks/{id} detail view); the
+            # event log is pruned to ``event_retention`` and cannot serve as
+            # a durable record of the last output.
+            task.result = reply
             payload["result"] = reply
         if task.trigger == TriggerKind.CRON:
             task.status = TaskStatus.PENDING

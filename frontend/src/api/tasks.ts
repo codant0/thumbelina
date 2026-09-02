@@ -69,6 +69,18 @@ export interface CreateTaskInput {
   cron?: string
   channel?: 'web' | 'wechat' | 'qq'
   content?: string
+  mode?: 'prompt' | 'notify'
+  conversation_id?: string
+}
+
+/** Task detail (GET /tasks/{id}): the list shape plus detail-only fields.
+ *  Kept out of the list payload on purpose — the UI polls the list every 10s
+ *  and the last run's output can be arbitrarily long. */
+export interface ScheduledTaskDetailVO extends ScheduledTaskVO {
+  /** Last successful run's output, persisted by the scheduler on completion. */
+  result: string | null
+  created_at: string
+  updated_at: string
 }
 
 async function parseError(res: Response): Promise<never> {
@@ -94,6 +106,13 @@ export async function listTasks(): Promise<ScheduledTaskVO[]> {
   if (!res.ok) return []
   const data = await res.json()
   return Array.isArray(data) ? (data as ScheduledTaskVO[]) : []
+}
+
+/** Single task detail for the click-to-inspect modal (404/503 throw). */
+export async function getTask(id: string): Promise<ScheduledTaskDetailVO> {
+  const res = await fetch(`${API_BASE}/tasks/${id}`)
+  if (!res.ok) await parseError(res)
+  return res.json() as Promise<ScheduledTaskDetailVO>
 }
 
 export async function createTask(input: CreateTaskInput): Promise<ScheduledTaskVO> {
