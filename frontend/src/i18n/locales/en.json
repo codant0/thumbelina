@@ -382,7 +382,14 @@
     "yesterday": "Yesterday",
     "remark": "Remark",
     "remarkPlaceholder": "Add a remark…",
-    "ungrouped": "Ungrouped"
+    "ungrouped": "Ungrouped",
+    "newGroup": "New group",
+    "newGroupPlaceholder": "Group name…",
+    "createGroup": "Create",
+    "renameGroup": "Rename group",
+    "renameGroupPlaceholder": "New name…",
+    "deleteGroup": "Delete group",
+    "confirmDeleteGroup": "Delete this group? Its items will move to Ungrouped."
   },
   "memory": {
     "title": "Memory",

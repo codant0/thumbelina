@@ -141,6 +141,18 @@ function notesHandler(
   })
 }
 
+/** Minimal DataTransfer stand-in (jsdom lacks the real class): stores the
+ * payload set during dragStart and replays it for dragOver/drop readers. */
+function makeDataTransfer(): { setData: (t: string, v: string) => void; getData: (t: string) => string } {
+  const store = new Map<string, string>()
+  return {
+    setData: (type, value) => {
+      store.set(type, value)
+    },
+    getData: type => store.get(type) ?? '',
+  }
+}
+
 afterEach(() => {
   vi.restoreAllMocks()
 })
@@ -1017,5 +1029,147 @@ describe('TodoPage', () => {
     // Heading group header disappears, day sub-headers stay.
     expect(within(notesPanel).queryByTestId('todo-group-header')).not.toBeInTheDocument()
     expect(within(notesPanel).getAllByTestId('note-group-header')).toHaveLength(2)
+  })
+
+  it('creates a new item group via the filter + editor', async () => {
+    mockFetch(enabledHandler((url, init) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/v1/todo/items/groups' && method === 'POST') {
+        return jsonResponse({ items: [] })
+      }
+      return undefined
+    }))
+    const user = userEvent.setup()
+    render(<TodoPage />)
+    await screen.findByText('buy milk')
+
+    const itemsPanel = screen.getByTestId('todo-items-panel')
+    await user.click(within(itemsPanel).getByLabelText('New group'))
+
+    const editor = within(itemsPanel).getByTestId('todo-group-editor')
+    const input = within(editor).getByLabelText('Group name…')
+    await user.type(input, '工作')
+    await user.click(within(editor).getByText('Create'))
+
+    // The new group is created and appears as a selectable card.
+    const newCard = await within(itemsPanel).findByText('工作')
+    expect(newCard).toBeInTheDocument()
+  })
+
+  it('dragging an item onto a group card sends a PATCH with the group', async () => {
+    const fetchSpy = mockFetch(enabledHandler((url, init) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/v1/todo/items' && method === 'GET') {
+        return jsonResponse({
+          items: [
+            { index: 0, text: 'buy milk', done: false, remark: '' },
+            { index: 1, text: 'work task', done: false, remark: '', group: '工作' },
+          ],
+        })
+      }
+      if (url.startsWith('/api/v1/todo/items/') && method === 'PATCH') {
+        const body = JSON.parse(String(init?.body)) as { group?: string }
+        return jsonResponse({
+          items: [
+            { index: 0, text: 'buy milk', done: false, remark: '', group: body.group ?? '' },
+            { index: 1, text: 'work task', done: false, remark: '', group: '工作' },
+          ],
+        })
+      }
+      return undefined
+    }))
+    render(<TodoPage />)
+    await screen.findByText('buy milk')
+
+    const itemsPanel = screen.getByTestId('todo-items-panel')
+    const dataTransfer = makeDataTransfer()
+    const item = within(itemsPanel).getAllByTestId('todo-item')[0]
+    fireEvent.dragStart(item, { dataTransfer })
+
+    const workCard = within(itemsPanel)
+      .getAllByTestId('todo-group-filter-card')
+      .find(card => card.textContent?.includes('工作'))
+    if (!workCard) throw new Error('工作 card not found')
+    fireEvent.drop(workCard, { dataTransfer })
+
+    await waitFor(() => {
+      const patch = fetchSpy.mock.calls.find(([, init]) => init?.method === 'PATCH')
+      expect(patch?.[0]).toBe('/api/v1/todo/items/0')
+      expect(JSON.parse(String(patch?.[1]?.body))).toEqual({ group: '工作' })
+    })
+  })
+
+  it('renames a group via its hover action', async () => {
+    mockFetch(enabledHandler((url, init) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/v1/todo/items' && method === 'GET') {
+        return jsonResponse({
+          items: [{ index: 0, text: 'work task', done: false, remark: '', group: '工作' }],
+        })
+      }
+      if (url === '/api/v1/todo/items/groups/%E5%B7%A5%E4%BD%9C' && method === 'PATCH') {
+        return jsonResponse({
+          items: [{ index: 0, text: 'work task', done: false, remark: '', group: 'Projects' }],
+        })
+      }
+      return undefined
+    }))
+    const user = userEvent.setup()
+    render(<TodoPage />)
+    await screen.findByText('work task')
+
+    const itemsPanel = screen.getByTestId('todo-items-panel')
+    const workCard = within(itemsPanel)
+      .getAllByTestId('todo-group-filter-card')
+      .find(card => card.textContent?.includes('工作'))
+    if (!workCard) throw new Error('工作 card not found')
+    await user.click(within(workCard.closest('.todo-group-filter__item') as HTMLElement).getByTestId('group-rename'))
+
+    const editor = within(itemsPanel).getByTestId('todo-group-editor')
+    const input = within(editor).getByLabelText('New name…')
+    await user.clear(input)
+    await user.type(input, 'Projects')
+    await user.click(within(editor).getByText('Save'))
+
+    // The renamed group appears as a filter card again (old name is gone).
+    await waitFor(() => {
+      const cards = within(itemsPanel).getAllByTestId('todo-group-filter-card')
+      expect(cards.some(card => card.textContent?.includes('Projects'))).toBe(true)
+      expect(cards.some(card => card.textContent?.includes('工作'))).toBe(false)
+    })
+  })
+
+  it('deletes a group after confirmation and moves members to ungrouped', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    mockFetch(enabledHandler((url, init) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/v1/todo/items' && method === 'GET') {
+        return jsonResponse({
+          items: [{ index: 0, text: 'work task', done: false, remark: '', group: '工作' }],
+        })
+      }
+      if (url === '/api/v1/todo/items/groups/%E5%B7%A5%E4%BD%9C' && method === 'DELETE') {
+        return jsonResponse({
+          items: [{ index: 0, text: 'work task', done: false, remark: '' }],
+        })
+      }
+      return undefined
+    }))
+    const user = userEvent.setup()
+    render(<TodoPage />)
+    await screen.findByText('work task')
+
+    const itemsPanel = screen.getByTestId('todo-items-panel')
+    const workCard = within(itemsPanel)
+      .getAllByTestId('todo-group-filter-card')
+      .find(card => card.textContent?.includes('工作'))
+    if (!workCard) throw new Error('工作 card not found')
+    await user.click(within(workCard.closest('.todo-group-filter__item') as HTMLElement).getByTestId('group-delete'))
+
+    expect(confirmSpy).toHaveBeenCalled()
+    // Group card disappears; ungrouped count includes the freed item.
+    await waitFor(() => {
+      expect(within(itemsPanel).queryByText('工作')).not.toBeInTheDocument()
+    })
   })
 })

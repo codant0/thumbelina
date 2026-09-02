@@ -9,6 +9,12 @@ import {
   addNote,
   updateNote,
   deleteNote,
+  createItemGroup,
+  renameItemGroup,
+  deleteItemGroup,
+  createNoteGroup,
+  renameNoteGroup,
+  deleteNoteGroup,
 } from './todo'
 import type { TodoItem, TodoNote } from './todo'
 
@@ -118,7 +124,7 @@ describe('todo API', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       jsonResponse({ notes: updated }),
     )
-    const notes = await updateNote(0, 'edited note')
+    const notes = await updateNote(0, { content: 'edited note' })
     const [url, init] = fetchSpy.mock.calls[0]
     expect(url).toBe('/api/v1/todo/notes/0')
     expect(init?.method).toBe('PUT')
@@ -151,5 +157,72 @@ describe('todo API', () => {
       new Response('Service Unavailable', { status: 503 }),
     )
     await expect(fetchNotes()).rejects.toThrow('503')
+  })
+
+  it('createItemGroup POSTs name and returns the item list', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse({ items: [] }),
+    )
+    const items = await createItemGroup('工作')
+    const [url, init] = fetchSpy.mock.calls[0]
+    expect(url).toBe('/api/v1/todo/items/groups')
+    expect(init?.method).toBe('POST')
+    expect(JSON.parse(init?.body as string)).toEqual({ name: '工作' })
+    expect(items).toEqual([])
+  })
+
+  it('renameItemGroup PATCHes old name in URL and new name in body', async () => {
+    const updated = [{ index: 0, text: 'a', done: false, remark: '', group: 'Projects' }]
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse({ items: updated }),
+    )
+    const items = await renameItemGroup('工作', 'Projects')
+    const [url, init] = fetchSpy.mock.calls[0]
+    expect(url).toBe('/api/v1/todo/items/groups/%E5%B7%A5%E4%BD%9C')
+    expect(init?.method).toBe('PATCH')
+    expect(JSON.parse(init?.body as string)).toEqual({ name: 'Projects' })
+    expect(items).toEqual(updated)
+  })
+
+  it('deleteItemGroup DELETEs the encoded name and returns items', async () => {
+    const remaining: TodoItem[] = []
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse({ items: remaining }),
+    )
+    const items = await deleteItemGroup('工作')
+    const [url, init] = fetchSpy.mock.calls[0]
+    expect(url).toBe('/api/v1/todo/items/groups/%E5%B7%A5%E4%BD%9C')
+    expect(init?.method).toBe('DELETE')
+    expect(items).toEqual([])
+  })
+
+  it('createNoteGroup POSTs name and returns the note list', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse({ notes: [] }),
+    )
+    const notes = await createNoteGroup('项目A')
+    const [url, init] = fetchSpy.mock.calls[0]
+    expect(url).toBe('/api/v1/todo/notes/groups')
+    expect(init?.method).toBe('POST')
+    expect(JSON.parse(init?.body as string)).toEqual({ name: '项目A' })
+    expect(notes).toEqual([])
+  })
+
+  it('renameNoteGroup / deleteNoteGroup hit the notes group endpoints', async () => {
+    const renamed = [{ index: 0, timestamp: '2026-08-14T10:00:00', content: 'x', group: '新名' }]
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ notes: renamed }))
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ notes: [] }))
+
+    const notes = await renameNoteGroup('项目A', '新名')
+    expect(fetchSpy.mock.calls[0][0]).toBe('/api/v1/todo/notes/groups/%E9%A1%B9%E7%9B%AEA')
+    expect(fetchSpy.mock.calls[0][1]?.method).toBe('PATCH')
+    expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body))).toEqual({ name: '新名' })
+    expect(notes).toEqual(renamed)
+
+    const afterDelete = await deleteNoteGroup('项目A')
+    expect(fetchSpy.mock.calls[1][0]).toBe('/api/v1/todo/notes/groups/%E9%A1%B9%E7%9B%AEA')
+    expect(fetchSpy.mock.calls[1][1]?.method).toBe('DELETE')
+    expect(afterDelete).toEqual([])
   })
 })

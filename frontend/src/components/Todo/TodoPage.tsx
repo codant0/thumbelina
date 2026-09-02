@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { DragEvent, KeyboardEvent } from 'react'
 import {
   ClipboardList,
   StickyNote,
@@ -18,10 +19,16 @@ import {
   addTodoItem,
   updateTodoItem,
   deleteTodoItem,
+  createItemGroup,
+  renameItemGroup,
+  deleteItemGroup,
   fetchNotes,
   addNote,
   updateNote,
   deleteNote,
+  createNoteGroup,
+  renameNoteGroup,
+  deleteNoteGroup,
 } from '../../api/todo'
 import type { TodoItem, TodoNote } from '../../api/todo'
 import { MarkdownContent } from '../Chat/MarkdownContent'
@@ -130,31 +137,47 @@ interface TodoGroupFilterOption {
   icon: 'all' | 'ungrouped' | null
 }
 
-/** Derives filter options from the visible list: All (total) → ungrouped →
- * heading groups in first-occurrence order. Empty buckets never appear.
- * Pure function, order and counts stay derived from the input list. */
-function groupFilterOptions<T extends { group?: string | null }>(list: T[]): TodoGroupFilterOption[] {
-  if (list.length === 0) return []
+/** Derives filter options from the visible list plus any locally created
+ * empty groups. Order: All (total) → ungrouped (only when entries exist
+ * without a heading) → named groups in first-occurrence order; freshly
+ * created empty groups appear so they can receive their first drag. */
+function buildGroupOptions<T extends { group?: string | null }>(
+  list: T[],
+  emptyGroups: string[] = [],
+): TodoGroupFilterOption[] {
   const counts = new Map<string, number>()
   const order: string[] = []
+  let ungroupedCount = 0
   for (const entry of list) {
     const key = entry.group ?? ''
+    if (key === '') {
+      ungroupedCount += 1
+      continue
+    }
     const next = (counts.get(key) ?? 0) + 1
     counts.set(key, next)
     if (next === 1) order.push(key)
   }
-  const options: TodoGroupFilterOption[] = [
-    { key: '', count: list.length, icon: 'all' },
-  ]
+  for (const name of emptyGroups) {
+    if (name && !order.includes(name)) order.push(name)
+  }
+  const options: TodoGroupFilterOption[] = [{ key: '', count: list.length, icon: 'all' }]
+  if (ungroupedCount > 0) {
+    options.push({ key: UNGROUPED_KEY, count: ungroupedCount, icon: 'ungrouped' })
+  }
   for (const key of order) {
-    const ungrouped = key === ''
-    options.push({
-      key: ungrouped ? UNGROUPED_KEY : key,
-      count: counts.get(key) ?? 0,
-      icon: ungrouped ? 'ungrouped' : null,
-    })
+    options.push({ key, count: counts.get(key) ?? 0, icon: null })
   }
   return options
+}
+
+/** Whether the group filter bar should render: there is something to bucket
+ * (entries or freshly created empty groups) besides the All card alone. */
+function hasGroupChoices<T extends { group?: string | null }>(
+  list: T[],
+  emptyGroups: string[],
+): boolean {
+  return list.length > 0 || emptyGroups.length > 0
 }
 
 interface TodoGroupFilterProps {
@@ -162,39 +185,398 @@ interface TodoGroupFilterProps {
   /** '' shows the full grouped view; otherwise only the selected bucket. */
   selected: string
   onSelect: (key: string) => void
-  /** Panel identity used for the 'all' card icon. */
+  /** Panel identity used for the 'all' card icon and drag payload checks. */
   kind: 'items' | 'notes'
+  /** Drop a dragged entry onto a group card. targetKey: group name, '' for
+   * "ungrouped", null when the card is not a drop target. */
+  onDropCard: (targetKey: string | null) => void
+  onRename: (name: string) => void
+  onDelete: (name: string) => void
+  onNewGroup: () => void
+  busy: boolean
 }
+
+const PANEL_PAYLOAD_KIND = { items: 'item', notes: 'note' } as const
 
 const TODO_ALL_ICON = { items: ClipboardList, notes: StickyNote } as const
 
-function TodoGroupFilter({ options, selected, onSelect, kind }: TodoGroupFilterProps) {
+function TodoGroupFilter({
+  options,
+  selected,
+  onSelect,
+  kind,
+  onDropCard,
+  onRename,
+  onDelete,
+  onNewGroup,
+  busy,
+}: TodoGroupFilterProps) {
   const { t } = useTranslation()
   const AllIcon = TODO_ALL_ICON[kind]
+  const [dropOverKey, setDropOverKey] = useState<string | null>(null)
+
+  const clearDropOver = useCallback(() => setDropOverKey(null), [])
+
+  const handleDrop = useCallback(
+    (key: string) => {
+      clearDropOver()
+      onDropCard(key)
+    },
+    [clearDropOver, onDropCard],
+  )
+
+  const payloadKind = PANEL_PAYLOAD_KIND[kind]
+
   return (
-    <div className="todo-group-filter" data-testid="todo-group-filter">
+    <div
+      className="todo-group-filter"
+      data-testid="todo-group-filter"
+      onDragLeave={clearDropOver}
+    >
       {options.map(option => {
         const Icon = option.icon === 'all' ? AllIcon : option.icon === 'ungrouped' ? Inbox : null
+        const droppable = option.key !== '' // All is a selector only
+        const dropping = dropOverKey === option.key
+        const classes = [
+          'todo-group-filter__item',
+          dropping ? 'todo-group-filter__item--drop-target' : '',
+        ]
+          .filter(Boolean)
+          .join(' ')
         return (
-          <button
+          <div
             key={option.key}
-            type="button"
-            aria-pressed={selected === option.key}
-            className={`todo-group-filter__card${selected === option.key ? ' todo-group-filter__card--selected' : ''}`}
-            data-testid="todo-group-filter-card"
-            onClick={() => onSelect(option.key)}
-            title={option.key === '' || option.key === UNGROUPED_KEY ? undefined : option.key}
+            className={classes}
+            onDragOver={e => {
+              if (!droppable || !readPanelDrag(e, payloadKind)) return
+              e.preventDefault()
+              e.dataTransfer.dropEffect = 'move'
+              setDropOverKey(option.key)
+            }}
+            onDragEnter={e => {
+              if (droppable && readPanelDrag(e, payloadKind)) setDropOverKey(option.key)
+            }}
+            onDrop={e => {
+              if (!droppable) return
+              e.preventDefault()
+              handleDrop(option.key === UNGROUPED_KEY ? '' : option.key)
+            }}
           >
-            {Icon ? <Icon size={14} aria-hidden="true" /> : null}
-            <span>
-              {option.key === '' ? t('todo.all') : option.key === UNGROUPED_KEY ? t('todo.ungrouped') : option.key}
-            </span>
-            <span className="todo-group-filter__badge" data-testid="todo-group-filter-count">
-              {option.count}
-            </span>
-          </button>
+            <button
+              type="button"
+              aria-pressed={selected === option.key}
+              className={`todo-group-filter__card${selected === option.key ? ' todo-group-filter__card--selected' : ''}`}
+              data-testid="todo-group-filter-card"
+              onClick={() => onSelect(option.key)}
+              title={option.key === '' || option.key === UNGROUPED_KEY ? undefined : option.key}
+            >
+              {Icon ? <Icon size={14} aria-hidden="true" /> : null}
+              <span>
+                {option.key === '' ? t('todo.all') : option.key === UNGROUPED_KEY ? t('todo.ungrouped') : option.key}
+              </span>
+              <span className="todo-group-filter__badge" data-testid="todo-group-filter-count">
+                {option.count}
+              </span>
+            </button>
+            {droppable && option.icon === null && (
+              <span className="todo-group-filter__actions">
+                <button
+                  type="button"
+                  className="todo-group-filter__action"
+                  aria-label={t('todo.renameGroup')}
+                  title={t('todo.renameGroup')}
+                  data-testid="group-rename"
+                  disabled={busy}
+                  onClick={() => onRename(option.key)}
+                >
+                  <Pencil size={12} />
+                </button>
+                <button
+                  type="button"
+                  className="todo-group-filter__action todo-group-filter__action--danger"
+                  aria-label={t('todo.deleteGroup')}
+                  title={t('todo.deleteGroup')}
+                  data-testid="group-delete"
+                  disabled={busy}
+                  onClick={() => onDelete(option.key)}
+                >
+                  <Trash2 size={12} />
+                </button>
+              </span>
+            )}
+          </div>
         )
       })}
+      <button
+        type="button"
+        className="todo-group-filter__new"
+        aria-label={t('todo.newGroup')}
+        title={t('todo.newGroup')}
+        disabled={busy}
+        onClick={onNewGroup}
+      >
+        <Plus size={14} />
+      </button>
+    </div>
+  )
+}
+
+interface GroupNameEditorProps {
+  /** 'create' | 'rename'; only used to pick the placeholder. */
+  mode: 'create' | 'rename'
+  initialValue?: string
+  busy: boolean
+  onSubmit: (name: string) => void
+  onCancel: () => void
+}
+
+/** Inline input for creating a new group or renaming an existing one. */
+function GroupNameEditor({ mode, initialValue = '', busy, onSubmit, onCancel }: GroupNameEditorProps) {
+  const { t } = useTranslation()
+  const [name, setName] = useState(initialValue)
+
+  const submit = () => {
+    const trimmed = name.trim()
+    if (!trimmed || busy) return
+    onSubmit(trimmed)
+  }
+
+  return (
+    <div className="todo-group-editor" data-testid="todo-group-editor">
+      <input
+        className="todo-group-editor__input form-input"
+        type="text"
+        value={name}
+        autoFocus
+        disabled={busy}
+        placeholder={mode === 'create' ? t('todo.newGroupPlaceholder') : t('todo.renameGroupPlaceholder')}
+        aria-label={mode === 'create' ? t('todo.newGroupPlaceholder') : t('todo.renameGroupPlaceholder')}
+        onChange={e => setName(e.target.value)}
+        onKeyDown={e => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            submit()
+          } else if (e.key === 'Escape') {
+            onCancel()
+          }
+        }}
+      />
+      <button
+        className="btn btn-primary btn-sm"
+        disabled={busy || !name.trim()}
+        onClick={submit}
+      >
+        <Check size={14} />
+        {mode === 'create' ? t('todo.createGroup') : t('todo.save')}
+      </button>
+      <button className="btn btn-ghost btn-sm" disabled={busy} onClick={onCancel}>
+        <X size={14} />
+        {t('todo.cancel')}
+      </button>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Drag & drop between item rows / note cards and group cards
+// ---------------------------------------------------------------------------
+
+const CARD_MIME = 'application/x-thumbelina-todo-card'
+
+interface TodoDragPayload {
+  /** Which list the dragged entry belongs to (must match the drop panel). */
+  kind: 'item' | 'note'
+  /** Server index of the dragged entry at drag time. */
+  index: number
+}
+
+function serializeDrag(payload: TodoDragPayload): string {
+  return JSON.stringify(payload)
+}
+
+function parseDrag(raw: string | undefined): TodoDragPayload | null {
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as TodoDragPayload
+    if ((parsed.kind === 'item' || parsed.kind === 'note') && typeof parsed.index === 'number') {
+      return parsed
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+/** Read a drag payload from a dataTransfer if it belongs to the given panel. */
+function readPanelDrag(e: DragEvent, kind: 'item' | 'note'): TodoDragPayload | null {
+  const payload = parseDrag(e.dataTransfer.getData(CARD_MIME))
+  if (!payload || payload.kind !== kind) return null
+  return payload
+}
+
+// ---------------------------------------------------------------------------
+// Item list panel
+// ---------------------------------------------------------------------------
+
+interface TodoItemRowProps {
+  item: TodoItem
+  busy: boolean
+  editing: boolean
+  editText: string
+  remarkEditing: boolean
+  editRemark: string
+  onEditTextChange: (text: string) => void
+  onSaveEdit: () => void
+  onCancelEdit: () => void
+  onEditKeyDown: (e: KeyboardEvent<HTMLInputElement>) => void
+  onRemarkChange: (remark: string) => void
+  onSaveRemark: () => void
+  onCancelRemark: () => void
+  onStartRemark: () => void
+  onStartEdit: () => void
+  onToggle: () => void
+  onDelete: () => void
+  onDragStart: (e: DragEvent<HTMLElement>) => void
+  onDragEnd: () => void
+  dragging: boolean
+}
+
+function TodoItemRow({
+  item,
+  busy,
+  editing,
+  editText,
+  remarkEditing,
+  editRemark,
+  onEditTextChange,
+  onSaveEdit,
+  onCancelEdit,
+  onEditKeyDown,
+  onRemarkChange,
+  onSaveRemark,
+  onCancelRemark,
+  onStartRemark,
+  onStartEdit,
+  onToggle,
+  onDelete,
+  onDragStart,
+  onDragEnd,
+  dragging,
+}: TodoItemRowProps) {
+  const { t } = useTranslation()
+  const classes = [
+    'todo-item',
+    item.done ? 'todo-item--done' : '',
+    dragging ? 'todo-item--dragging' : '',
+    editing || remarkEditing ? 'todo-item--editing' : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+
+  return (
+    <div
+      className={classes}
+      data-testid="todo-item"
+      draggable={!editing && !remarkEditing && !busy}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+    >
+      {editing ? (
+        <div className="todo-item__edit">
+          <input
+            className="todo-item__edit-input form-input"
+            type="text"
+            value={editText}
+            aria-label={t('todo.edit')}
+            autoFocus
+            disabled={busy}
+            onChange={e => onEditTextChange(e.target.value)}
+            onKeyDown={onEditKeyDown}
+          />
+          <button
+            className="btn btn-primary btn-sm"
+            disabled={busy || !editText.trim()}
+            onClick={onSaveEdit}
+          >
+            <Check size={14} />
+            {t('todo.save')}
+          </button>
+          <button className="btn btn-ghost btn-sm" disabled={busy} onClick={onCancelEdit}>
+            <X size={14} />
+            {t('todo.cancel')}
+          </button>
+        </div>
+      ) : (
+        <div className="todo-item__body">
+          <div className="todo-item__row">
+            <input
+              className="todo-item__checkbox"
+              type="checkbox"
+              checked={item.done}
+              disabled={busy}
+              aria-label={item.text}
+              onChange={onToggle}
+            />
+            <span className="todo-item__text">{item.text}</span>
+            <div className="todo-item__actions">
+              <button
+                className="todo-item__action"
+                aria-label={t('todo.remark')}
+                title={t('todo.remark')}
+                disabled={busy}
+                onClick={onStartRemark}
+              >
+                <StickyNote size={14} />
+              </button>
+              <button
+                className="todo-item__action"
+                aria-label={t('todo.edit')}
+                title={t('todo.edit')}
+                disabled={busy}
+                onClick={onStartEdit}
+              >
+                <Pencil size={14} />
+              </button>
+              <button
+                className="todo-item__action todo-item__action--danger"
+                aria-label={t('todo.delete')}
+                title={t('todo.delete')}
+                disabled={busy}
+                onClick={onDelete}
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          </div>
+          {remarkEditing ? (
+            <div className="todo-item__remark-edit">
+              <textarea
+                className="todo-item__remark-textarea form-input"
+                value={editRemark}
+                aria-label={t('todo.remark')}
+                rows={3}
+                autoFocus
+                disabled={busy}
+                onChange={e => onRemarkChange(e.target.value)}
+              />
+              <div className="todo-item__remark-edit-actions">
+                <button className="btn btn-primary btn-sm" disabled={busy} onClick={onSaveRemark}>
+                  <Check size={14} />
+                  {t('todo.save')}
+                </button>
+                <button className="btn btn-ghost btn-sm" disabled={busy} onClick={onCancelRemark}>
+                  <X size={14} />
+                  {t('todo.cancel')}
+                </button>
+              </div>
+            </div>
+          ) : item.remark ? (
+            <div className="todo-item__remark">
+              <MarkdownContent content={item.remark} />
+            </div>
+          ) : null}
+        </div>
+      )}
     </div>
   )
 }
@@ -212,6 +594,10 @@ interface TodoListPanelProps {
   onDelete: (index: number) => void
   onSaveText: (index: number, text: string) => void
   onSaveRemark: (index: number, remark: string) => void
+  onMoveToGroup: (index: number, group: string) => void
+  onCreateGroup: (name: string) => void
+  onRenameGroup: (oldName: string, newName: string) => void
+  onDeleteGroup: (name: string) => void
 }
 
 function TodoListPanel({
@@ -225,6 +611,10 @@ function TodoListPanel({
   onDelete,
   onSaveText,
   onSaveRemark,
+  onMoveToGroup,
+  onCreateGroup,
+  onRenameGroup,
+  onDeleteGroup,
 }: TodoListPanelProps) {
   const { t } = useTranslation()
   const [newText, setNewText] = useState('')
@@ -233,8 +623,18 @@ function TodoListPanel({
   const [remarkIndex, setRemarkIndex] = useState<number | null>(null)
   const [editRemark, setEditRemark] = useState('')
   const [groupKey, setGroupKey] = useState<string>('')
+  // Named groups with no members yet (created locally, empty on the server).
+  const [emptyGroups, setEmptyGroups] = useState<string[]>([])
+  // Which group action is open: null, 'create', or the name being renamed.
+  const [editorMode, setEditorMode] = useState<'create' | 'rename' | null>(null)
+  const [renameTarget, setRenameTarget] = useState('')
+  const [draggingIndex, setDraggingIndex] = useState<number | null>(null)
 
-  const groupOptions = useMemo(() => groupFilterOptions(items), [items])
+  const groupOptions = useMemo(
+    () => buildGroupOptions(items, emptyGroups),
+    [items, emptyGroups],
+  )
+  const showGroupFilter = hasGroupChoices(items, emptyGroups)
   const shownItems = useMemo(() => {
     if (groupKey === '') return items
     return items.filter(item => (item.group ?? '') === (groupKey === UNGROUPED_KEY ? '' : groupKey))
@@ -277,6 +677,7 @@ function TodoListPanel({
       itemsRef.current = items
       cancelEdit()
       cancelRemark()
+      setDraggingIndex(null)
     }
   }, [items, cancelEdit, cancelRemark])
 
@@ -296,6 +697,74 @@ function TodoListPanel({
     setEditRemark('')
   }, [remarkIndex, editRemark, onSaveRemark])
 
+  // ---- group management --------------------------------------------------
+
+  const closeEditor = useCallback(() => {
+    setEditorMode(null)
+    setRenameTarget('')
+  }, [])
+
+  const submitEditor = useCallback(
+    (name: string) => {
+      if (editorMode === 'create') {
+        onCreateGroup(name)
+        setEmptyGroups(prev => (prev.includes(name) ? prev : [...prev, name]))
+        setGroupKey(name) // select the fresh group so items can be dropped in
+        closeEditor()
+      } else if (editorMode === 'rename' && renameTarget) {
+        const target = renameTarget
+        onRenameGroup(target, name)
+        setEmptyGroups(prev =>
+          prev.map(existing => (existing === target ? name : existing)),
+        )
+        if (groupKey === target) setGroupKey(name)
+        closeEditor()
+      }
+    },
+    [editorMode, renameTarget, groupKey, onCreateGroup, onRenameGroup, closeEditor],
+  )
+
+  const startRename = useCallback(
+    (name: string) => {
+      setRenameTarget(name)
+      setEditorMode('rename')
+    },
+    [],
+  )
+
+  const requestDeleteGroup = useCallback(
+    (name: string) => {
+      if (!window.confirm(t('todo.confirmDeleteGroup'))) return
+      onDeleteGroup(name)
+      setEmptyGroups(prev => prev.filter(existing => existing !== name))
+      if (groupKey === name) setGroupKey('')
+    },
+    [t, onDeleteGroup, groupKey],
+  )
+
+  // ---- drag & drop -------------------------------------------------------
+
+  const handleItemDragStart = useCallback(
+    (item: TodoItem) => (e: DragEvent<HTMLElement>) => {
+      e.dataTransfer.setData(CARD_MIME, serializeDrag({ kind: 'item', index: item.index }))
+      e.dataTransfer.effectAllowed = 'move'
+      setDraggingIndex(item.index)
+    },
+    [],
+  )
+
+  const handleDropCard = useCallback(
+    (targetKey: string | null) => {
+      if (targetKey === null || draggingIndex === null) return
+      const index = draggingIndex
+      const sourceGroup = items.find(item => item.index === index)?.group ?? ''
+      if (targetKey === sourceGroup) return // dragging onto its own card
+      setDraggingIndex(null)
+      onMoveToGroup(index, targetKey)
+    },
+    [draggingIndex, items, onMoveToGroup],
+  )
+
   const doneCount = allItems.filter(item => item.done).length
   const counts = { all: allItems.length, active: allItems.length - doneCount, done: doneCount }
 
@@ -309,14 +778,62 @@ function TodoListPanel({
     return <TodoEmptyState icon={Inbox} text={t('todo.noCompleted')} />
   }
 
+  const renderItems = (source: TodoItem[]) =>
+    source.map(item => (
+      <TodoItemRow
+        key={item.index}
+        item={item}
+        busy={busy}
+        editing={editingIndex === item.index}
+        editText={editText}
+        remarkEditing={remarkIndex === item.index}
+        editRemark={editRemark}
+        dragging={draggingIndex === item.index}
+        onEditTextChange={setEditText}
+        onSaveEdit={saveEdit}
+        onCancelEdit={cancelEdit}
+        onEditKeyDown={e => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            saveEdit()
+          } else if (e.key === 'Escape') {
+            cancelEdit()
+          }
+        }}
+        onRemarkChange={setEditRemark}
+        onSaveRemark={saveRemark}
+        onCancelRemark={cancelRemark}
+        onStartRemark={() => startRemark(item)}
+        onStartEdit={() => startEdit(item)}
+        onToggle={() => onToggle(item)}
+        onDelete={() => onDelete(item.index)}
+        onDragStart={handleItemDragStart(item)}
+        onDragEnd={() => setDraggingIndex(null)}
+      />
+    ))
+
   return (
     <>
-      {groupOptions.length > 1 && (
+      {showGroupFilter && (
         <TodoGroupFilter
           options={groupOptions}
           selected={groupKey}
           onSelect={setGroupKey}
           kind="items"
+          onDropCard={handleDropCard}
+          onRename={startRename}
+          onDelete={requestDeleteGroup}
+          onNewGroup={() => setEditorMode('create')}
+          busy={busy}
+        />
+      )}
+      {editorMode !== null && (
+        <GroupNameEditor
+          mode={editorMode}
+          initialValue={editorMode === 'rename' ? renameTarget : ''}
+          busy={busy}
+          onSubmit={submitEditor}
+          onCancel={closeEditor}
         />
       )}
 
@@ -338,11 +855,7 @@ function TodoListPanel({
             }
           }}
         />
-        <button
-          className="btn btn-primary"
-          disabled={busy || !newText.trim()}
-          onClick={submitNew}
-        >
+        <button className="btn btn-primary" disabled={busy || !newText.trim()} onClick={submitNew}>
           <Plus size={14} />
           {t('todo.add')}
         </button>
@@ -357,246 +870,20 @@ function TodoListPanel({
               <div className="todo-group__header" data-testid="todo-group-header">
                 {group.key || t('todo.ungrouped')}
               </div>
-              {group.items.map(item => (
-                <div
-                  key={item.index}
-                  className={`todo-item${item.done ? ' todo-item--done' : ''}`}
-                  data-testid="todo-item"
-                >
-              {editingIndex === item.index ? (
-                <div className="todo-item__edit">
-                  <input
-                    className="todo-item__edit-input form-input"
-                    type="text"
-                    value={editText}
-                    aria-label={t('todo.edit')}
-                    autoFocus
-                    disabled={busy}
-                    onChange={e => setEditText(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault()
-                        saveEdit()
-                      } else if (e.key === 'Escape') {
-                        cancelEdit()
-                      }
-                    }}
-                  />
-                  <button
-                    className="btn btn-primary btn-sm"
-                    disabled={busy || !editText.trim()}
-                    onClick={saveEdit}
-                  >
-                    <Check size={14} />
-                    {t('todo.save')}
-                  </button>
-                  <button className="btn btn-ghost btn-sm" disabled={busy} onClick={cancelEdit}>
-                    <X size={14} />
-                    {t('todo.cancel')}
-                  </button>
-                </div>
-              ) : (
-                <div className="todo-item__body">
-                  <div className="todo-item__row">
-                    <input
-                      className="todo-item__checkbox"
-                      type="checkbox"
-                      checked={item.done}
-                      disabled={busy}
-                      aria-label={item.text}
-                      onChange={() => onToggle(item)}
-                    />
-                    <span className="todo-item__text">{item.text}</span>
-                    <div className="todo-item__actions">
-                      <button
-                        className="todo-item__action"
-                        aria-label={t('todo.remark')}
-                        title={t('todo.remark')}
-                        disabled={busy}
-                        onClick={() => startRemark(item)}
-                      >
-                        <StickyNote size={14} />
-                      </button>
-                      <button
-                        className="todo-item__action"
-                        aria-label={t('todo.edit')}
-                        title={t('todo.edit')}
-                        disabled={busy}
-                        onClick={() => startEdit(item)}
-                      >
-                        <Pencil size={14} />
-                      </button>
-                      <button
-                        className="todo-item__action todo-item__action--danger"
-                        aria-label={t('todo.delete')}
-                        title={t('todo.delete')}
-                        disabled={busy}
-                        onClick={() => onDelete(item.index)}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </div>
-                  {remarkIndex === item.index ? (
-                    <div className="todo-item__remark-edit">
-                      <textarea
-                        className="todo-item__remark-textarea form-input"
-                        value={editRemark}
-                        aria-label={t('todo.remark')}
-                        rows={3}
-                        autoFocus
-                        disabled={busy}
-                        onChange={e => setEditRemark(e.target.value)}
-                      />
-                      <div className="todo-item__remark-edit-actions">
-                        <button
-                          className="btn btn-primary btn-sm"
-                          disabled={busy}
-                          onClick={saveRemark}
-                        >
-                          <Check size={14} />
-                          {t('todo.save')}
-                        </button>
-                        <button className="btn btn-ghost btn-sm" disabled={busy} onClick={cancelRemark}>
-                          <X size={14} />
-                          {t('todo.cancel')}
-                        </button>
-                      </div>
-                    </div>
-                  ) : item.remark ? (
-                    <div className="todo-item__remark">
-                      <MarkdownContent content={item.remark} />
-                    </div>
-                  ) : null}
-                </div>
-              )}
-                </div>
-              ))}
+              {renderItems(group.items)}
             </div>
           ))}
         </div>
       ) : (
-        <div className="todo-list">
-          {shownItems.map(item => (
-            <div
-              key={item.index}
-              className={`todo-item${item.done ? ' todo-item--done' : ''}`}
-              data-testid="todo-item"
-            >
-              {editingIndex === item.index ? (
-                <div className="todo-item__edit">
-                  <input
-                    className="todo-item__edit-input form-input"
-                    type="text"
-                    value={editText}
-                    aria-label={t('todo.edit')}
-                    autoFocus
-                    disabled={busy}
-                    onChange={e => setEditText(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault()
-                        saveEdit()
-                      } else if (e.key === 'Escape') {
-                        cancelEdit()
-                      }
-                    }}
-                  />
-                  <button
-                    className="btn btn-primary btn-sm"
-                    disabled={busy || !editText.trim()}
-                    onClick={saveEdit}
-                  >
-                    <Check size={14} />
-                    {t('todo.save')}
-                  </button>
-                  <button className="btn btn-ghost btn-sm" disabled={busy} onClick={cancelEdit}>
-                    <X size={14} />
-                    {t('todo.cancel')}
-                  </button>
-                </div>
-              ) : (
-                <div className="todo-item__body">
-                  <div className="todo-item__row">
-                    <input
-                      className="todo-item__checkbox"
-                      type="checkbox"
-                      checked={item.done}
-                      disabled={busy}
-                      aria-label={item.text}
-                      onChange={() => onToggle(item)}
-                    />
-                    <span className="todo-item__text">{item.text}</span>
-                    <div className="todo-item__actions">
-                      <button
-                        className="todo-item__action"
-                        aria-label={t('todo.remark')}
-                        title={t('todo.remark')}
-                        disabled={busy}
-                        onClick={() => startRemark(item)}
-                      >
-                        <StickyNote size={14} />
-                      </button>
-                      <button
-                        className="todo-item__action"
-                        aria-label={t('todo.edit')}
-                        title={t('todo.edit')}
-                        disabled={busy}
-                        onClick={() => startEdit(item)}
-                      >
-                        <Pencil size={14} />
-                      </button>
-                      <button
-                        className="todo-item__action todo-item__action--danger"
-                        aria-label={t('todo.delete')}
-                        title={t('todo.delete')}
-                        disabled={busy}
-                        onClick={() => onDelete(item.index)}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </div>
-                  {remarkIndex === item.index ? (
-                    <div className="todo-item__remark-edit">
-                      <textarea
-                        className="todo-item__remark-textarea form-input"
-                        value={editRemark}
-                        aria-label={t('todo.remark')}
-                        rows={3}
-                        autoFocus
-                        disabled={busy}
-                        onChange={e => setEditRemark(e.target.value)}
-                      />
-                      <div className="todo-item__remark-edit-actions">
-                        <button
-                          className="btn btn-primary btn-sm"
-                          disabled={busy}
-                          onClick={saveRemark}
-                        >
-                          <Check size={14} />
-                          {t('todo.save')}
-                        </button>
-                        <button className="btn btn-ghost btn-sm" disabled={busy} onClick={cancelRemark}>
-                          <X size={14} />
-                          {t('todo.cancel')}
-                        </button>
-                      </div>
-                    </div>
-                  ) : item.remark ? (
-                    <div className="todo-item__remark">
-                      <MarkdownContent content={item.remark} />
-                    </div>
-                  ) : null}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
+        <div className="todo-list">{renderItems(shownItems)}</div>
       )}
     </>
   )
 }
+
+// ---------------------------------------------------------------------------
+// Notes panel
+// ---------------------------------------------------------------------------
 
 interface TodoNotesPanelProps {
   notes: TodoNote[]
@@ -604,6 +891,10 @@ interface TodoNotesPanelProps {
   onAdd: (content: string) => void
   onUpdate: (index: number, content: string) => void
   onDelete: (index: number) => void
+  onMoveToGroup: (index: number, group: string) => void
+  onCreateGroup: (name: string) => void
+  onRenameGroup: (oldName: string, newName: string) => void
+  onDeleteGroup: (name: string) => void
 }
 
 interface NoteGroup {
@@ -660,14 +951,130 @@ function toLocalDateKey(date: Date): string {
   return `${date.getFullYear()}-${month}-${day}`
 }
 
-function TodoNotesPanel({ notes, busy, onAdd, onUpdate, onDelete }: TodoNotesPanelProps) {
+interface TodoNoteCardProps {
+  note: TodoNote
+  busy: boolean
+  editing: boolean
+  editContent: string
+  onEditChange: (content: string) => void
+  onSaveEdit: () => void
+  onCancelEdit: () => void
+  onEditKeyDown: (e: KeyboardEvent<HTMLTextAreaElement>) => void
+  onStartEdit: () => void
+  onDelete: () => void
+  onDragStart: (e: DragEvent<HTMLElement>) => void
+  onDragEnd: () => void
+  dragging: boolean
+}
+
+function TodoNoteCard({
+  note,
+  busy,
+  editing,
+  editContent,
+  onEditChange,
+  onSaveEdit,
+  onCancelEdit,
+  onEditKeyDown,
+  onStartEdit,
+  onDelete,
+  onDragStart,
+  onDragEnd,
+  dragging,
+}: TodoNoteCardProps) {
+  const { t } = useTranslation()
+  const classes = [
+    'todo-note',
+    dragging ? 'todo-note--dragging' : '',
+    editing ? 'todo-note--editing' : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+  return (
+    <div
+      className={classes}
+      data-testid="todo-note"
+      draggable={!editing && !busy}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+    >
+      <div className="todo-note__header">
+        <span className="todo-note__time">{note.timestamp}</span>
+        <div className="todo-note__actions">
+          <button
+            className="todo-note__action"
+            aria-label={t('todo.edit')}
+            title={t('todo.edit')}
+            disabled={busy}
+            onClick={onStartEdit}
+          >
+            <Pencil size={14} />
+          </button>
+          <button
+            className="todo-note__action todo-note__action--danger"
+            aria-label={t('todo.delete')}
+            title={t('todo.delete')}
+            disabled={busy}
+            onClick={onDelete}
+            data-testid="note-delete"
+          >
+            <Trash2 size={14} />
+          </button>
+        </div>
+      </div>
+      {editing ? (
+        <div className="todo-note__edit">
+          <textarea
+            className="todo-note__edit-textarea form-input"
+            value={editContent}
+            aria-label={t('todo.edit')}
+            rows={3}
+            autoFocus
+            disabled={busy}
+            onChange={e => onEditChange(e.target.value)}
+            onKeyDown={onEditKeyDown}
+          />
+          <div className="todo-note__edit-actions">
+            <button className="btn btn-primary btn-sm" disabled={busy || !editContent.trim()} onClick={onSaveEdit}>
+              <Check size={14} />
+              {t('todo.save')}
+            </button>
+            <button className="btn btn-ghost btn-sm" disabled={busy} onClick={onCancelEdit}>
+              <X size={14} />
+              {t('todo.cancel')}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="todo-note__content">{note.content}</div>
+      )}
+    </div>
+  )
+}
+
+function TodoNotesPanel({
+  notes,
+  busy,
+  onAdd,
+  onUpdate,
+  onDelete,
+  onMoveToGroup,
+  onCreateGroup,
+  onRenameGroup,
+  onDeleteGroup,
+}: TodoNotesPanelProps) {
   const { t } = useTranslation()
   const [draft, setDraft] = useState('')
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [editDraft, setEditDraft] = useState('')
   const [groupKey, setGroupKey] = useState<string>('')
+  const [emptyGroups, setEmptyGroups] = useState<string[]>([])
+  const [editorMode, setEditorMode] = useState<'create' | 'rename' | null>(null)
+  const [renameTarget, setRenameTarget] = useState('')
+  const [draggingIndex, setDraggingIndex] = useState<number | null>(null)
 
-  const groupOptions = useMemo(() => groupFilterOptions(notes), [notes])
+  const groupOptions = useMemo(() => buildGroupOptions(notes, emptyGroups), [notes, emptyGroups])
+  const showGroupFilter = hasGroupChoices(notes, emptyGroups)
   const shownNotes = useMemo(() => {
     if (groupKey === '') return notes
     return notes.filter(note => (note.group ?? '') === (groupKey === UNGROUPED_KEY ? '' : groupKey))
@@ -698,6 +1105,7 @@ function TodoNotesPanel({ notes, busy, onAdd, onUpdate, onDelete }: TodoNotesPan
     if (notesRef.current !== notes) {
       notesRef.current = notes
       cancelEdit()
+      setDraggingIndex(null)
     }
   }, [notes, cancelEdit])
 
@@ -723,14 +1131,150 @@ function TodoNotesPanel({ notes, busy, onAdd, onUpdate, onDelete }: TodoNotesPan
     return key
   }
 
+  // ---- group management --------------------------------------------------
+
+  const closeEditor = useCallback(() => {
+    setEditorMode(null)
+    setRenameTarget('')
+  }, [])
+
+  const submitEditor = useCallback(
+    (name: string) => {
+      if (editorMode === 'create') {
+        onCreateGroup(name)
+        setEmptyGroups(prev => (prev.includes(name) ? prev : [...prev, name]))
+        setGroupKey(name)
+        closeEditor()
+      } else if (editorMode === 'rename' && renameTarget) {
+        const target = renameTarget
+        onRenameGroup(target, name)
+        setEmptyGroups(prev => prev.map(existing => (existing === target ? name : existing)))
+        if (groupKey === target) setGroupKey(name)
+        closeEditor()
+      }
+    },
+    [editorMode, renameTarget, groupKey, onCreateGroup, onRenameGroup, closeEditor],
+  )
+
+  const startRename = useCallback((name: string) => {
+    setRenameTarget(name)
+    setEditorMode('rename')
+  }, [])
+
+  const requestDeleteGroup = useCallback(
+    (name: string) => {
+      if (!window.confirm(t('todo.confirmDeleteGroup'))) return
+      onDeleteGroup(name)
+      setEmptyGroups(prev => prev.filter(existing => existing !== name))
+      if (groupKey === name) setGroupKey('')
+    },
+    [t, onDeleteGroup, groupKey],
+  )
+
+  // ---- drag & drop -------------------------------------------------------
+
+  const handleNoteDragStart = useCallback(
+    (note: TodoNote) => (e: DragEvent<HTMLElement>) => {
+      e.dataTransfer.setData(CARD_MIME, serializeDrag({ kind: 'note', index: note.index }))
+      e.dataTransfer.effectAllowed = 'move'
+      setDraggingIndex(note.index)
+    },
+    [],
+  )
+
+  const handleDropCard = useCallback(
+    (targetKey: string | null) => {
+      if (targetKey === null || draggingIndex === null) return
+      const index = draggingIndex
+      const sourceGroup = notes.find(note => note.index === index)?.group ?? ''
+      if (targetKey === sourceGroup) return // dragging onto its own card
+      setDraggingIndex(null)
+      onMoveToGroup(index, targetKey)
+    },
+    [draggingIndex, notes, onMoveToGroup],
+  )
+
+  /** Renders one note card with shared edit/drag wiring. */
+  const renderNoteCard = (note: TodoNote) => (
+    <TodoNoteCard
+      key={note.index}
+      note={note}
+      busy={busy}
+      editing={editingIndex === note.index}
+      editContent={editDraft}
+      dragging={draggingIndex === note.index}
+      onEditChange={setEditDraft}
+      onSaveEdit={saveEdit}
+      onCancelEdit={cancelEdit}
+      onEditKeyDown={e => {
+        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+          e.preventDefault()
+          saveEdit()
+        } else if (e.key === 'Escape') {
+          cancelEdit()
+        }
+      }}
+      onStartEdit={() => startEdit(note)}
+      onDelete={() => onDelete(note.index)}
+      onDragStart={handleNoteDragStart(note)}
+      onDragEnd={() => setDraggingIndex(null)}
+    />
+  )
+
+  /** Day sub-headers + note cards for a single heading (or ungrouped) slice. */
+  const renderDayGroups = (source: TodoNote[]) =>
+    groupNotesByDay(source).flatMap(dayGroup => [
+      <div
+        key={`day-${dayGroup.key}`}
+        className="todo-note-group__header"
+        data-testid="note-group-header"
+      >
+        {groupLabel(dayGroup.key)}
+      </div>,
+      ...dayGroup.notes.map(renderNoteCard),
+    ])
+
+  /** All view: heading groups (incl. ungrouped) wrap the day sub-headers. */
+  const renderAllNotes = (source: TodoNote[]) => (
+    <div className="todo-note-list">
+      {groupByHeading(source).map(heading => (
+        <div key={`heading-${heading.key}`} className="todo-group" data-testid="todo-group">
+          <div className="todo-group__header" data-testid="todo-group-header">
+            {heading.key || t('todo.ungrouped')}
+          </div>
+          {renderDayGroups(heading.items)}
+        </div>
+      ))}
+    </div>
+  )
+
+  /** Single-group view: flat day sub-headers only (no heading layer). */
+  const renderOneGroupNotes = (source: TodoNote[]) => (
+    <div className="todo-note-list">{renderDayGroups(source)}</div>
+  )
+
   return (
     <>
-      {groupOptions.length > 1 && (
+      {showGroupFilter && (
         <TodoGroupFilter
           options={groupOptions}
           selected={groupKey}
           onSelect={setGroupKey}
           kind="notes"
+          onDropCard={handleDropCard}
+          onRename={startRename}
+          onDelete={requestDeleteGroup}
+          onNewGroup={() => setEditorMode('create')}
+          busy={busy}
+        />
+      )}
+      {editorMode !== null && (
+        <GroupNameEditor
+          mode={editorMode}
+          initialValue={editorMode === 'rename' ? renameTarget : ''}
+          busy={busy}
+          onSubmit={submitEditor}
+          onCancel={closeEditor}
         />
       )}
 
@@ -757,153 +1301,23 @@ function TodoNotesPanel({ notes, busy, onAdd, onUpdate, onDelete }: TodoNotesPan
       {shownNotes.length === 0 ? (
         <TodoEmptyState icon={StickyNote} text={t('todo.emptyNotes')} />
       ) : groupKey === '' ? (
-        <div className="todo-note-list">
-          {groupByHeading(notes).map(heading => (
-            <div key={`heading-${heading.key}`} className="todo-group" data-testid="todo-group">
-              <div className="todo-group__header" data-testid="todo-group-header">
-                {heading.key || t('todo.ungrouped')}
-              </div>
-              {groupNotesByDay(heading.items).flatMap(dayGroup => [
-                <div
-                  key={`day-${dayGroup.key}`}
-                  className="todo-note-group__header"
-                  data-testid="note-group-header"
-                >
-                  {groupLabel(dayGroup.key)}
-                </div>,
-                ...dayGroup.notes.map(note => (
-                  <div key={note.index} className="todo-note" data-testid="todo-note">
-                    <div className="todo-note__header">
-                      <span className="todo-note__time">{note.timestamp}</span>
-                      <div className="todo-note__actions">
-                        <button
-                          className="todo-note__action"
-                          aria-label={t('todo.edit')}
-                          title={t('todo.edit')}
-                          disabled={busy}
-                          onClick={() => startEdit(note)}
-                        >
-                          <Pencil size={14} />
-                        </button>
-                        <button
-                          className="todo-note__action todo-note__action--danger"
-                          aria-label={t('todo.delete')}
-                          title={t('todo.delete')}
-                          disabled={busy}
-                          onClick={() => onDelete(note.index)}
-                          data-testid="note-delete"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </div>
-                    {editingIndex === note.index ? (
-                      <div className="todo-note__edit">
-                        <textarea
-                          className="todo-note__edit-textarea form-input"
-                          value={editDraft}
-                          aria-label={t('todo.edit')}
-                          rows={3}
-                          autoFocus
-                          disabled={busy}
-                          onChange={e => setEditDraft(e.target.value)}
-                        />
-                        <div className="todo-note__edit-actions">
-                          <button
-                            className="btn btn-primary btn-sm"
-                            disabled={busy || !editDraft.trim()}
-                            onClick={saveEdit}
-                          >
-                            <Check size={14} />
-                            {t('todo.save')}
-                          </button>
-                          <button className="btn btn-ghost btn-sm" disabled={busy} onClick={cancelEdit}>
-                            <X size={14} />
-                            {t('todo.cancel')}
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="todo-note__content">{note.content}</div>
-                    )}
-                  </div>
-                )),
-              ])}
-            </div>
-          ))}
-        </div>
+        renderAllNotes(notes)
       ) : (
-        <div className="todo-note-list">
-          {groupNotesByDay(shownNotes).flatMap(dayGroup => [
-            <div
-              key={`day-${dayGroup.key}`}
-              className="todo-note-group__header"
-              data-testid="note-group-header"
-            >
-              {groupLabel(dayGroup.key)}
-            </div>,
-            ...dayGroup.notes.map(note => (
-              <div key={note.index} className="todo-note" data-testid="todo-note">
-                <div className="todo-note__header">
-                  <span className="todo-note__time">{note.timestamp}</span>
-                  <div className="todo-note__actions">
-                    <button
-                      className="todo-note__action"
-                      aria-label={t('todo.edit')}
-                      title={t('todo.edit')}
-                      disabled={busy}
-                      onClick={() => startEdit(note)}
-                    >
-                      <Pencil size={14} />
-                    </button>
-                    <button
-                      className="todo-note__action todo-note__action--danger"
-                      aria-label={t('todo.delete')}
-                      title={t('todo.delete')}
-                      disabled={busy}
-                      onClick={() => onDelete(note.index)}
-                      data-testid="note-delete"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                </div>
-                {editingIndex === note.index ? (
-                  <div className="todo-note__edit">
-                    <textarea
-                      className="todo-note__edit-textarea form-input"
-                      value={editDraft}
-                      aria-label={t('todo.edit')}
-                      rows={3}
-                      autoFocus
-                      disabled={busy}
-                      onChange={e => setEditDraft(e.target.value)}
-                    />
-                    <div className="todo-note__edit-actions">
-                      <button
-                        className="btn btn-primary btn-sm"
-                        disabled={busy || !editDraft.trim()}
-                        onClick={saveEdit}
-                      >
-                        <Check size={14} />
-                        {t('todo.save')}
-                      </button>
-                      <button className="btn btn-ghost btn-sm" disabled={busy} onClick={cancelEdit}>
-                        <X size={14} />
-                        {t('todo.cancel')}
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="todo-note__content">{note.content}</div>
-                )}
-              </div>
-            )),
-          ])}
-        </div>
+        renderOneGroupNotes(shownNotes)
       )}
     </>
   )
+}
+
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
+
+/** Removes blank placeholder notes (the anchor an empty notes group writes
+ * to disk) from the lists the UI operates on. They carry no content and only
+ * exist to persist the group marker. */
+function withoutPlaceholderNotes(notes: TodoNote[]): TodoNote[] {
+  return notes.filter(note => note.content !== '')
 }
 
 export function TodoPage() {
@@ -938,7 +1352,7 @@ export function TodoPage() {
       }
       const [loadedItems, loadedNotes] = await Promise.all([fetchTodoItems(), fetchNotes()])
       setItems(loadedItems)
-      setNotes(loadedNotes)
+      setNotes(withoutPlaceholderNotes(loadedNotes))
       setEnabled(true)
     } catch {
       setError(t('common.error'))
@@ -976,7 +1390,7 @@ export function TodoPage() {
       setBusy(true)
       setError('')
       try {
-        setNotes(await operation())
+        setNotes(withoutPlaceholderNotes(await operation()))
       } catch {
         setError(t('common.error'))
       } finally {
@@ -1007,16 +1421,51 @@ export function TodoPage() {
     (index: number, remark: string) => void writeItems(() => updateTodoItem(index, { remark })),
     [writeItems],
   )
+  const handleMoveItemToGroup = useCallback(
+    (index: number, group: string) => void writeItems(() => updateTodoItem(index, { group })),
+    [writeItems],
+  )
+  const handleCreateItemGroup = useCallback(
+    (name: string) => void writeItems(() => createItemGroup(name)),
+    [writeItems],
+  )
+  const handleRenameItemGroup = useCallback(
+    (oldName: string, newName: string) =>
+      void writeItems(() => renameItemGroup(oldName, newName)),
+    [writeItems],
+  )
+  const handleDeleteItemGroup = useCallback(
+    (name: string) => void writeItems(() => deleteItemGroup(name)),
+    [writeItems],
+  )
+
   const handleAddNote = useCallback(
     (content: string) => void writeNotes(() => addNote(content)),
     [writeNotes],
   )
   const handleUpdateNote = useCallback(
-    (index: number, content: string) => void writeNotes(() => updateNote(index, content)),
+    (index: number, content: string) => void writeNotes(() => updateNote(index, { content })),
     [writeNotes],
   )
   const handleDeleteNote = useCallback(
     (index: number) => void writeNotes(() => deleteNote(index)),
+    [writeNotes],
+  )
+  const handleMoveNoteToGroup = useCallback(
+    (index: number, group: string) => void writeNotes(() => updateNote(index, { group })),
+    [writeNotes],
+  )
+  const handleCreateNoteGroup = useCallback(
+    (name: string) => void writeNotes(() => createNoteGroup(name)),
+    [writeNotes],
+  )
+  const handleRenameNoteGroup = useCallback(
+    (oldName: string, newName: string) =>
+      void writeNotes(() => renameNoteGroup(oldName, newName)),
+    [writeNotes],
+  )
+  const handleDeleteNoteGroup = useCallback(
+    (name: string) => void writeNotes(() => deleteNoteGroup(name)),
     [writeNotes],
   )
 
@@ -1084,6 +1533,10 @@ export function TodoPage() {
             onDelete={handleDeleteItem}
             onSaveText={handleSaveItemText}
             onSaveRemark={handleSaveItemRemark}
+            onMoveToGroup={handleMoveItemToGroup}
+            onCreateGroup={handleCreateItemGroup}
+            onRenameGroup={handleRenameItemGroup}
+            onDeleteGroup={handleDeleteItemGroup}
           />
         </section>
         <section className="todo-page__panel card" data-testid="todo-notes-panel">
@@ -1097,6 +1550,10 @@ export function TodoPage() {
             onAdd={handleAddNote}
             onUpdate={handleUpdateNote}
             onDelete={handleDeleteNote}
+            onMoveToGroup={handleMoveNoteToGroup}
+            onCreateGroup={handleCreateNoteGroup}
+            onRenameGroup={handleRenameNoteGroup}
+            onDeleteGroup={handleDeleteNoteGroup}
           />
         </section>
       </div>

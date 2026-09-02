@@ -12,7 +12,11 @@ from pydantic import BaseModel, Field
 
 from thumbelina.api.deps import get_todo_service
 from thumbelina.todo.models import Note, TodoItem
-from thumbelina.todo.service import TodoService
+from thumbelina.todo.service import (
+    GroupNameConflictError,
+    GroupNotFoundError,
+    TodoService,
+)
 
 router = APIRouter(prefix="/todo", tags=["todo"])
 
@@ -24,11 +28,18 @@ class TodoItemCreate(BaseModel):
 
 
 class TodoItemUpdate(BaseModel):
-    """Payload for updating a todo item (text, done state and/or remark)."""
+    """Payload for updating a todo item (text, done state, remark and/or group).
+
+    ``group``: ``""`` clears the assignment (the item becomes ungrouped);
+    any non-empty string attaches the item to that group, creating its
+    ``# heading`` if necessary.  Whether the field was actually sent matters
+    (``null`` is "leave unchanged"), so handlers check ``model_fields_set``.
+    """
 
     text: str | None = None
     done: bool | None = None
     remark: str | None = None
+    group: str | None = None
 
 
 class NoteCreate(BaseModel):
@@ -38,9 +49,27 @@ class NoteCreate(BaseModel):
 
 
 class NoteUpdate(BaseModel):
-    """Payload for replacing a note's content."""
+    """Payload for updating a quick note.
 
-    content: str = Field(min_length=1)
+    ``content`` and ``group`` are both optional; at least one is expected.
+    ``content: null`` leaves the text untouched so a drag that only changes
+    the group can send ``{"group": "…"}``.  ``group: ""`` clears the group.
+    """
+
+    content: str | None = None
+    group: str | None = None
+
+
+class GroupCreate(BaseModel):
+    """Payload for creating a new group."""
+
+    name: str = Field(min_length=1)
+
+
+class GroupRename(BaseModel):
+    """Payload for renaming a group."""
+
+    name: str = Field(min_length=1)
 
 
 class TodoItemOut(BaseModel):
@@ -140,22 +169,50 @@ async def create_item(
     return _items_payload(await service.add_item(text))
 
 
+def _patch_group(payload: TodoItemUpdate | NoteUpdate, field: str) -> str | None:
+    """Extract a group patch from a request payload.
+
+    Returns the stripped group target (``""`` clears the group) or ``None``
+    when the client did not explicitly send the field.  Pydantic cannot tell
+    "absent" from ``null`` through the attribute, so we consult
+    ``model_fields_set`` to distinguish "leave the group alone" from an
+    explicit clear.
+    """
+    if field not in payload.model_fields_set:
+        return None
+    value = getattr(payload, field)
+    if value is None:
+        return None  # JSON null == "do not touch" (a no-op request)
+    return str(value).strip()
+
+
 @router.patch("/items/{index}", response_model=TodoItemsOut, response_model_exclude_none=True)
 async def update_item(
     index: int,
     payload: TodoItemUpdate,
     service: TodoService = Depends(get_todo_service),
 ) -> TodoItemsOut:
-    """Update the text, done state and/or remark of the item at ``index``."""
+    """Update the text, done state, remark and/or group of the item at ``index``.
+
+    ``group`` is the field that lets the UI drag an item into a different
+    bucket: send ``""`` to ungroup it or a group name to move it there.
+    """
     text: str | None = None
     if payload.text is not None:
         text = _require_non_blank(payload.text, "text")
     remark: str | None = None
     if payload.remark is not None:
         remark = payload.remark.strip()
+    group = _patch_group(payload, "group")
     try:
         return _items_payload(
-            await service.update_item(index, text=text, done=payload.done, remark=remark)
+            await service.update_item(
+                index,
+                text=text,
+                done=payload.done,
+                remark=remark,
+                group=group,
+            )
         )
     except IndexError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -195,10 +252,20 @@ async def update_note(
     payload: NoteUpdate,
     service: TodoService = Depends(get_todo_service),
 ) -> TodoNotesOut:
-    """Replace the content of the note at ``index`` (timestamp is kept)."""
-    content = _require_non_blank(payload.content, "content")
+    """Replace the content of the note at ``index`` and/or reassign its group.
+
+    Timestamp is kept.  At least one of ``content`` / ``group`` must be
+    present; a drag that only moves the note sends ``{"group": "…"}`` and
+    leaves the text alone.
+    """
+    if "content" not in payload.model_fields_set and "group" not in payload.model_fields_set:
+        raise HTTPException(status_code=422, detail="nothing to update")
+    content: str | None = None
+    if payload.content is not None:
+        content = _require_non_blank(payload.content, "content")
+    group = _patch_group(payload, "group")
     try:
-        return _notes_payload(await service.update_note(index, content))
+        return _notes_payload(await service.update_note(index, content, group=group))
     except IndexError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -213,3 +280,110 @@ async def delete_note(
         return _notes_payload(await service.delete_note(index))
     except IndexError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+# ----------------------------------------------------------------------
+# Group CRUD
+# ----------------------------------------------------------------------
+
+
+@router.post("/items/groups", response_model=TodoItemsOut, response_model_exclude_none=True)
+async def create_item_group(
+    payload: GroupCreate,
+    service: TodoService = Depends(get_todo_service),
+) -> TodoItemsOut:
+    """Append a ``# name`` marker so the new group exists in the file."""
+    name = _require_non_blank(payload.name, "name")
+    await service.create_group("items", name)
+    return _items_payload(await service.list_items())
+
+
+@router.patch(
+    "/items/groups/{name}",
+    response_model=TodoItemsOut,
+    response_model_exclude_none=True,
+)
+async def rename_item_group(
+    name: str,
+    payload: GroupRename,
+    service: TodoService = Depends(get_todo_service),
+) -> TodoItemsOut:
+    """Rename the ``# name`` marker and reassign every item in the group."""
+    old = _require_non_blank(name, "name")
+    new = _require_non_blank(payload.name, "name")
+    try:
+        await service.rename_group("items", old, new)
+    except GroupNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except GroupNameConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _items_payload(await service.list_items())
+
+
+@router.delete(
+    "/items/groups/{name}",
+    response_model=TodoItemsOut,
+    response_model_exclude_none=True,
+)
+async def delete_item_group(
+    name: str,
+    service: TodoService = Depends(get_todo_service),
+) -> TodoItemsOut:
+    """Remove the ``# name`` marker; members fall back to "ungrouped"."""
+    target = _require_non_blank(name, "name")
+    try:
+        await service.delete_group("items", target)
+    except GroupNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _items_payload(await service.list_items())
+
+
+@router.post("/notes/groups", response_model=TodoNotesOut, response_model_exclude_none=True)
+async def create_note_group(
+    payload: GroupCreate,
+    service: TodoService = Depends(get_todo_service),
+) -> TodoNotesOut:
+    """Append a ``# name`` marker so the new group exists in ``notes.md``."""
+    name = _require_non_blank(payload.name, "name")
+    await service.create_group("notes", name)
+    return _notes_payload(await service.list_notes())
+
+
+@router.patch(
+    "/notes/groups/{name}",
+    response_model=TodoNotesOut,
+    response_model_exclude_none=True,
+)
+async def rename_note_group(
+    name: str,
+    payload: GroupRename,
+    service: TodoService = Depends(get_todo_service),
+) -> TodoNotesOut:
+    """Rename the ``# name`` marker in ``notes.md`` and reassign every note."""
+    old = _require_non_blank(name, "name")
+    new = _require_non_blank(payload.name, "name")
+    try:
+        await service.rename_group("notes", old, new)
+    except GroupNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except GroupNameConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _notes_payload(await service.list_notes())
+
+
+@router.delete(
+    "/notes/groups/{name}",
+    response_model=TodoNotesOut,
+    response_model_exclude_none=True,
+)
+async def delete_note_group(
+    name: str,
+    service: TodoService = Depends(get_todo_service),
+) -> TodoNotesOut:
+    """Remove the ``# name`` marker from ``notes.md``; members go ungrouped."""
+    target = _require_non_blank(name, "name")
+    try:
+        await service.delete_group("notes", target)
+    except GroupNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _notes_payload(await service.list_notes())

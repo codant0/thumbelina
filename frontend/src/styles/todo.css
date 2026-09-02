@@ -8,9 +8,7 @@
 
 .todo-page__panel {
   margin-bottom: 0;
-}
-
-.todo-page__error {
+}.todo-page__error {
   color: var(--error);
   font-size: var(--fs-sm);
   margin-bottom: var(--sp-3);
@@ -343,6 +341,25 @@
   display: none;
 }
 
+/* Each bucket is a wrapper that can receive a drop; the button inside is
+   the visible card. Group cards (not All / Ungrouped) host rename + delete
+   actions that only appear on hover / focus-within. */
+.todo-group-filter__item {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+  flex-shrink: 0;
+  border-radius: var(--radius);
+  transition: box-shadow var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.todo-group-filter__item--drop-target {
+  background: var(--accent-secondary-muted);
+  box-shadow: 0 0 0 2px var(--accent-secondary-border);
+  border-radius: var(--radius);
+}
+
 .todo-group-filter__card {
   display: inline-flex;
   align-items: center;
@@ -377,6 +394,10 @@
   font-weight: var(--fw-med);
 }
 
+.todo-group-filter__item--drop-target .todo-group-filter__card {
+  border-color: var(--accent-secondary-border);
+}
+
 .todo-group-filter__badge {
   min-width: 20px;
   height: 20px;
@@ -393,6 +414,117 @@
 .todo-group-filter__card--selected .todo-group-filter__badge {
   background: var(--accent-secondary);
   color: var(--bg-surface);
+}
+
+.todo-group-filter__item--drop-target .todo-group-filter__badge {
+  background: var(--accent-secondary-muted);
+  color: var(--accent-secondary);
+}
+
+/* Rename / delete icon actions tucked to the right of a group card. */
+.todo-group-filter__actions {
+  position: absolute;
+  right: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  gap: 1px;
+  padding-left: 2px;
+  background: inherit;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.todo-group-filter__item:hover .todo-group-filter__actions,
+.todo-group-filter__item:focus-within .todo-group-filter__actions {
+  opacity: 1;
+}
+
+.todo-group-filter__action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.todo-group-filter__action:hover:not(:disabled) {
+  background: var(--bg-active);
+  color: var(--text-primary);
+}
+
+.todo-group-filter__action--danger {
+  color: var(--error);
+}
+
+.todo-group-filter__action--danger:hover:not(:disabled) {
+  background: var(--error-muted);
+  color: var(--error);
+}
+
+.todo-group-filter__action:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* "+ New group" stub appended after the cards. */
+.todo-group-filter__new {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  flex-shrink: 0;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.todo-group-filter__new:hover:not(:disabled) {
+  border-color: var(--accent-secondary-border);
+  color: var(--accent-secondary);
+  background: var(--accent-secondary-muted);
+}
+
+.todo-group-filter__new:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.todo-group-filter__new:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Inline create / rename group editor row. */
+.todo-group-editor {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+  padding: var(--sp-2);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.todo-group-editor__input {
+  flex: 1;
+  min-width: 0;
 }
 
 .todo-empty-state {
@@ -594,3 +726,14 @@
   }
 }
 
+
+/* A row/card currently being dragged back to a group card. */
+.todo-item--dragging,
+.todo-note--dragging {
+  opacity: 0.45;
+}
+
+.todo-item--editing,
+.todo-note--editing {
+  cursor: default;
+}

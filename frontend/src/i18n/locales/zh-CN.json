@@ -382,7 +382,14 @@
     "yesterday": "昨天",
     "remark": "备注",
     "remarkPlaceholder": "添加备注说明…",
-    "ungrouped": "未分组"
+    "ungrouped": "未分组",
+    "newGroup": "新建分组",
+    "newGroupPlaceholder": "分组名称…",
+    "createGroup": "创建",
+    "renameGroup": "重命名分组",
+    "renameGroupPlaceholder": "新名称…",
+    "deleteGroup": "删除分组",
+    "confirmDeleteGroup": "删除该分组？其中的条目将移入未分组。"
   },
   "memory": {
     "title": "记忆",

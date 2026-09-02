@@ -259,3 +259,155 @@ def test_notes_omit_group_key_when_ungrouped(todo_client: TestClient, tmp_path: 
     response = todo_client.get("/api/v1/todo/notes")
 
     assert "group" not in response.json()["notes"][0]
+
+
+def test_patch_item_group_creates_marker(todo_client: TestClient, tmp_path: Path) -> None:
+    """PATCH with group creates the # heading marker if missing."""
+    response = todo_client.post("/api/v1/todo/items", json={"text": "条目 A"})
+    assert response.status_code == 200
+
+    response = todo_client.patch("/api/v1/todo/items/0", json={"group": "工作"})
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["group"] == "工作"
+    assert "# 工作" in (tmp_path / "TODO" / "todolist.md").read_text(encoding="utf-8")
+
+
+def test_patch_item_group_empty_string_clears(todo_client: TestClient, tmp_path: Path) -> None:
+    """PATCH with group='' moves the item out of its group."""
+    _write_todo_file(tmp_path, "todolist.md", "# 工作\n- [ ] 条目 A\n")
+
+    response = todo_client.patch("/api/v1/todo/items/0", json={"group": ""})
+
+    assert response.status_code == 200
+    assert "group" not in response.json()["items"][0]
+
+
+def test_put_note_group_only(todo_client: TestClient) -> None:
+    """PUT /notes/{i} with only ``group`` reassigns without touching content."""
+    todo_client.post("/api/v1/todo/notes", json={"content": "原始内容"})
+
+    response = todo_client.put(
+        "/api/v1/todo/notes/0",
+        json={"content": "原始内容", "group": "工作"},
+    )
+
+    assert response.status_code == 200
+    note = response.json()["notes"][0]
+    assert note["content"] == "原始内容"
+    assert note["group"] == "工作"
+
+
+def test_create_item_group_appends_marker(todo_client: TestClient, tmp_path: Path) -> None:
+    """POST /items/groups writes a ``# name`` marker."""
+    response = todo_client.post("/api/v1/todo/items/groups", json={"name": "工作"})
+
+    assert response.status_code == 200
+    assert response.json() == {"items": []}
+    assert "# 工作" in (tmp_path / "TODO" / "todolist.md").read_text(encoding="utf-8")
+
+
+def test_create_group_rejects_blank(todo_client: TestClient) -> None:
+    response = todo_client.post("/api/v1/todo/items/groups", json={"name": "   "})
+    assert response.status_code == 422
+
+
+def test_rename_item_group(todo_client: TestClient, tmp_path: Path) -> None:
+    """PATCH /items/groups/{old} renames marker and reassigns items."""
+    _write_todo_file(tmp_path, "todolist.md", "# 工作\n- [ ] 条目 A\n")
+
+    response = todo_client.patch("/api/v1/todo/items/groups/工作", json={"name": "Projects"})
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["group"] == "Projects"
+    text = (tmp_path / "TODO" / "todolist.md").read_text(encoding="utf-8")
+    assert "# Projects" in text
+    assert "# 工作" not in text
+
+
+def test_rename_item_group_conflict_409(todo_client: TestClient, tmp_path: Path) -> None:
+    """Renaming onto an existing group returns 409."""
+    _write_todo_file(tmp_path, "todolist.md", "# 工作\n- [ ] a\n# 学习\n- [ ] b\n")
+
+    response = todo_client.patch("/api/v1/todo/items/groups/工作", json={"name": "学习"})
+    assert response.status_code == 409
+
+
+def test_rename_item_group_unknown_404(todo_client: TestClient) -> None:
+    response = todo_client.patch("/api/v1/todo/items/groups/不存在", json={"name": "Projects"})
+    assert response.status_code == 404
+
+
+def test_delete_item_group_moves_members_ungrouped(todo_client: TestClient, tmp_path: Path) -> None:
+    """DELETE removes the marker and detaches every member."""
+    _write_todo_file(tmp_path, "todolist.md", "# 工作\n- [ ] a\n# 学习\n- [ ] b\n")
+
+    response = todo_client.delete("/api/v1/todo/items/groups/工作")
+
+    assert response.status_code == 200
+    items = response.json()["items"]
+    # exclude_none drops the ``group`` key entirely for ungrouped items.
+    assert [item.get("group") for item in items] == [None, "学习"]
+    text = (tmp_path / "TODO" / "todolist.md").read_text(encoding="utf-8")
+    assert "# 工作" not in text
+    assert "# 学习" in text
+
+
+def test_drag_item_across_groups_round_trips(todo_client: TestClient, tmp_path: Path) -> None:
+    """Physically moving an item between groups stays stable on re-read.
+
+    The UI drags by the index it currently renders; after the server moves
+    the line the ordering may shift, but a fresh read must agree with the
+    response the move returned.
+    """
+    _write_todo_file(
+        tmp_path,
+        "todolist.md",
+        "# 工作\n- [ ] 写周报\n# 学习\n- [ ] 读论文\n",
+    )
+
+    # Drag '读论文' (currently index 1) into 工作.
+    response = todo_client.patch("/api/v1/todo/items/1", json={"group": "工作"})
+    assert response.status_code == 200
+    moved = response.json()["items"]
+    assert [item["text"] for item in moved] == ["写周报", "读论文"]
+    assert [item["group"] for item in moved] == ["工作", "工作"]
+
+    # A fresh read agrees with the move response.
+    response = todo_client.get("/api/v1/todo/items")
+    assert response.json()["items"] == moved
+
+    # Drag '写周报' out of its group back to ungrouped.
+    response = todo_client.patch("/api/v1/todo/items/0", json={"group": ""})
+    assert response.status_code == 200
+    assert [item.get("group") for item in response.json()["items"]] == [None, "工作"]
+
+
+def test_delete_item_group_unknown_404(todo_client: TestClient) -> None:
+    response = todo_client.delete("/api/v1/todo/items/groups/不存在")
+    assert response.status_code == 404
+
+
+def test_note_group_crud_via_api(todo_client: TestClient, tmp_path: Path) -> None:
+    """notes.md supports the same create / rename / delete endpoints."""
+    response = todo_client.post("/api/v1/todo/notes/groups", json={"name": "工作"})
+    assert response.status_code == 200
+
+    response = todo_client.post("/api/v1/todo/notes", json={"content": "笔记 A"})
+    assert response.status_code == 200
+    note_index = response.json()["notes"][0]["index"]
+
+    response = todo_client.put(
+        f"/api/v1/todo/notes/{note_index}",
+        json={"content": "笔记 A", "group": "工作"},
+    )
+    assert response.status_code == 200
+    assert response.json()["notes"][0]["group"] == "工作"
+
+    response = todo_client.patch("/api/v1/todo/notes/groups/工作", json={"name": "Projects"})
+    assert response.status_code == 200
+    assert response.json()["notes"][0]["group"] == "Projects"
+
+    response = todo_client.delete("/api/v1/todo/notes/groups/Projects")
+    assert response.status_code == 200
+    assert "group" not in response.json()["notes"][0]

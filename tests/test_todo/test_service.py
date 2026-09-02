@@ -8,7 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from thumbelina.todo.service import TodoService
+from thumbelina.todo.service import (
+    GroupNameConflictError,
+    GroupNotFoundError,
+    TodoService,
+)
 
 TIMESTAMP_RE = re.compile(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}")
 
@@ -225,3 +229,210 @@ class TestConcurrency:
         items = await service.list_items()
         assert len(items) == 10
         assert sorted(item.text for item in items) == [f"并发条目 {i}" for i in range(10)]
+
+
+class TestGroupCRUD:
+    """Group CRUD: create / rename / delete on todolist.md and notes.md."""
+
+    async def test_create_item_group_appends_marker(self, tmp_path: Path) -> None:
+        directory = tmp_path / "TODO"
+        service = TodoService(directory)
+        await service.init()
+        await service.add_item("条目 A")
+
+        await service.create_group("items", "工作")
+
+        text = (directory / "todolist.md").read_text(encoding="utf-8")
+        assert text.endswith("- [ ] 条目 A\n# 工作\n")
+        # Existing items stay ungrouped: only new assignments adopt the group.
+        items = await service.list_items()
+        assert items[0].group is None
+
+    async def test_add_item_skips_trailing_empty_group_marker(self, tmp_path: Path) -> None:
+        """A fresh empty group (a trailing ``# name`` with no members) must
+        not capture items added afterwards — new items stay ungrouped until
+        the user explicitly drags them into the group."""
+        directory = tmp_path / "TODO"
+        service = TodoService(directory)
+        await service.init()
+        await service.add_item("条目 A")
+        await service.create_group("items", "工作")
+
+        items = await service.add_item("新条目")
+
+        # Both items stay ungrouped; the marker stays below them.
+        assert [item.group for item in items] == [None, None]
+        text = (directory / "todolist.md").read_text(encoding="utf-8")
+        assert text == "- [ ] 条目 A\n- [ ] 新条目\n# 工作\n"
+
+    async def test_create_item_group_is_idempotent(self, tmp_path: Path) -> None:
+        directory = tmp_path / "TODO"
+        service = TodoService(directory)
+        await service.init()
+
+        await service.create_group("items", "工作")
+        await service.create_group("items", "工作")
+
+        text = (directory / "todolist.md").read_text(encoding="utf-8")
+        # The second call must not duplicate the heading.
+        assert text.count("# 工作") == 1
+
+    async def test_update_item_assigns_group_and_creates_marker(self, tmp_path: Path) -> None:
+        directory = tmp_path / "TODO"
+        service = TodoService(directory)
+        await service.init()
+        await service.add_item("条目 A")
+
+        updated = await service.update_item(0, group="工作")
+
+        assert updated[0].group == "工作"
+        text = (directory / "todolist.md").read_text(encoding="utf-8")
+        # The marker is inserted above the first item in the group so the
+        # parser tags that item with it.
+        assert text == "# 工作\n- [ ] 条目 A\n"
+
+    async def test_update_item_group_empty_string_clears(self, tmp_path: Path) -> None:
+        directory = tmp_path / "TODO"
+        service = TodoService(directory)
+        await service.init()
+        # Pre-seed a grouped item.
+        (directory / "todolist.md").write_text("# 工作\n- [ ] 条目 A\n", encoding="utf-8")
+
+        updated = await service.update_item(0, group="")
+
+        assert updated[0].group is None
+        text = (directory / "todolist.md").read_text(encoding="utf-8")
+        # Clearing the group does not delete the heading marker — other
+        # items may still reference it. Empty-string round-trip just emits
+        # the marker alone (no items follow it).
+        assert "# 工作" in text
+
+    async def test_rename_item_group_swaps_marker_and_members(self, tmp_path: Path) -> None:
+        directory = tmp_path / "TODO"
+        service = TodoService(directory)
+        await service.init()
+        await service.add_item("条目 A")
+        await service.add_item("条目 B")
+        # Moving A physically relocates its line, so re-list after each move
+        # to observe the fresh ordering the UI would see.
+        await service.update_item(0, group="工作")
+        remaining = await service.list_items()
+        # B is still ungrouped; drag it in using its current index.
+        await service.update_item(remaining[0].index, group="工作")
+
+        await service.rename_group("items", "工作", "Projects")
+
+        items = await service.list_items()
+        assert [item.group for item in items] == ["Projects", "Projects"]
+        text = (directory / "todolist.md").read_text(encoding="utf-8")
+        assert "# Projects" in text
+        assert "# 工作" not in text
+
+    async def test_rename_item_group_rejects_collision(self, tmp_path: Path) -> None:
+        directory = tmp_path / "TODO"
+        service = TodoService(directory)
+        await service.init()
+        await service.create_group("items", "工作")
+        await service.create_group("items", "学习")
+
+        with pytest.raises(GroupNameConflictError):
+            await service.rename_group("items", "工作", "学习")
+
+    async def test_rename_item_group_unknown_raises(self, tmp_path: Path) -> None:
+        directory = tmp_path / "TODO"
+        service = TodoService(directory)
+        await service.init()
+
+        with pytest.raises(GroupNotFoundError):
+            await service.rename_group("items", "不存在", "学习")
+
+    async def test_delete_item_group_moves_members_to_ungrouped(self, tmp_path: Path) -> None:
+        directory = tmp_path / "TODO"
+        service = TodoService(directory)
+        await service.init()
+        await service.add_item("条目 A")
+        await service.update_item(0, group="工作")
+        await service.create_group("items", "学习")
+        await service.add_item("条目 B")
+        await service.update_item(1, group="学习")
+
+        await service.delete_group("items", "工作")
+
+        items = await service.list_items()
+        assert [item.group for item in items] == [None, "学习"]
+        text = (directory / "todolist.md").read_text(encoding="utf-8")
+        assert "# 工作" not in text
+        assert "# 学习" in text
+
+    async def test_delete_item_group_unknown_raises(self, tmp_path: Path) -> None:
+        directory = tmp_path / "TODO"
+        service = TodoService(directory)
+        await service.init()
+
+        with pytest.raises(GroupNotFoundError):
+            await service.delete_group("items", "不存在")
+
+    async def test_note_group_crud_round_trip(self, tmp_path: Path) -> None:
+        directory = tmp_path / "TODO"
+        service = TodoService(directory)
+        await service.init()
+        await service.add_note("笔记 A")
+        await service.add_note("笔记 B")
+        # Notes list newest-first: [B, A].  Drag each into 工作.  Each move
+        # physically relocates notes (groups must stay contiguous), so look
+        # up the current index per drag rather than caching it.
+        for content in ("笔记 B", "笔记 A"):
+            notes = await service.list_notes()
+            target = next(note for note in notes if note.content == content)
+            await service.update_note(target.index, group="工作")
+
+        notes = await service.list_notes()
+        assert all(note.group == "工作" for note in notes)
+
+        await service.rename_group("notes", "工作", "Projects")
+        notes = await service.list_notes()
+        assert all(note.group == "Projects" for note in notes)
+
+        await service.delete_group("notes", "Projects")
+        notes = await service.list_notes()
+        assert all(note.group is None for note in notes)
+        # No blank placeholder anchor survives the group deletion.
+        assert all(note.content for note in notes)
+
+    async def test_update_note_group_empty_string_clears(self, tmp_path: Path) -> None:
+        directory = tmp_path / "TODO"
+        service = TodoService(directory)
+        await service.init()
+        await service.add_note("笔记 A")
+        await service.update_note(0, "笔记 A", group="工作")
+
+        updated = await service.update_note(0, "笔记 A", group="")
+
+        assert updated[0].group is None
+
+    async def test_create_note_group_uses_blank_placeholder(self, tmp_path: Path) -> None:
+        """An empty notes group is anchored by a blank placeholder note so the
+        marker survives re-reads without capturing existing notes."""
+        directory = tmp_path / "TODO"
+        service = TodoService(directory)
+        await service.init()
+        await service.add_note("真实笔记")
+
+        await service.create_group("notes", "工作")
+
+        notes = await service.list_notes()
+        # [真实笔记, 占位符] — the placeholder sits at the tail.
+        assert [note.content for note in notes] == ["真实笔记", ""]
+        assert notes[-1].group == "工作"
+        text = (directory / "notes.md").read_text(encoding="utf-8")
+        assert "# 工作" in text
+
+        # Idempotent.
+        await service.create_group("notes", "工作")
+        assert "# 工作" in (directory / "notes.md").read_text(encoding="utf-8")
+
+        # Deleting the group removes the blank anchor instead of resurrecting it.
+        await service.delete_group("notes", "工作")
+        notes = await service.list_notes()
+        assert [note.content for note in notes] == ["真实笔记"]
+        assert "# 工作" not in (directory / "notes.md").read_text(encoding="utf-8")
