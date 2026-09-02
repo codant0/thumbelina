@@ -176,4 +176,65 @@ describe('InputBox', () => {
     expect(screen.getByText(/auto-send paused/i)).toBeInTheDocument()
     expect(screen.queryByText(/Will be sent when the current reply finishes/i)).not.toBeInTheDocument()
   })
+
+  it('marks the pending bar with data-state=auto when not held', () => {
+    render(
+      <InputBox
+        onSend={vi.fn()}
+        pendingMessage="queued"
+        onSendPendingNow={vi.fn()}
+        onCancelPending={vi.fn()}
+      />,
+    )
+    expect(screen.getByTestId('pending-message').getAttribute('data-state')).toBe('auto')
+  })
+
+  it('marks the pending bar with data-state=held and swaps to the warning icon', () => {
+    const { container } = render(
+      <InputBox
+        onSend={vi.fn()}
+        pendingMessage="queued"
+        pendingHeld
+        onSendPendingNow={vi.fn()}
+        onCancelPending={vi.fn()}
+      />,
+    )
+    expect(screen.getByTestId('pending-message').getAttribute('data-state')).toBe('held')
+    // icon chip carries an inline data-icon for the visual test; warning icon wins under held.
+    expect(container.querySelector('.pending-float-icon-chip [data-icon="AlertCircle"]')).toBeTruthy()
+    expect(container.querySelector('.pending-float-icon-chip [data-icon="Clock"]')).toBeNull()
+  })
+
+  it('uses btn-sm variants and the right ordering (ghost cancel before primary send-now)', () => {
+    render(
+      <InputBox
+        onSend={vi.fn()}
+        pendingMessage="queued"
+        onSendPendingNow={vi.fn()}
+        onCancelPending={vi.fn()}
+      />,
+    )
+    const cancel = screen.getByTestId('pending-cancel')
+    const sendNow = screen.getByTestId('pending-send-now')
+    expect(cancel.className).toMatch(/btn-sm/)
+    expect(cancel.className).toMatch(/btn-ghost/)
+    expect(sendNow.className).toMatch(/btn-sm/)
+    expect(sendNow.className).toMatch(/btn-primary/)
+    // DOM order: cancel first, send-now second
+    expect(cancel.compareDocumentPosition(sendNow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('exposes the pending bar as a polite live region for screen readers', () => {
+    render(
+      <InputBox
+        onSend={vi.fn()}
+        pendingMessage="queued"
+        onSendPendingNow={vi.fn()}
+        onCancelPending={vi.fn()}
+      />,
+    )
+    const bar = screen.getByTestId('pending-message')
+    expect(bar.getAttribute('role')).toBe('status')
+    expect(bar.getAttribute('aria-live')).toBe('polite')
+  })
 })

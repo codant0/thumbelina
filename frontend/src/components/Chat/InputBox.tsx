@@ -1,5 +1,5 @@
 import { useState, useRef, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
-import { Clock, Send, Square, Zap } from 'lucide-react'
+import { AlertCircle, Clock, Send, Square, X, Zap } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 
 interface InputBoxProps {
@@ -79,13 +79,29 @@ export function InputBox({
     }
   }
 
+  const pendingState = pendingHeld ? 'held' : 'auto'
+
   return (
     <div className="input-box">
       {pendingMessage && (
-        <div className="pending-float" data-testid="pending-message" role="status">
+        <div
+          className="pending-float"
+          data-testid="pending-message"
+          data-state={pendingState}
+          role="status"
+          aria-live="polite"
+        >
+          <div className="pending-float-accent" aria-hidden="true" />
           <div className="pending-float-head">
-            <Clock size={14} />
+            <span className="pending-float-icon-chip" aria-hidden="true">
+              {pendingHeld ? (
+                <AlertCircle size={14} data-icon="AlertCircle" />
+              ) : (
+                <Clock size={14} data-icon="Clock" />
+              )}
+            </span>
             <span className="pending-float-title">{t('chat.pendingTitle')}</span>
+            <span className="pending-float-sep" aria-hidden="true">·</span>
             <span className="pending-float-hint">
               {pendingHeld ? t('chat.pendingHeldHint') : t('chat.pendingHint')}
             </span>
@@ -94,20 +110,21 @@ export function InputBox({
           <div className="pending-float-actions">
             <button
               type="button"
-              className="btn btn-primary"
-              data-testid="pending-send-now"
-              onClick={onSendPendingNow}
-            >
-              <Zap size={13} />
-              {t('chat.sendNow')}
-            </button>
-            <button
-              type="button"
-              className="btn btn-ghost"
+              className="btn btn-sm btn-ghost"
               data-testid="pending-cancel"
               onClick={onCancelPending}
             >
+              <X size={12} />
               {t('common.cancel')}
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm btn-primary"
+              data-testid="pending-send-now"
+              onClick={onSendPendingNow}
+            >
+              <Zap size={12} />
+              {t('chat.sendNow')}
             </button>
           </div>
         </div>
