@@ -48,6 +48,15 @@ async def call_model(
 async def tool_node(state: AgentState, tools: list[BaseTool]) -> dict[str, list[ToolMessage]]:
     """Execute tool calls from the last AI message.
 
+    Tool calls from the same AIMessage are dispatched concurrently with
+    ``asyncio.gather`` so a model that emits N independent tool calls in one
+    turn waits ``max(t_i)`` instead of ``sum(t_i)``. ``gather`` preserves the
+    input order, so the returned ``ToolMessage`` list always aligns with the
+    original ``tool_calls`` list by ``tool_call_id`` (required by OpenAI-style
+    providers). One failing tool does not abort the rest: failures are
+    captured via ``return_exceptions=True`` and rendered as an
+    ``Error executing tool ...`` ``ToolMessage``.
+
     Parameters
     ----------
     state:
@@ -66,31 +75,28 @@ async def tool_node(state: AgentState, tools: list[BaseTool]) -> dict[str, list[
         return {"messages": []}
 
     tool_map = {tool.name: tool for tool in tools}
-    tool_messages: list[ToolMessage] = []
 
-    for tool_call in last_message.tool_calls:
+    async def _invoke_one(tool_call: dict) -> ToolMessage:
         tool_name = tool_call["name"]
-        tool_args = tool_call["args"]
         tool_call_id = tool_call["id"]
 
         if tool_name not in tool_map:
-            tool_messages.append(
-                ToolMessage(
-                    content=f"Error: Unknown tool '{tool_name}'",
-                    tool_call_id=tool_call_id,
-                )
+            return ToolMessage(
+                content=f"Error: Unknown tool '{tool_name}'",
+                tool_call_id=tool_call_id,
             )
-            continue
 
         try:
-            result = await tool_map[tool_name].ainvoke(tool_args)
-            tool_messages.append(ToolMessage(content=str(result), tool_call_id=tool_call_id))
+            result = await tool_map[tool_name].ainvoke(tool_call["args"])
         except Exception as exc:
-            tool_messages.append(
-                ToolMessage(
-                    content=f"Error executing tool '{tool_name}': {exc}",
-                    tool_call_id=tool_call_id,
-                )
+            return ToolMessage(
+                content=f"Error executing tool '{tool_name}': {exc}",
+                tool_call_id=tool_call_id,
             )
+        return ToolMessage(content=str(result), tool_call_id=tool_call_id)
+
+    tool_messages: list[ToolMessage] = list(
+        await asyncio.gather(*(_invoke_one(tc) for tc in last_message.tool_calls))
+    )
 
     return {"messages": tool_messages}

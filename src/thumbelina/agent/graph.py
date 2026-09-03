@@ -21,6 +21,7 @@ from langchain_core.messages import (
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.errors import GraphRecursionError
 from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
@@ -454,10 +455,19 @@ class ThumbelinaAgent:
     def _build_graph(self) -> CompiledStateGraph[AgentState, Any]:
         """构建并编译 LangGraph agent 图。
 
-        结构：entry → compress → agent (→ tools → agent …)。压缩节点
-        每轮运行一次，先于 LLM 调用，仅当用量接近上下文窗口时裁剪
-        检查点历史；低于阈值时原样放行状态，从而保留纯追加前缀
-        （provider 前缀缓存）。
+        结构::
+
+            entry → compress → agent → tools → agent → … → END
+
+        ``compress`` 节点在 **每次图入口处** 运行一次(每轮 ``run``/``stream``
+        调用开始时由入口触发),承担两件事:无条件修复 ``tool_calls``/
+        ``ToolMessage`` 配对、用量接近窗口时压缩历史;无需改动时返回空更新
+        ``{}``,保留纯追加前缀(provider 前缀缓存)。
+
+        此外, ``_call_model_node`` 在每次调用 LLM **之前** 都会先调用
+        :func:`ensure_tool_pairing` 修复配对不变量(包括 ``tools → agent``
+        的循环迭代中),因此「每轮 LLM 调用前修复」这一约束由 agent 节点
+        自身保证;压缩动作本身仅在每轮入口执行。
         """
         graph = StateGraph(AgentState)
         graph.add_node("compress", self._compress_node)
@@ -497,23 +507,27 @@ class ThumbelinaAgent:
         return self._context_window_tokens
 
     async def _compress_node(self, state: AgentState, config: RunnableConfig) -> dict[str, Any]:
-        """在每轮 LLM 调用前修复配对不变量，并在用量接近窗口时压缩历史。
+        """在每次图入口处修复配对不变量，并在用量接近窗口时压缩历史。
 
-        每轮在 LLM 调用之前运行一次（entry → compress → agent）。做两件事：
+        该节点在 **每次 ``run``/``stream`` 入口处** 运行一次(由
+        ``graph.set_entry_point("compress")`` 触发)。做两件事:
 
-        1. **无条件**修复 ``tool_calls``/``ToolMessage`` 配对（见
-           :func:`ensure_tool_pairing`）：流式轮次若在 assistant 产出
-           ``tool_calls`` 后、tools 节点执行前被中断，检查点会留下悬空
-           ``tool_calls``，原样发给 OpenAI 兼容端点会被 400 拒绝，且之后
-           每轮重放、无法自愈。修复在每轮 LLM 调用前完成，因此无论是否
-           触发压缩，发往 provider 的序列都满足配对不变量。
-        2. 用量达到 ``window × context.compress.threshold`` 时，按配置策略
-           向 50% 低水位压缩；失败的策略降级为纯删除，压缩永远不会阻塞
+        1. **无条件**修复 ``tool_calls``/``ToolMessage`` 配对(见
+           :func:`ensure_tool_pairing`):流式轮次若在 assistant 产出
+           ``tool_calls`` 后、tools 节点执行前被中断,检查点会留下悬空
+           ``tool_calls``,原样发给 OpenAI 兼容端点会被 400 拒绝,且之后
+           每轮重放、无法自愈。修复在图入口完成,因此下一轮重放不会因历史
+           损坏而雪崩。
+           **每轮 LLM 调用前** 的修复由 :meth:`_call_model_node` 内部独立
+           保证(``tools → agent`` 循环的迭代也会经过 agent 节点),从而
+           覆盖「compress 节点只在入口跑一次」的拓扑限制。
+        2. 用量达到 ``window × context.compress.threshold`` 时,按配置策略
+           向 50% 低水位压缩;失败的策略降级为纯删除,压缩永远不会阻塞
            会话。
 
-        修复与压缩后的序列写回状态，检查点存储器会把它固定下来供后续轮次
-        使用。两者都未改动状态（无需修复且低于阈值）时返回空更新，保留
-        纯追加前缀（provider 前缀缓存）。
+        修复与压缩后的序列写回状态,检查点存储器会把它固定下来供后续轮次
+        使用。两者都未改动状态(无需修复且低于阈值)时返回空更新 ``{}``,
+        保留纯追加前缀(provider 前缀缓存)。
         """
         messages = state["messages"]
         if not messages:
@@ -687,7 +701,25 @@ class ThumbelinaAgent:
         return _result(True, tokens_before, tokens_after, len(compressed), "ok")
 
     async def _call_model_node(self, state: AgentState) -> dict[str, list[AIMessage]]:
-        """Node wrapper for calling the LLM."""
+        """Node wrapper for calling the LLM.
+
+        在调 LLM 之前,先对 ``messages`` 做一次配对修复
+        (``ensure_tool_pairing``),作为 LLM 调用的输入视图 —— 这是
+        ``tools → agent`` 循环每次回到 agent 节点时唯一一次「修复配对」
+        的机会,也是 :meth:`_compress_node` docstring 中承诺的「每轮 LLM
+        调用前修复」的实现。修复结果不会写回 graph state(``add_messages``
+        reducer 不支持直接删除),但持久化修复由 ``compress`` 节点在每轮
+        图入口处负责;此处仅保证 LLM 永远不会看到悬空 ``tool_calls``。
+        """
+        messages = state.get("messages") or []
+        if messages:
+            repaired = ensure_tool_pairing(messages)
+            if repaired is not messages:
+                logger.warning(
+                    "Repaired broken tool_calls pairing before LLM call "
+                    "(interrupted turn left dangling tool_calls / orphaned tool messages)"
+                )
+                state = {**state, "messages": repaired}
         model = self.llm
         if self.tools:
             try:
@@ -708,11 +740,27 @@ class ThumbelinaAgent:
             )
         result = await tool_node(state, self.tools)
         tool_messages = result.get("messages", [])
+        # ``zip`` 会在两侧长度不一致时静默截断,这里显式记录告警以避免
+        # 后续 ``tool_node`` 行为变更后丢失轨迹记录而无人察觉。
+        if len(calls) != len(tool_messages):
+            logger.error(
+                "Tool call/result count mismatch in trajectory recording: "
+                "%d call(s) but %d tool message(s); pairing by zip truncation",
+                len(calls),
+                len(tool_messages),
+            )
         for tool_call, tool_message in zip(calls, tool_messages):
             content = str(getattr(tool_message, "content", ""))
             await self.trajectory_recorder.record_tool_result(
                 tool_call.get("id", ""), content, is_error=content.startswith("Error")
             )
+        if len(calls) > len(tool_messages):
+            for orphan in calls[len(tool_messages) :]:
+                logger.warning(
+                    "Trajectory: tool call %r has no ToolMessage counterpart; "
+                    "skipping result record",
+                    orphan.get("id", ""),
+                )
         return result
 
     def _run_config(self, context_window_tokens: int | None = None) -> RunnableConfig | None:
@@ -737,6 +785,19 @@ class ThumbelinaAgent:
         if context_window_tokens is not None:
             configurable["context_window_tokens"] = context_window_tokens
         return {"configurable": configurable}
+
+    def _graph_invoke_config(self, base: RunnableConfig | None) -> RunnableConfig:
+        """在 ``_run_config`` 基础上叠加 ``recursion_limit`` 等图级选项。
+
+        ``recursion_limit`` 是 LangGraph 顶层 ``config`` 字段(不是
+        ``configurable`` 内的键),用于约束图节点跳数;达到上限时抛
+        ``GraphRecursionError``。此处显式声明等于 LangGraph 默认值 25,
+        便于未来按模型/会话类型调整,同时 ``run``/``stream`` 中通过捕
+        获该异常提供友好兜底回复。
+        """
+        merged: RunnableConfig = dict(base) if base else {}
+        merged.setdefault("recursion_limit", 25)
+        return merged
 
     async def _is_first_turn(self, config: RunnableConfig) -> bool:
         """当检查点线程尚无任何消息时返回 ``True``。
@@ -1046,11 +1107,22 @@ class ThumbelinaAgent:
         if self._remember_tool is not None:
             self._remember_tool.reset_turn_quota()
 
-        config = self._run_config(context_window_tokens)
+        config = self._graph_invoke_config(self._run_config(context_window_tokens))
         initial_messages = await self._build_initial_messages(user_input, config)
 
         initial_state: AgentState = {"messages": initial_messages}
-        result = await self.graph.ainvoke(initial_state, config=config)
+        try:
+            result = await self.graph.ainvoke(initial_state, config=config)
+        except GraphRecursionError:
+            logger.warning(
+                "Agent recursion limit (recursion_limit=%d) exceeded; returning fallback reply",
+                int((config or {}).get("recursion_limit", 25)),
+            )
+            fallback = "Conversation reached the step limit; please retry or reset."
+            await self._persist_message("assistant", fallback)
+            await self.trajectory_recorder.record_assistant(fallback)
+            asyncio.create_task(self._maybe_auto_name())
+            return fallback
 
         last_message = result["messages"][-1]
         response = str(last_message.content)
@@ -1100,7 +1172,7 @@ class ThumbelinaAgent:
         if self._remember_tool is not None:
             self._remember_tool.reset_turn_quota()
 
-        config = self._run_config(context_window_tokens)
+        config = self._graph_invoke_config(self._run_config(context_window_tokens))
         initial_messages = await self._build_initial_messages(user_input, config)
 
         initial_state: AgentState = {"messages": initial_messages}
@@ -1116,57 +1188,69 @@ class ThumbelinaAgent:
         last_chunk_metadata: dict | None = None
         chunk_meta_count = 0
 
-        async for event in self.graph.astream(initial_state, stream_mode="messages", config=config):
-            # event is a tuple: (message_chunk, metadata)
-            if not isinstance(event, tuple) or len(event) < 1:
-                continue
+        astream_iter = self.graph.astream(initial_state, stream_mode="messages", config=config)
+        try:
+            async for event in astream_iter:
+                # event is a tuple: (message_chunk, metadata)
+                if not isinstance(event, tuple) or len(event) < 1:
+                    continue
 
-            message_chunk = event[0]
-            metadata = event[1] if len(event) > 1 and isinstance(event[1], dict) else {}
-            # 来自压缩节点的状态维护（删除、被剥离的 assistant 重新
-            # 发出）不属于回复内容。
-            if metadata.get("langgraph_node") == "compress":
-                continue
+                message_chunk = event[0]
+                metadata = event[1] if len(event) > 1 and isinstance(event[1], dict) else {}
+                # 来自压缩节点的状态维护（删除、被剥离的 assistant 重新
+                # 发出）不属于回复内容。
+                if metadata.get("langgraph_node") == "compress":
+                    continue
 
-            # Accept both streaming chunks (AIMessageChunk) and complete
-            # responses (AIMessage). The latter occurs with non-streaming
-            # LLM providers, where astream(stream_mode="messages") emits a
-            # single AIMessage instead of per-token chunks.
-            if not isinstance(message_chunk, AIMessage) or getattr(
-                message_chunk, "tool_calls", None
-            ):
-                continue
-            chunk_metadata = getattr(message_chunk, "response_metadata", None)
-            if isinstance(chunk_metadata, dict) and chunk_metadata:
-                last_chunk_metadata = chunk_metadata
-                chunk_meta_count += 1
-                if "token_usage" in chunk_metadata:
-                    logger.debug(
-                        "trajectory: stream chunk carries token_usage: %r",
-                        chunk_metadata["token_usage"],
-                    )
+                # Accept both streaming chunks (AIMessageChunk) and complete
+                # responses (AIMessage). The latter occurs with non-streaming
+                # LLM providers, where astream(stream_mode="messages") emits a
+                # single AIMessage instead of per-token chunks.
+                if not isinstance(message_chunk, AIMessage) or getattr(
+                    message_chunk, "tool_calls", None
+                ):
+                    continue
+                chunk_metadata = getattr(message_chunk, "response_metadata", None)
+                if isinstance(chunk_metadata, dict) and chunk_metadata:
+                    last_chunk_metadata = chunk_metadata
+                    chunk_meta_count += 1
+                    if "token_usage" in chunk_metadata:
+                        logger.debug(
+                            "trajectory: stream chunk carries token_usage: %r",
+                            chunk_metadata["token_usage"],
+                        )
 
-            content, reasoning = _extract_chunk_parts(message_chunk)
-            if content:
-                full_response += content
-                pending_content += content
-            if reasoning:
-                full_reasoning += reasoning
-                pending_reasoning += reasoning
-            if not content and not reasoning:
-                continue
+                content, reasoning = _extract_chunk_parts(message_chunk)
+                if content:
+                    full_response += content
+                    pending_content += content
+                if reasoning:
+                    full_reasoning += reasoning
+                    pending_reasoning += reasoning
+                if not content and not reasoning:
+                    continue
 
-            # Yield when buffer reaches batch size or time interval
-            now = asyncio.get_event_loop().time()
-            due = (now - last_flush) >= flush_interval
-            if pending_reasoning and (len(pending_reasoning) >= batch_size or due):
-                yield {"type": "reasoning", "text": pending_reasoning}
-                pending_reasoning = ""
-                last_flush = now
-            if pending_content and (len(pending_content) >= batch_size or due):
-                yield {"type": "content", "text": pending_content}
-                pending_content = ""
-                last_flush = now
+                # Yield when buffer reaches batch size or time interval
+                now = asyncio.get_event_loop().time()
+                due = (now - last_flush) >= flush_interval
+                if pending_reasoning and (len(pending_reasoning) >= batch_size or due):
+                    yield {"type": "reasoning", "text": pending_reasoning}
+                    pending_reasoning = ""
+                    last_flush = now
+                if pending_content and (len(pending_content) >= batch_size or due):
+                    yield {"type": "content", "text": pending_content}
+                    pending_content = ""
+                    last_flush = now
+        except GraphRecursionError:
+            logger.warning(
+                "Agent recursion limit (recursion_limit=%d) exceeded mid-stream; "
+                "yielding fallback reply",
+                int((config or {}).get("recursion_limit", 25)),
+            )
+            fallback = "Conversation reached the step limit; please retry or reset."
+            if not full_response:
+                full_response = fallback
+            yield {"type": "content", "text": fallback}
 
         # Yield any remaining content
         if pending_reasoning:
