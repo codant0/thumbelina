@@ -88,6 +88,10 @@
   flex-direction: column;
   flex-shrink: 0;
   overflow: hidden;
+  /* chat-area 的 message-list 跨越整个 viewport (见 chat.css);
+     sidebar 通过更高 z-index 浮在 message-list 之上,遮挡左缘 260px 区。 */
+  position: relative;
+  z-index: 2;
 }
 
 .sidebar-header {
@@ -174,12 +178,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.sidebar-item .item-date {
-  font-size: var(--fs-xs);
-  color: var(--text-secondary);
-  margin-top: 2px;
 }
 
 .sidebar-delete {

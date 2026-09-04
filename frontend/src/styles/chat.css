@@ -8,7 +8,7 @@
 }
 
 .chat-status {
-  padding: 7px var(--sp-4);
+  padding: 7px var(--sp-5);
   font-size: var(--fs-xs);
   font-weight: var(--fw-med);
   color: var(--text-secondary);
@@ -23,6 +23,9 @@
   row-gap: 5px;
   flex-shrink: 0;
   background: var(--bg-surface);
+  /* 覆盖整个 chat-area 宽度,不需要与对话框(960px)对齐 */
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .chat-status .dot {
@@ -235,28 +238,65 @@
 }
 
 /* ===== Messages ===== */
+
+/* 对话内容统一最大宽度(行业偏宽端:ChatGPT ≈ 768px,Claude 768,Notion AI ≈ 760px,
+   部分专业工具 (Phind / Perplexity) 走 960–1024 区间)。
+   容器居中,让"对话框"宽度始终固定,消息行宽 = 容器宽,不再随视口抖动。 */
+:root {
+  --chat-max-width: 960px;
+}
+
 .message-list {
+  /* 占满 chat-area 剩余高度并接管滚动条;
+     通过 negative margin 让 message-list 跨越整个 viewport,
+     滚动条因此紧贴浏览器最右侧。sidebar 用 z-index 浮在上面 (见 layout.css)。 */
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   /* Our ResizeObserver clamp owns scroll anchoring — the browser's native
      anchoring fights it when earlier content expands (images, fonts). */
   overflow-anchor: none;
-  padding: var(--sp-4) var(--sp-5);
+  /* 滚动条 hover 时留 8px 让位给 handle,其它时候占位避免布局抖动 */
+  scrollbar-gutter: stable;
+  padding: var(--sp-4) 0;
+  margin-left: calc(-1 * var(--sidebar-width));
+  width: calc(100% + var(--sidebar-width));
+  box-sizing: border-box;
+}
+
+/* 居中容器:所有消息行 / 工具栏 / 输入框都被它约束宽度。 */
+.message-list-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
 }
 
 /* Inner wrapper observed by ResizeObserver: its height tracks the content,
    so any post-commit growth (streaming text, async render, font swap)
-   fires the clamp-to-bottom while the user is following. */
+   fires the clamp-to-bottom while the user is following.
+   同时作为消息行宽度的统一容器:max-width 让所有消息行宽固定。 */
 .message-list-content {
   display: flex;
   flex-direction: column;
   gap: var(--sp-4);
+  width: 100%;
+  max-width: var(--chat-max-width);
+  /* message-list 跨越 viewport,左 padding 让出 sidebar 区 + 视觉留白,
+     让对话框内容居中且不被 sidebar 遮挡。 */
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 40px;
+  padding-right: var(--sp-5);
+  box-sizing: border-box;
 }
 
+/* 消息行宽 = 容器宽;气泡宽度通过内部 max-width 控制。 */
 .message {
   display: flex;
   flex-direction: column;
-  max-width: 80%;
+  width: 100%;
+  max-width: 100%;
   animation: msgIn var(--dur-base) var(--ease-out);
 }
 
@@ -265,16 +305,29 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* user 行:右对齐,内部气泡靠右且宽度自适应内容(短句紧凑,长句到 75%)。 */
 .message.user {
-  align-self: flex-end;
+  align-items: flex-end;
 }
 
+.message.user .msg-content {
+  max-width: 75%;
+}
+
+/* assistant 行:左对齐,内部气泡靠左且占据整行宽度(避免左贴边)。 */
 .message.assistant {
-  align-self: flex-start;
+  align-items: flex-start;
 }
 
+.message.assistant .msg-content {
+  max-width: 100%;
+}
+
+/* system 消息:容器居中,内容自动居中。 */
 .message.system {
   align-self: center;
+  align-items: center;
+  width: auto;
   max-width: 65%;
 }
 
@@ -285,11 +338,17 @@
   letter-spacing: 0.04em;
   margin-bottom: 5px;
   color: var(--text-secondary);
+  display: inline-block;
 }
 
 .message.user .msg-role {
   text-align: right;
   color: var(--accent);
+  align-self: flex-end;
+}
+
+.message.assistant .msg-role {
+  align-self: flex-start;
 }
 
 .message.system .msg-role {
@@ -456,6 +515,9 @@
   border-top: 1px solid var(--border);
   background: var(--bg-surface);
   flex-shrink: 0;
+  /* 覆盖整个 chat-area 宽度,不需要与对话框(960px)对齐 */
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .input-box form {
@@ -547,5 +609,629 @@
 
 .input-box .stop-send-btn:hover {
   filter: brightness(1.08);
+}
+
+/* ===== Subagent inline cards ===== */
+/* Subagent 卡片:整张卡片可点击,在右侧展开详情面板。 */
+
+.subagent-cards {
+  margin-top: var(--sp-2);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.subagent-card {
+  display: block;
+  width: 100%;
+  font-size: var(--fs-sm);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-2) var(--sp-3);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.subagent-card:hover {
+  border-color: var(--accent);
+}
+
+.subagent-card:disabled {
+  cursor: default;
+}
+
+.subagent-card[data-status="running"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+
+.subagent-card__summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.subagent-card__name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: var(--fw-semi);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  flex: 1;
+  min-width: 0;
+}
+
+.subagent-card__name svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  flex-shrink: 0;
+}
+
+.subagent-card__name span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-card__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.subagent-card__duration {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+
+/* ===== Subagent 右侧停靠面板 ===== */
+
+.subagent-side-panel__backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.18);
+  border: 0;
+  padding: 0;
+  cursor: default;
+  z-index: 50;
+  /* 让面板本身不被遮罩吞掉点击 —— 面板 z 更高,且在遮罩之后渲染,自然在上层 */
+}
+
+.subagent-side-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(560px, 50vw);
+  background: var(--bg-surface);
+  border-left: 1px solid var(--border);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  z-index: 60;
+  animation: subagent-side-panel-in 0.18s ease-out;
+}
+
+@keyframes subagent-side-panel-in {
+  from {
+    transform: translateX(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.subagent-side-panel__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.subagent-side-panel__header .subagent-badge {
+  flex: 1;
+  justify-content: flex-start;
+}
+
+.subagent-side-panel__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.subagent-side-panel__btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.subagent-side-panel__btn.is-done {
+  color: var(--success, var(--accent));
+}
+
+.subagent-side-panel__close:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.subagent-side-panel__body {
+  overflow-y: auto;
+  padding: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+/* ===== Floating window (independent of chat dialog size) ===== */
+
+.float-window {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-surface, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 4px);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 4px 12px rgba(0, 0, 0, 0.08),
+    0 20px 48px rgba(0, 0, 0, 0.16);
+  overflow: hidden;
+  min-width: 320px;
+  min-height: 220px;
+  font-size: var(--fs-sm);
+  color: var(--text);
+  animation: float-window-in 0.16s ease-out;
+}
+
+@keyframes float-window-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.99); }
+  to   { opacity: 1; transform: translateY(0)    scale(1); }
+}
+
+.float-window--minimized {
+  min-height: 0;
+  height: auto !important;
+  animation: none;
+}
+
+.float-window__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-elevated, var(--bg));
+  border-bottom: 1px solid var(--border);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  flex-shrink: 0;
+}
+
+.float-window__header:active {
+  cursor: grabbing;
+}
+
+.float-window__title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.float-window__title {
+  font-weight: var(--fw-semi);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-sm);
+}
+
+.float-window__subtitle {
+  font-size: var(--fs-xs);
+}
+
+.float-window__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.float-window__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.float-window__btn:hover {
+  background: var(--bg-hover, rgba(127, 127, 127, 0.12));
+  color: var(--text);
+}
+
+.float-window__btn.is-done {
+  color: var(--success);
+}
+
+.float-window__btn--close:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
+.float-window__body {
+  flex: 1;
+  overflow: auto;
+  padding: var(--sp-4);
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+/* ---- resize handles ---- */
+.float-window__resize {
+  position: absolute;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.float-window__resize--n,
+.float-window__resize--s {
+  left: 8px;
+  right: 8px;
+  height: 8px;
+}
+
+.float-window__resize--n { top: -4px; cursor: ns-resize; }
+.float-window__resize--s { bottom: -4px; cursor: ns-resize; }
+
+.float-window__resize--e,
+.float-window__resize--w {
+  top: 8px;
+  bottom: 8px;
+  width: 8px;
+}
+
+.float-window__resize--e { right: -4px; cursor: ew-resize; }
+.float-window__resize--w { left: -4px; cursor: ew-resize; }
+
+.float-window__resize--ne,
+.float-window__resize--nw,
+.float-window__resize--se,
+.float-window__resize--sw {
+  width: 14px;
+  height: 14px;
+}
+
+.float-window__resize--ne { top: -4px; right: -4px; cursor: nesw-resize; }
+.float-window__resize--nw { top: -4px; left: -4px; cursor: nwse-resize; }
+.float-window__resize--se { bottom: -4px; right: -4px; cursor: nwse-resize; }
+.float-window__resize--sw { bottom: -4px; left: -4px; cursor: nesw-resize; }
+
+/* ===== Subagent detail window body ===== */
+
+/* 状态徽章(标题栏下方的副标题区) */
+.subagent-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semi);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+
+.subagent-badge svg {
+  flex-shrink: 0;
+}
+
+.subagent-badge--pending {
+  background: color-mix(in srgb, var(--text-secondary) 14%, transparent);
+  color: var(--text-secondary);
+  border-color: color-mix(in srgb, var(--text-secondary) 28%, transparent);
+}
+
+.subagent-badge--running {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+}
+
+.subagent-badge--running svg {
+  animation: subagent-spin 1.2s linear infinite;
+}
+
+@keyframes subagent-spin {
+  to { transform: rotate(360deg); }
+}
+
+.subagent-badge--completed {
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 32%, transparent);
+}
+
+.subagent-badge--failed {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 32%, transparent);
+}
+
+.subagent-badge--cancelled {
+  background: color-mix(in srgb, var(--text-secondary) 10%, transparent);
+  color: var(--text-secondary);
+  border-color: color-mix(in srgb, var(--text-secondary) 22%, transparent);
+}
+
+/* Hero 区:大色块头部,展示任务标题 + 状态色背景 */
+.subagent-hero {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border-radius: var(--radius);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  position: relative;
+  overflow: hidden;
+}
+
+.subagent-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, transparent 0%, var(--hero-accent, transparent) 100%);
+  opacity: 0.08;
+  pointer-events: none;
+}
+
+.subagent-hero--pending { --hero-accent: var(--text-secondary); }
+.subagent-hero--running {
+  --hero-accent: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+.subagent-hero--completed {
+  --hero-accent: var(--success);
+  border-color: color-mix(in srgb, var(--success) 30%, var(--border));
+}
+.subagent-hero--failed {
+  --hero-accent: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 30%, var(--border));
+}
+.subagent-hero--cancelled { --hero-accent: var(--text-secondary); }
+
+.subagent-hero__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--hero-accent);
+  color: var(--bg, #fff);
+  flex-shrink: 0;
+}
+
+.subagent-hero--pending .subagent-hero__icon { background: var(--text-secondary); }
+
+.subagent-hero--running .subagent-hero__icon svg {
+  animation: subagent-spin 1.2s linear infinite;
+}
+
+.subagent-hero__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: relative;
+  z-index: 1;
+}
+
+.subagent-hero__eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--hero-accent);
+  font-weight: var(--fw-semi);
+}
+
+.subagent-hero__title {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semi);
+  color: var(--text);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.subagent-hero__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+
+.subagent-hero__meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 元信息卡 2x2 grid */
+.subagent-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.subagent-meta-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.subagent-meta-card__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.subagent-meta-card__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.subagent-meta-card__label {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.subagent-meta-card__value {
+  font-size: var(--fs-sm);
+  color: var(--text);
+  word-break: break-word;
+}
+
+.subagent-meta-card__value--mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+
+/* Error block — 红色高亮 */
+.subagent-error-block {
+  border: 1px solid color-mix(in srgb, var(--danger) 36%, var(--border));
+  background: color-mix(in srgb, var(--danger) 8%, var(--bg-elevated));
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+
+.subagent-error-block__header {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--danger);
+  font-weight: var(--fw-semi);
+  font-size: var(--fs-sm);
+  margin-bottom: 6px;
+}
+
+.subagent-error-block__body {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: rgba(0, 0, 0, 0.06);
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  max-height: 160px;
+  overflow: auto;
+}
+
+/* Result 区:toolbar + markdown 独立滚动 */
+.subagent-result {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.subagent-result__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+}
+
+.subagent-result__label {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  font-weight: var(--fw-semi);
+}
+
+.subagent-result__body {
+  padding: var(--sp-3) var(--sp-4);
+  overflow: auto;
+  font-size: var(--fs-sm);
+  line-height: 1.65;
+  color: var(--text);
+}
+
+/* ===== Responsive: 窄屏自动取消居中容器约束 =====
+   视口 < 600px 时把 --chat-max-width 调到 100%,让窄屏占满宽度。 */
+@media (max-width: 600px) {
+  :root {
+    --chat-max-width: 100%;
+  }
+
+  .message-list,
+  .chat-status,
+  .input-box {
+    padding-left: var(--sp-3);
+    padding-right: var(--sp-3);
+  }
 }
 

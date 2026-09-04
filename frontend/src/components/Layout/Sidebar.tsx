@@ -125,14 +125,6 @@ export function Sidebar({ conversations, onSelect, onNew, onDelete, onRename, se
                       {isWeChat && <WeChatIcon size={14} className="wechat-icon" />}
                       <span className="item-title__text">{conv.name || conv.summary || t('chat.unnamed')}</span>
                     </div>
-                    <div className="item-date">
-                      {conv.updated_at
-                        ? new Date(conv.updated_at).toLocaleDateString(undefined, {
-                            month: 'short',
-                            day: 'numeric',
-                          })
-                        : ''}
-                    </div>
                     {onRename && !isWeChat && (
                       <button
                         className="btn btn-ghost btn-sm sidebar-action"

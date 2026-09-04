@@ -20,6 +20,8 @@ vi.mock('./hooks/useWebSocket', () => ({
     switchConversation: vi.fn(),
     loadHistory: vi.fn(),
   })),
+  // ChatWindow 订阅子 Agent 事件;在测试里提供 noop 退订函数。
+  subscribeSubagentEvents: vi.fn(() => () => {}),
 }))
 
 describe('App', () => {
