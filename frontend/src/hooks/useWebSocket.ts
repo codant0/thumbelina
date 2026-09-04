@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Message } from '../types/chat'
+import type { Message, SubagentEventPayload } from '../types/chat'
 
 interface WsIncoming {
   chunk?: string
@@ -25,6 +25,8 @@ interface WsIncoming {
   git_branch?: { workspace: string; branch: string }
   /** 任务调度器生命周期事件(设计 §8.2),与 REST 事件视图字节同构。 */
   task_event?: TaskEventPayload
+  /** Subagent 生命周期事件(开始/完成/失败/取消),由聊天窗口订阅并内联展示。 */
+  subagent_event?: SubagentEventPayload
 }
 
 /** ``{task_event: …}`` 帧体;与 ``GET /tasks/events`` 的条目结构一致。 */
@@ -53,6 +55,17 @@ const taskEventListeners = new Set<TaskEventListener>()
 export function subscribeTaskEvents(fn: TaskEventListener): () => void {
   taskEventListeners.add(fn)
   return () => { taskEventListeners.delete(fn) }
+}
+
+// Subagent 生命周期事件监听器(模块级):ChatWindow 卸载/重连时需要重订阅,
+// 模块级 Set 让 ChatWindow 挂载即生效,无需关心 ws 实例何时初始化。
+type SubagentEventListener = (payload: SubagentEventPayload, conversationId: string | undefined) => void
+const subagentEventListeners = new Set<SubagentEventListener>()
+
+/** 订阅后端广播的 subagent_event 帧;返回退订函数。 */
+export function subscribeSubagentEvents(fn: SubagentEventListener): () => void {
+  subagentEventListeners.add(fn)
+  return () => { subagentEventListeners.delete(fn) }
 }
 
 // 打字机阶梯式提速:首批字符最快(让"开口"明显),中段最快,长文本末段降到 3/tick
@@ -403,6 +416,17 @@ export function useWebSocket(url: string, activeConversationId?: string) {
         }
         for (const fn of taskEventListeners) {
           try { fn(data.task_event) } catch { /* 监听者异常不影响主流程 */ }
+        }
+      }
+
+      // Subagent 事件帧:与 task_event 同等派发,通知模块级监听者(ChatWindow)。
+      // 由 ChatWindow 维护"按 assistant 消息 id 分组"的事件桶并渲染内联卡片。
+      if (data.subagent_event) {
+        for (const fn of listenersRef.current) {
+          try { fn(data) } catch { /* 监听者异常不影响主流程 */ }
+        }
+        for (const fn of subagentEventListeners) {
+          try { fn(data.subagent_event, data.conversation_id) } catch { /* 监听者异常不影响主流程 */ }
         }
       }
 

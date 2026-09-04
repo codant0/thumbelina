@@ -1,9 +1,10 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { Message, ToolCall } from '../../types/chat'
+import type { Message, SubagentEventPayload, ToolCall } from '../../types/chat'
 import { ArrowDown, Brain, Check, ChevronDown, Copy, RefreshCcw, Wrench } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import { MarkdownContent } from './MarkdownContent'
 import { JsonBlock } from './CodeBlock'
+import { SubagentCard } from './SubagentCard'
 import { splitLeadingJson } from '../../lib/codeUtils'
 import { useCopy } from '../../hooks/useCopy'
 
@@ -16,6 +17,10 @@ interface MessageListProps {
   awaitingMoreContent?: boolean
   /** Re-send the latest user turn (offered on the last assistant message). */
   onRegenerate?: () => void
+  /** Subagent 事件按 assistant 消息 id 分组;用于在该消息下方内联展示卡片。 */
+  subagentsByMsgId?: Record<string, SubagentEventPayload[]>
+  /** 点击 "查看对话详情" 时的回调;由 ChatWindow 提供用于打开详情 Modal。 */
+  onViewSubagentDetail?: (event: SubagentEventPayload) => void
 }
 
 interface ThinkingBlockProps {
@@ -147,11 +152,15 @@ const MessageItem = memo(function MessageItem({
   isStreamingMsg,
   canRegenerate,
   onRegenerate,
+  subagents,
+  onViewSubagentDetail,
 }: {
   msg: Message
   isStreamingMsg: boolean
   canRegenerate: boolean
   onRegenerate?: () => void
+  subagents?: SubagentEventPayload[]
+  onViewSubagentDetail?: (event: SubagentEventPayload) => void
 }) {
   const { t } = useTranslation()
   return (
@@ -180,6 +189,17 @@ const MessageItem = memo(function MessageItem({
           ))}
         </div>
       )}
+      {subagents && subagents.length > 0 && (
+        <div className="subagent-cards" data-testid="subagent-cards">
+          {subagents.map(sa => (
+            <SubagentCard
+              key={sa.id}
+              event={sa}
+              {...(onViewSubagentDetail ? { onViewDetail: onViewSubagentDetail } : {})}
+            />
+          ))}
+        </div>
+      )}
       {msg.content && (
         <MessageActions
           text={msg.content}
@@ -190,7 +210,7 @@ const MessageItem = memo(function MessageItem({
   )
 })
 
-function MessageListInner({ messages, waitingForReply, isStreaming, awaitingMoreContent, onRegenerate }: MessageListProps) {
+function MessageListInner({ messages, waitingForReply, isStreaming, awaitingMoreContent, onRegenerate, subagentsByMsgId, onViewSubagentDetail }: MessageListProps) {
   const listRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   // Whether to keep following new content. False once the user scrolls up to read.
@@ -317,6 +337,8 @@ function MessageListInner({ messages, waitingForReply, isStreaming, awaitingMore
               isStreamingMsg={msg.id === streamingMsgId}
               canRegenerate={msg.id === lastAssistantId && Boolean(handleRegenerate)}
               onRegenerate={handleRegenerate}
+              subagents={subagentsByMsgId?.[msg.id]}
+              {...(onViewSubagentDetail ? { onViewSubagentDetail } : {})}
             />
           ))}
           {waitingForReply && (
