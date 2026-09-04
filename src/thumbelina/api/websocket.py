@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -18,6 +19,8 @@ from thumbelina.api.routes.chat import (
 )
 from thumbelina.api.schemas import WebSocketMessage
 from thumbelina.concurrency import per_conversation_lock
+from thumbelina.subagents.base import SubagentEvent
+from thumbelina.subagents.manager import SubagentManager
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +56,7 @@ async def _run_generation(
     agent: ThumbelinaAgent,
     message: str,
     cid: str | None,
+    active_conv_ref: dict[str, str | None],
 ) -> None:
     """在独立 asyncio.Task 中执行一轮生成（流式或非流式）。
 
@@ -64,7 +68,15 @@ async def _run_generation(
     响应已通过前面的 ``yield`` 发给前端，但 assistant 消息不会落库
     （``stream`` 只在完整结束时才 ``_persist_message``）—— 这是可接受的：
     partial 不落库。非流式分支（``agent.run``）同样被 cancel 中断。
+
+    ``active_conv_ref`` 是 ``websocket_chat`` 持有的可变容器,被
+    subagent listener 用来读取"本轮正在生成的会话 ID",以决定把事件推给
+    哪个连接、避免跨会话串话。
     """
+    # 在本轮范围内,subagent listener 能从 active_conv_ref 读到本次 cid,
+    # 因此即便 listener 注册在 connect 时,它仍能正确路由。
+    if cid:
+        active_conv_ref["value"] = cid
     async with per_conversation_lock(cid):
         if cid:
             agent.current_conversation_id = cid
@@ -199,6 +211,43 @@ async def websocket_chat(websocket: WebSocket) -> None:
     # 当前进行中的生成任务（可为 None）。每个连接至多一个在跑。
     current_task: asyncio.Task[Any] | None = None
 
+    # Subagent 事件桥接:在 connect 时一次性注册 listener,把 Subagent
+    # 生命周期事件推给当前连接。listener 用 active_conv_ref 拿到本轮
+    # 正在跑的 conversation id,只有匹配 cid 才发送,避免跨会话串话。
+    active_conv_ref: dict[str, str | None] = {"value": None}
+    subagent_manager: SubagentManager | None = getattr(
+        websocket.app.state, "subagent_manager", None
+    )
+    unsubscribe_subagent: Callable[[], None] | None = None
+
+    async def _on_subagent_event(event: SubagentEvent) -> None:
+        target_cid = active_conv_ref["value"]
+        if not target_cid:
+            return
+        try:
+            await websocket.send_json(
+                {
+                    "subagent_event": {
+                        "type": event.type,
+                        "id": event.id,
+                        "task": event.task,
+                        "status": event.status.value,
+                        "result": event.result,
+                        "error": event.error,
+                        "started_at": event.started_at,
+                        "finished_at": event.finished_at,
+                    },
+                    "conversation_id": target_cid,
+                }
+            )
+        except Exception:
+            # 连接已断开 / 写入失败 — listener 会在 finally 中被取消,
+            # 这里吞掉避免打断 manager 循环。
+            logger.debug("subagent_event push failed; will be unsubscribed")
+
+    if subagent_manager is not None:
+        unsubscribe_subagent = subagent_manager.add_listener(_on_subagent_event)
+
     try:
         while True:
             raw_text = await websocket.receive_text()
@@ -279,7 +328,7 @@ async def websocket_chat(websocket: WebSocket) -> None:
             # 生成在独立任务中运行，主循环立即回到 receive_text()，
             # 使流式进行中也能接收并响应 stop。
             current_task = asyncio.create_task(
-                _run_generation(websocket, agent, parsed.message, cid)
+                _run_generation(websocket, agent, parsed.message, cid, active_conv_ref)
             )
 
     except WebSocketDisconnect:
@@ -290,4 +339,9 @@ async def websocket_chat(websocket: WebSocket) -> None:
             current_task.cancel()
         await _wait_task_cleared(current_task)
         _chat_ws_clients.discard(websocket)
+        if unsubscribe_subagent is not None:
+            try:
+                unsubscribe_subagent()
+            except Exception:
+                logger.warning("Failed to unsubscribe subagent listener", exc_info=True)
         logger.debug("WebSocket client disconnected (total: %d)", len(_chat_ws_clients))
