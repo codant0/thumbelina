@@ -12,7 +12,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from thumbelina.repository.models import TrajectoryEvent
@@ -157,3 +157,22 @@ class TrajectoryRepository:
         self, limit: int = 100, conversation_id: str | None = None
     ) -> dict[str, Any]:
         return await asyncio.to_thread(self._get_cache_stats_sync, limit, conversation_id)
+
+    def _delete_for_conversation_sync(self, conversation_id: str) -> int:
+        """删除指定会话的全部轨迹事件(清空上下文时联动清理)。"""
+        with self._get_session() as session:
+            result = session.execute(
+                delete(TrajectoryEvent).where(TrajectoryEvent.conversation_id == conversation_id)
+            )
+            session.commit()
+            # SQLAlchemy 2.x rowcount:int | None;以驱动返回值做兜底断言
+            return int(result.rowcount or 0)
+
+    async def delete_for_conversation(self, conversation_id: str) -> int:
+        """删除指定会话的全部轨迹事件,返回被删行数。
+
+        删除整个会话(DB 级 CASCADE)时无需调用本方法;
+        仅在「保留会话、清空消息」时由 manager.clear_messages 串行触发,
+        以便状态栏 cache-stats 在清空后立刻回到 0。
+        """
+        return await asyncio.to_thread(self._delete_for_conversation_sync, conversation_id)

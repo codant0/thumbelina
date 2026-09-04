@@ -180,6 +180,9 @@ class RepositoryManager:
     async def clear_messages(self, conversation_id: str) -> bool:
         """Clear all messages of a conversation while keeping the conversation.
 
+        同时级联清理该会话的轨迹事件(llm_usage 等),以保证 cache-stats
+        端点在清空后返回 0;不删 conversation 本身(summary 也会被一并清掉)。
+
         Parameters
         ----------
         conversation_id:
@@ -190,7 +193,13 @@ class RepositoryManager:
         bool
             True if messages were cleared, False if the conversation was not found.
         """
-        return await self.conversation_repository.clear_messages(conversation_id)
+        cleared = await self.conversation_repository.clear_messages(conversation_id)
+        if not cleared:
+            return False
+        # 先消息、再轨迹:任一阶段 DB 失败会原样向上抛,
+        # 由路由层 per_conversation_lock 内的调用方决定是否重试。
+        await self.trajectory_repository.delete_for_conversation(conversation_id)
+        return True
 
     async def set_summary(self, conversation_id: str, summary: str) -> bool:
         """Set the summary for a conversation.
