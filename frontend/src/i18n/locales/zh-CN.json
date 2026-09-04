@@ -18,6 +18,7 @@
     "saving": "保存中…",
     "cancel": "取消",
     "close": "关闭",
+    "minimize": "最小化",
     "connected": "已连接",
     "disconnected": "已断开",
     "generating": "生成中…",
@@ -583,5 +584,27 @@
     "arguments": "参数",
     "result": "结果",
     "hasResult": "含返回结果"
+  },
+  "subagent": {
+    "title": "子代理",
+    "task": "任务",
+    "result": "结果",
+    "error": "错误",
+    "id": "ID",
+    "heroEyebrow": "子代理对话",
+    "runningHint": "子代理正在运行,请稍候…",
+    "cancelledHint": "子代理在完成前被取消。",
+    "startedAt": "开始时间",
+    "finishedAt": "结束时间",
+    "duration": "耗时",
+    "viewDetail": "查看对话详情",
+    "noResult": "暂无结果",
+    "status": {
+      "pending": "等待中",
+      "running": "运行中",
+      "completed": "已完成",
+      "failed": "失败",
+      "cancelled": "已取消"
+    }
   }
 }

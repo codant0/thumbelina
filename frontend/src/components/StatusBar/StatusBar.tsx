@@ -13,6 +13,7 @@ interface ItemState {
 type Action =
   | { type: 'load'; key: string; data: StatusData; state: StatusBarState }
   | { type: 'error'; key: string }
+  | { type: 'reset'; key: string }
 
 function reducer(state: Record<string, ItemState>, action: Action): Record<string, ItemState> {
   switch (action.type) {
@@ -20,6 +21,14 @@ function reducer(state: Record<string, ItemState>, action: Action): Record<strin
       return { ...state, [action.key]: { data: action.data, state: action.state } }
     case 'error':
       return { ...state, [action.key]: { state: 'error', failed: true } }
+    // 清空某个 key 的展示态：会话切换/新建时立刻回到占位,
+    // 避免「上一会话的统计短暂停留」再被新数据替换。
+    case 'reset': {
+      if (!(action.key in state)) return state
+      const next = { ...state }
+      delete next[action.key]
+      return next
+    }
     default:
       return state
   }
@@ -41,6 +50,9 @@ export function StatusBar({ items }: StatusBarProps) {
 
   useEffect(() => {
     for (const item of items) {
+      // 先清掉旧的展示态:items 变化(通常是会话切换/新建)时,
+      // 立刻回到占位符而不是停留上一会话的数据,避免闪烁。
+      dispatch({ type: 'reset', key: item.key })
       // 兼容同步与异步 getData，两者抛错都归入 error 降级
       Promise.resolve()
         .then(() => item.getData())

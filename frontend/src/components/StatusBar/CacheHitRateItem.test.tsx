@@ -72,3 +72,80 @@ describe('CacheHitRateItem 图标', () => {
     expect(item.querySelector('svg')).not.toBeNull()
   })
 })
+
+describe('CacheHitRateItem 会话切换', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    localStorage.clear()
+    localStorage.setItem('thumbelina-locale', 'zh-CN')
+  })
+
+  it('切换 conversationId 时按新会话请求(修复闭包陈旧)', async () => {
+    // 每个 conversationId 返回不同的统计,验证闭包不再锁住旧值
+    let conv = 'conv-A'
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : (input as URL).toString()
+        const cid = new URL(url, 'http://x').searchParams.get('conversation_id')
+        // A: 命中率高(80%);B: 命中率低(10%),对比明显
+        const hit = cid === 'conv-A' ? 800 : 100
+        const miss = cid === 'conv-A' ? 200 : 900
+        return new Response(
+          JSON.stringify({ hit_tokens: hit, miss_tokens: miss, turns: 4 }),
+          { status: 200 },
+        )
+      })
+
+    const { rerender } = renderWithI18n(<CacheHitRateItem conversationId={conv} />)
+    expect(await screen.findByText('80%')).toBeInTheDocument()
+
+    // 切到 B:应重新请求 B 的统计,而不是沿用 A 的 80%
+    conv = 'conv-B'
+    rerender(
+      <LocaleProvider>
+        <CacheHitRateItem conversationId={conv} />
+      </LocaleProvider>,
+    )
+    expect(await screen.findByText('10%')).toBeInTheDocument()
+
+    // 应至少请求过两次,且最后一次必须包含 conv-B
+    expect(fetchSpy.mock.calls.length).toBeGreaterThanOrEqual(2)
+    const lastUrl = fetchSpy.mock.calls[fetchSpy.mock.calls.length - 1][0]
+    expect(String(lastUrl)).toContain('conversation_id=conv-B')
+  })
+
+  it('切换会话时立刻回到占位符(避免旧数据闪烁)', async () => {
+    const fetchHolder: { resolve: ((value: Response) => void) | null } = { resolve: null }
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
+      () =>
+        new Promise<Response>(resolve => {
+          fetchHolder.resolve = resolve
+        }),
+    )
+
+    const { rerender } = renderWithI18n(<CacheHitRateItem conversationId="conv-A" />)
+    // 等 useEffect 排队后再解析第一个 fetch:render 后仍显示「…」
+    expect(await screen.findByText('…')).toBeInTheDocument()
+
+    // 第一次请求解析为 A 的统计
+    fetchHolder.resolve?.(
+      new Response(JSON.stringify({ hit_tokens: 800, miss_tokens: 200, turns: 4 }), {
+        status: 200,
+      }),
+    )
+    // 让 microtask 走完
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(await screen.findByText('80%')).toBeInTheDocument()
+
+    // 切到 B;在新的 fetch 解析前,展示应先回到「…」,而不是停留 80%
+    rerender(
+      <LocaleProvider>
+        <CacheHitRateItem conversationId="conv-B" />
+      </LocaleProvider>,
+    )
+    // 此刻 B 的 fetch 尚未 resolve;reducer 已被 reset 回初始态
+    expect(screen.getByText('…')).toBeInTheDocument()
+  })
+})

@@ -18,6 +18,7 @@
     "saving": "Saving…",
     "cancel": "Cancel",
     "close": "Close",
+    "minimize": "Minimize",
     "connected": "Connected",
     "disconnected": "Disconnected",
     "generating": "Generating…",
@@ -583,5 +584,27 @@
     "arguments": "Arguments",
     "result": "Result",
     "hasResult": "has result"
+  },
+  "subagent": {
+    "title": "Subagent",
+    "task": "Task",
+    "result": "Result",
+    "error": "Error",
+    "id": "ID",
+    "heroEyebrow": "Subagent conversation",
+    "runningHint": "Subagent is running, please wait…",
+    "cancelledHint": "Subagent was cancelled before completion.",
+    "startedAt": "Started",
+    "finishedAt": "Finished",
+    "duration": "Duration",
+    "viewDetail": "View conversation",
+    "noResult": "No result",
+    "status": {
+      "pending": "Pending",
+      "running": "Running",
+      "completed": "Completed",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    }
   }
 }

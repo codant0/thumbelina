@@ -61,7 +61,9 @@ function CacheHitRateItemInner({ conversationId }: { conversationId: string }) {
         .replace('{total}', String(hitOf(d) + missOf(d)))
         .replace('{turns}', String(turns))
     },
-  }), [t])
+  // 把 conversationId 写入依赖：会话切换时 item 必须重建,否则 useMemo
+  // 缓存里的 getData 闭包仍指向旧会话,fetch 永远查不到新会话的统计。
+  }), [t, conversationId])
 
   return <StatusBar items={[item]} />
 }
