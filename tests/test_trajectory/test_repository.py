@@ -142,3 +142,74 @@ async def test_cache_stats_aggregates_llm_usage(manager: RepositoryManager):
     conv_c = await manager.create_conversation(name="会话C")
     stats_c = await manager.get_cache_stats(conversation_id=conv_c)
     assert stats_c == {"hit_tokens": 0, "miss_tokens": 0, "turns": 0}
+
+
+async def test_clear_messages_resets_cache_stats_to_zero(manager: RepositoryManager):
+    """清空上下文应级联删除轨迹事件,使 cache-stats 立刻回到 0。
+
+    状态栏缓存命中率在清空后会立刻归零,不会停留旧统计。
+    """
+    conv_a = await manager.create_conversation(name="会话A")
+    conv_b = await manager.create_conversation(name="会话B")
+    base = datetime(2026, 8, 21, 10, 0, 0)
+
+    def usage(turn: str, hit: int, miss: int, minute: int) -> dict:
+        return {
+            "turn_id": turn,
+            "seq": 0,
+            "event_type": "llm_usage",
+            "payload": json.dumps({"cache_hit_tokens": hit, "cache_miss_tokens": miss}),
+            "created_at": base + timedelta(minutes=minute),
+        }
+
+    await manager.add_trajectory_events(
+        conv_a, [usage("a1", 900, 300, 1), usage("a2", 100, 500, 2)]
+    )
+    await manager.add_trajectory_events(conv_b, [usage("b1", 50, 50, 3)])
+
+    # 清空前,A 的 cache-stats 不为零
+    stats_before = await manager.get_cache_stats(conversation_id=conv_a)
+    assert stats_before["hit_tokens"] == 1000
+    assert stats_before["miss_tokens"] == 800
+
+    # 清空 A 的消息(保留会话)
+    assert await manager.clear_messages(conv_a) is True
+
+    # A 的 cache-stats 应回到 0
+    stats_a = await manager.get_cache_stats(conversation_id=conv_a)
+    assert stats_a == {"hit_tokens": 0, "miss_tokens": 0, "turns": 0}
+
+    # B 的统计未受影响(级联只清理目标会话)
+    stats_b = await manager.get_cache_stats(conversation_id=conv_b)
+    assert stats_b == {"hit_tokens": 50, "miss_tokens": 50, "turns": 1}
+
+    # 会话本身仍存在,只是没有数据
+    conv_meta = await manager.get_conversation(conv_a)
+    assert conv_meta is not None
+
+
+async def test_delete_for_conversation_isolated_to_target(manager: RepositoryManager):
+    """TrajectoryRepository.delete_for_conversation 只清理目标会话。"""
+    conv_a = await manager.create_conversation(name="会话A")
+    conv_b = await manager.create_conversation(name="会话B")
+    base = datetime(2026, 8, 21, 10, 0, 0)
+
+    def usage(turn: str, hit: int, miss: int, minute: int) -> dict:
+        return {
+            "turn_id": turn,
+            "seq": 0,
+            "event_type": "llm_usage",
+            "payload": json.dumps({"cache_hit_tokens": hit, "cache_miss_tokens": miss}),
+            "created_at": base + timedelta(minutes=minute),
+        }
+
+    await manager.add_trajectory_events(conv_a, [usage("a1", 10, 20, 1)])
+    await manager.add_trajectory_events(conv_b, [usage("b1", 30, 40, 2)])
+
+    deleted = await manager.trajectory_repository.delete_for_conversation(conv_a)
+    assert deleted == 1
+
+    stats_a = await manager.get_cache_stats(conversation_id=conv_a)
+    assert stats_a == {"hit_tokens": 0, "miss_tokens": 0, "turns": 0}
+    stats_b = await manager.get_cache_stats(conversation_id=conv_b)
+    assert stats_b == {"hit_tokens": 30, "miss_tokens": 40, "turns": 1}
