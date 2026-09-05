@@ -30,6 +30,7 @@ dependencies = [
     "llama-index-core>=0.14.23",
     "loguru>=0.7.0",
     "croniter>=2.0",
+    "cryptography>=42",
 ]
 
 [project.optional-dependencies]
