@@ -204,6 +204,45 @@
   word-break: break-word;
 }
 
+/* ===== Tool call cards — live states (设计 §5.3) ===== */
+/* 色值全部走主题令牌;running 动画仅 transform(旋转)。 */
+.tool-call.status-ok .tool-call__meta { color: var(--success); }
+
+.tool-call.status-error {
+  border-color: var(--error);
+  background: var(--error-muted);
+  box-shadow: inset 3px 0 0 var(--error);
+}
+
+.tool-call.status-error .tool-call__meta { color: var(--error); }
+
+.tool-call.status-running .tool-call__meta,
+.tool-call.status-interrupted .tool-call__meta { color: var(--text-secondary); }
+
+.tool-call__spinner {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: var(--radius-full);
+  animation: toolCallSpin 0.8s linear infinite;
+}
+
+@keyframes toolCallSpin {
+  to { transform: rotate(360deg); }
+}
+
+.tool-call__hint {
+  padding: 0 var(--sp-3) var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool-call__spinner { animation: none; }
+}
+
 /* ===== Message-level actions (copy / retry) ===== */
 .msg-actions {
   display: flex;

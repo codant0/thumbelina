@@ -1,7 +1,34 @@
+/**
+ * 聊天流内实时工具调用卡(设计 §5.1):由 WS ``tool_event`` 帧实时驱动,
+ * 按 ``call_id`` 在同一 assistant 消息上 upsert。
+ * ``args`` 为截断参数时后端下发 ``{"_truncated_json": "<json 字符串>"}``
+ * 并置 ``argsTruncated``(契约冻结段);完整参数/结果事后在轨迹页查看。
+ */
 export interface ToolCall {
+  call_id?: string
   name: string
   args: Record<string, unknown>
   result?: string
+  status: 'running' | 'ok' | 'error' | 'interrupted'
+  durationMs?: number
+  resultTruncated?: boolean
+  argsTruncated?: boolean
+}
+
+/**
+ * WS 下行 ``{tool_event: …}`` 帧体(契约冻结):``phase`` 由后端 WS 层从
+ * stream() 的 tool_start/tool_end 事件映射,其余字段原样透传。
+ */
+export interface ToolEventPayload {
+  phase: 'start' | 'end'
+  call_id: string
+  name?: string
+  args?: Record<string, unknown>
+  args_truncated?: boolean
+  duration_ms?: number
+  is_error?: boolean
+  result_preview?: string
+  result_truncated?: boolean
 }
 
 export type ThinkingEffort = 'low' | 'medium' | 'high'

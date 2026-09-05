@@ -601,7 +601,11 @@
   "toolCalls": {
     "arguments": "参数",
     "result": "结果",
-    "hasResult": "含返回结果"
+    "hasResult": "含返回结果",
+    "running": "调用中…",
+    "interrupted": "已中断",
+    "durationMs": "{ms} ms",
+    "truncatedHint": "完整内容见轨迹页"
   },
   "subagent": {
     "title": "子代理",

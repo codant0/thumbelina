@@ -70,23 +70,37 @@ function ThinkingBlock({ thinking, active }: ThinkingBlockProps) {
   )
 }
 
-/** One tool call rendered as a collapsed summary card. */
+/**
+ * One tool call rendered as a live status card (设计 §5.3):
+ * running(脉冲动画+调用中) / ok(✓+耗时) / error(错误红条) / interrupted(中断提示)。
+ * 参数/结果折叠展开沿用原有交互;结果被截断时提示完整内容见轨迹页。
+ */
 function ToolCallItem({ tc }: { tc: ToolCall }) {
   const [open, setOpen] = useState(false)
   const { t } = useTranslation()
   const argsText = useMemo(() => {
+    // 契约:args 序列化超限时后端下发 {"_truncated_json": "<json 字符串>"}
+    // 并置 argsTruncated —— 原样展示截断 JSON,而不是把占位对象当普通参数美化。
+    const truncated = tc.argsTruncated
+      ? (tc.args as { _truncated_json?: unknown })._truncated_json
+      : undefined
+    if (typeof truncated === 'string') return truncated
     try {
       return JSON.stringify(tc.args, null, 2)
     } catch {
       return String(tc.args)
     }
-  }, [tc.args])
+  }, [tc.args, tc.argsTruncated])
   return (
-    <div className="tool-call" data-testid="tool-call">
+    <div className={`tool-call status-${tc.status}`} data-testid="tool-call">
       <button type="button" className="tool-call__summary" aria-expanded={open} onClick={() => setOpen(o => !o)}>
         <span className="tool-call__name"><Wrench size={13} /><span>{tc.name}</span></span>
+        {tc.status === 'running' && <span className="tool-call__spinner" aria-hidden="true" />}
         <span className="tool-call__meta">
-          {tc.result ? t('toolCalls.hasResult') : t('toolCalls.arguments')}
+          {tc.status === 'running' && t('toolCalls.running')}
+          {tc.status === 'ok' && `✓ ${t('toolCalls.durationMs', { ms: tc.durationMs ?? 0 })}`}
+          {tc.status === 'error' && `✗ ${t('toolCalls.durationMs', { ms: tc.durationMs ?? 0 })}`}
+          {tc.status === 'interrupted' && t('toolCalls.interrupted')}
         </span>
         <ChevronDown size={14} className={`tool-call__caret${open ? ' is-open' : ''}`} />
       </button>
@@ -94,10 +108,12 @@ function ToolCallItem({ tc }: { tc: ToolCall }) {
         <div className="tool-call__detail">
           <div className="tool-call__section-label">{t('toolCalls.arguments')}</div>
           <pre>{argsText}</pre>
+          {tc.argsTruncated && <div className="tool-call__hint">{t('toolCalls.truncatedHint')}</div>}
           {tc.result && (
             <>
               <div className="tool-call__section-label">{t('toolCalls.result')}</div>
               <pre>{tc.result}</pre>
+              {tc.resultTruncated && <div className="tool-call__hint">{t('toolCalls.truncatedHint')}</div>}
             </>
           )}
         </div>
@@ -234,7 +250,7 @@ const MessageItem = memo(function MessageItem({
       {msg.toolCalls && msg.toolCalls.length > 0 && (
         <div className="tool-calls" data-testid="tool-calls">
           {msg.toolCalls.map((tc, i) => (
-            <ToolCallItem key={i} tc={tc} />
+            <ToolCallItem key={tc.call_id ?? i} tc={tc} />
           ))}
         </div>
       )}
