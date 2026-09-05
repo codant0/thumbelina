@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { useState } from 'react'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -487,5 +487,85 @@ describe('InputBox attachments', () => {
       />,
     )
     expect(screen.queryByTestId('pending-attach-badge')).not.toBeInTheDocument()
+  })
+})
+
+describe('InputBox preview URL revocation', () => {
+  // object URL 生命周期回归:previewUrlsRef 曾只读不写,createObjectURL 产生的
+  // 预览地址全部泄漏。spy 两个静态方法(默认透传真实实现),断言移除 / 发送后
+  // 清空 / 卸载三条路径都会 revoke(环境无 createObjectURL 时管道退回空串,
+  // 不会走到这些断言的 blob: 前缀检查,用真实环境验证)。
+  const png = (name: string) => new File(['x'], name, { type: 'image/png' })
+  const uploaded = { id: 'att-1', mime: 'image/png', size: 1, width: 10, height: 10, sha256: null }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(uploadAttachment).mockResolvedValue(uploaded)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('revokes the object URL when a thumbnail is removed', async () => {
+    const createSpy = vi.spyOn(URL, 'createObjectURL')
+    const revokeSpy = vi.spyOn(URL, 'revokeObjectURL')
+    render(<Harness />)
+
+    fireEvent.change(screen.getByTestId('attach-input'), { target: { files: [png('gone.png')] } })
+    await waitFor(() => {
+      expect(screen.getByTestId('attachments-strip').querySelector('[data-status="ready"]')).toBeTruthy()
+    })
+    const previewUrl = createSpy.mock.results[0]?.value as string
+    expect(previewUrl).toMatch(/^blob:/)
+    revokeSpy.mockClear()
+
+    fireEvent.click(screen.getByRole('button', { name: '移除 gone.png' }))
+    expect(revokeSpy).toHaveBeenCalledTimes(1)
+    expect(revokeSpy).toHaveBeenCalledWith(previewUrl)
+  })
+
+  it('revokes the object URL when the strip is cleared after sending', async () => {
+    const createSpy = vi.spyOn(URL, 'createObjectURL')
+    const revokeSpy = vi.spyOn(URL, 'revokeObjectURL')
+    const onSend = vi.fn()
+    const user = userEvent.setup()
+    render(<Harness onSend={onSend} />)
+
+    fireEvent.change(screen.getByTestId('attach-input'), { target: { files: [png('sent.png')] } })
+    await waitFor(() => {
+      expect(screen.getByTestId('attachments-strip').querySelector('[data-status="ready"]')).toBeTruthy()
+    })
+    const previewUrl = createSpy.mock.results[0]?.value as string
+    revokeSpy.mockClear()
+
+    await user.type(screen.getByPlaceholderText(/Type a message/i), 'hi')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    expect(onSend).toHaveBeenCalledWith('hi', [{ id: 'att-1' }])
+    // 发送后父级清空列表 → 兜底回收 effect revoke 剩余预览地址
+    expect(revokeSpy).toHaveBeenCalledWith(previewUrl)
+    expect(screen.queryByTestId('attachments-strip')).not.toBeInTheDocument()
+  })
+
+  it('revokes all object URLs on unmount', async () => {
+    const createSpy = vi.spyOn(URL, 'createObjectURL')
+    const revokeSpy = vi.spyOn(URL, 'revokeObjectURL')
+    const { unmount } = render(<Harness />)
+
+    fireEvent.change(screen.getByTestId('attach-input'), {
+      target: { files: [png('a.png'), png('b.png')] },
+    })
+    // 预览 URL 在插入后的首次提交就随列表登记(与上传进度无关),等两次上传
+    // 都已发起即可卸载,断言两个预览都被回收。
+    await waitFor(() => {
+      expect(uploadAttachment).toHaveBeenCalledTimes(2)
+    })
+    const urls = createSpy.mock.results.map(r => r.value as string)
+    expect(urls).toHaveLength(2)
+    revokeSpy.mockClear()
+
+    unmount()
+    expect(revokeSpy).toHaveBeenCalledWith(urls[0])
+    expect(revokeSpy).toHaveBeenCalledWith(urls[1])
   })
 })

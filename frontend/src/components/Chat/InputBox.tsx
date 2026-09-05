@@ -133,6 +133,7 @@ export function InputBox({
   // 添加/重试管道在 async 续段里要读最新列表 —— 用 ref 镜像受控数组,避免闭包过期。
   const attachmentsRef = useRef<LocalAttachment[]>(attachments ?? EMPTY_ATTACHMENTS)
   // 已创建的 object URL(localId -> url):移除/卸载时 revoke,父级清空(切会话)时兜底回收。
+  // 由下方 effect 从受控列表登记(管道在构造 LocalAttachment 时已 createObjectURL)。
   const previewUrlsRef = useRef<Map<string, string>>(new Map())
   const { t } = useTranslation()
 
@@ -149,9 +150,15 @@ export function InputBox({
 
   useEffect(() => {
     attachmentsRef.current = list
+    // 登记当前列表的预览 URL(previewUrlsRef 的唯一写入点):移除/父级清空/卸载
+    // 三处回收都从这里读取。previewUrl 为空串(jsdom 不可用兜底)时不登记。
+    for (const a of list) {
+      if (a.previewUrl) previewUrlsRef.current.set(a.localId, a.previewUrl)
+    }
   }, [list])
 
-  // 兜底回收:附件从列表消失(手动删除 / 父级清空)时 revoke 对应 object URL。
+  // 兜底回收:附件从列表消失(手动删除 / 父级清空)时 revoke 对应 object URL,
+  // 并把条目移出映射,避免映射随反复添加/删除无界增长。
   useEffect(() => {
     const alive = new Set(list.map(a => a.localId))
     for (const [localId, url] of previewUrlsRef.current) {
