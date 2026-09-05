@@ -304,4 +304,101 @@ describe('ChatWindow', () => {
       ])
     })
   })
+
+  // ── 重新生成携带附件(设计 §5.4 / F8)────────────────────────────────────────
+
+  it('regenerate resends the last user message with its attachment refs', () => {
+    wsState = {
+      ...baseState,
+      messages: [
+        { id: '1', role: 'user', content: '看图', timestamp: '', attachments: [{ id: 'att-1', mime: 'image/png', alt: '首页截图' }, { id: 'att-2', mime: 'image/png' }] },
+        { id: '2', role: 'assistant', content: 'answer', timestamp: '' },
+      ],
+    }
+    renderWindow({ conversationId: 'conv-1' })
+
+    fireEvent.click(screen.getByTestId('regenerate'))
+    expect(baseState.sendMessage).toHaveBeenCalledTimes(1)
+    expect(baseState.sendMessage).toHaveBeenCalledWith('看图', 'conv-1', [
+      { id: 'att-1', alt: '首页截图' },
+      { id: 'att-2' },
+    ])
+  })
+
+  it('regenerate keeps the two-argument sendMessage call for a text-only message', () => {
+    // 回归:无附件的历史消息重新生成时保持旧调用形状(第三参不出现)。
+    wsState = {
+      ...baseState,
+      messages: [
+        { id: '1', role: 'user', content: 'hi', timestamp: '' },
+        { id: '2', role: 'assistant', content: 'yo', timestamp: '' },
+      ],
+    }
+    renderWindow({ conversationId: 'conv-1' })
+
+    fireEvent.click(screen.getByTestId('regenerate'))
+    expect(baseState.sendMessage).toHaveBeenCalledTimes(1)
+    expect(baseState.sendMessage).toHaveBeenCalledWith('hi', 'conv-1')
+    expect(vi.mocked(baseState.sendMessage).mock.calls[0]).toHaveLength(2)
+  })
+
+  it('regenerate respects the streaming guard (no resend mid-reply)', () => {
+    wsState = {
+      ...baseState,
+      isStreaming: true,
+      messages: [
+        { id: '1', role: 'user', content: 'hi', timestamp: '', attachments: [{ id: 'att-1', mime: 'image/png' }] },
+        { id: 'stream-2', role: 'assistant', content: 'partial', timestamp: '' },
+      ],
+    }
+    renderWindow({ conversationId: 'conv-1' })
+
+    // 流式中 MessageList 不渲染 regenerate 按钮;守卫本身在 ChatWindow 内兜底。
+    expect(screen.queryByTestId('regenerate')).not.toBeInTheDocument()
+    expect(baseState.sendMessage).not.toHaveBeenCalled()
+  })
+
+  it('queues a message with attachment refs while streaming (three-argument queuePendingMessage)', async () => {
+    wsState = {
+      ...baseState,
+      isStreaming: true,
+      messages: [
+        { id: '1', role: 'user', content: 'hi', timestamp: '' },
+        { id: 'stream-2', role: 'assistant', content: 'answ', timestamp: '' },
+      ],
+    }
+    renderWindow({ conversationId: 'conv-1' })
+
+    fireEvent.dragEnter(document, { dataTransfer: { types: ['Files'], files: [] } })
+    fireEvent.drop(document, { dataTransfer: { types: ['Files'], files: [new File(['x'], 'shot.png', { type: 'image/png' })] } })
+    await waitFor(() => {
+      expect(screen.getByTestId('attachments-strip').querySelector('[data-status="ready"]')).toBeTruthy()
+    })
+
+    fireEvent.change(screen.getByPlaceholderText(/Type a message/i), { target: { value: '排队看图' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await waitFor(() => {
+      expect(baseState.queuePendingMessage).toHaveBeenCalledWith('排队看图', 'conv-1', [{ id: 'att-1' }])
+    })
+    expect(baseState.sendMessage).not.toHaveBeenCalled()
+  })
+
+  it('clears the attachment draft when the conversation switches (workspace semantics)', async () => {
+    // 验收 §9:码农页切换 WorkspacePicker 后 attachments 清空 —— 附件草稿
+    // 归会话持有,切会话(切 workspace 同语义)时随状态一起清掉,且不补发上传。
+    const { rerender } = renderWindow({ conversationId: 'conv-1' })
+
+    fireEvent.dragEnter(document, { dataTransfer: { types: ['Files'], files: [] } })
+    fireEvent.drop(document, { dataTransfer: { types: ['Files'], files: [new File(['x'], 'shot.png', { type: 'image/png' })] } })
+    await waitFor(() => {
+      expect(screen.getByTestId('attachments-strip').querySelector('[data-status="ready"]')).toBeTruthy()
+    })
+
+    const uploadsBefore = mockUploadAttachment.mock.calls.length
+    rerender(<ChatWindow ws={wsState} conversationId="conv-2" />)
+    await waitFor(() => {
+      expect(screen.queryByTestId('attachments-strip')).not.toBeInTheDocument()
+    })
+    expect(mockUploadAttachment).toHaveBeenCalledTimes(uploadsBefore)
+  })
 })

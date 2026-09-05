@@ -458,4 +458,25 @@ describe('MessageList', () => {
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(screen.queryByTestId('attachment-lightbox')).not.toBeInTheDocument()
   })
+
+  it('maps every attachment id to its attachmentUrl src in DOM order', () => {
+    // 验收:历史回放多张图时,缩略图 URL 逐张与 id 对应(不串图)。
+    const { container } = render(<MessageList messages={userWithAttachments} />)
+    const imgs = container.querySelectorAll('.msg-attachment-thumb')
+    expect([...imgs].map(i => i.getAttribute('src'))).toEqual([
+      '/api/v1/attachments/att-1',
+      '/api/v1/attachments/att-2',
+    ])
+  })
+
+  it('navigates a multi-image lightbox with ArrowRight and ArrowLeft', () => {
+    // 验收 §9:灯箱 ← / → 键盘操作(→ 正向,← 回退;Esc 已在上例覆盖)。
+    const { container } = render(<MessageList messages={userWithAttachments} />)
+    fireEvent.click(screen.getAllByRole('button', { name: 'View image' })[0])
+    expect(container.querySelector('.lightbox-image')!.getAttribute('src')).toBe('/api/v1/attachments/att-1')
+    fireEvent.keyDown(document, { key: 'ArrowRight' })
+    expect(container.querySelector('.lightbox-image')!.getAttribute('src')).toBe('/api/v1/attachments/att-2')
+    fireEvent.keyDown(document, { key: 'ArrowLeft' })
+    expect(container.querySelector('.lightbox-image')!.getAttribute('src')).toBe('/api/v1/attachments/att-1')
+  })
 })

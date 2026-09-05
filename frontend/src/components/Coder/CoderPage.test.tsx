@@ -82,6 +82,18 @@ describe('CoderPage', () => {
     expect(screen.getByPlaceholderText(/Type a message/i)).toBeInTheDocument()
   })
 
+  it('exposes the attachment entry and file drop overlay in the coder chat window', () => {
+    // 码农页复用 ChatWindow(验收 §9):📎 附件按钮 + 隐藏 file input 存在,
+    // 拖文件进窗口同样弹出蒙层(拖代码块不带 Files 不触发,已在 ChatWindow 侧覆盖)。
+    renderPage({ selectedId: 'coder1' })
+    expect(screen.getByRole('button', { name: 'Add image' })).toBeInTheDocument()
+    expect(screen.getByTestId('attach-input')).toBeInTheDocument()
+    fireEvent.dragEnter(document, { dataTransfer: { types: ['Files'], files: [] } })
+    expect(screen.getByTestId('drop-overlay')).toBeInTheDocument()
+    fireEvent.dragLeave(document, { dataTransfer: { types: ['Files'], files: [] } })
+    expect(screen.queryByTestId('drop-overlay')).not.toBeInTheDocument()
+  })
+
   it('shows the hero empty state and opens the picker via its CTA', () => {
     renderPage({ conversations: [] })
     expect(screen.getByTestId('coder-hero-empty')).toBeInTheDocument()

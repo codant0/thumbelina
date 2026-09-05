@@ -389,6 +389,33 @@ describe('InputBox attachments', () => {
     expect(onSend).toHaveBeenCalledWith('', [{ id: 'att-1' }])
   })
 
+  it('sends an image-only message via Enter with empty text', async () => {
+    // 验收 §9 P0 边界的 Enter 路径:附件就绪 + 文字为空,Enter 同样发出 ('', refs)。
+    const onSend = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <InputBox onSend={onSend} attachments={[localAtt()]} onAttachmentsChange={vi.fn()} />,
+    )
+    await user.type(screen.getByPlaceholderText(/Type a message/i), '{enter}')
+    expect(onSend).toHaveBeenCalledWith('', [{ id: 'att-1' }])
+  })
+
+  it('disables send when text and attachments are both empty', () => {
+    // 验收 §9:文字与附件均为空 → 发送按钮禁用(canSendMessage('') 为 false)。
+    render(<InputBox onSend={vi.fn()} onAttachmentsChange={vi.fn()} />)
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
+  })
+
+  it('disables send for whitespace-only text with no attachments', async () => {
+    const onSend = vi.fn()
+    const user = userEvent.setup()
+    render(<InputBox onSend={onSend} onAttachmentsChange={vi.fn()} />)
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
+    await user.type(screen.getByPlaceholderText(/Type a message/i), '   ')
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
+    expect(onSend).not.toHaveBeenCalled()
+  })
+
   it('disables send while an attachment is uploading', () => {
     render(
       <InputBox

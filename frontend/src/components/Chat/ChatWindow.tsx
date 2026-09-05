@@ -203,7 +203,16 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
   const handleRegenerate = useCallback(() => {
     if (isStreaming || !isConnected) return
     const lastUser = [...messages].reverse().find(m => m.role === 'user')
-    if (lastUser) sendMessage(lastUser.content, conversationId)
+    if (!lastUser) return
+    // 重新生成携带上一条用户消息的附件(设计 §5.4/F8):映射为 {id, alt?} 引用
+    // 随文字一起重发;无附件时保持两参调用形状(旧调用点零回退,协议 §4.1)。
+    const refs: SendAttachmentInput[] = (lastUser.attachments ?? []).map(a => {
+      const ref: SendAttachmentInput = { id: a.id }
+      if (a.alt !== undefined) ref.alt = a.alt
+      return ref
+    })
+    if (refs.length > 0) sendMessage(lastUser.content, conversationId, refs)
+    else sendMessage(lastUser.content, conversationId)
   }, [messages, isStreaming, isConnected, conversationId, sendMessage])
 
   const toggleStreaming = useCallback(async () => {
