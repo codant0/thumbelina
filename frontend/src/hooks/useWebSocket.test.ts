@@ -845,6 +845,40 @@ describe('useWebSocket', () => {
       expect(result.current.pendingAttachments).toBeUndefined()
     })
 
+    it('纯图片排队(text 为空)暴露 pendingActive=true 且 pendingMessage 为空串', async () => {
+      vi.useFakeTimers()
+      const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-1'))
+      await act(async () => { vi.advanceTimersByTime(10) })
+
+      // 进入流式回复状态
+      act(() => { result.current.sendMessage('first', 'conv-1') })
+      act(() => {
+        MockWebSocket.instances[0].simulateMessage(
+          JSON.stringify({ chunk: 'answering. ', conversation_id: 'conv-1' }),
+        )
+      })
+
+      // Finding 3 回归:纯图片排队 text 为 '' → pendingMessage 是假值,
+      // 悬浮条必须以 pendingActive 为准渲染,否则用户零反馈、会重复发送。
+      act(() => {
+        result.current.queuePendingMessage('', 'conv-1', [{ id: 'att_9', mime: 'image/png' }])
+      })
+      expect(result.current.pendingActive).toBe(true)
+      expect(result.current.pendingMessage).toBe('')
+      expect(result.current.pendingAttachments).toEqual([{ id: 'att_9', mime: 'image/png' }])
+
+      // 回复结束 → 待发条目自动发送,排队态复位
+      act(() => {
+        MockWebSocket.instances[0].simulateMessage(
+          JSON.stringify({ done: true, conversation_id: 'conv-1' }),
+        )
+      })
+      await act(async () => { vi.advanceTimersByTime(500) })
+
+      expect(result.current.pendingActive).toBe(false)
+      expect(result.current.pendingMessage).toBeNull()
+    })
+
     it('loadHistory 把后端 attachments 字段容错映射进 Message.attachments', async () => {
       const fetchMock = vi.fn().mockResolvedValue({
         ok: true,

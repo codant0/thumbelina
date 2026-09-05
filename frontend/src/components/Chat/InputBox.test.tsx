@@ -143,6 +143,7 @@ describe('InputBox', () => {
     render(
       <InputBox
         onSend={onSend}
+        pendingActive
         pendingMessage="queued text"
         onSendPendingNow={vi.fn()}
         onCancelPending={vi.fn()}
@@ -164,6 +165,7 @@ describe('InputBox', () => {
     render(
       <InputBox
         onSend={vi.fn()}
+        pendingActive
         pendingMessage="queued text"
         onSendPendingNow={onSendPendingNow}
         onCancelPending={onCancelPending}
@@ -184,6 +186,7 @@ describe('InputBox', () => {
     render(
       <InputBox
         onSend={vi.fn()}
+        pendingActive
         pendingMessage="queued"
         pendingHeld
         onSendPendingNow={vi.fn()}
@@ -199,6 +202,7 @@ describe('InputBox', () => {
     render(
       <InputBox
         onSend={vi.fn()}
+        pendingActive
         pendingMessage="queued"
         onSendPendingNow={vi.fn()}
         onCancelPending={vi.fn()}
@@ -211,6 +215,7 @@ describe('InputBox', () => {
     const { container } = render(
       <InputBox
         onSend={vi.fn()}
+        pendingActive
         pendingMessage="queued"
         pendingHeld
         onSendPendingNow={vi.fn()}
@@ -227,6 +232,7 @@ describe('InputBox', () => {
     render(
       <InputBox
         onSend={vi.fn()}
+        pendingActive
         pendingMessage="queued"
         onSendPendingNow={vi.fn()}
         onCancelPending={vi.fn()}
@@ -246,6 +252,7 @@ describe('InputBox', () => {
     render(
       <InputBox
         onSend={vi.fn()}
+        pendingActive
         pendingMessage="queued"
         onSendPendingNow={vi.fn()}
         onCancelPending={vi.fn()}
@@ -260,6 +267,7 @@ describe('InputBox', () => {
     render(
       <InputBox
         onSend={vi.fn()}
+        pendingActive
         pendingMessage="queued"
         onSendPendingNow={vi.fn()}
         onCancelPending={vi.fn()}
@@ -278,6 +286,7 @@ describe('InputBox', () => {
     const { container } = render(
       <InputBox
         onSend={vi.fn()}
+        pendingActive
         pendingMessage="queued"
         onSendPendingNow={vi.fn()}
         onCancelPending={vi.fn()}
@@ -364,7 +373,10 @@ describe('InputBox attachments', () => {
     )
     await user.type(screen.getByPlaceholderText(/Type a message/i), '看图')
     await user.click(screen.getByRole('button', { name: 'Send' }))
-    expect(onSend).toHaveBeenCalledWith('看图', [{ id: 'att-9', alt: '首页' }])
+    expect(onSend).toHaveBeenCalledWith(
+      '看图',
+      [{ id: 'att-9', mime: 'image/png', width: 10, height: 10, alt: '首页' }],
+    )
     expect(onAttachmentsChange).toHaveBeenLastCalledWith([])
   })
 
@@ -386,7 +398,9 @@ describe('InputBox attachments', () => {
     const send = screen.getByRole('button', { name: 'Send' })
     expect(send).toBeEnabled()
     await user.click(send)
-    expect(onSend).toHaveBeenCalledWith('', [{ id: 'att-1' }])
+    expect(onSend).toHaveBeenCalledWith('', [
+      { id: 'att-1', mime: 'image/png', width: 10, height: 10 },
+    ])
   })
 
   it('sends an image-only message via Enter with empty text', async () => {
@@ -397,7 +411,9 @@ describe('InputBox attachments', () => {
       <InputBox onSend={onSend} attachments={[localAtt()]} onAttachmentsChange={vi.fn()} />,
     )
     await user.type(screen.getByPlaceholderText(/Type a message/i), '{enter}')
-    expect(onSend).toHaveBeenCalledWith('', [{ id: 'att-1' }])
+    expect(onSend).toHaveBeenCalledWith('', [
+      { id: 'att-1', mime: 'image/png', width: 10, height: 10 },
+    ])
   })
 
   it('disables send when text and attachments are both empty', () => {
@@ -489,13 +505,16 @@ describe('InputBox attachments', () => {
     )
     await user.type(screen.getByPlaceholderText(/Type a message/i), '排队')
     await user.click(screen.getByRole('button', { name: 'Send' }))
-    expect(onQueueSend).toHaveBeenCalledWith('排队', [{ id: 'att-7' }])
+    expect(onQueueSend).toHaveBeenCalledWith('排队', [
+      { id: 'att-7', mime: 'image/png', width: 10, height: 10 },
+    ])
   })
 
   it('shows the pending-image count badge on the queued message bar', () => {
     render(
       <InputBox
         onSend={vi.fn()}
+        pendingActive
         pendingMessage="queued"
         pendingAttachmentCount={2}
         onSendPendingNow={vi.fn()}
@@ -509,12 +528,46 @@ describe('InputBox attachments', () => {
     render(
       <InputBox
         onSend={vi.fn()}
+        pendingActive
         pendingMessage="queued"
         onSendPendingNow={vi.fn()}
         onCancelPending={vi.fn()}
       />,
     )
     expect(screen.queryByTestId('pending-attach-badge')).not.toBeInTheDocument()
+  })
+
+  it('renders the float for an image-only queue with the badge as its text content', () => {
+    // Finding 3 回归:纯图片排队时 pendingMessage 为 ''(假值),悬浮条改由
+    // pendingActive 门控;无文本时 imagesCount 徽标即正文,用户才有排队反馈,
+    // 且单条队列语义不变(发送按钮禁用)。
+    const { container } = render(
+      <InputBox
+        onSend={vi.fn()}
+        pendingActive
+        pendingMessage=""
+        pendingAttachmentCount={1}
+        onSendPendingNow={vi.fn()}
+        onCancelPending={vi.fn()}
+      />,
+    )
+    expect(screen.getByTestId('pending-message')).toBeInTheDocument()
+    expect(screen.getByTestId('pending-attach-badge')).toHaveTextContent('+ 1 image(s)')
+    expect(container.querySelector('.pending-float-text')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
+  })
+
+  it('does not render the pending float when no entry is queued', () => {
+    render(
+      <InputBox
+        onSend={vi.fn()}
+        pendingActive={false}
+        pendingMessage={null}
+        onSendPendingNow={vi.fn()}
+        onCancelPending={vi.fn()}
+      />,
+    )
+    expect(screen.queryByTestId('pending-message')).not.toBeInTheDocument()
   })
 
   it('keeps every batch-added attachment ready when uploads resolve individually (race regression)', async () => {
@@ -562,7 +615,10 @@ describe('InputBox attachments', () => {
     // 发送不再被阻塞,且携带全部就绪引用(添加顺序)
     await user.type(screen.getByPlaceholderText(/Type a message/i), '看图')
     await user.click(screen.getByRole('button', { name: 'Send' }))
-    expect(onSend).toHaveBeenCalledWith('看图', [{ id: 'att-first' }, { id: 'att-second' }])
+    expect(onSend).toHaveBeenCalledWith('看图', [
+      { id: 'att-first', mime: 'image/png', width: 10, height: 10 },
+      { id: 'att-second', mime: 'image/png', width: 10, height: 10 },
+    ])
   })
 })
 
@@ -617,7 +673,9 @@ describe('InputBox preview URL revocation', () => {
 
     await user.type(screen.getByPlaceholderText(/Type a message/i), 'hi')
     await user.click(screen.getByRole('button', { name: 'Send' }))
-    expect(onSend).toHaveBeenCalledWith('hi', [{ id: 'att-1' }])
+    expect(onSend).toHaveBeenCalledWith('hi', [
+      { id: 'att-1', mime: 'image/png', width: 10, height: 10 },
+    ])
     // 发送后父级清空列表 → 兜底回收 effect revoke 剩余预览地址
     expect(revokeSpy).toHaveBeenCalledWith(previewUrl)
     expect(screen.queryByTestId('attachments-strip')).not.toBeInTheDocument()

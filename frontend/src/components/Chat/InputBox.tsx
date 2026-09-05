@@ -29,8 +29,13 @@ interface InputBoxProps {
   isStreaming?: boolean
   /** Called when the user stops generation (only used while isStreaming). */
   onStop?: () => void
-  /** Queued message for the active conversation (single slot); null = none. */
+  /** Queued message for the active conversation (single slot); null = none.
+   *  纯图片排队时为 ''(空串)——悬浮条改由 pendingActive 门控。 */
   pendingMessage?: string | null
+  /** A queued entry exists for the active conversation (also true for
+   *  image-only queues whose text is empty); gates the pending float and the
+   *  single-slot guard. */
+  pendingActive?: boolean
   /** The queued message is held because the previous reply ended abnormally. */
   pendingHeld?: boolean
   /** Submitting while streaming queues the message instead of sending it. */
@@ -118,6 +123,7 @@ export function InputBox({
   isStreaming,
   onStop,
   pendingMessage,
+  pendingActive,
   pendingHeld,
   onQueueSend,
   onSendPendingNow,
@@ -141,9 +147,14 @@ export function InputBox({
   const list = attachments ?? EMPTY_ATTACHMENTS
   const readyItems = list.filter(a => a.status === 'ready' && a.uploaded)
   const readyCount = readyItems.length
-  // 仅 ready 项映射为发送引用;failed/uploading 项阻塞发送
+  // 仅 ready 项映射为发送引用;failed/uploading 项阻塞发送。
+  // 引用随带上传响应的 mime/width/height(乐观插入直接作为 AttachmentRef
+  // 渲染);上行帧构造时再由 useWebSocket 剥离为 {id, alt}(§4.1)。
   const readyRefs: SendAttachmentInput[] = readyItems.map(a => {
-    const ref: SendAttachmentInput = { id: a.uploaded!.id }
+    const uploaded = a.uploaded!
+    const ref: SendAttachmentInput = { id: uploaded.id, mime: uploaded.mime }
+    if (uploaded.width != null) ref.width = uploaded.width
+    if (uploaded.height != null) ref.height = uploaded.height
     if (a.alt !== undefined) ref.alt = a.alt
     return ref
   })
@@ -250,7 +261,8 @@ export function InputBox({
       return
     }
     // 单条队列:已有待发消息时,先通过悬浮条「立即执行/取消」处理
-    if (pendingMessage) return
+    // (pendingActive 也覆盖纯图片排队 —— text 为空但条目存在)。
+    if (pendingActive) return
     // 无就绪附件时保持单参调用(旧测试依赖 toHaveBeenCalledWith('Hello world') 形状)
     if (readyRefs.length > 0) onSend(trimmed, readyRefs)
     else onSend(trimmed)
@@ -281,13 +293,13 @@ export function InputBox({
   const pendingState = pendingHeld ? 'held' : 'auto'
   const sendDisabled =
     disabled ||
-    !!pendingMessage ||
+    !!pendingActive ||
     !canSendMessage(text, readyCount) ||
     hasBlockingAttachments
 
   return (
     <div className="input-box">
-      {pendingMessage && (
+      {pendingActive && (
         <div
           className="pending-float"
           data-testid="pending-message"
@@ -310,9 +322,12 @@ export function InputBox({
               {pendingHeld ? t('chat.pendingHeldHint') : t('chat.pendingHint')}
             </div>
           </div>
-          <div className="pending-float-text">{pendingMessage}</div>
+          {pendingMessage
+            ? <div className="pending-float-text">{pendingMessage}</div>
+            : null}
           {pendingAttachmentCount ? (
-            /* 待发消息携带的图片数徽标(样式见 chat.css .pending-float-attach-badge) */
+            /* 待发消息携带的图片数徽标(样式见 chat.css .pending-float-attach-badge);
+               纯图片排队(text 为空)时它就是悬浮条的正文内容 */
             <span className="pending-float-attach-badge" data-testid="pending-attach-badge">
               {t('chat.attachments.imagesCount', { n: pendingAttachmentCount })}
             </span>
@@ -409,7 +424,7 @@ export function InputBox({
           type="submit"
           disabled={sendDisabled}
           title={
-            pendingMessage
+            pendingActive
               ? t('chat.pendingBlockTitle')
               : hasBlockingAttachments
                 ? t('chat.attachments.blockingHint')

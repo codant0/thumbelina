@@ -37,6 +37,7 @@ const renderBar = (props: Record<string, unknown>) =>
   render(
     <InputBox
       onSend={() => {}}
+      pendingActive
       pendingMessage="queued text that might run on a bit"
       onSendPendingNow={() => {}}
       onCancelPending={() => {}}

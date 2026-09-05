@@ -122,7 +122,11 @@ def multimodal_client(client, ws_repo, attachments_root: Path):
 def test_valid_frame_persists_attachments_and_sends_image_blocks(
     multimodal_client, ws_repo, attachments_root, conversation_id
 ):
-    """text + 2 附件：user 消息带 attachments JSON；LLM 收到 2 个图像块。"""
+    """text + 2 附件：user 消息带富化后的 attachments JSON；LLM 收到 2 个图像块。
+
+    设计 §3.2/§4.2:上行原始引用 ``[{id, alt?}]`` 在 WS 层用附件记录补全为
+    ``[{id, mime, width, height, alt?}]`` 后落库(保持原顺序与重复项)。
+    """
     first = _seed_attachment(attachments_root, ws_repo, _png_bytes(3, 2))
     second = _seed_attachment(attachments_root, ws_repo, _png_bytes(9, 4))
     refs = [{"id": first["id"], "alt": "first"}, {"id": second["id"]}]
@@ -137,12 +141,15 @@ def test_valid_frame_persists_attachments_and_sends_image_blocks(
     assert any(frame.get("done") for frame in frames)
     assert not any("error" in frame for frame in frames)
 
-    # 持久化的 user 消息携带 attachments JSON（读回等价列表）
+    # 持久化的 user 消息携带富化后的 attachments JSON(读回等价列表)
     messages = _get_messages(ws_repo, conversation_id)
     user_messages = [m for m in messages if m["role"] == "user"]
     assert len(user_messages) == 1
     assert user_messages[0]["content"] == "看这两张图"
-    assert user_messages[0]["attachments"] == refs
+    assert user_messages[0]["attachments"] == [
+        {"id": first["id"], "mime": "image/png", "width": 3, "height": 2, "alt": "first"},
+        {"id": second["id"], "mime": "image/png", "width": 3, "height": 2},
+    ]
 
     # fake LLM 收到的最后一条 HumanMessage：list content，首块 text + 2 图像块
     human = _last_human_message(multimodal_client)
@@ -181,7 +188,9 @@ def test_empty_text_with_attachments_passes_guard(
     user_messages = [m for m in messages if m["role"] == "user"]
     assert len(user_messages) == 1
     assert user_messages[0]["content"] == ""
-    assert user_messages[0]["attachments"] == [{"id": record["id"]}]
+    assert user_messages[0]["attachments"] == [
+        {"id": record["id"], "mime": "image/png", "width": 3, "height": 2}
+    ]
 
     human = _last_human_message(multimodal_client)
     assert isinstance(human.content, list)
@@ -211,9 +220,10 @@ def test_duplicate_attachment_ids_send_single_image_block(
     image_blocks = [b for b in human.content if isinstance(b, dict) and b.get("type") == "image"]
     assert len(image_blocks) == 1
 
-    # 持久化层保留原始引用列表（去重只发生在模型视图）
+    # 持久化层保留原始引用列表的顺序与重复项(富化补全元数据;去重只发生在模型视图)
+    enriched = {"id": record["id"], "mime": "image/png", "width": 3, "height": 2}
     user_messages = [m for m in _get_messages(ws_repo, conversation_id) if m["role"] == "user"]
-    assert user_messages[0]["attachments"] == refs
+    assert user_messages[0]["attachments"] == [enriched, enriched]
 
 
 # ----------------------------------------------------------------------
@@ -245,6 +255,29 @@ def test_missing_attachment_id_rejects_without_persist_or_generation(
         assert ws.receive_json().get("stopped") is True
 
     assert _get_messages(ws_repo, conversation_id) == []
+    assert not chat_model.ainvoke.called
+
+
+def test_missing_attachment_error_frame_uses_resolved_conversation_id(
+    multimodal_client, ws_repo
+):
+    """回归:首条消息(无 conversation_id)引用缺失附件 → 错误帧携带服务端
+    新建会话的 cid,而非 parsed.conversation_id(None)。前端依赖该 id 清除
+    等待态;带 None 会白等到 90s 超时。"""
+    chat_model = multimodal_client.app.state.agent.llm_provider.chat_model
+
+    with multimodal_client.websocket_connect("/ws/chat") as ws:
+        ws.send_json({"message": "hello", "attachments": [{"id": "missing-1"}]})
+        created = ws.receive_json()
+        assert set(created.keys()) == {"conversation_created"}
+        cid = created["conversation_created"]
+
+        frame = ws.receive_json()
+        assert frame["error"] == "Invalid attachment"
+        assert frame["missing_attachment_ids"] == ["missing-1"]
+        assert frame["conversation_id"] == cid
+
+    assert _get_messages(ws_repo, cid) == []
     assert not chat_model.ainvoke.called
 
 

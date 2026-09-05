@@ -17,6 +17,7 @@ const ws = {
   lastConversationId: null,
   newConversationId: null,
   clearNewConversation: vi.fn(),
+  pendingActive: false,
   pendingMessage: null,
   pendingAttachments: undefined,
   pendingHeld: false,

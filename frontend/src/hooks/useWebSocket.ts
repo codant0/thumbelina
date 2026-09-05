@@ -278,8 +278,10 @@ export function useWebSocket(url: string, activeConversationId?: string) {
           role: 'user',
           content: message,
           timestamp: new Date().toISOString(),
-          // 乐观插入原样携带附件引用:本地缩略图渲染只需 id/alt,mime 等由历史回放补全
-          attachments: attachments as AttachmentRef[] | undefined,
+          // 乐观插入原样携带附件引用(含上传响应带来的 mime/width/height):
+          // 本地缩略图渲染即可用,无需等历史回放补全。上行帧构造时仍剥离为
+          // {id, alt}(§4.1)。
+          attachments,
         },
       ])
       setWaitingConvIds(prev => (prev.includes(targetConv) ? prev : [...prev, targetConv]))
@@ -288,7 +290,8 @@ export function useWebSocket(url: string, activeConversationId?: string) {
       if (conversationId) {
         payload.conversation_id = conversationId
       }
-      // 协议 §4.1:附件非空才携带(仅 {id, alt});空数组不发,兼容纯文本旧分支
+      // 协议 §4.1:附件非空才携带,且剥离为 {id, alt}(mime 等元数据只用于
+      // 乐观渲染,上行帧形状不变);空数组不发,兼容纯文本旧分支
       if (attachments && attachments.length > 0) {
         payload.attachments = attachments.map(({ id, alt }) => (alt === undefined ? { id } : { id, alt }))
       }
@@ -899,7 +902,32 @@ export function useWebSocket(url: string, activeConversationId?: string) {
     (!activeConversationId && waitingConvIds.includes('@pending')) || false
   const activePending = activeConversationId ? pendingByConv[activeConversationId] : undefined
 
-  return { messages, isConnected, isStreaming: isStreamingActive, streamingMode, waitingForReply, awaitingMoreContent, lastConversationId, newConversationId, clearNewConversation, pendingMessage: activePending?.text ?? null, pendingAttachments: activePending?.attachments ?? undefined, pendingHeld: activePending?.held ?? false, queuePendingMessage, sendPendingNow, cancelPendingMessage, sendMessage, stopGeneration, clearMessages, switchConversation, loadHistory, subscribe }
+  return {
+    messages,
+    isConnected,
+    isStreaming: isStreamingActive,
+    streamingMode,
+    waitingForReply,
+    awaitingMoreContent,
+    lastConversationId,
+    newConversationId,
+    clearNewConversation,
+    // 待发条目存在(含纯图片排队:text 为空 → pendingMessage 为 '' 的假值,
+    // 悬浮条必须以 pendingActive 为准渲染,否则纯图片排队零反馈)。
+    pendingActive: activePending !== undefined,
+    pendingMessage: activePending?.text ?? null,
+    pendingAttachments: activePending?.attachments ?? undefined,
+    pendingHeld: activePending?.held ?? false,
+    queuePendingMessage,
+    sendPendingNow,
+    cancelPendingMessage,
+    sendMessage,
+    stopGeneration,
+    clearMessages,
+    switchConversation,
+    loadHistory,
+    subscribe,
+  }
 }
 
 export type ChatSocket = ReturnType<typeof useWebSocket>

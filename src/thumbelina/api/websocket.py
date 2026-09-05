@@ -52,6 +52,34 @@ async def broadcast_chat_message(message: dict[str, Any]) -> None:
         logger.debug("Broadcast to %d client(s): %s", len(_chat_ws_clients), list(message.keys()))
 
 
+def _enrich_attachment_refs(
+    refs: list[dict[str, Any]],
+    records: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """把上行原始附件引用 ``[{id, alt?}]`` 补全为持久化形态(设计 §3.2/§4.2)。
+
+    ``mime``/``width``/``height`` 取自附件记录(存在性校验时已批量取回),
+    ``alt`` 保留上行值;保持原顺序与重复项。``width``/``height`` 为空的记录
+    省略对应键;id 无法解析或记录缺失的引用原样保留(交由下游容错)。
+    """
+    enriched: list[dict[str, Any]] = []
+    for ref in refs:
+        attachment_id = ref.get("id")
+        record = records.get(attachment_id) if isinstance(attachment_id, str) else None
+        if record is None:
+            enriched.append(dict(ref))
+            continue
+        item: dict[str, Any] = {"id": attachment_id, "mime": record.get("mime")}
+        if record.get("width") is not None:
+            item["width"] = record["width"]
+        if record.get("height") is not None:
+            item["height"] = record["height"]
+        if ref.get("alt") is not None:
+            item["alt"] = ref["alt"]
+        enriched.append(item)
+    return enriched
+
+
 async def _run_generation(
     websocket: WebSocket,
     agent: ThumbelinaAgent,
@@ -75,10 +103,11 @@ async def _run_generation(
     subagent listener 用来读取"本轮正在生成的会话 ID",以决定把事件推给
     哪个连接、避免跨会话串话。
 
-    ``attachments`` 是可选的图像附件引用(``[{id, alt?}]``,Task B3),
-    透传给 ``agent.stream``/``agent.run``;微信绑定的会话为纯文本通道,
-    图像附件在此直接忽略(仅文本进入模型);若该轮文本也为空白(纯图片
-    轮),回错误帧并直接结束,不开始生成。
+    ``attachments`` 是可选的图像附件引用(``[{id, mime, width, height, alt?}]``,
+    已由 ``websocket_chat`` 按设计 §3.2/§4.2 用附件记录补全),透传给
+    ``agent.stream``/``agent.run``;微信绑定的会话为纯文本通道,图像附件在
+    此直接忽略(仅文本进入模型);若该轮文本也为空白(纯图片轮),回错误帧
+    并直接结束,不开始生成。
     """
     # 在本轮范围内,subagent listener 能从 active_conv_ref 读到本次 cid,
     # 因此即便 listener 注册在 connect 时,它仍能正确路由。
@@ -364,6 +393,11 @@ async def websocket_chat(websocket: WebSocket) -> None:
             # 附件存在性校验(Task B3,无用户体系不做归属校验):任何 id
             # 在 attachments 表中缺失 → 错误帧且不开新一轮。仓储异常按
             # 校验失败处理(全部视为缺失),不中断连接。
+            # 错误帧携带解析后的 cid(而非 parsed.conversation_id):首条
+            # 消息在服务端新建会话时 parsed 值为 None,前端拿不到会话 id
+            # 就无法清除等待态,会白等到 90s 超时。
+            attachment_records: dict[str, dict[str, Any]] = {}
+            parsed_attachments_enriched = parsed.attachments
             if parsed.attachments and agent.repository_manager:
                 attachment_ids: list[str] = []
                 for ref in parsed.attachments:
@@ -372,7 +406,9 @@ async def websocket_chat(websocket: WebSocket) -> None:
                         attachment_ids.append(attachment_id)
                 missing: list[str] = list(attachment_ids)
                 try:
-                    records = await agent.repository_manager.get_attachments(attachment_ids)
+                    attachment_records = await agent.repository_manager.get_attachments(
+                        attachment_ids
+                    )
                 except Exception:
                     logger.warning(
                         "Attachment existence check failed (conversation %s)",
@@ -380,22 +416,35 @@ async def websocket_chat(websocket: WebSocket) -> None:
                         exc_info=True,
                     )
                 else:
-                    missing = [aid for aid in attachment_ids if aid not in records]
+                    missing = [aid for aid in attachment_ids if aid not in attachment_records]
                 if missing:
                     await websocket.send_json(
                         {
                             "error": "Invalid attachment",
                             "missing_attachment_ids": missing,
-                            "conversation_id": parsed.conversation_id,
+                            "conversation_id": cid,
                         }
                     )
                     continue
+
+                # 设计 §3.2/§4.2:messages.attachments 持久化与历史回放的
+                # 形态为 [{id, mime, width, height, alt?}]。用校验阶段取回
+                # 的记录把上行原始引用补全为富引用后再进入生成(落库、历史、
+                # 轨迹摘要共用以此列表;图像块组装仍由 multimodal 按 id 查表)。
+                parsed_attachments_enriched = _enrich_attachment_refs(
+                    parsed.attachments, attachment_records
+                )
 
             # 生成在独立任务中运行，主循环立即回到 receive_text()，
             # 使流式进行中也能接收并响应 stop。
             current_task = asyncio.create_task(
                 _run_generation(
-                    websocket, agent, parsed.message, cid, active_conv_ref, parsed.attachments
+                    websocket,
+                    agent,
+                    parsed.message,
+                    cid,
+                    active_conv_ref,
+                    parsed_attachments_enriched,
                 )
             )
 

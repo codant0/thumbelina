@@ -34,6 +34,7 @@ const baseState: ChatSocket = {
   lastConversationId: null,
   newConversationId: null,
   clearNewConversation: vi.fn(),
+  pendingActive: false,
   pendingMessage: null,
   pendingAttachments: undefined,
   pendingHeld: false,
@@ -204,7 +205,7 @@ describe('ChatWindow', () => {
   })
 
   it('renders the queued message floating bar wired to send-now and cancel', () => {
-    wsState = { ...baseState, pendingMessage: 'queued text' }
+    wsState = { ...baseState, pendingActive: true, pendingMessage: 'queued text' }
     renderWindow({ conversationId: 'conv-1' })
 
     expect(screen.getByTestId('pending-message')).toHaveTextContent('queued text')
@@ -217,7 +218,7 @@ describe('ChatWindow', () => {
   })
 
   it('marks the queued bar as held after an abnormal reply end', () => {
-    wsState = { ...baseState, pendingMessage: 'queued text', pendingHeld: true }
+    wsState = { ...baseState, pendingActive: true, pendingMessage: 'queued text', pendingHeld: true }
     renderWindow({ conversationId: 'conv-1' })
     expect(screen.getByText(/auto-send paused/i)).toBeInTheDocument()
   })
@@ -225,11 +226,26 @@ describe('ChatWindow', () => {
   it('shows the pending-image badge when the queued message carries attachments', () => {
     wsState = {
       ...baseState,
+      pendingActive: true,
       pendingMessage: 'queued text',
       pendingAttachments: [{ id: 'a1' }, { id: 'a2' }],
     }
     renderWindow({ conversationId: 'conv-1' })
     expect(screen.getByTestId('pending-attach-badge')).toHaveTextContent('+ 2 image(s)')
+  })
+
+  it('renders the queued bar for an image-only queue (empty text) with the badge text', () => {
+    // Finding 3 回归:hook 对纯图片排队暴露 pendingActive=true 而 pendingMessage
+    // 为 ''(假值);ChatWindow 原样透传,悬浮条照常渲染并以徽标为正文。
+    wsState = {
+      ...baseState,
+      pendingActive: true,
+      pendingMessage: '',
+      pendingAttachments: [{ id: 'a1' }],
+    }
+    renderWindow({ conversationId: 'conv-1' })
+    expect(screen.getByTestId('pending-message')).toBeInTheDocument()
+    expect(screen.getByTestId('pending-attach-badge')).toHaveTextContent('+ 1 image(s)')
   })
 
   it('drops image files into the shared pipeline and sends them with the message', async () => {
@@ -249,7 +265,9 @@ describe('ChatWindow', () => {
     fireEvent.change(screen.getByPlaceholderText(/Type a message/i), { target: { value: '看图' } })
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
     await waitFor(() => {
-      expect(baseState.sendMessage).toHaveBeenCalledWith('看图', 'conv-1', [{ id: 'att-1' }])
+      expect(baseState.sendMessage).toHaveBeenCalledWith('看图', 'conv-1', [
+        { id: 'att-1', mime: 'image/png', width: 10, height: 10 },
+      ])
     })
     // 发送成功后清空附件草稿
     expect(screen.queryByTestId('attachments-strip')).not.toBeInTheDocument()
@@ -299,8 +317,8 @@ describe('ChatWindow', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
     await waitFor(() => {
       expect(baseState.sendMessage).toHaveBeenCalledWith('看图', 'conv-1', [
-        { id: 'att-drop-a' },
-        { id: 'att-drop-b' },
+        { id: 'att-drop-a', mime: 'image/png', width: 10, height: 10 },
+        { id: 'att-drop-b', mime: 'image/png', width: 10, height: 10 },
       ])
     })
   })
@@ -378,7 +396,9 @@ describe('ChatWindow', () => {
     fireEvent.change(screen.getByPlaceholderText(/Type a message/i), { target: { value: '排队看图' } })
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
     await waitFor(() => {
-      expect(baseState.queuePendingMessage).toHaveBeenCalledWith('排队看图', 'conv-1', [{ id: 'att-1' }])
+      expect(baseState.queuePendingMessage).toHaveBeenCalledWith('排队看图', 'conv-1', [
+        { id: 'att-1', mime: 'image/png', width: 10, height: 10 },
+      ])
     })
     expect(baseState.sendMessage).not.toHaveBeenCalled()
   })
