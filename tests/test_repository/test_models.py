@@ -247,3 +247,76 @@ class TestEnsureSchemaStringDefault:
             ).fetchone()
             assert row.description == "老数据"
             assert row.content == ""
+
+
+class TestEnsureSchemaMessagesAttachments:
+    """ensure_schema 必须为遗留库补齐多模态增量(设计 §3.2)。
+
+    回归:多模态分支在 messages 上新增 JSON 列 ``attachments``、并新增
+    ``attachments`` 表。``Base.metadata.create_all`` 只建缺失的表、不补
+    已有表的缺失列 —— 遗留库升级必须靠 ensure_schema 补列,否则带附件的
+    user 消息写入整行失败。
+    """
+
+    def test_adds_attachments_column_and_attachments_table(self):
+        from sqlalchemy import inspect as sa_inspect
+        from sqlalchemy import text
+
+        from thumbelina.repository.models import Attachment, ensure_schema
+
+        engine = create_engine("sqlite:///:memory:")
+        # 模拟多模态之前的遗留库:messages 表存在但没有 attachments 列
+        # (reasoning_content 属于更早的迁移,已在),attachments 表不存在。
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "CREATE TABLE messages ("
+                    "id VARCHAR(36) PRIMARY KEY, "
+                    "conversation_id VARCHAR(36), "
+                    "role VARCHAR(20), "
+                    "content TEXT NOT NULL, "
+                    "reasoning_content TEXT, "
+                    "created_at DATETIME)"
+                )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO messages (id, conversation_id, role, content) "
+                    "VALUES ('legacy', 'conv', 'user', '老消息')"
+                )
+            )
+
+        # create_all 补建缺失的表(attachments 等);ensure_schema 补齐已有表的缺失列。
+        Base.metadata.create_all(engine)
+        ensure_schema(engine)
+
+        inspector = sa_inspect(engine)
+        column_names = {col["name"] for col in inspector.get_columns("messages")}
+        assert "attachments" in column_names
+        assert inspector.has_table("attachments")
+
+        # 补列后模型可正常写入:附件记录 + 带附件引用的 user 消息。
+        with Session(engine) as session:
+            session.add(
+                Attachment(id="att-1", mime="image/png", size=1, relative_path="2026/09/a.png")
+            )
+            session.add(
+                Message(
+                    id="msg-1",
+                    conversation_id="conv",
+                    role="user",
+                    content="新消息",
+                    attachments='[{"id": "att-1", "mime": "image/png"}]',
+                )
+            )
+            session.commit()
+
+            row = session.execute(
+                text("SELECT content, attachments FROM messages WHERE id='legacy'")
+            ).fetchone()
+            assert row.content == "老消息"
+            assert row.attachments is None
+            new_row = session.execute(
+                text("SELECT attachments FROM messages WHERE id='msg-1'")
+            ).fetchone()
+            assert new_row.attachments == '[{"id": "att-1", "mime": "image/png"}]'

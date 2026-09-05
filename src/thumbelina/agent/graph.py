@@ -34,6 +34,7 @@ from thumbelina.agent.compression import (
     strip_first_assistant_thinking,
 )
 from thumbelina.agent.edges import CONTINUE, should_continue
+from thumbelina.agent.multimodal import build_image_blocks
 from thumbelina.agent.nodes import call_model, tool_node
 from thumbelina.agent.state import AgentState
 from thumbelina.agent.trajectory import TrajectoryRecorder, normalize_llm_usage
@@ -207,6 +208,22 @@ def _messages_state_update(
     return {"messages": replacement}
 
 
+def _attachment_summary(attachments: list[dict[str, object]] | None) -> str | None:
+    """构造 trajectory 用的用户附件摘要(Task B4)。
+
+    格式:``attached N image(s)``;每个 alt 截断 50 字符后以
+    ``, alt: xxx`` 拼接,避免长文本污染轨迹。无附件返回 ``None``。
+    """
+    if not attachments:
+        return None
+    summary = f"attached {len(attachments)} image(s)"
+    for ref in attachments:
+        alt = ref.get("alt") if isinstance(ref, dict) else None
+        if isinstance(alt, str) and alt.strip():
+            summary += f", alt: {alt[:50]}"
+    return summary
+
+
 class ThumbelinaAgent:
     """Main agent class that orchestrates the LangGraph agent loop.
 
@@ -278,6 +295,9 @@ class ThumbelinaAgent:
         self.role = role
         self.role_prompt = get_role_prompt(role) if role else None
         self.workspace = workspace
+        # 附件根目录(多模态,设计 §3.1):非构造参数,由 websocket_chat 在
+        # clone() 之后接线;None 表示未配置,图像块构建 fail-soft 全部跳过。
+        self.attachments_root: Path | None = None
         self.current_conversation_id: str | None = None
         # Lazily-resolved chat model; None means resolve from llm_provider.
         self._llm: BaseChatModel | None = None
@@ -816,7 +836,10 @@ class ThumbelinaAgent:
         return not snapshot.values.get("messages")
 
     async def _build_initial_messages(
-        self, user_input: str, config: RunnableConfig | None
+        self,
+        user_input: str,
+        config: RunnableConfig | None,
+        attachments: list[dict[str, object]] | None = None,
     ) -> list[Any]:
         """构建单轮的输入消息序列。
 
@@ -832,6 +855,11 @@ class ThumbelinaAgent:
 
         没有检查点时状态从不持久化，因此每一轮都携带角色提示词与
         记忆索引摘要，与检查点出现之前完全一致。
+
+        多模态（设计 §3.3 / Task B4/B5）：``attachments`` 非空时把最后
+        一条 ``HumanMessage`` 组装为「文本 + 标准图像内容块」列表（纯图
+        时仅图像块）；块构建 fail-soft，解析不出任何块时回退纯文本，
+        与既有行为一致。
         """
         first_turn = True
         if self._checkpointer is not None and config is not None:
@@ -871,7 +899,19 @@ class ThumbelinaAgent:
         if skill_context:
             messages.append(SystemMessage(content=skill_context))
             traj_items.append({"kind": "skill", "content": skill_context})
-        messages.append(HumanMessage(content=user_input))
+        # 多模态(Task B4/B5):附件引用解析为标准图像内容块;解析不出
+        # 任何块时(无 repo / 无 root / 记录或文件缺失)回退纯文本。
+        blocks: list[dict[str, object]] = []
+        if attachments:
+            blocks = await build_image_blocks(
+                self.repository_manager, attachments, self.attachments_root
+            )
+        if not blocks:
+            messages.append(HumanMessage(content=user_input))
+        elif user_input.strip():
+            messages.append(HumanMessage(content=[{"type": "text", "text": user_input}, *blocks]))
+        else:  # 纯图片消息
+            messages.append(HumanMessage(content=[*blocks]))
         await self.trajectory_recorder.record_context(traj_items)
         return messages
 
@@ -888,7 +928,11 @@ class ThumbelinaAgent:
                 )
 
     async def _persist_message(
-        self, role: str, content: str, reasoning_content: str | None = None
+        self,
+        role: str,
+        content: str,
+        reasoning_content: str | None = None,
+        attachments: list[dict[str, object]] | None = None,
     ) -> None:
         """Persist a message to repository if enabled."""
         if self.repository_manager and self.current_conversation_id:
@@ -898,6 +942,7 @@ class ThumbelinaAgent:
                     role=role,
                     content=content,
                     reasoning_content=reasoning_content,
+                    attachments=attachments,
                 )
             except Exception:
                 logger.warning("Failed to persist message to repository", exc_info=True)
@@ -1041,6 +1086,8 @@ class ThumbelinaAgent:
         # Share the channel registry so the notify tool (deduped to the
         # parent's instance) sees the same channels in clones.
         cloned._channels = self._channels
+        # 附件根目录(Path 不可变,按值共享安全;Task B3)。
+        cloned.attachments_root = self.attachments_root
         return cloned
 
     async def _maybe_extract_memory(self, user_input: str) -> None:
@@ -1087,7 +1134,12 @@ class ThumbelinaAgent:
         if exc is not None:
             logger.warning("Memory extraction background task failed: %s", exc)
 
-    async def run(self, user_input: str, context_window_tokens: int | None = None) -> str:
+    async def run(
+        self,
+        user_input: str,
+        context_window_tokens: int | None = None,
+        attachments: list[dict[str, object]] | None = None,
+    ) -> str:
         """Run the agent with user input and return the response.
 
         Parameters
@@ -1098,17 +1150,25 @@ class ThumbelinaAgent:
             可选的按会话上下文窗口（单位为 token），由调用方解析
             （会话端点 → 全局活跃端点 → ``llm.context_window``）。
             它被放入运行配置中供压缩节点使用。
+        attachments:
+            可选的图像附件引用（``[{id, alt?}]``，设计 §4.1）：非空时
+            随消息落库，并把最后一轮 ``HumanMessage`` 组装为文本 +
+            标准图像内容块（解析失败 fail-soft 回退纯文本）。
         """
         await self._ensure_conversation()
         self.trajectory_recorder.begin_turn(self.current_conversation_id)
-        await self._persist_message("user", user_input)
-        await self.trajectory_recorder.record_user(user_input)
+        await self._persist_message("user", user_input, attachments=attachments)
+        await self.trajectory_recorder.record_user(
+            user_input, attachment_summary=_attachment_summary(attachments)
+        )
         # 每轮开始重置 RememberTool 单轮配额(§8.6)。
         if self._remember_tool is not None:
             self._remember_tool.reset_turn_quota()
 
         config = self._graph_invoke_config(self._run_config(context_window_tokens))
-        initial_messages = await self._build_initial_messages(user_input, config)
+        initial_messages = await self._build_initial_messages(
+            user_input, config, attachments=attachments
+        )
 
         initial_state: AgentState = {"messages": initial_messages}
         try:
@@ -1153,7 +1213,10 @@ class ThumbelinaAgent:
         return response
 
     async def stream(
-        self, user_input: str, context_window_tokens: int | None = None
+        self,
+        user_input: str,
+        context_window_tokens: int | None = None,
+        attachments: list[dict[str, object]] | None = None,
     ) -> AsyncGenerator[dict[str, str], None]:
         """Stream the agent's response as typed events.
 
@@ -1163,17 +1226,24 @@ class ThumbelinaAgent:
 
         ``context_window_tokens`` 是可选的按会话上下文窗口（单位为
         token），由调用方解析；它被放入运行配置中供压缩节点使用。
+        ``attachments`` 是可选的图像附件引用（``[{id, alt?}]``）：
+        非空时随消息落库，并把最后一轮 ``HumanMessage`` 组装为文本 +
+        标准图像内容块（解析失败 fail-soft 回退纯文本）。
         """
         await self._ensure_conversation()
         self.trajectory_recorder.begin_turn(self.current_conversation_id)
-        await self._persist_message("user", user_input)
-        await self.trajectory_recorder.record_user(user_input)
+        await self._persist_message("user", user_input, attachments=attachments)
+        await self.trajectory_recorder.record_user(
+            user_input, attachment_summary=_attachment_summary(attachments)
+        )
         # 每轮开始重置 RememberTool 单轮配额(§8.6)。
         if self._remember_tool is not None:
             self._remember_tool.reset_turn_quota()
 
         config = self._graph_invoke_config(self._run_config(context_window_tokens))
-        initial_messages = await self._build_initial_messages(user_input, config)
+        initial_messages = await self._build_initial_messages(
+            user_input, config, attachments=attachments
+        )
 
         initial_state: AgentState = {"messages": initial_messages}
         full_response = ""

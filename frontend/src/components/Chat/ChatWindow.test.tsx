@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { ChatWindow } from './ChatWindow'
 import type { ChatSocket } from '../../hooks/useWebSocket'
 
@@ -14,6 +14,16 @@ vi.mock('../../api/conversations', async (importOriginal) => {
   }
 })
 
+// 附件上传 mock:拖放冒烟测试需要真实的添加管道跑通(走 useAttachments)。
+const mockUploadAttachment = vi.fn()
+vi.mock('../../api/attachments', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api/attachments')>()
+  return {
+    ...actual,
+    uploadAttachment: (...args: unknown[]) => mockUploadAttachment(...args),
+  }
+})
+
 const baseState: ChatSocket = {
   messages: [],
   isConnected: true,
@@ -24,7 +34,9 @@ const baseState: ChatSocket = {
   lastConversationId: null,
   newConversationId: null,
   clearNewConversation: vi.fn(),
+  pendingActive: false,
   pendingMessage: null,
+  pendingAttachments: undefined,
   pendingHeld: false,
   queuePendingMessage: vi.fn(),
   sendPendingNow: vi.fn(),
@@ -44,6 +56,7 @@ const renderWindow = (props: Record<string, unknown> = {}) =>
 beforeEach(() => {
   vi.clearAllMocks()
   wsState = baseState
+  mockUploadAttachment.mockResolvedValue({ id: 'att-1', mime: 'image/png', size: 1, width: 10, height: 10, sha256: null })
 })
 
 describe('ChatWindow', () => {
@@ -192,7 +205,7 @@ describe('ChatWindow', () => {
   })
 
   it('renders the queued message floating bar wired to send-now and cancel', () => {
-    wsState = { ...baseState, pendingMessage: 'queued text' }
+    wsState = { ...baseState, pendingActive: true, pendingMessage: 'queued text' }
     renderWindow({ conversationId: 'conv-1' })
 
     expect(screen.getByTestId('pending-message')).toHaveTextContent('queued text')
@@ -205,8 +218,207 @@ describe('ChatWindow', () => {
   })
 
   it('marks the queued bar as held after an abnormal reply end', () => {
-    wsState = { ...baseState, pendingMessage: 'queued text', pendingHeld: true }
+    wsState = { ...baseState, pendingActive: true, pendingMessage: 'queued text', pendingHeld: true }
     renderWindow({ conversationId: 'conv-1' })
     expect(screen.getByText(/auto-send paused/i)).toBeInTheDocument()
+  })
+
+  it('shows the pending-image badge when the queued message carries attachments', () => {
+    wsState = {
+      ...baseState,
+      pendingActive: true,
+      pendingMessage: 'queued text',
+      pendingAttachments: [{ id: 'a1' }, { id: 'a2' }],
+    }
+    renderWindow({ conversationId: 'conv-1' })
+    expect(screen.getByTestId('pending-attach-badge')).toHaveTextContent('+ 2 image(s)')
+  })
+
+  it('renders the queued bar for an image-only queue (empty text) with the badge text', () => {
+    // Finding 3 回归:hook 对纯图片排队暴露 pendingActive=true 而 pendingMessage
+    // 为 ''(假值);ChatWindow 原样透传,悬浮条照常渲染并以徽标为正文。
+    wsState = {
+      ...baseState,
+      pendingActive: true,
+      pendingMessage: '',
+      pendingAttachments: [{ id: 'a1' }],
+    }
+    renderWindow({ conversationId: 'conv-1' })
+    expect(screen.getByTestId('pending-message')).toBeInTheDocument()
+    expect(screen.getByTestId('pending-attach-badge')).toHaveTextContent('+ 1 image(s)')
+  })
+
+  it('drops image files into the shared pipeline and sends them with the message', async () => {
+    renderWindow({ conversationId: 'conv-1' })
+    // 文档级拖放:dataTransfer.types 含 Files 才触发
+    fireEvent.dragEnter(document, { dataTransfer: { types: ['Files'], files: [] } })
+    expect(screen.getByTestId('drop-overlay')).toBeInTheDocument()
+    const file = new File(['x'], 'shot.png', { type: 'image/png' })
+    fireEvent.drop(document, { dataTransfer: { types: ['Files'], files: [file] } })
+    await waitFor(() => {
+      expect(screen.getByTestId('attachments-strip')).toBeInTheDocument()
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('attachments-strip').querySelector('[data-status="ready"]')).toBeTruthy()
+    })
+
+    fireEvent.change(screen.getByPlaceholderText(/Type a message/i), { target: { value: '看图' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await waitFor(() => {
+      expect(baseState.sendMessage).toHaveBeenCalledWith('看图', 'conv-1', [
+        { id: 'att-1', mime: 'image/png', width: 10, height: 10 },
+      ])
+    })
+    // 发送成功后清空附件草稿
+    expect(screen.queryByTestId('attachments-strip')).not.toBeInTheDocument()
+  })
+
+  it('does not trigger the drop overlay for non-file drags (coder code-drag)', () => {
+    renderWindow({ conversationId: 'conv-1' })
+    fireEvent.dragEnter(document, { dataTransfer: { types: ['text/plain'], files: [] } })
+    expect(screen.queryByTestId('drop-overlay')).not.toBeInTheDocument()
+  })
+
+  it('keeps every dropped attachment ready when uploads resolve individually (race regression)', async () => {
+    // 拖放多文件的竞态回归(与 InputBox 📎 路径共用管道,覆盖 ChatWindow 侧的
+    // 函数式 ctx):后一张的上传补丁不得用过期快照覆盖前一张刚落地的 ready。
+    const resolveUpload: Array<(v: unknown) => void> = []
+    mockUploadAttachment
+      .mockImplementationOnce(() => new Promise(resolve => { resolveUpload.push(resolve) }))
+      .mockImplementationOnce(() => new Promise(resolve => { resolveUpload.push(resolve) }))
+    renderWindow({ conversationId: 'conv-1' })
+    fireEvent.dragEnter(document, { dataTransfer: { types: ['Files'], files: [] } })
+    fireEvent.drop(document, {
+      dataTransfer: {
+        types: ['Files'],
+        files: [
+          new File(['x'], 'first.png', { type: 'image/png' }),
+          new File(['x'], 'second.png', { type: 'image/png' }),
+        ],
+      },
+    })
+    await waitFor(() => expect(mockUploadAttachment).toHaveBeenCalledTimes(1))
+
+    // 同一 act 域内先后 resolve 两张的上传(仅冲微任务,React 不提交任何 ready)
+    await act(async () => {
+      resolveUpload[0]({ id: 'att-drop-a', mime: 'image/png', size: 1, width: 10, height: 10, sha256: null })
+      for (let i = 0; i < 20; i++) await Promise.resolve()
+      expect(mockUploadAttachment).toHaveBeenCalledTimes(2)
+      resolveUpload[1]({ id: 'att-drop-b', mime: 'image/png', size: 1, width: 10, height: 10, sha256: null })
+      for (let i = 0; i < 5; i++) await Promise.resolve()
+    })
+
+    await waitFor(() => {
+      const thumbs = [...screen.getByTestId('attachments-strip').children]
+      expect(thumbs.map(t => t.getAttribute('data-status'))).toEqual(['ready', 'ready'])
+    })
+
+    fireEvent.change(screen.getByPlaceholderText(/Type a message/i), { target: { value: '看图' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await waitFor(() => {
+      expect(baseState.sendMessage).toHaveBeenCalledWith('看图', 'conv-1', [
+        { id: 'att-drop-a', mime: 'image/png', width: 10, height: 10 },
+        { id: 'att-drop-b', mime: 'image/png', width: 10, height: 10 },
+      ])
+    })
+  })
+
+  // ── 重新生成携带附件(设计 §5.4 / F8)────────────────────────────────────────
+
+  it('regenerate resends the last user message with its attachment refs', () => {
+    wsState = {
+      ...baseState,
+      messages: [
+        { id: '1', role: 'user', content: '看图', timestamp: '', attachments: [{ id: 'att-1', mime: 'image/png', alt: '首页截图' }, { id: 'att-2', mime: 'image/png' }] },
+        { id: '2', role: 'assistant', content: 'answer', timestamp: '' },
+      ],
+    }
+    renderWindow({ conversationId: 'conv-1' })
+
+    fireEvent.click(screen.getByTestId('regenerate'))
+    expect(baseState.sendMessage).toHaveBeenCalledTimes(1)
+    expect(baseState.sendMessage).toHaveBeenCalledWith('看图', 'conv-1', [
+      { id: 'att-1', alt: '首页截图' },
+      { id: 'att-2' },
+    ])
+  })
+
+  it('regenerate keeps the two-argument sendMessage call for a text-only message', () => {
+    // 回归:无附件的历史消息重新生成时保持旧调用形状(第三参不出现)。
+    wsState = {
+      ...baseState,
+      messages: [
+        { id: '1', role: 'user', content: 'hi', timestamp: '' },
+        { id: '2', role: 'assistant', content: 'yo', timestamp: '' },
+      ],
+    }
+    renderWindow({ conversationId: 'conv-1' })
+
+    fireEvent.click(screen.getByTestId('regenerate'))
+    expect(baseState.sendMessage).toHaveBeenCalledTimes(1)
+    expect(baseState.sendMessage).toHaveBeenCalledWith('hi', 'conv-1')
+    expect(vi.mocked(baseState.sendMessage).mock.calls[0]).toHaveLength(2)
+  })
+
+  it('regenerate respects the streaming guard (no resend mid-reply)', () => {
+    wsState = {
+      ...baseState,
+      isStreaming: true,
+      messages: [
+        { id: '1', role: 'user', content: 'hi', timestamp: '', attachments: [{ id: 'att-1', mime: 'image/png' }] },
+        { id: 'stream-2', role: 'assistant', content: 'partial', timestamp: '' },
+      ],
+    }
+    renderWindow({ conversationId: 'conv-1' })
+
+    // 流式中 MessageList 不渲染 regenerate 按钮;守卫本身在 ChatWindow 内兜底。
+    expect(screen.queryByTestId('regenerate')).not.toBeInTheDocument()
+    expect(baseState.sendMessage).not.toHaveBeenCalled()
+  })
+
+  it('queues a message with attachment refs while streaming (three-argument queuePendingMessage)', async () => {
+    wsState = {
+      ...baseState,
+      isStreaming: true,
+      messages: [
+        { id: '1', role: 'user', content: 'hi', timestamp: '' },
+        { id: 'stream-2', role: 'assistant', content: 'answ', timestamp: '' },
+      ],
+    }
+    renderWindow({ conversationId: 'conv-1' })
+
+    fireEvent.dragEnter(document, { dataTransfer: { types: ['Files'], files: [] } })
+    fireEvent.drop(document, { dataTransfer: { types: ['Files'], files: [new File(['x'], 'shot.png', { type: 'image/png' })] } })
+    await waitFor(() => {
+      expect(screen.getByTestId('attachments-strip').querySelector('[data-status="ready"]')).toBeTruthy()
+    })
+
+    fireEvent.change(screen.getByPlaceholderText(/Type a message/i), { target: { value: '排队看图' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await waitFor(() => {
+      expect(baseState.queuePendingMessage).toHaveBeenCalledWith('排队看图', 'conv-1', [
+        { id: 'att-1', mime: 'image/png', width: 10, height: 10 },
+      ])
+    })
+    expect(baseState.sendMessage).not.toHaveBeenCalled()
+  })
+
+  it('clears the attachment draft when the conversation switches (workspace semantics)', async () => {
+    // 验收 §9:码农页切换 WorkspacePicker 后 attachments 清空 —— 附件草稿
+    // 归会话持有,切会话(切 workspace 同语义)时随状态一起清掉,且不补发上传。
+    const { rerender } = renderWindow({ conversationId: 'conv-1' })
+
+    fireEvent.dragEnter(document, { dataTransfer: { types: ['Files'], files: [] } })
+    fireEvent.drop(document, { dataTransfer: { types: ['Files'], files: [new File(['x'], 'shot.png', { type: 'image/png' })] } })
+    await waitFor(() => {
+      expect(screen.getByTestId('attachments-strip').querySelector('[data-status="ready"]')).toBeTruthy()
+    })
+
+    const uploadsBefore = mockUploadAttachment.mock.calls.length
+    rerender(<ChatWindow ws={wsState} conversationId="conv-2" />)
+    await waitFor(() => {
+      expect(screen.queryByTestId('attachments-strip')).not.toBeInTheDocument()
+    })
+    expect(mockUploadAttachment).toHaveBeenCalledTimes(uploadsBefore)
   })
 })

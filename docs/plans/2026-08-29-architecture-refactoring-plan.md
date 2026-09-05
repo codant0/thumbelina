@@ -9,6 +9,8 @@
   - **P1** = 明确架构债，重构收益大、应在中期规划内偿还
   - **P2** = 工程卫生与体验优化，可长期穿插
 
+> **⚠️ 状态注记（2026-09-05）**：本文 §3 主题二「存储地基统一」（D1–D12，含 Alembic 落地方案）**已于 2026-08-30 回退，未实施**；配套细化文档 `2026-08-29-storage-refactor-design.md`（整篇为 Alembic 设计）已随之删除。数据库 schema 演进继续走现行机制 `Base.metadata.create_all` + `ensure_schema()`（`repository/db.py`），**不引入 Alembic**——后续决策记录见 `2026-08-30-event-timer-tasks-design.md` 的 D3 决策行。本文其余主题（前端重构等）不受此注记影响。
+
 ---
 
 ## 1. 现状总览
@@ -172,7 +174,7 @@
 - 部署面：升级行为变化（无密钥→本机+随机口令），老部署需按 release note 重配 compose。
 - 回滚：易——git revert 即回到无鉴权行为；auth.json 残留无害。
 
-### 主题二：存储地基统一（对应 D1–D12、D3、A9 部分 ｜ Phase 0 部分小步 + Phase 2 主体）
+### 主题二：存储地基统一（对应 D1–D12、D3、A9 部分 ｜ Phase 0 部分小步 + Phase 2 主体）⚠️ **已回退未实施（2026-08-30，含本节全部 Alembic 方案，见顶部状态注记；schema 演进走 create_all + ensure_schema）**
 
 **改动原因**
 

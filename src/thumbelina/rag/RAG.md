@@ -217,17 +217,15 @@ def _classify_page(page) -> PageKind:
     # 信号2：图片覆盖面积占比（扫描件特征：大图铺满页面）
     page_area = page.rect.width * page.rect.height
     img_area = sum(
-      (b["bbox"][2] - b["bbox"][0]) * (b["bbox"][3] - b["bbox"][1])
-      for b in page.get_image_info()
+        (b["bbox"][2] - b["bbox"][0]) * (b["bbox"][3] - b["bbox"][1]) for b in page.get_image_info()
     )
     image_dominant = img_area > 0.6 * page_area
     # 信号3（可选）：文本层质量——字母/数字占比，识别"有文本层的扫描件"的垃圾文本
-    
-    
+
     if sparse_text and image_dominant:
-      return PageKind.SCANNED
+        return PageKind.SCANNED
     if image_dominant and not sparse_text:
-      return PageKind.MIXED   # 图文混排，文本可用
+        return PageKind.MIXED  # 图文混排，文本可用
     return PageKind.TEXT
 ```
 

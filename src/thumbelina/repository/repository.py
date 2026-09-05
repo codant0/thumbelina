@@ -3,15 +3,70 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+import json
+import logging
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import delete, select, text
 from sqlalchemy.orm import Session, joinedload
 
 from thumbelina.repository.models import Conversation, Message
 
+if TYPE_CHECKING:
+    from thumbelina.repository.models import Attachment
+
+logger = logging.getLogger(__name__)
+
 # Valid roles for messages
 VALID_ROLES = {"user", "assistant", "system"}
+
+
+def _serialize_attachments(attachments: list[dict[str, Any]] | None) -> str | None:
+    """把附件引用列表序列化为 JSON 字符串(存入 ``Message.attachments``)。
+
+    ``None`` 或空列表返回 ``None``(列保持 NULL,与老消息统一);
+    序列化失败兜底返回 ``None`` 并记 warning,不炸写路径。
+    """
+    if not attachments:
+        return None
+    try:
+        return json.dumps(attachments, ensure_ascii=False)
+    except (TypeError, ValueError) as exc:
+        logger.warning("Failed to serialize message attachments: %s", exc)
+        return None
+
+
+def _deserialize_attachments(raw: str | None) -> list[dict[str, Any]] | None:
+    """把 ``Message.attachments`` 列反序列化为附件引用字典列表。
+
+    空/``None``/坏 JSON/非 list/过滤后为空 → ``None``;
+    否则只保留 ``isinstance(item, dict)`` 的元素(坏 JSON 不炸读路径)。
+    """
+    if not raw:
+        return None
+    try:
+        parsed: Any = json.loads(raw)
+    except (ValueError, TypeError):
+        logger.debug("Ignoring malformed message attachments JSON: %r", raw[:100])
+        return None
+    if not isinstance(parsed, list):
+        return None
+    items = [item for item in parsed if isinstance(item, dict)]
+    return items or None
+
+
+def _attachment_to_dict(att: Attachment) -> dict[str, Any]:
+    """把 ``Attachment`` ORM 行转为普通字典(created_at 为 isoformat 或 None)。"""
+    return {
+        "id": att.id,
+        "mime": att.mime,
+        "size": att.size,
+        "width": att.width,
+        "height": att.height,
+        "sha256": att.sha256,
+        "relative_path": att.relative_path,
+        "created_at": att.created_at.isoformat() if att.created_at else None,
+    }
 
 
 class ConversationRepository:
@@ -89,6 +144,7 @@ class ConversationRepository:
         role: str,
         content: str,
         reasoning_content: str | None = None,
+        attachments: list[dict[str, Any]] | None = None,
     ) -> None:
         """Synchronous implementation of add_message."""
         if role not in VALID_ROLES:
@@ -105,6 +161,7 @@ class ConversationRepository:
                 role=role,
                 content=content,
                 reasoning_content=reasoning_content,
+                attachments=_serialize_attachments(attachments),
             )
             session.add(message)
             session.commit()
@@ -115,6 +172,7 @@ class ConversationRepository:
         role: str,
         content: str,
         reasoning_content: str | None = None,
+        attachments: list[dict[str, Any]] | None = None,
     ) -> None:
         """Add a message to a conversation.
 
@@ -128,6 +186,10 @@ class ConversationRepository:
             Content of the message.
         reasoning_content:
             Optional captured thinking/reasoning text for assistant messages.
+        attachments:
+            Optional list of attachment reference dicts (shape:
+            ``[{id, mime, width?, height?, alt?}]``). JSON-encoded into the
+            message row; serialization failure degrades to NULL.
 
         Raises
         ------
@@ -135,7 +197,12 @@ class ConversationRepository:
             If the conversation does not exist or role is invalid.
         """
         return await asyncio.to_thread(
-            self._add_message_sync, conversation_id, role, content, reasoning_content
+            self._add_message_sync,
+            conversation_id,
+            role,
+            content,
+            reasoning_content,
+            attachments,
         )
 
     def _get_messages_sync(self, conversation_id: str) -> list[dict[str, Any]]:
@@ -162,6 +229,7 @@ class ConversationRepository:
                     "role": msg.role,
                     "content": msg.content,
                     "reasoning_content": msg.reasoning_content,
+                    "attachments": _deserialize_attachments(msg.attachments),
                     "created_at": msg.created_at.isoformat(),
                 }
                 for msg in messages
@@ -257,6 +325,7 @@ class ConversationRepository:
                             "role": msg.role,
                             "content": msg.content,
                             "reasoning_content": msg.reasoning_content,
+                            "attachments": _deserialize_attachments(msg.attachments),
                             "created_at": msg.created_at.isoformat(),
                         }
                         for msg in conv.messages
@@ -610,3 +679,142 @@ class ConversationRepository:
             List of matching message dicts.
         """
         return await asyncio.to_thread(self._search_messages_sync, query, limit)
+
+    # ------------------------------------------------------------------
+    # Attachment CRUD(设计文档 §3.2 / Task B1)
+    # ------------------------------------------------------------------
+
+    def _create_attachment_sync(
+        self,
+        mime: str,
+        size: int,
+        relative_path: str,
+        width: int | None = None,
+        height: int | None = None,
+        sha256: str | None = None,
+    ) -> dict[str, Any]:
+        """Synchronous implementation of create_attachment."""
+        from thumbelina.repository.models import Attachment
+
+        with self._get_session() as session:
+            att = Attachment(
+                mime=mime,
+                size=size,
+                relative_path=relative_path,
+                width=width,
+                height=height,
+                sha256=sha256,
+            )
+            session.add(att)
+            session.commit()
+            session.refresh(att)
+            return _attachment_to_dict(att)
+
+    async def create_attachment(
+        self,
+        *,
+        mime: str,
+        size: int,
+        relative_path: str,
+        width: int | None = None,
+        height: int | None = None,
+        sha256: str | None = None,
+    ) -> dict[str, Any]:
+        """Record a new attachment and return its metadata dict.
+
+        Parameters
+        ----------
+        mime:
+            MIME type of the attachment (e.g. ``image/png``).
+        size:
+            File size in bytes.
+        relative_path:
+            Path relative to the attachment root directory
+            (e.g. ``2026/09/<uuid>.png``). The caller owns writing the bytes.
+        width:
+            Optional image width in pixels.
+        height:
+            Optional image height in pixels.
+        sha256:
+            Optional hex digest for dedup.
+
+        Returns
+        -------
+        dict[str, Any]
+            The stored attachment metadata (including generated id and
+            created_at).
+        """
+        return await asyncio.to_thread(
+            self._create_attachment_sync, mime, size, relative_path, width, height, sha256
+        )
+
+    def _get_attachment_sync(self, attachment_id: str) -> dict[str, Any] | None:
+        """Synchronous implementation of get_attachment."""
+        from thumbelina.repository.models import Attachment
+
+        with self._get_session() as session:
+            att = session.get(Attachment, attachment_id)
+            if att is None:
+                return None
+            return _attachment_to_dict(att)
+
+    async def get_attachment(self, attachment_id: str) -> dict[str, Any] | None:
+        """Get a single attachment by ID.
+
+        Returns
+        -------
+        dict[str, Any] | None
+            Attachment metadata dict, or None if not found.
+        """
+        return await asyncio.to_thread(self._get_attachment_sync, attachment_id)
+
+    def _get_attachments_sync(self, attachment_ids: list[str]) -> dict[str, dict[str, Any]]:
+        """Synchronous implementation of get_attachments."""
+        from thumbelina.repository.models import Attachment
+
+        if not attachment_ids:
+            return {}
+        with self._get_session() as session:
+            rows = (
+                session.execute(select(Attachment).where(Attachment.id.in_(attachment_ids)))
+                .scalars()
+                .all()
+            )
+            return {att.id: _attachment_to_dict(att) for att in rows}
+
+    async def get_attachments(self, attachment_ids: list[str]) -> dict[str, dict[str, Any]]:
+        """Batch-get attachments by IDs.
+
+        Parameters
+        ----------
+        attachment_ids:
+            IDs to look up; an empty list short-circuits to ``{}``.
+
+        Returns
+        -------
+        dict[str, dict[str, Any]]
+            Mapping of ``{id: metadata dict}``; missing IDs are absent.
+        """
+        return await asyncio.to_thread(self._get_attachments_sync, attachment_ids)
+
+    def _delete_attachment_sync(self, attachment_id: str) -> bool:
+        """Synchronous implementation of delete_attachment."""
+        from thumbelina.repository.models import Attachment
+
+        with self._get_session() as session:
+            att = session.get(Attachment, attachment_id)
+            if att is None:
+                return False
+            session.delete(att)
+            session.commit()
+            return True
+
+    async def delete_attachment(self, attachment_id: str) -> bool:
+        """Physically delete an attachment row (no soft delete).
+
+        Returns
+        -------
+        bool
+            True if the row was deleted, False if not found.
+        """
+        return await asyncio.to_thread(self._delete_attachment_sync, attachment_id)

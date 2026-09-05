@@ -1,8 +1,10 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import { render } from '@testing-library/react'
-import { InputBox } from './InputBox'
-// 拉入 composer.css + themes.css 使 jsdom 解析得到 .pending-float-* 的真实规则与 token。
+import { InputBox, type LocalAttachment } from './InputBox'
+// 拉入 composer.css + chat.css + themes.css 使 jsdom 解析得到 .pending-float-* /
+// .attachments-strip / .attachment-thumb 的真实规则与主题 token。
 import '../../styles/composer.css'
+import '../../styles/chat.css'
 import '../../styles/themes.css'
 
 // themes.css 的 token 写在 [data-theme="dark"] 等选择器下;为让 jsdom 解析得到
@@ -35,6 +37,7 @@ const renderBar = (props: Record<string, unknown>) =>
   render(
     <InputBox
       onSend={() => {}}
+      pendingActive
       pendingMessage="queued text that might run on a bit"
       onSendPendingNow={() => {}}
       onCancelPending={() => {}}
@@ -106,5 +109,48 @@ describe('PendingMessageBar layout', () => {
       expect(cs.borderRadius).toBe('9999px')
       expect(parseInt(cs.height, 10)).toBe(32)
     }
+  })
+})
+
+// 带缩略图 + 流式中的 composer 布局(Task F8 视觉补缺):jsdom 结构断言风格,
+// 与上方 pending-float 用例同范式 —— DOM 结构 + stylesheet 令牌消费断言。
+describe('AttachmentStrip + streaming composer layout', () => {
+  const readyAtt = (i: number): LocalAttachment => ({
+    localId: `local-${i}`,
+    file: new File(['x'], `shot${i}.png`, { type: 'image/png' }),
+    status: 'ready',
+    uploaded: { id: `att-${i}`, mime: 'image/png', size: 1, width: 10, height: 10, sha256: null },
+    previewUrl: '',
+  })
+
+  it('renders two ready thumbnails above the composer with the stop button while streaming', () => {
+    const { container } = render(
+      <InputBox
+        onSend={() => {}}
+        isStreaming
+        onStop={() => {}}
+        onQueueSend={() => {}}
+        attachments={[readyAtt(1), readyAtt(2)]}
+        onAttachmentsChange={() => {}}
+      />,
+    )
+
+    // 结构:缩略条在表单上方,两张就绪缩略卡,流式停止按钮与发送并排。
+    const strip = container.querySelector('[data-testid="attachments-strip"]') as HTMLElement
+    expect(strip).toBeTruthy()
+    const form = container.querySelector('form') as HTMLElement
+    expect(strip.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const thumbs = [...strip.querySelectorAll('.attachment-thumb')]
+    expect(thumbs).toHaveLength(2)
+    for (const thumb of thumbs) expect(thumb.getAttribute('data-status')).toBe('ready')
+    expect(container.querySelector('[data-testid="stop-generation"]')).toBeTruthy()
+    expect(container.querySelector('.attach-btn')).toBeTruthy()
+
+    // 令牌消费:48×48 缩略卡与间距走主题变量(chat.css),非硬编码色值。
+    const rules = allRuleText()
+    expect(rules).toMatch(/\.attachment-thumb\s*\{[^}]*width:\s*48px/)
+    expect(rules).toMatch(/\.attachment-thumb\s*\{[^}]*border-radius:\s*var\(--radius\)/)
+    expect(rules).toMatch(/\.attachment-thumb\s*\{[^}]*border:\s*1px solid var\(--border\)/)
+    expect(rules).toMatch(/\.attachments-strip\s*\{[^}]*gap:\s*var\(--sp-2\)/)
   })
 })

@@ -288,7 +288,25 @@
     "regenerate": "Regenerate",
     "scrollToBottom": "Scroll to latest",
     "unnamed": "New Conversation",
-    "listEmpty": "No conversations yet."
+    "listEmpty": "No conversations yet.",
+    "attachments": {
+      "addImage": "Add image",
+      "dropHint": "Drop images here",
+      "removeAlt": "Remove image",
+      "uploading": "Uploading…",
+      "uploadFailed": "Upload failed, click to retry",
+      "retry": "Retry",
+      "tooLarge": "Image exceeds 10MB",
+      "unsupportedType": "Only PNG / JPEG / WebP / GIF supported",
+      "maxImages": "Up to 4 images",
+      "imagesCount": "+ {n} image(s)",
+      "lightboxOpen": "View image",
+      "lightboxClose": "Close",
+      "lightboxPrev": "Previous image",
+      "lightboxNext": "Next image",
+      "retryLoad": "Retry loading",
+      "blockingHint": "Image upload in progress or failed"
+    }
   },
   "coder": {
     "sidebarTitle": "Coder Sessions",

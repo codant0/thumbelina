@@ -254,6 +254,14 @@ class Message(Base):
         default=None,
         comment="Model thinking/reasoning content captured before the final answer",
     )
+    attachments: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        default=None,
+        comment=(
+            "JSON-encoded list of attachment refs; shape: [{id, mime, width?, height?, alt?}]"
+        ),
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         server_default=func.now(),
@@ -267,6 +275,59 @@ class Message(Base):
 
     def __repr__(self) -> str:
         return f"<Message(id={self.id!r}, role={self.role!r})>"
+
+
+class Attachment(Base):
+    """附件元数据记录(设计文档 §3.2 / Task B1)。
+
+    只存元数据,字节由上传路由写入附件根目录下的 ``relative_path``
+    (如 ``2026/09/<uuid>.png``)。个人单用户免鉴权:无 user_id /
+    FK 归属列,无软删(deleted_at),删除即物理删除。
+    """
+
+    __tablename__ = "attachments"
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+    )
+    mime: Mapped[str] = mapped_column(
+        String(64),
+        comment="MIME type, e.g. image/png",
+    )
+    size: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        comment="File size in bytes",
+    )
+    width: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        default=None,
+    )
+    height: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        default=None,
+    )
+    sha256: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        default=None,
+        comment="Hex digest for dedup; NULL when not computed",
+    )
+    relative_path: Mapped[str] = mapped_column(
+        String(500),
+        comment="Path relative to the attachment root directory",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=func.now(),
+    )
+
+    def __repr__(self) -> str:
+        return f"<Attachment(id={self.id!r}, mime={self.mime!r})>"
 
 
 class TrajectoryEvent(Base):

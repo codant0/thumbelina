@@ -12,6 +12,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
 from thumbelina.agent.graph import ThumbelinaAgent
+from thumbelina.api.routes.attachments import resolve_attachments_root
 from thumbelina.api.routes.chat import (
     _apply_conversation_endpoint,
     apply_conversation_runtime,
@@ -51,12 +52,41 @@ async def broadcast_chat_message(message: dict[str, Any]) -> None:
         logger.debug("Broadcast to %d client(s): %s", len(_chat_ws_clients), list(message.keys()))
 
 
+def _enrich_attachment_refs(
+    refs: list[dict[str, Any]],
+    records: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """把上行原始附件引用 ``[{id, alt?}]`` 补全为持久化形态(设计 §3.2/§4.2)。
+
+    ``mime``/``width``/``height`` 取自附件记录(存在性校验时已批量取回),
+    ``alt`` 保留上行值;保持原顺序与重复项。``width``/``height`` 为空的记录
+    省略对应键;id 无法解析或记录缺失的引用原样保留(交由下游容错)。
+    """
+    enriched: list[dict[str, Any]] = []
+    for ref in refs:
+        attachment_id = ref.get("id")
+        record = records.get(attachment_id) if isinstance(attachment_id, str) else None
+        if record is None:
+            enriched.append(dict(ref))
+            continue
+        item: dict[str, Any] = {"id": attachment_id, "mime": record.get("mime")}
+        if record.get("width") is not None:
+            item["width"] = record["width"]
+        if record.get("height") is not None:
+            item["height"] = record["height"]
+        if ref.get("alt") is not None:
+            item["alt"] = ref["alt"]
+        enriched.append(item)
+    return enriched
+
+
 async def _run_generation(
     websocket: WebSocket,
     agent: ThumbelinaAgent,
     message: str,
     cid: str | None,
     active_conv_ref: dict[str, str | None],
+    attachments: list[dict[str, object]] | None = None,
 ) -> None:
     """在独立 asyncio.Task 中执行一轮生成（流式或非流式）。
 
@@ -72,6 +102,12 @@ async def _run_generation(
     ``active_conv_ref`` 是 ``websocket_chat`` 持有的可变容器,被
     subagent listener 用来读取"本轮正在生成的会话 ID",以决定把事件推给
     哪个连接、避免跨会话串话。
+
+    ``attachments`` 是可选的图像附件引用(``[{id, mime, width, height, alt?}]``,
+    已由 ``websocket_chat`` 按设计 §3.2/§4.2 用附件记录补全),透传给
+    ``agent.stream``/``agent.run``;微信绑定的会话为纯文本通道,图像附件在
+    此直接忽略(仅文本进入模型);若该轮文本也为空白(纯图片轮),回错误帧
+    并直接结束,不开始生成。
     """
     # 在本轮范围内,subagent listener 能从 active_conv_ref 读到本次 cid,
     # 因此即便 listener 注册在 connect 时,它仍能正确路由。
@@ -100,12 +136,31 @@ async def _run_generation(
                 except Exception as exc:
                     logger.warning("Failed to apply WeChat endpoint: %s", exc)
 
+        # 微信为纯文本通道(设计 §3.2):绑定会话收到图像附件时直接忽略,
+        # 仅文本进入模型。不做 attachment_skipped 降级事件。
+        # 纯图片轮(message 为空白且原附件非空)直接拒绝:若照常置空附件,
+        # 会以空文本 HumanMessage 落库并发给模型。错误帧后直接 return,
+        # 不开新一轮、不落库。带文本的轮次保持原行为(附件丢弃,文本放行)。
+        if is_wechat_conversation and attachments:
+            if not message.strip():
+                await websocket.send_json(
+                    {
+                        "error": "WeChat channel does not support image-only messages",
+                        "conversation_id": cid,
+                    }
+                )
+                return
+            logger.info("WeChat conversation: skipped %d image attachment(s)", len(attachments))
+            attachments = None
+
         # Use streaming for frontend, regardless of WeChat binding
         streaming = websocket.app.state.config.llm.streaming_enabled
         full_response = ""
         if streaming:
             try:
-                async for event in agent.stream(message, context_window_tokens=window_tokens):
+                async for event in agent.stream(
+                    message, context_window_tokens=window_tokens, attachments=attachments
+                ):
                     text = event["text"]
                     if event["type"] == "reasoning":
                         await websocket.send_json(
@@ -133,7 +188,9 @@ async def _run_generation(
                 )
                 return
         else:
-            full_response = await agent.run(message, context_window_tokens=window_tokens)
+            full_response = await agent.run(
+                message, context_window_tokens=window_tokens, attachments=attachments
+            )
             await websocket.send_json({"response": full_response, "conversation_id": cid})
 
         await websocket.send_json(
@@ -205,6 +262,11 @@ async def websocket_chat(websocket: WebSocket) -> None:
 
     # Clone the agent per connection to isolate conversation state
     agent = shared_agent.clone()
+
+    # 附件根目录接线(Task B3):与上传路由同源解析(绝对路径直接用,
+    # 相对路径基于工作目录,config 缺失回退默认目录),克隆实例据此在
+    # _build_initial_messages 中读取附件字节构建图像块。
+    agent.attachments_root = resolve_attachments_root(getattr(websocket.app.state, "config", None))
 
     # Conversation is created lazily on first message, not on connect.
     default_conversation_id: str | None = None
@@ -302,7 +364,8 @@ async def websocket_chat(websocket: WebSocket) -> None:
                 await websocket.send_json({"error": "Invalid message format"})
                 continue
 
-            if not parsed.message.strip():
+            # 纯文本或纯图片至少其一;守卫放宽以放行纯图片消息(Task B3)。
+            if not parsed.message.strip() and not parsed.attachments:
                 await websocket.send_json({"error": "Empty message"})
                 continue
 
@@ -325,10 +388,62 @@ async def websocket_chat(websocket: WebSocket) -> None:
                     await websocket.send_json({"error": f"Conversation not found: {cid}"})
                     continue
 
+            # 附件存在性校验(Task B3,无用户体系不做归属校验):任何 id
+            # 在 attachments 表中缺失 → 错误帧且不开新一轮。仓储异常按
+            # 校验失败处理(全部视为缺失),不中断连接。
+            # 错误帧携带解析后的 cid(而非 parsed.conversation_id):首条
+            # 消息在服务端新建会话时 parsed 值为 None,前端拿不到会话 id
+            # 就无法清除等待态,会白等到 90s 超时。
+            attachment_records: dict[str, dict[str, Any]] = {}
+            parsed_attachments_enriched = parsed.attachments
+            if parsed.attachments and agent.repository_manager:
+                attachment_ids: list[str] = []
+                for ref in parsed.attachments:
+                    attachment_id = ref.get("id")
+                    if isinstance(attachment_id, str) and attachment_id:
+                        attachment_ids.append(attachment_id)
+                missing: list[str] = list(attachment_ids)
+                try:
+                    attachment_records = await agent.repository_manager.get_attachments(
+                        attachment_ids
+                    )
+                except Exception:
+                    logger.warning(
+                        "Attachment existence check failed (conversation %s)",
+                        cid,
+                        exc_info=True,
+                    )
+                else:
+                    missing = [aid for aid in attachment_ids if aid not in attachment_records]
+                if missing:
+                    await websocket.send_json(
+                        {
+                            "error": "Invalid attachment",
+                            "missing_attachment_ids": missing,
+                            "conversation_id": cid,
+                        }
+                    )
+                    continue
+
+                # 设计 §3.2/§4.2:messages.attachments 持久化与历史回放的
+                # 形态为 [{id, mime, width, height, alt?}]。用校验阶段取回
+                # 的记录把上行原始引用补全为富引用后再进入生成(落库、历史、
+                # 轨迹摘要共用以此列表;图像块组装仍由 multimodal 按 id 查表)。
+                parsed_attachments_enriched = _enrich_attachment_refs(
+                    parsed.attachments, attachment_records
+                )
+
             # 生成在独立任务中运行，主循环立即回到 receive_text()，
             # 使流式进行中也能接收并响应 stop。
             current_task = asyncio.create_task(
-                _run_generation(websocket, agent, parsed.message, cid, active_conv_ref)
+                _run_generation(
+                    websocket,
+                    agent,
+                    parsed.message,
+                    cid,
+                    active_conv_ref,
+                    parsed_attachments_enriched,
+                )
             )
 
     except WebSocketDisconnect:

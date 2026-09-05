@@ -127,7 +127,7 @@ def test_websocket_passes_context_window_to_stream(client):
     """流式路径应接收到解析出的上下文窗口。"""
     recorded = {}
 
-    async def _stream(message, context_window_tokens=None):
+    async def _stream(message, context_window_tokens=None, attachments=None):
         recorded["message"] = message
         recorded["window"] = context_window_tokens
         yield {"type": "content", "text": "ok"}
@@ -197,7 +197,7 @@ async def test_websocket_serializes_same_conversation_turns():
     gate = asyncio.Event()
     first_started = asyncio.Event()
 
-    async def _stream(message, context_window_tokens=None):
+    async def _stream(message, context_window_tokens=None, attachments=None):
         order.append(("start", message))
         if message == "first":
             first_started.set()
@@ -278,7 +278,7 @@ def test_websocket_stop_cancels_inflight_generation(client):
     """流式进行中收到 stop 应取消生成并返回 stopped。"""
     import asyncio as _asyncio
 
-    async def _stream(message, context_window_tokens=None):
+    async def _stream(message, context_window_tokens=None, attachments=None):
         yield {"type": "content", "text": "partial"}
         # 保持生成进行中，等待 stop 打断。
         await _asyncio.sleep(30)
@@ -302,7 +302,7 @@ def test_websocket_recovers_after_stop(client):
     """被 stop 打断后连接应能继续处理下一条普通消息。"""
     import asyncio as _asyncio
 
-    async def _stream(message, context_window_tokens=None):
+    async def _stream(message, context_window_tokens=None, attachments=None):
         if message == "first":
             yield {"type": "content", "text": "partial"}
             await _asyncio.sleep(30)

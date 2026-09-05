@@ -83,8 +83,12 @@ class TrajectoryRecorder:
         self._turn_id = str(uuid4()) if conversation_id else None
         self._seq = 0
 
-    async def record_user(self, content: str) -> None:
-        await self._record("user", {"content": content})
+    async def record_user(self, content: str, attachment_summary: str | None = None) -> None:
+        """记录用户消息;``attachment_summary`` 为可选附件摘要(Task B4)。"""
+        payload: dict[str, Any] = {"content": content}
+        if attachment_summary:
+            payload["attachment_summary"] = attachment_summary
+        await self._record("user", payload)
 
     async def record_context(self, items: list[dict[str, str]]) -> None:
         await self._record("context", {"items": items})

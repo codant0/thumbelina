@@ -31,10 +31,23 @@ const dictionaries: Record<Locale, Record<string, unknown>> = {
   'zh-CN': zhCN,
 }
 
+/** {k} 占位符参数替换:与 Provider 内的 t 共用,保证无 Provider 渲染时行为一致。 */
+function interpolate(value: string, params?: Record<string, string | number>): string {
+  if (!params) return value
+  return Object.entries(params).reduce(
+    (acc, [k, v]) => acc.replaceAll(`{${k}}`, String(v)),
+    value,
+  )
+}
+
+function translate(dictionary: Record<string, unknown>, key: string, params?: Record<string, string | number>): string {
+  return interpolate(getNestedValue(dictionary, key) ?? key, params)
+}
+
 export const LocaleContext = createContext<LocaleContextValue>({
   locale: DEFAULT_LOCALE,
   setLocale: () => {},
-  t: (key: string) => getNestedValue(en, key) ?? key,
+  t: (key: string, params?: Record<string, string | number>) => translate(en, key, params),
 })
 
 interface LocaleProviderProps {
@@ -55,17 +68,7 @@ export function LocaleProvider({ children }: LocaleProviderProps) {
   }, [])
 
   const t = useCallback(
-    (key: string, params?: Record<string, string | number>) => {
-      const dictionary = dictionaries[locale]
-      let value = getNestedValue(dictionary, key) ?? key
-      if (params) {
-        value = Object.entries(params).reduce(
-          (acc, [k, v]) => acc.replaceAll(`{${k}}`, String(v)),
-          value,
-        )
-      }
-      return value
-    },
+    (key: string, params?: Record<string, string | number>) => translate(dictionaries[locale], key, params),
     [locale],
   )
 

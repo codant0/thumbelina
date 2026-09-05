@@ -76,6 +76,7 @@ class RepositoryManager:
         role: str,
         content: str,
         reasoning_content: str | None = None,
+        attachments: list[dict[str, Any]] | None = None,
     ) -> None:
         """Add a message to a conversation.
 
@@ -89,6 +90,10 @@ class RepositoryManager:
             Content of the message.
         reasoning_content:
             Optional captured thinking/reasoning text for assistant messages.
+        attachments:
+            Optional list of attachment reference dicts (shape:
+            ``[{id, mime, width?, height?, alt?}]``). Stored JSON-encoded on
+            the message row; serialization failure degrades to NULL.
 
         Raises
         ------
@@ -106,6 +111,7 @@ class RepositoryManager:
             role=role,
             content=content,
             reasoning_content=reasoning_content,
+            attachments=attachments,
         )
 
     async def get_messages(self, conversation_id: str) -> list[dict[str, Any]]:
@@ -397,3 +403,69 @@ class RepositoryManager:
             List of matching message dicts.
         """
         return await self._search_engine.hybrid_search(query, limit=limit)
+
+    # ------------------------------------------------------------------
+    # Attachment passthrough(设计文档 §3.2 / Task B1)
+    # ------------------------------------------------------------------
+
+    async def create_attachment(
+        self,
+        *,
+        mime: str,
+        size: int,
+        relative_path: str,
+        width: int | None = None,
+        height: int | None = None,
+        sha256: str | None = None,
+    ) -> dict[str, Any]:
+        """Record a new attachment and return its metadata dict.
+
+        Parameters
+        ----------
+        mime:
+            MIME type of the attachment (e.g. ``image/png``).
+        size:
+            File size in bytes.
+        relative_path:
+            Path relative to the attachment root directory; the caller owns
+            writing the bytes to disk.
+        width:
+            Optional image width in pixels.
+        height:
+            Optional image height in pixels.
+        sha256:
+            Optional hex digest for dedup.
+
+        Returns
+        -------
+        dict[str, Any]
+            The stored attachment metadata (including generated id and
+            created_at).
+        """
+        return await self.conversation_repository.create_attachment(
+            mime=mime,
+            size=size,
+            relative_path=relative_path,
+            width=width,
+            height=height,
+            sha256=sha256,
+        )
+
+    async def get_attachment(self, attachment_id: str) -> dict[str, Any] | None:
+        """Get a single attachment by ID; returns None if not found."""
+        return await self.conversation_repository.get_attachment(attachment_id)
+
+    async def get_attachments(self, attachment_ids: list[str]) -> dict[str, dict[str, Any]]:
+        """Batch-get attachments by IDs; returns ``{id: metadata dict}``.
+
+        An empty ID list returns ``{}``; missing IDs are absent from the map.
+        """
+        return await self.conversation_repository.get_attachments(attachment_ids)
+
+    async def delete_attachment(self, attachment_id: str) -> bool:
+        """Physically delete an attachment row (no soft delete).
+
+        Returns False if the attachment does not exist. Cleaning up the file
+        on disk is the caller's responsibility.
+        """
+        return await self.conversation_repository.delete_attachment(attachment_id)

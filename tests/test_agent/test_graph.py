@@ -302,6 +302,7 @@ class TestAgentMemoryIntegration:
             role="user",
             content="Hi",
             reasoning_content=None,
+            attachments=None,
         )
 
     @pytest.mark.asyncio
@@ -326,6 +327,7 @@ class TestAgentMemoryIntegration:
             role="assistant",
             content="Hello!",
             reasoning_content=None,
+            attachments=None,
         )
 
     @pytest.mark.asyncio
@@ -386,6 +388,7 @@ class TestAgentMemoryIntegration:
             role="user",
             content="Hi",
             reasoning_content=None,
+            attachments=None,
         )
 
     @pytest.mark.asyncio

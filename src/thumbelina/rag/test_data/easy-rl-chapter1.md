@@ -447,12 +447,13 @@ $python
 比如我们现在安装了Gym库，就可以直接调入Taxi-v3的环境。初始化这个环境后，我们就可以进行交互了。智能体得到某个观测后，它就会输出一个动作。这个动作会被环境拿去执行某个步骤 ，然后环境就会往前走一步，返回新的观测、奖励以及一个 flag 变量 done，done 决定这个游戏是不是结束了。我们通过几行代码就可实现强化学习的框架：
 
 ```python
-import gym 
-env = gym.make("Taxi-v3") 
-observation = env.reset() 
-agent = load_agent() 
+import gym
+
+env = gym.make("Taxi-v3")
+observation = env.reset()
+agent = load_agent()
 for step in range(100):
-    action = agent(observation) 
+    action = agent(observation)
     observation, reward, done, info = env.step(action)
 ```
 
@@ -482,13 +483,14 @@ for step in range(100):
 
 ```python
 import gym  # 导入 Gym 的 Python 接口环境包
-env = gym.make('CartPole-v0')  # 构建实验环境
+
+env = gym.make("CartPole-v0")  # 构建实验环境
 env.reset()  # 重置一个回合
 for _ in range(1000):
     env.render()  # 显示图形界面
-    action = env.action_space.sample() # 从动作空间中随机选取一个动作
-    env.step(action) # 用于提交动作，括号内是具体的动作
-env.close() # 关闭环境
+    action = env.action_space.sample()  # 从动作空间中随机选取一个动作
+    env.step(action)  # 用于提交动作，括号内是具体的动作
+env.close()  # 关闭环境
 ```
 
 注意：如果绘制了实验的图形界面窗口，那么关闭该窗口的最佳方式是调用 env.close()。试图直接关闭图形界面窗口可能会导致内存不能释放，甚至会导致死机。
@@ -502,15 +504,16 @@ observation 是状态信息，是在游戏中观测到的屏幕像素值或者�
 在每个训练中都要使用的返回值有 observation、reward、done。但 observation 的结构会由于游戏的不同而发生变化。以 CartPole-v0 为例，我们对代码进行修改：
 
 ```python
-import gym  
-env = gym.make('CartPole-v0')  
-env.reset()  
+import gym
+
+env = gym.make("CartPole-v0")
+env.reset()
 for _ in range(1000):
-    env.render()  
-    action = env.action_space.sample() 
+    env.render()
+    action = env.action_space.sample()
     observation, reward, done, info = env.step(action)
     print(observation)
-env.close()    
+env.close()
 ```
 
 输出：
@@ -528,6 +531,7 @@ env.step()完成了一个完整的 $S \to A \to R \to S'$ 过程。我们只要�
 Gym 库已注册的环境可以通过以下代码查看：
 ```python
 from gym import envs
+
 env_specs = envs.registry.all()
 envs_ids = [env_spec.id for env_spec in env_specs]
 print(envs_ids)
@@ -541,12 +545,12 @@ Gym 库中的每个环境都定义了观测空间和动作空间。观测空间�
 首先我们来看看这个任务的观测空间和动作空间：
 ```python
 import gym
-env = gym.make('MountainCar-v0')
-print('观测空间 = {}'.format(env.observation_space))
-print('动作空间 = {}'.format(env.action_space))
-print('观测范围 = {} ~ {}'.format(env.observation_space.low,
-        env.observation_space.high))
-print('动作数 = {}'.format(env.action_space.n))
+
+env = gym.make("MountainCar-v0")
+print("观测空间 = {}".format(env.observation_space))
+print("动作空间 = {}".format(env.action_space))
+print("观测范围 = {} ~ {}".format(env.observation_space.low, env.observation_space.high))
+print("动作数 = {}".format(env.action_space.n))
 ```
 
 输出：
@@ -566,21 +570,21 @@ print('动作数 = {}'.format(env.action_space.n))
 class SimpleAgent:
     def __init__(self, env):
         pass
-    
-    def decide(self, observation): # 决策
+
+    def decide(self, observation):  # 决策
         position, velocity = observation
-        lb = min(-0.09 * (position + 0.25) ** 2 + 0.03,
-                0.3 * (position + 0.9) ** 4 - 0.008)
+        lb = min(-0.09 * (position + 0.25) ** 2 + 0.03, 0.3 * (position + 0.9) ** 4 - 0.008)
         ub = -0.07 * (position + 0.38) ** 2 + 0.07
         if lb < velocity < ub:
             action = 2
         else:
             action = 0
-        return action # 返回动作
+        return action  # 返回动作
 
-    def learn(self, *args): # 学习
+    def learn(self, *args):  # 学习
         pass
-    
+
+
 agent = SimpleAgent(env)
 ```
 
@@ -590,20 +594,20 @@ SimpleAgent 类的 decide()方法用于决策，learn() 方法用于学习，该
 
 ```python
 def play(env, agent, render=False, train=False):
-    episode_reward = 0. # 记录回合总奖励，初始值为0
-    observation = env.reset() # 重置游戏环境，开始新回合
-    while True: # 不断循环，直到回合结束
-        if render: # 判断是否显示
-            env.render() # 显示图形界面
+    episode_reward = 0.0  # 记录回合总奖励，初始值为0
+    observation = env.reset()  # 重置游戏环境，开始新回合
+    while True:  # 不断循环，直到回合结束
+        if render:  # 判断是否显示
+            env.render()  # 显示图形界面
         action = agent.decide(observation)
-        next_observation, reward, done, _ = env.step(action) # 执行动作
-        episode_reward += reward # 收集回合奖励
-        if train: # 判断是否训练智能体
-            agent.learn(observation, action, reward, done) # 学习
-        if done: # 回合结束，跳出循环
+        next_observation, reward, done, _ = env.step(action)  # 执行动作
+        episode_reward += reward  # 收集回合奖励
+        if train:  # 判断是否训练智能体
+            agent.learn(observation, action, reward, done)  # 学习
+        if done:  # 回合结束，跳出循环
             break
         observation = next_observation
-    return episode_reward # 返回回合总奖励
+    return episode_reward  # 返回回合总奖励
 ```
 
 上面代码中的 play 函数可以让智能体和环境交互一个回合，该函数有 4 个参数。env 是环境类。agent 是智能体类。render 是 bool 型变量，其用于判断是否需要图形化显示。如果 render 为 True，则在交互过程中会调用 env.render() 以显示图形界面，通过调用 env.close() 可关闭图形界面。train 是 bool 型变量，其用于判断是否训练智能体，在训练过程中设置为 True，让智能体学习；在测试过程中设置为 False，让智能体保持不变。该函数的返回值 episode\_reward 是 float 型的数值，其表示智能体与环境交互一个回合的回合总奖励。
@@ -611,10 +615,10 @@ def play(env, agent, render=False, train=False):
 接下来，我们使用下面的代码让智能体和环境交互一个回合，并显示图形界面。
 
 ```python
-env.seed(3) # 设置随机种子，让结果可复现
+env.seed(3)  # 设置随机种子，让结果可复现
 episode_reward = play(env, agent, render=True)
-print('回合奖励 = {}'.format(episode_reward))
-env.close() # 关闭图形界面
+print("回合奖励 = {}".format(episode_reward))
+env.close()  # 关闭图形界面
 ```
 
 输出：
@@ -625,7 +629,7 @@ env.close() # 关闭图形界面
 为了评估智能体的性能，需要计算出连续交互 100 回合的平均回合奖励，代码如下。
 ```python
 episode_rewards = [play(env, agent) for _ in range(100)]
-print('平均回合奖励 = {}'.format(np.mean(episode_rewards)))
+print("平均回合奖励 = {}".format(np.mean(episode_rewards)))
 ```
 
 输出：

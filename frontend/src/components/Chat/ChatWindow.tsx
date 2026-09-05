@@ -2,7 +2,9 @@ import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import type { ChatSocket } from '../../hooks/useWebSocket'
 import { subscribeSubagentEvents } from '../../hooks/useWebSocket'
 import { MessageList } from './MessageList'
-import { InputBox } from './InputBox'
+import { InputBox, type LocalAttachment } from './InputBox'
+import { addFilesToAttachments, attachmentHintKey, type AttachmentHint } from './useAttachments'
+import { DropOverlay } from './DropOverlay'
 import { ConversationModelSelector } from './ConversationModelSelector'
 import { KnowledgeBaseSelector } from './KnowledgeBaseSelector'
 import { RoleSelector } from './RoleSelector'
@@ -12,7 +14,7 @@ import { CacheHitRateItem } from '../StatusBar/CacheHitRateItem'
 import { GitBranchSelector } from '../StatusBar/GitBranchSelector'
 import { Toast } from '../Settings/Toast'
 import { Mail, Eraser, Shrink, Route } from 'lucide-react'
-import type { Conversation, SubagentEventPayload, ThinkingEffort } from '../../types/chat'
+import type { Conversation, SendAttachmentInput, SubagentEventPayload, ThinkingEffort } from '../../types/chat'
 import { useTranslation } from '../../i18n'
 import { clearConversationMessages, compressConversation } from '../../api/conversations'
 import { ConfirmDialog } from '../common/ConfirmDialog'
@@ -33,12 +35,19 @@ interface ChatWindowProps {
 }
 
 export function ChatWindow({ ws, conversationId, conversations, onConversationCreated, onDefaultConversation, onSetEndpoint, onSetKnowledgeBase, onSetRole, onSetThinking, onViewTrajectory }: ChatWindowProps) {
-  const { messages, isConnected, isStreaming, streamingMode: wsStreamingMode, waitingForReply, awaitingMoreContent, newConversationId, clearNewConversation, pendingMessage, pendingHeld, queuePendingMessage, sendPendingNow, cancelPendingMessage, sendMessage, stopGeneration, clearMessages, switchConversation, loadHistory } = ws
+  const { messages, isConnected, isStreaming, streamingMode: wsStreamingMode, waitingForReply, awaitingMoreContent, newConversationId, clearNewConversation, pendingActive, pendingMessage, pendingAttachments, pendingHeld, queuePendingMessage, sendPendingNow, cancelPendingMessage, sendMessage, stopGeneration, clearMessages, switchConversation, loadHistory } = ws
   const [streamingMode, setStreamingMode] = useState(true)
   const [toggling, setToggling] = useState(false)
   const [clearing, setClearing] = useState(false)
   const [confirmClear, setConfirmClear] = useState(false)
   const [compressing, setCompressing] = useState(false)
+  // 待发附件草稿(设计 §5.1):受控数组在这里持有,InputBox 通过 onAttachmentsChange 同步;
+  // 拖放(drop)与 📎 按钮共用 useAttachments 的同一条添加管道。
+  const [attachments, setAttachments] = useState<LocalAttachment[]>([])
+  // 拖放管道的临时行内提示(超出上限/类型不支持等,2 秒自动消失)。
+  const [dropHint, setDropHint] = useState<AttachmentHint | null>(null)
+  // 管道 async 续段里要读最新列表 —— ref 镜像,避免闭包过期。
+  const attachmentsRef = useRef<LocalAttachment[]>([])
   // Local inline feedback for the compress action (quiet success/failure hint).
   const [compressNotice, setCompressNotice] = useState<{ message: string; isError: boolean } | null>(null)
   // Subagent 事件按 assistant 消息 id 分组:
@@ -65,6 +74,18 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
       loadHistory(conversationId)
     }
   }, [conversationId, switchConversation, clearMessages, loadHistory])
+
+  // 附件 ref 镜像:drop 管道的 async 续段读取最新列表用。
+  useEffect(() => {
+    attachmentsRef.current = attachments
+  }, [attachments])
+
+  // 拖放提示 2 秒自动消失。
+  useEffect(() => {
+    if (!dropHint) return
+    const timer = setTimeout(() => setDropHint(null), 2000)
+    return () => clearTimeout(timer)
+  }, [dropHint])
 
   // Fetch initial config
   useEffect(() => {
@@ -108,9 +129,36 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
     return unsubscribe
   }, [messages])
 
-  const handleSend = (text: string) => {
-    sendMessage(text, conversationId)
+  // 发送:无就绪附件时保持两参调用(sendMessage(text, conversationId)),
+  // 有就绪附件时把 {id, alt} 引用一并带上(协议 §4.1)。
+  const handleSend = (text: string, readyRefs?: SendAttachmentInput[]) => {
+    if (readyRefs && readyRefs.length > 0) sendMessage(text, conversationId, readyRefs)
+    else sendMessage(text, conversationId)
   }
+
+  // 流式进行中提交 → 排队为待发消息,附件引用随文字一起进入待发队列。
+  const handleQueueSend = (text: string, readyRefs?: SendAttachmentInput[]) => {
+    if (readyRefs && readyRefs.length > 0) queuePendingMessage(text, conversationId, readyRefs)
+    else queuePendingMessage(text, conversationId)
+  }
+
+  // 拖放落下:与 📎 按钮共用同一条添加管道(useAttachments.addFilesToAttachments),
+  // 管道放这里(而非 InputBox 内部)以避免 InputBox 内部状态外泄(设计 §5 / Task F4)。
+  const handleDropFiles = useCallback((files: File[]) => {
+    void addFilesToAttachments(files, {
+      getCurrent: () => attachmentsRef.current,
+      // 函数式变更:setState updater 内同步刷新镜像 ref,管道下一个 async 续段
+      // 的 getCurrent() 才能读到最新列表(多张上传的补丁互不覆盖,不会卡死发送)。
+      update: updater =>
+        setAttachments(prev => {
+          const next = updater(prev)
+          attachmentsRef.current = next
+          return next
+        }),
+    }).then(hint => {
+      if (hint) setDropHint(hint)
+    })
+  }, [])
 
   const handleClearContext = useCallback(async () => {
     if (!conversationId || clearing) return
@@ -155,7 +203,16 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
   const handleRegenerate = useCallback(() => {
     if (isStreaming || !isConnected) return
     const lastUser = [...messages].reverse().find(m => m.role === 'user')
-    if (lastUser) sendMessage(lastUser.content, conversationId)
+    if (!lastUser) return
+    // 重新生成携带上一条用户消息的附件(设计 §5.4/F8):映射为 {id, alt?} 引用
+    // 随文字一起重发;无附件时保持两参调用形状(旧调用点零回退,协议 §4.1)。
+    const refs: SendAttachmentInput[] = (lastUser.attachments ?? []).map(a => {
+      const ref: SendAttachmentInput = { id: a.id }
+      if (a.alt !== undefined) ref.alt = a.alt
+      return ref
+    })
+    if (refs.length > 0) sendMessage(lastUser.content, conversationId, refs)
+    else sendMessage(lastUser.content, conversationId)
   }, [messages, isStreaming, isConnected, conversationId, sendMessage])
 
   const toggleStreaming = useCallback(async () => {
@@ -235,10 +292,12 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
   }, [selectedSubagentId, closeSubagentDetail])
 
   // conversation 切换时清理状态,确保下一会话从空桶开始。
+  // 附件草稿随会话切换清空(设计 §5.3:跨 Workspace 切换同语义)。
   useEffect(() => {
     if (lastConvIdRef.current !== conversationId) {
       lastConvIdRef.current = conversationId
       setSelectedSubagentId(null)
+      setAttachments([])
     }
   }, [conversationId])
 
@@ -358,14 +417,24 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
           )}
         </>
       )}
+      {/* 全屏拖放覆盖层:仅当拖入 dataTransfer 含 Files 时出现;drop 与 📎 按钮共用添加管道。 */}
+      <DropOverlay onFiles={handleDropFiles} />
+      {dropHint && (
+        /* 拖放添加管道的临时行内提示(2 秒自动消失;样式见 chat.css) */
+        <div className="attachment-error-hint" role="status">{t(attachmentHintKey(dropHint))}</div>
+      )}
       <InputBox
         onSend={handleSend}
         disabled={!isConnected}
         isStreaming={isStreaming}
         onStop={handleStop}
+        pendingActive={pendingActive}
         pendingMessage={pendingMessage}
         pendingHeld={pendingHeld}
-        onQueueSend={text => queuePendingMessage(text, conversationId)}
+        attachments={attachments}
+        onAttachmentsChange={setAttachments}
+        pendingAttachmentCount={pendingAttachments?.length ?? 0}
+        onQueueSend={handleQueueSend}
         onSendPendingNow={() => sendPendingNow(conversationId)}
         onCancelPending={() => cancelPendingMessage(conversationId)}
         toolbar={

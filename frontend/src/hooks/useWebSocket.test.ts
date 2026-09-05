@@ -776,4 +776,146 @@ describe('useWebSocket', () => {
       expect(result.current.pendingMessage).toBeNull()
     })
   })
+
+  describe('attachment protocol (F1 附件协议)', () => {
+    it('sendMessage 携带附件时,WS 帧包含 {id, alt} 列表且乐观用户消息带 attachments', async () => {
+      const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-1'))
+      await act(async () => {
+        await new Promise(resolve => setTimeout(resolve, 10))
+      })
+
+      act(() => {
+        result.current.sendMessage('看图', 'conv-1', [{ id: 'att_1', alt: '截图' }])
+      })
+
+      const frames = MockWebSocket.instances[0].sentMessages.map(
+        s => JSON.parse(s) as Record<string, unknown>,
+      )
+      expect(frames[0].message).toBe('看图')
+      expect(frames[0].attachments).toEqual([{ id: 'att_1', alt: '截图' }])
+      const userMsg = result.current.messages.find(m => m.role === 'user')
+      expect(userMsg?.attachments).toEqual([{ id: 'att_1', alt: '截图' }])
+    })
+
+    it('sendMessage 不带附件时不出现 attachments 键(老调用点零回退)', async () => {
+      const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-1'))
+      await act(async () => {
+        await new Promise(resolve => setTimeout(resolve, 10))
+      })
+
+      act(() => {
+        result.current.sendMessage('Hello')
+      })
+
+      const sent = JSON.parse(MockWebSocket.instances[0].sentMessages[0]) as Record<string, unknown>
+      expect('attachments' in sent).toBe(false)
+    })
+
+    it('queuePendingMessage 排队附件,回复结束后随消息一起自动发送', async () => {
+      vi.useFakeTimers()
+      const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-1'))
+      await act(async () => { vi.advanceTimersByTime(10) })
+
+      // 进入流式回复状态
+      act(() => { result.current.sendMessage('first', 'conv-1') })
+      act(() => {
+        MockWebSocket.instances[0].simulateMessage(
+          JSON.stringify({ chunk: 'answering. ', conversation_id: 'conv-1' }),
+        )
+      })
+
+      act(() => { result.current.queuePendingMessage('second', 'conv-1', [{ id: 'att_9' }]) })
+      expect(result.current.pendingMessage).toBe('second')
+      expect(result.current.pendingAttachments).toEqual([{ id: 'att_9' }])
+      // 排队不立即发送
+      expect(MockWebSocket.instances[0].sentMessages).toHaveLength(1)
+
+      act(() => {
+        MockWebSocket.instances[0].simulateMessage(
+          JSON.stringify({ done: true, conversation_id: 'conv-1' }),
+        )
+      })
+      await act(async () => { vi.advanceTimersByTime(500) })
+
+      const frames = MockWebSocket.instances[0].sentMessages
+        .map(s => JSON.parse(s) as Record<string, unknown>)
+        .filter(f => typeof f.message === 'string')
+      expect(frames).toHaveLength(2)
+      expect(frames[1].attachments).toEqual([{ id: 'att_9' }])
+      expect(result.current.pendingAttachments).toBeUndefined()
+    })
+
+    it('纯图片排队(text 为空)暴露 pendingActive=true 且 pendingMessage 为空串', async () => {
+      vi.useFakeTimers()
+      const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-1'))
+      await act(async () => { vi.advanceTimersByTime(10) })
+
+      // 进入流式回复状态
+      act(() => { result.current.sendMessage('first', 'conv-1') })
+      act(() => {
+        MockWebSocket.instances[0].simulateMessage(
+          JSON.stringify({ chunk: 'answering. ', conversation_id: 'conv-1' }),
+        )
+      })
+
+      // Finding 3 回归:纯图片排队 text 为 '' → pendingMessage 是假值,
+      // 悬浮条必须以 pendingActive 为准渲染,否则用户零反馈、会重复发送。
+      act(() => {
+        result.current.queuePendingMessage('', 'conv-1', [{ id: 'att_9', mime: 'image/png' }])
+      })
+      expect(result.current.pendingActive).toBe(true)
+      expect(result.current.pendingMessage).toBe('')
+      expect(result.current.pendingAttachments).toEqual([{ id: 'att_9', mime: 'image/png' }])
+
+      // 回复结束 → 待发条目自动发送,排队态复位
+      act(() => {
+        MockWebSocket.instances[0].simulateMessage(
+          JSON.stringify({ done: true, conversation_id: 'conv-1' }),
+        )
+      })
+      await act(async () => { vi.advanceTimersByTime(500) })
+
+      expect(result.current.pendingActive).toBe(false)
+      expect(result.current.pendingMessage).toBeNull()
+    })
+
+    it('loadHistory 把后端 attachments 字段容错映射进 Message.attachments', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          messages: [
+            {
+              id: 'u1',
+              role: 'user',
+              content: '看图',
+              created_at: '2024-01-01T00:00:00Z',
+              attachments: [{ id: 'att_1', mime: 'image/png', width: 1280, height: 720, alt: '首页' }],
+            },
+            // 老消息 attachments 为 null → 无附件
+            { id: 'u2', role: 'user', content: '纯文本老消息', created_at: '2024-01-01T00:01:00Z', attachments: null },
+            // 缺 id / 非对象元素被过滤,过滤后为空 → 视为无附件
+            {
+              id: 'u3',
+              role: 'user',
+              content: '坏附件',
+              created_at: '2024-01-01T00:02:00Z',
+              attachments: [{ mime: 'image/png' }, 'junk'],
+            },
+          ],
+        }),
+      })
+      globalThis.fetch = fetchMock
+      const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-1'))
+
+      await act(async () => {
+        await result.current.loadHistory('conv-1')
+      })
+
+      expect(result.current.messages[0].attachments).toEqual([
+        { id: 'att_1', mime: 'image/png', width: 1280, height: 720, alt: '首页' },
+      ])
+      expect(result.current.messages[1].attachments).toBeUndefined()
+      expect(result.current.messages[2].attachments).toBeUndefined()
+    })
+  })
 })

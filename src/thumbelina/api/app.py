@@ -28,6 +28,7 @@ from starlette.types import ASGIApp
 
 from thumbelina.agent.graph import ThumbelinaAgent
 from thumbelina.api.routes import (
+    attachments,
     chat,
     conversations,
     data,
@@ -1043,6 +1044,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(memory.router, prefix="/api/v1")
     app.include_router(tools.router, prefix="/api/v1")
     app.include_router(trajectory.router, prefix="/api/v1")
+    app.include_router(attachments.router, prefix="/api/v1")
     app.include_router(ws_router)
 
     return app
