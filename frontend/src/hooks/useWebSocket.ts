@@ -20,6 +20,8 @@ interface WsIncoming {
     user_message: string
     response: string
     source?: string
+    /** 入站微信图片的附件 refs(设计 §2);纯文本轮为 null。 */
+    attachments?: AttachmentRef[] | null
   }
   /** 后端切换 git 分支后广播的事件,携带工作区与当前分支名。 */
   git_branch?: { workspace: string; branch: string }
@@ -551,13 +553,18 @@ export function useWebSocket(url: string, activeConversationId?: string) {
         // Only display messages if the user is currently viewing this conversation
         if (cm.conversation_id && cm.conversation_id === activeConversationRef.current) {
           const newMsgs: Message[] = []
-          // For external messages (source !== 'frontend'), show the user message
-          if (cm.source !== 'frontend' && cm.user_message) {
+          // For external messages (source !== 'frontend'), show the user message.
+          // 纯图片轮 user_message 为空,但有 attachments 时仍要显示用户气泡。
+          const inboundAttachments = parseHistoryAttachments(cm.attachments)
+          if (cm.source !== 'frontend' && (cm.user_message || inboundAttachments)) {
             newMsgs.push({
               id: String(msgIdRef.current++),
               role: 'user',
-              content: cm.user_message,
+              content: cm.user_message ?? '',
               timestamp: new Date().toISOString(),
+              // 与 loadHistory 同一容错映射(设计 §2):入站微信图片并入
+              // 乐观用户消息,本地缩略图直接可渲染。
+              attachments: inboundAttachments,
             })
           }
           // Always show the AI response

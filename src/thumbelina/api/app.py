@@ -794,7 +794,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 user_text: str,
                 response: str,
                 source: str = "wechat",
+                attachments: list[dict[str, Any]] | None = None,
             ) -> None:
+                # attachments:入站微信图片的附件 refs(设计 §2),前端并入
+                # 乐观用户消息;纯文本轮为 None。
                 await broadcast_chat_message(
                     {
                         "channel_message": {
@@ -803,6 +806,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                             "user_message": user_text,
                             "response": response,
                             "source": source,
+                            "attachments": attachments,
                         }
                     }
                 )

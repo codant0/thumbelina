@@ -80,6 +80,59 @@ def _enrich_attachment_refs(
     return enriched
 
 
+async def _forward_attachments_to_wechat(
+    websocket: WebSocket,
+    agent: ThumbelinaAgent,
+    wechat_channel: Any,
+    wechat_user_id: str,
+    context_token: str,
+    attachments: list[dict[str, Any]],
+) -> None:
+    """把本轮 Web 侧附件逐张转发给微信对端(设计 §2)。
+
+    调用时机:回复文本已经 :meth:`WeChatChannel.send_message` 同步之后
+    (协议要求文字说明先于图片发送,见 ``ILinkClient.send_image``)。
+    每张独立 fail-soft:记录缺失、文件缺失、路径穿越或发送失败只
+    ``logger.warning`` 并继续下一张,不影响文本回复与后续图片。
+    """
+    from thumbelina.api.routes.attachments import resolve_attachments_root
+
+    root = resolve_attachments_root(getattr(websocket.app.state, "config", None))
+    resolved_root = root.resolve()
+    repository = agent.repository_manager
+    for ref in attachments:
+        attachment_id = ref.get("id") if isinstance(ref, dict) else None
+        if not isinstance(attachment_id, str) or not attachment_id:
+            continue
+        try:
+            if repository is None:
+                raise ValueError("no repository manager")
+            record = await repository.get_attachment(attachment_id)
+            if record is None:
+                raise ValueError("attachment record not found")
+            relative_path = record.get("relative_path")
+            if not isinstance(relative_path, str) or not relative_path:
+                raise ValueError("attachment record has no relative_path")
+            # 路径穿越防护:与上传/回读路由同规则,逃逸附件根目录即拒绝。
+            full = (root / relative_path).resolve()
+            if not full.is_relative_to(resolved_root):
+                raise ValueError(f"path escapes attachments root: {relative_path}")
+            data = full.read_bytes()
+            await wechat_channel.send_image(wechat_user_id, data, context_token=context_token)
+            logger.info(
+                "Forwarded attachment %s (mime=%s) to WeChat user %s",
+                attachment_id,
+                ref.get("mime") or record.get("mime"),
+                wechat_user_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to forward attachment %s to WeChat (skipped): %s",
+                attachment_id,
+                exc,
+            )
+
+
 async def _run_generation(
     websocket: WebSocket,
     agent: ThumbelinaAgent,
@@ -105,9 +158,10 @@ async def _run_generation(
 
     ``attachments`` 是可选的图像附件引用(``[{id, mime, width, height, alt?}]``,
     已由 ``websocket_chat`` 按设计 §3.2/§4.2 用附件记录补全),透传给
-    ``agent.stream``/``agent.run``;微信绑定的会话为纯文本通道,图像附件在
-    此直接忽略(仅文本进入模型);若该轮文本也为空白(纯图片轮),回错误帧
-    并直接结束,不开始生成。
+    ``agent.stream``/``agent.run``。微信绑定的会话同样接受附件(设计 §2):
+    refs 随用户消息持久化并组装图像块喂给模型;回复完成后逐张经三步流程
+    转发给微信对端(见下方 WeChat sync 块)。纯图片轮(文本空白 + 有图)
+    照常生成,不再拒绝。
     """
     # 在本轮范围内,subagent listener 能从 active_conv_ref 读到本次 cid,
     # 因此即便 listener 注册在 connect 时,它仍能正确路由。
@@ -136,22 +190,9 @@ async def _run_generation(
                 except Exception as exc:
                     logger.warning("Failed to apply WeChat endpoint: %s", exc)
 
-        # 微信为纯文本通道(设计 §3.2):绑定会话收到图像附件时直接忽略,
-        # 仅文本进入模型。不做 attachment_skipped 降级事件。
-        # 纯图片轮(message 为空白且原附件非空)直接拒绝:若照常置空附件,
-        # 会以空文本 HumanMessage 落库并发给模型。错误帧后直接 return,
-        # 不开新一轮、不落库。带文本的轮次保持原行为(附件丢弃,文本放行)。
-        if is_wechat_conversation and attachments:
-            if not message.strip():
-                await websocket.send_json(
-                    {
-                        "error": "WeChat channel does not support image-only messages",
-                        "conversation_id": cid,
-                    }
-                )
-                return
-            logger.info("WeChat conversation: skipped %d image attachment(s)", len(attachments))
-            attachments = None
+        # 微信绑定的会话不再丢弃附件(设计 §2 废弃旧行为):refs 随用户
+        # 消息持久化、图像块喂给模型,回复完成后逐张转发微信对端。纯图片
+        # 轮(文本空白 + 有图)照常生成。
 
         # Use streaming for frontend, regardless of WeChat binding
         streaming = websocket.app.state.config.llm.streaming_enabled
@@ -217,6 +258,18 @@ async def _run_generation(
                             context_token=last_context_token,
                         )
                         logger.info("Sent response to WeChat user %s", last_wechat_user)
+
+                        # 设计 §2:回复文本先发,本轮 Web 侧附件图片随后逐张
+                        # 经三步流程转发;单张失败仅 warning,不影响文本回复。
+                        if attachments:
+                            await _forward_attachments_to_wechat(
+                                websocket,
+                                agent,
+                                wechat_channel,
+                                last_wechat_user,
+                                last_context_token,
+                                attachments,
+                            )
                     else:
                         logger.warning("No WeChat user ID available to send response to")
                 except Exception as send_exc:

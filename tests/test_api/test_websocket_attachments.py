@@ -295,22 +295,23 @@ def test_more_than_four_attachments_rejected_by_validator(
 
 
 # ----------------------------------------------------------------------
-# WeChat-bound conversations (纯文本通道)
+# WeChat-bound conversations (设计 §2:附件端到端放行)
 # ----------------------------------------------------------------------
 
 
-def test_wechat_conversation_with_text_drops_attachments_but_generates(
+def test_wechat_conversation_with_text_persists_attachments_and_forwards_images(
     multimodal_client, ws_repo, attachments_root, conversation_id
 ):
-    """微信会话 + 文本 + 附件：生成继续、LLM 收到纯文本、附件记录不动。
+    """微信会话 + 文本 + 附件（设计 §2 取代旧"丢弃"行为）：
 
-    注意：当前实现（commit 97a0498）在 WS 层直接丢弃附件引用后再调用
-    agent，因此落库的 user 消息 attachments 为 None（brief 用例 11 写的
-    「附件仍持久化」与该实现不一致，见任务报告 concerns）。
+    - 富化后的 refs 随 user 消息持久化；
+    - LLM 收到文本块 + 图像块（多模态理解）；
+    - 回复文本先同步微信，随后附件字节经 channel.send_image 逐张转发。
     """
     record = _seed_attachment(attachments_root, ws_repo)
     wechat_channel = MagicMock()
     wechat_channel.send_message = AsyncMock()
+    wechat_channel.send_image = AsyncMock()
     wechat_channel._last_wechat_user_id = "wxid_friend"
     wechat_channel._last_context_token = "tok-123"
     multimodal_client.app.state.wechat_channel = wechat_channel
@@ -328,37 +329,50 @@ def test_wechat_conversation_with_text_drops_attachments_but_generates(
         # 微信转发发生在 done 帧之后的同一生成任务内；保持连接打开直到转发完成，
         # 避免连接关闭取消任务造成 flake。
         for _ in range(100):
-            if wechat_channel.send_message.await_count:
+            if wechat_channel.send_message.await_count and wechat_channel.send_image.await_count:
                 break
             time.sleep(0.02)
 
-    assert wechat_channel.send_message.await_count == 1
     assert any(frame.get("response") == "Agent response" for frame in frames)
     assert any(frame.get("done") for frame in frames)
     assert not any("error" in frame for frame in frames)
 
-    # LLM 收到纯文本 str content（无图像块）
-    human = _last_human_message(multimodal_client)
-    assert isinstance(human, HumanMessage)
-    assert isinstance(human.content, str)
-    assert human.content == "带图说话"
-
-    # 附件引用未随消息落库（实现行为：WS 层丢弃），但附件记录与文件仍在
+    # 富化后的 refs 随 user 消息持久化（设计 §2:不再丢弃）
     user_messages = [m for m in _get_messages(ws_repo, conversation_id) if m["role"] == "user"]
     assert user_messages[0]["content"] == "带图说话"
-    assert user_messages[0]["attachments"] is None
-    assert asyncio.run(ws_repo.get_attachment(record["id"])) is not None
-    assert (attachments_root / record["relative_path"]).is_file()
+    assert user_messages[0]["attachments"] == [
+        {"id": record["id"], "mime": "image/png", "width": 3, "height": 2}
+    ]
 
-    # 回复照常同步给微信
+    # LLM 收到 list content：文本块 + 图像块（图像字节来自附件根目录）
+    human = _last_human_message(multimodal_client)
+    assert isinstance(human, HumanMessage)
+    assert isinstance(human.content, list)
+    text_blocks = [b for b in human.content if isinstance(b, dict) and b.get("type") == "text"]
+    image_blocks = [b for b in human.content if isinstance(b, dict) and b.get("type") == "image"]
+    assert text_blocks and text_blocks[0]["text"] == "带图说话"
+    assert len(image_blocks) == 1
+    assert image_blocks[0]["base64"] == base64.b64encode(_png_bytes()).decode("ascii")
+    assert image_blocks[0]["mime_type"] == "image/png"
+
+    # 回复文本先同步给微信
+    assert wechat_channel.send_message.await_count == 1
     assert wechat_channel.send_message.call_args.args[1] == "Agent response"
     assert wechat_channel.send_message.call_args.kwargs.get("context_token") == "tok-123"
 
+    # 附件图片随后逐张转发（读取附件根目录下的真实字节）
+    assert wechat_channel.send_image.await_count == 1
+    forward_args = wechat_channel.send_image.await_args
+    assert forward_args.args[0] == "wxid_friend"
+    assert forward_args.args[1] == _png_bytes()
+    assert forward_args.kwargs.get("context_token") == "tok-123"
 
-def test_wechat_conversation_image_only_message_rejected(
+
+def test_wechat_conversation_image_only_message_proceeds(
     multimodal_client, ws_repo, attachments_root, conversation_id
 ):
-    """微信 + 纯图片 → 专用错误帧；无消息落库；无生成。"""
+    """微信 + 纯图片（设计 §2 取代旧错误帧拒绝）：照常生成，无错误帧，
+    user 消息空文本 + 富化 refs 落库，LLM 收到纯图像块 HumanMessage。"""
     chat_model = multimodal_client.app.state.agent.llm_provider.chat_model
     record = _seed_attachment(attachments_root, ws_repo)
     multimodal_client.app.state.wechat_conversation_id = conversation_id
@@ -371,12 +385,61 @@ def test_wechat_conversation_image_only_message_rejected(
                 "attachments": [{"id": record["id"]}],
             }
         )
-        frame = ws.receive_json()
-        assert frame["error"] == "WeChat channel does not support image-only messages"
-        assert frame["conversation_id"] == conversation_id
+        frames = _collect_until_done(ws)
 
-        ws.send_json({"stop": True})
-        assert ws.receive_json().get("stopped") is True
+    assert any(frame.get("response") == "Agent response" for frame in frames)
+    assert any(frame.get("done") for frame in frames)
+    assert not any("error" in frame for frame in frames)
 
-    assert _get_messages(ws_repo, conversation_id) == []
-    assert not chat_model.ainvoke.called
+    user_messages = [m for m in _get_messages(ws_repo, conversation_id) if m["role"] == "user"]
+    assert len(user_messages) == 1
+    assert user_messages[0]["content"] == ""
+    assert user_messages[0]["attachments"] == [
+        {"id": record["id"], "mime": "image/png", "width": 3, "height": 2}
+    ]
+
+    assert chat_model.ainvoke.called
+    human = _last_human_message(multimodal_client)
+    assert isinstance(human.content, list)
+    assert human.content
+    assert all(isinstance(block, dict) and block.get("type") == "image" for block in human.content)
+
+
+def test_wechat_conversation_send_image_failure_degrades_text_only(
+    multimodal_client, ws_repo, attachments_root, conversation_id
+):
+    """单张图片转发失败（send_image 抛错）→ 仅 warning 跳过该图，
+    文本回复照常同步，无错误帧、不影响本轮其余部分。"""
+    record = _seed_attachment(attachments_root, ws_repo)
+    wechat_channel = MagicMock()
+    wechat_channel.send_message = AsyncMock()
+    wechat_channel.send_image = AsyncMock(side_effect=RuntimeError("CDN upload failed"))
+    wechat_channel._last_wechat_user_id = "wxid_friend"
+    wechat_channel._last_context_token = "tok-123"
+    multimodal_client.app.state.wechat_channel = wechat_channel
+    multimodal_client.app.state.wechat_conversation_id = conversation_id
+
+    with multimodal_client.websocket_connect("/ws/chat") as ws:
+        ws.send_json(
+            {
+                "message": "带图说话",
+                "conversation_id": conversation_id,
+                "attachments": [{"id": record["id"]}],
+            }
+        )
+        frames = _collect_until_done(ws)
+        for _ in range(100):
+            if wechat_channel.send_message.await_count and wechat_channel.send_image.await_count:
+                break
+            time.sleep(0.02)
+
+    assert not any("error" in frame for frame in frames)
+    # 文本回复不受图片转发失败影响
+    assert wechat_channel.send_message.await_count == 1
+    assert wechat_channel.send_message.call_args.args[1] == "Agent response"
+    # 图片发送尝试过一次即失败;refs 仍随消息落库(多模态理解不受影响)
+    assert wechat_channel.send_image.await_count == 1
+    user_messages = [m for m in _get_messages(ws_repo, conversation_id) if m["role"] == "user"]
+    assert user_messages[0]["attachments"] == [
+        {"id": record["id"], "mime": "image/png", "width": 3, "height": 2}
+    ]

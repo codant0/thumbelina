@@ -917,5 +917,37 @@ describe('useWebSocket', () => {
       expect(result.current.messages[1].attachments).toBeUndefined()
       expect(result.current.messages[2].attachments).toBeUndefined()
     })
+
+    it('inbound wechat channel_message with image appears as user message carrying attachments', async () => {
+      const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-9'))
+
+      await act(async () => {
+        await new Promise(resolve => setTimeout(resolve, 10))
+      })
+
+      await act(async () => {
+        MockWebSocket.instances[0].simulateMessage(
+          JSON.stringify({
+            channel_message: {
+              channel: 'wechat',
+              conversation_id: 'conv-9',
+              user_message: '',
+              response: '这是你发的图片',
+              source: 'wechat',
+              attachments: [{ id: 'att_wx', mime: 'image/jpeg', width: 640, height: 480 }],
+            },
+          }),
+        )
+      })
+
+      // 纯图片入站:user_message 为空但仍生成用户气泡并携带附件 refs
+      const userMsg = result.current.messages.find(m => m.role === 'user')
+      expect(userMsg).toBeDefined()
+      expect(userMsg!.attachments).toEqual([
+        { id: 'att_wx', mime: 'image/jpeg', width: 640, height: 480 },
+      ])
+      const assistantMsg = result.current.messages.find(m => m.role === 'assistant')
+      expect(assistantMsg?.content).toBe('这是你发的图片')
+    })
   })
 })
