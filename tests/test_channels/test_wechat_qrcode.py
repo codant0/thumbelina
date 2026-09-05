@@ -605,6 +605,18 @@ class TestDownloadMedia:
             )
 
     @pytest.mark.asyncio
+    async def test_ssrf_error_message_does_not_leak_signed_url(self):
+        """SSRF 拒绝消息只含 host + path，不泄露查询串里的签名令牌。"""
+        client = _make_client()
+        full_url = "https://evil.example.com/payload?encrypted_query_param=signed-token"
+        with pytest.raises(ValueError, match="SSRF") as exc_info:
+            await client.download_media("eqp", _KEY, full_url=full_url)
+        msg = str(exc_info.value)
+        assert "signed-token" not in msg
+        assert "evil.example.com" in msg
+        assert "/payload" in msg
+
+    @pytest.mark.asyncio
     async def test_bad_padding_raises_value_error(self):
         client = _make_client()
         resp = MagicMock()
@@ -688,12 +700,14 @@ class TestSendImage:
         assert client._client.post.await_count == 1  # 后续两步未执行
 
     @pytest.mark.asyncio
-    async def test_cdn_http_failure_raises_media_error(self):
+    @pytest.mark.parametrize("status", [199, 302, 500])
+    async def test_cdn_non_2xx_failure_raises_media_error(self, status):
+        """非 2xx 一律失败（含 1xx/3xx——3xx 快速失败，不跟随重定向语义）。"""
         client = _make_client()
         client._client.post = AsyncMock(
             side_effect=[
                 _json_response({"upload_param": "up-param"}),
-                MagicMock(status_code=500, headers={}),
+                MagicMock(status_code=status, headers={}),
             ]
         )
 

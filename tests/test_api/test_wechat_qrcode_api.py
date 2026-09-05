@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -185,6 +186,75 @@ class TestConfirmLogin:
         assert client.app.state.config.channels.wechat.enabled is True
         # Verify swap_channel was called
         mock_runtime.swap_channel.assert_awaited_once()
+
+    def test_callback_forwards_five_args_including_attachments_to_broadcast(self, client):
+        """Regression: the hot-login callback must accept the 5-arg signature
+        ``handle_incoming`` invokes (cid, text, response, source, attachments)
+        and forward attachments into the channel_message frame.
+
+        A stale 4-arg callback raised TypeError on every WeChat turn after QR
+        login (swallowed by handle_incoming), so no channel_message reached the
+        web UI until restart.
+        """
+        captured: dict = {}
+        broadcast = AsyncMock()
+        # Patch before the POST: the route imports broadcast_chat_message at
+        # request time and the callback closure binds that object.
+        with patch("thumbelina.api.websocket.broadcast_chat_message", broadcast):
+            with patch("thumbelina.api.routes.wechat._get_qrcode_manager") as mock_get:
+                mock_manager = MagicMock()
+                mock_manager.save_credentials.return_value = "/accounts/bot-id.json"
+                mock_get.return_value = mock_manager
+
+                mock_runtime = AsyncMock()
+
+                async def fake_swap(
+                    channel_name,
+                    new_config,
+                    app_state,
+                    agent,
+                    on_message_callback=None,
+                ):
+                    captured["callback"] = on_message_callback
+                    return True
+
+                mock_runtime.swap_channel.side_effect = fake_swap
+                client.app.state.runtime_config_manager = mock_runtime
+                client.app.state.agent = MagicMock()
+
+                resp = client.post(
+                    "/api/v1/wechat/qrcode/confirm",
+                    json={
+                        "bot_token": "tok-abc",
+                        "ilink_bot_id": "bot@id",
+                        "base_url": "https://example.com",
+                        "ilink_user_id": "user-123",
+                    },
+                )
+
+        assert resp.status_code == 200
+        assert resp.json()["connected"] is True
+        callback = captured.get("callback")
+        assert callback is not None
+
+        refs = [{"id": "att-1", "mime": "image/png", "width": 3, "height": 2}]
+        # Exactly how handle_incoming invokes the callback (5 positional args).
+        asyncio.run(callback("conv-1", "看图", "resp text", "wechat", refs))
+        # Pure-text turn: attachments=None must still broadcast.
+        asyncio.run(callback("conv-1", "hello", "hi", "wechat", None))
+
+        assert broadcast.await_count == 2
+        first = broadcast.await_args_list[0].args[0]["channel_message"]
+        assert first == {
+            "channel": "wechat",
+            "conversation_id": "conv-1",
+            "user_message": "看图",
+            "response": "resp text",
+            "source": "wechat",
+            "attachments": refs,
+        }
+        second = broadcast.await_args_list[1].args[0]["channel_message"]
+        assert second["attachments"] is None
 
     def test_missing_fields_returns_422(self, client):
         """POST /wechat/qrcode/confirm with missing fields returns 422."""

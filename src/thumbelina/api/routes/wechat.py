@@ -260,11 +260,17 @@ async def confirm_wechat_login(
         try:
             from thumbelina.api.websocket import broadcast_chat_message
 
+            # Signature must mirror the app.py lifespan callback: handle_incoming
+            # invokes it with 5 positional args (including inbound image refs,
+            # 设计 §2). A stale 4-arg signature raises TypeError on every turn
+            # (swallowed by the caller) and the web UI stops receiving
+            # channel_message frames until restart.
             async def _on_wechat_message(
                 cid: str,
                 user_text: str,
                 response: str,
                 source: str = "wechat",
+                attachments: list[dict[str, Any]] | None = None,
             ) -> None:
                 await broadcast_chat_message(
                     {
@@ -274,6 +280,7 @@ async def confirm_wechat_login(
                             "user_message": user_text,
                             "response": response,
                             "source": source,
+                            "attachments": attachments,
                         }
                     }
                 )

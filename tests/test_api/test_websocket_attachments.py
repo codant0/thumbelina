@@ -41,7 +41,12 @@ def _png_bytes(width: int = 3, height: int = 2) -> bytes:
     return b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\x0dIHDR" + struct.pack(">II", width, height)
 
 
-def _seed_attachment(root: Path, repo: ConversationRepository, data: bytes | None = None) -> dict:
+def _seed_attachment(
+    root: Path,
+    repo: ConversationRepository,
+    data: bytes | None = None,
+    mime: str = "image/png",
+) -> dict:
     """Write bytes below *root* and record the attachment; returns metadata."""
     data = data if data is not None else _png_bytes()
     relative_path = f"2026/01/seed-{uuid4().hex}.png"
@@ -50,7 +55,7 @@ def _seed_attachment(root: Path, repo: ConversationRepository, data: bytes | Non
     full.write_bytes(data)
     return asyncio.run(
         repo.create_attachment(
-            mime="image/png",
+            mime=mime,
             size=len(data),
             relative_path=relative_path,
             width=3,
@@ -443,3 +448,87 @@ def test_wechat_conversation_send_image_failure_degrades_text_only(
     assert user_messages[0]["attachments"] == [
         {"id": record["id"], "mime": "image/png", "width": 3, "height": 2}
     ]
+
+
+def test_wechat_conversation_pure_image_empty_response_still_forwards_images(
+    multimodal_client, ws_repo, attachments_root, conversation_id
+):
+    """微信 + 纯图片 + 模型空回复：文本同步跳过，但附件图片仍逐张转发。
+
+    回归：转发曾嵌在 ``is_wechat_conversation and full_response`` 内，
+    空回复的纯图片轮会静默丢弃 send_image。
+    """
+    record = _seed_attachment(attachments_root, ws_repo)
+    wechat_channel = MagicMock()
+    wechat_channel.send_message = AsyncMock()
+    wechat_channel.send_image = AsyncMock()
+    wechat_channel._last_wechat_user_id = "wxid_friend"
+    wechat_channel._last_context_token = "tok-123"
+    multimodal_client.app.state.wechat_channel = wechat_channel
+    multimodal_client.app.state.wechat_conversation_id = conversation_id
+    # 模型空回复（mock LLM 返回空 content → full_response=""）
+    chat_model = multimodal_client.app.state.agent.llm_provider.chat_model
+    chat_model.ainvoke = AsyncMock(return_value=AIMessage(content=""))
+
+    with multimodal_client.websocket_connect("/ws/chat") as ws:
+        ws.send_json(
+            {
+                "message": "",
+                "conversation_id": conversation_id,
+                "attachments": [{"id": record["id"]}],
+            }
+        )
+        frames = _collect_until_done(ws)
+        # 转发发生在 done 帧之后的同一生成任务内；保持连接打开直到转发完成。
+        for _ in range(100):
+            if wechat_channel.send_image.await_count:
+                break
+            time.sleep(0.02)
+
+    assert any(frame.get("done") for frame in frames)
+    assert not any("error" in frame for frame in frames)
+
+    # 空回复：文本同步跳过
+    assert wechat_channel.send_message.await_count == 0
+    # 但图片转发不依赖 full_response，仍然执行
+    assert wechat_channel.send_image.await_count == 1
+    forward_args = wechat_channel.send_image.await_args
+    assert forward_args.args[0] == "wxid_friend"
+    assert forward_args.args[1] == _png_bytes()
+    assert forward_args.kwargs.get("context_token") == "tok-123"
+
+
+def test_wechat_conversation_non_image_attachment_skipped_for_forward(
+    multimodal_client, ws_repo, attachments_root, conversation_id
+):
+    """非图片 mime 的附件不进入微信转发（debug 跳过），文本回复照常同步。"""
+    record = _seed_attachment(attachments_root, ws_repo, mime="application/pdf")
+    wechat_channel = MagicMock()
+    wechat_channel.send_message = AsyncMock()
+    wechat_channel.send_image = AsyncMock()
+    wechat_channel._last_wechat_user_id = "wxid_friend"
+    wechat_channel._last_context_token = "tok-123"
+    multimodal_client.app.state.wechat_channel = wechat_channel
+    multimodal_client.app.state.wechat_conversation_id = conversation_id
+
+    with multimodal_client.websocket_connect("/ws/chat") as ws:
+        ws.send_json(
+            {
+                "message": "这是份文档",
+                "conversation_id": conversation_id,
+                "attachments": [{"id": record["id"]}],
+            }
+        )
+        frames = _collect_until_done(ws)
+        # 等待生成任务收尾（若有转发发生也在此窗口内出现）
+        for _ in range(100):
+            if wechat_channel.send_message.await_count:
+                break
+            time.sleep(0.02)
+
+    assert any(frame.get("done") for frame in frames)
+    assert not any("error" in frame for frame in frames)
+    # 文本照常同步
+    assert wechat_channel.send_message.await_count == 1
+    # 非图片附件被显式跳过，send_image 不调用
+    wechat_channel.send_image.assert_not_awaited()

@@ -649,7 +649,13 @@ class ILinkClient:
         """
         if full_url:
             if not self._is_allowed_cdn_url(full_url):
-                raise ValueError(f"拒绝非微信 CDN 域的 full_url（SSRF 防护）: {full_url}")
+                # 错误消息只带 host + path：full_url 查询串是服务端签名
+                # 令牌，不应进入异常文本/日志。
+                parsed = urlparse(full_url)
+                raise ValueError(
+                    f"拒绝非微信 CDN 域的 full_url（SSRF 防护）: "
+                    f"host={parsed.hostname or ''} path={parsed.path}"
+                )
             url = full_url
         else:
             url = (
@@ -807,7 +813,7 @@ class ILinkClient:
             content=ciphertext,
             headers={"Content-Type": "application/octet-stream"},
         )
-        if cdn_resp.status_code >= 400:
+        if cdn_resp.status_code < 200 or cdn_resp.status_code >= 300:
             raise ILinkMediaError(f"CDN 上传失败: HTTP {cdn_resp.status_code}")
         encrypted_param = cdn_resp.headers.get("x-encrypted-param", "")
         if not encrypted_param:

@@ -92,6 +92,7 @@ async def _forward_attachments_to_wechat(
 
     调用时机:回复文本已经 :meth:`WeChatChannel.send_message` 同步之后
     (协议要求文字说明先于图片发送,见 ``ILinkClient.send_image``)。
+    非图片 mime 的附件显式跳过(debug 日志)——send_image 只支持图片。
     每张独立 fail-soft:记录缺失、文件缺失、路径穿越或发送失败只
     ``logger.warning`` 并继续下一张,不影响文本回复与后续图片。
     """
@@ -110,6 +111,15 @@ async def _forward_attachments_to_wechat(
             record = await repository.get_attachment(attachment_id)
             if record is None:
                 raise ValueError("attachment record not found")
+            mime = ref.get("mime") or record.get("mime")
+            if isinstance(mime, str) and not mime.startswith("image/"):
+                logger.debug(
+                    "Skipping non-image attachment %s (mime=%s) — "
+                    "WeChat forward only supports images",
+                    attachment_id,
+                    mime,
+                )
+                continue
             relative_path = record.get("relative_path")
             if not isinstance(relative_path, str) or not relative_path:
                 raise ValueError("attachment record has no relative_path")
@@ -242,8 +252,10 @@ async def _run_generation(
             }
         )
 
-        # Sync to WeChat if this is a WeChat conversation
-        if is_wechat_conversation and full_response:
+        # Sync to WeChat if this is a WeChat conversation. 转发不依赖
+        # full_response：纯图片轮模型回复可能为空，此时文本同步跳过，
+        # 但附件图片仍必须逐张转发，否则静默丢失。
+        if is_wechat_conversation:
             wechat_channel = getattr(websocket.app.state, "wechat_channel", None)
             if wechat_channel is not None:
                 logger.info("Sending frontend message response to WeChat")
@@ -252,12 +264,19 @@ async def _run_generation(
                     last_context_token = getattr(wechat_channel, "_last_context_token", "")
 
                     if last_wechat_user:
-                        await wechat_channel.send_message(
-                            last_wechat_user,
-                            full_response,
-                            context_token=last_context_token,
-                        )
-                        logger.info("Sent response to WeChat user %s", last_wechat_user)
+                        if full_response:
+                            await wechat_channel.send_message(
+                                last_wechat_user,
+                                full_response,
+                                context_token=last_context_token,
+                            )
+                            logger.info("Sent response to WeChat user %s", last_wechat_user)
+                        else:
+                            logger.info(
+                                "Empty model response for WeChat conversation %s; "
+                                "skipping text sync (attachment forwarding still applies)",
+                                cid,
+                            )
 
                         # 设计 §2:回复文本先发,本轮 Web 侧附件图片随后逐张
                         # 经三步流程转发;单张失败仅 warning,不影响文本回复。
