@@ -31,12 +31,19 @@ LOW_WATERMARK = 0.5
 # 丢失签名的 assistant 轮次（HTTP 400）。
 _THINKING_BLOCK_TYPES = ("thinking", "redacted_thinking", "reasoning")
 
+# 图像内容块的固定 token 占位（GPT-4V 基线，设计文档 §3.2/Task B4）：
+# base64 无法按文本估算视觉开销，每张图按固定值计入，
+# 否则压缩阈值会因图像块被当成空文本而失真。
+IMAGE_BLOCK_TOKEN_PLACEHOLDER = 765
+
 
 def message_text(message: BaseMessage) -> str:
     """从消息的 ``content`` 中提取可估算的文本。
 
     同时处理纯字符串内容与结构化内容块（text/thinking 字典，
     例如 Anthropic），使用量估算同样覆盖块式内容的 assistant 轮次。
+    图像块不含文本，其固定开销由 :func:`estimate_messages_tokens`
+    单独计入（本函数保持纯文本口径）。
     """
     content = message.content
     if isinstance(content, str):
@@ -55,6 +62,15 @@ def message_text(message: BaseMessage) -> str:
     return str(content)
 
 
+def _image_block_count(content: object) -> int:
+    """统计消息 ``content`` 中标准图像内容块（``type == "image"``）的数量。"""
+    if not isinstance(content, list):
+        return 0
+    return sum(
+        1 for block in content if isinstance(block, dict) and block.get("type") == "image"
+    )
+
+
 def estimate_messages_tokens(messages: Sequence[BaseMessage]) -> int:
     """估算 *messages* 的总 token 用量。
 
@@ -62,8 +78,14 @@ def estimate_messages_tokens(messages: Sequence[BaseMessage]) -> int:
     :func:`~thumbelina.rag.retrieval.context_formatter.estimate_tokens`
     估算器（CJK ≈ 2 tokens/字符，其他 ≈ 0.25 tokens/字符）——对窗口
     预算控制来说足够准确，且与 formatter 共享，保证两层口径一致。
+    结构化 content 中的每个图像内容块按
+    :data:`IMAGE_BLOCK_TOKEN_PLACEHOLDER`（GPT-4V 基线占位）固定计入。
     """
-    return sum(estimate_tokens(message_text(message)) for message in messages)
+    return sum(
+        estimate_tokens(message_text(message))
+        + _image_block_count(message.content) * IMAGE_BLOCK_TOKEN_PLACEHOLDER
+        for message in messages
+    )
 
 
 def group_atomic_units(messages: Sequence[BaseMessage]) -> list[list[BaseMessage]]:

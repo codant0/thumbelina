@@ -134,18 +134,25 @@ _DIMENSION_PARSERS = {
 # ----------------------------------------------------------------------
 
 
-def _attachments_root(request: Request) -> Path:
-    """解析附件根目录(绝对路径直接用,相对路径基于工作目录)。
+def resolve_attachments_root(config: object) -> Path:
+    """从应用配置解析附件根目录(设计 §3.1)。
 
-    config 经 ``getattr`` 读取,测试 fixture 缺失时回退默认目录。
+    ``repository.attachments_directory`` 为绝对路径时直接用,相对路径
+    基于当前工作目录;config 缺失(测试 fixture)或字段为空时回退默认
+    目录 ``_DEFAULT_ATTACHMENTS_DIRECTORY``。上传路由与 WebSocket 聊天
+    (``agent.attachments_root``)共用本函数,保证读写同源。
     """
     directory = _DEFAULT_ATTACHMENTS_DIRECTORY
-    config = getattr(request.app.state, "config", None)
     repository_config = getattr(config, "repository", None) if config is not None else None
     if repository_config is not None:
         directory = getattr(repository_config, "attachments_directory", None) or directory
     root = Path(directory)
     return root if root.is_absolute() else Path.cwd() / root
+
+
+def _attachments_root(request: Request) -> Path:
+    """解析附件根目录(绝对路径直接用,相对路径基于工作目录)。"""
+    return resolve_attachments_root(getattr(request.app.state, "config", None))
 
 
 def _attachment_file(root: Path, relative_path: str) -> Path:

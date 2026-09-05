@@ -12,6 +12,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
 from thumbelina.agent.graph import ThumbelinaAgent
+from thumbelina.api.routes.attachments import resolve_attachments_root
 from thumbelina.api.routes.chat import (
     _apply_conversation_endpoint,
     apply_conversation_runtime,
@@ -57,6 +58,7 @@ async def _run_generation(
     message: str,
     cid: str | None,
     active_conv_ref: dict[str, str | None],
+    attachments: list[dict[str, object]] | None = None,
 ) -> None:
     """在独立 asyncio.Task 中执行一轮生成（流式或非流式）。
 
@@ -72,6 +74,10 @@ async def _run_generation(
     ``active_conv_ref`` 是 ``websocket_chat`` 持有的可变容器,被
     subagent listener 用来读取"本轮正在生成的会话 ID",以决定把事件推给
     哪个连接、避免跨会话串话。
+
+    ``attachments`` 是可选的图像附件引用(``[{id, alt?}]``,Task B3),
+    透传给 ``agent.stream``/``agent.run``;微信绑定的会话为纯文本通道,
+    图像附件在此直接忽略(仅文本进入模型)。
     """
     # 在本轮范围内,subagent listener 能从 active_conv_ref 读到本次 cid,
     # 因此即便 listener 注册在 connect 时,它仍能正确路由。
@@ -100,12 +106,20 @@ async def _run_generation(
                 except Exception as exc:
                     logger.warning("Failed to apply WeChat endpoint: %s", exc)
 
+        # 微信为纯文本通道(设计 §3.2):绑定会话收到图像附件时直接忽略,
+        # 仅文本进入模型。不做 attachment_skipped 降级事件。
+        if is_wechat_conversation and attachments:
+            logger.info("WeChat conversation: skipped %d image attachment(s)", len(attachments))
+            attachments = None
+
         # Use streaming for frontend, regardless of WeChat binding
         streaming = websocket.app.state.config.llm.streaming_enabled
         full_response = ""
         if streaming:
             try:
-                async for event in agent.stream(message, context_window_tokens=window_tokens):
+                async for event in agent.stream(
+                    message, context_window_tokens=window_tokens, attachments=attachments
+                ):
                     text = event["text"]
                     if event["type"] == "reasoning":
                         await websocket.send_json(
@@ -133,7 +147,9 @@ async def _run_generation(
                 )
                 return
         else:
-            full_response = await agent.run(message, context_window_tokens=window_tokens)
+            full_response = await agent.run(
+                message, context_window_tokens=window_tokens, attachments=attachments
+            )
             await websocket.send_json({"response": full_response, "conversation_id": cid})
 
         await websocket.send_json(
@@ -205,6 +221,13 @@ async def websocket_chat(websocket: WebSocket) -> None:
 
     # Clone the agent per connection to isolate conversation state
     agent = shared_agent.clone()
+
+    # 附件根目录接线(Task B3):与上传路由同源解析(绝对路径直接用,
+    # 相对路径基于工作目录,config 缺失回退默认目录),克隆实例据此在
+    # _build_initial_messages 中读取附件字节构建图像块。
+    agent.attachments_root = resolve_attachments_root(
+        getattr(websocket.app.state, "config", None)
+    )
 
     # Conversation is created lazily on first message, not on connect.
     default_conversation_id: str | None = None
@@ -302,7 +325,8 @@ async def websocket_chat(websocket: WebSocket) -> None:
                 await websocket.send_json({"error": "Invalid message format"})
                 continue
 
-            if not parsed.message.strip():
+            # 纯文本或纯图片至少其一;守卫放宽以放行纯图片消息(Task B3)。
+            if not parsed.message.strip() and not parsed.attachments:
                 await websocket.send_json({"error": "Empty message"})
                 continue
 
@@ -325,10 +349,42 @@ async def websocket_chat(websocket: WebSocket) -> None:
                     await websocket.send_json({"error": f"Conversation not found: {cid}"})
                     continue
 
+            # 附件存在性校验(Task B3,无用户体系不做归属校验):任何 id
+            # 在 attachments 表中缺失 → 错误帧且不开新一轮。仓储异常按
+            # 校验失败处理(全部视为缺失),不中断连接。
+            if parsed.attachments and agent.repository_manager:
+                attachment_ids: list[str] = []
+                for ref in parsed.attachments:
+                    attachment_id = ref.get("id")
+                    if isinstance(attachment_id, str) and attachment_id:
+                        attachment_ids.append(attachment_id)
+                missing: list[str] = list(attachment_ids)
+                try:
+                    records = await agent.repository_manager.get_attachments(attachment_ids)
+                except Exception:
+                    logger.warning(
+                        "Attachment existence check failed (conversation %s)",
+                        cid,
+                        exc_info=True,
+                    )
+                else:
+                    missing = [aid for aid in attachment_ids if aid not in records]
+                if missing:
+                    await websocket.send_json(
+                        {
+                            "error": "Invalid attachment",
+                            "missing_attachment_ids": missing,
+                            "conversation_id": parsed.conversation_id,
+                        }
+                    )
+                    continue
+
             # 生成在独立任务中运行，主循环立即回到 receive_text()，
             # 使流式进行中也能接收并响应 stop。
             current_task = asyncio.create_task(
-                _run_generation(websocket, agent, parsed.message, cid, active_conv_ref)
+                _run_generation(
+                    websocket, agent, parsed.message, cid, active_conv_ref, parsed.attachments
+                )
             )
 
     except WebSocketDisconnect:
