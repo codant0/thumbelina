@@ -259,7 +259,8 @@ class TestEnsureSchemaMessagesAttachments:
     """
 
     def test_adds_attachments_column_and_attachments_table(self):
-        from sqlalchemy import inspect as sa_inspect, text
+        from sqlalchemy import inspect as sa_inspect
+        from sqlalchemy import text
 
         from thumbelina.repository.models import Attachment, ensure_schema
 
