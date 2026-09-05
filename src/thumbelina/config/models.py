@@ -100,6 +100,13 @@ class RepositoryConfig(BaseModel):
     database_url: str = Field(
         default="sqlite:///thumbelina.db", description="Database connection URL"
     )
+    attachments_directory: str = Field(
+        default="attachments",
+        description=(
+            "Directory (relative to working directory) for uploaded image "
+            "attachments; sharded yyyy/mm."
+        ),
+    )
 
 
 class LoggingConfig(BaseModel):

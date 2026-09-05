@@ -47,6 +47,29 @@ def write_text_atomic(path: Path, text: str) -> None:
         raise
 
 
+def write_bytes_atomic(path: Path, data: bytes) -> None:
+    """把 ``data`` 原子地写入 ``path``(字节版 ``write_text_atomic``)。
+
+    同范式:先写同目录下的临时文件,``flush`` 并 best-effort ``fsync``
+    后 ``os.replace`` 到目标路径;任何异常都会清理临时文件再抛出。
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(path.name + TMP_SUFFIX)
+    try:
+        with open(tmp_path, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            try:
+                os.fsync(handle.fileno())
+            except OSError as exc:
+                # fsync best-effort:Windows/网络盘可能不支持。
+                logger.debug("fsync 跳过: %s (%s)", path, exc)
+        os.replace(tmp_path, path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
+
+
 def read_text(path: Path) -> str:
     """读取 ``path`` 全文;文件缺失或读取失败时返回空字符串。"""
     try:
