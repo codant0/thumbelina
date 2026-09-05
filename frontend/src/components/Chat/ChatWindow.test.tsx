@@ -14,6 +14,16 @@ vi.mock('../../api/conversations', async (importOriginal) => {
   }
 })
 
+// 附件上传 mock:拖放冒烟测试需要真实的添加管道跑通(走 useAttachments)。
+const mockUploadAttachment = vi.fn()
+vi.mock('../../api/attachments', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api/attachments')>()
+  return {
+    ...actual,
+    uploadAttachment: (...args: unknown[]) => mockUploadAttachment(...args),
+  }
+})
+
 const baseState: ChatSocket = {
   messages: [],
   isConnected: true,
@@ -45,6 +55,7 @@ const renderWindow = (props: Record<string, unknown> = {}) =>
 beforeEach(() => {
   vi.clearAllMocks()
   wsState = baseState
+  mockUploadAttachment.mockResolvedValue({ id: 'att-1', mime: 'image/png', size: 1, width: 10, height: 10, sha256: null })
 })
 
 describe('ChatWindow', () => {
@@ -209,5 +220,44 @@ describe('ChatWindow', () => {
     wsState = { ...baseState, pendingMessage: 'queued text', pendingHeld: true }
     renderWindow({ conversationId: 'conv-1' })
     expect(screen.getByText(/auto-send paused/i)).toBeInTheDocument()
+  })
+
+  it('shows the pending-image badge when the queued message carries attachments', () => {
+    wsState = {
+      ...baseState,
+      pendingMessage: 'queued text',
+      pendingAttachments: [{ id: 'a1' }, { id: 'a2' }],
+    }
+    renderWindow({ conversationId: 'conv-1' })
+    expect(screen.getByTestId('pending-attach-badge')).toHaveTextContent('+ 2 张图片')
+  })
+
+  it('drops image files into the shared pipeline and sends them with the message', async () => {
+    renderWindow({ conversationId: 'conv-1' })
+    // 文档级拖放:dataTransfer.types 含 Files 才触发
+    fireEvent.dragEnter(document, { dataTransfer: { types: ['Files'], files: [] } })
+    expect(screen.getByTestId('drop-overlay')).toBeInTheDocument()
+    const file = new File(['x'], 'shot.png', { type: 'image/png' })
+    fireEvent.drop(document, { dataTransfer: { types: ['Files'], files: [file] } })
+    await waitFor(() => {
+      expect(screen.getByTestId('attachments-strip')).toBeInTheDocument()
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('attachments-strip').querySelector('[data-status="ready"]')).toBeTruthy()
+    })
+
+    fireEvent.change(screen.getByPlaceholderText(/Type a message/i), { target: { value: '看图' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await waitFor(() => {
+      expect(baseState.sendMessage).toHaveBeenCalledWith('看图', 'conv-1', [{ id: 'att-1' }])
+    })
+    // 发送成功后清空附件草稿
+    expect(screen.queryByTestId('attachments-strip')).not.toBeInTheDocument()
+  })
+
+  it('does not trigger the drop overlay for non-file drags (coder code-drag)', () => {
+    renderWindow({ conversationId: 'conv-1' })
+    fireEvent.dragEnter(document, { dataTransfer: { types: ['text/plain'], files: [] } })
+    expect(screen.queryByTestId('drop-overlay')).not.toBeInTheDocument()
   })
 })

@@ -22,6 +22,8 @@ vi.mock('./hooks/useWebSocket', () => ({
   })),
   // ChatWindow 订阅子 Agent 事件;在测试里提供 noop 退订函数。
   subscribeSubagentEvents: vi.fn(() => () => {}),
+  // InputBox 的发送按钮启用条件消费该纯函数(附件协议层,Task 5 落地)。
+  canSendMessage: (text: string, attachmentCount: number) => text.trim() !== '' || attachmentCount > 0,
 }))
 
 describe('App', () => {

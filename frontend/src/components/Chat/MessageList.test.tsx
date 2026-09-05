@@ -392,4 +392,70 @@ describe('MessageList', () => {
     render(<MessageList messages={messages} isStreaming onRegenerate={() => {}} />)
     expect(screen.queryByTestId('regenerate')).toBeNull()
   })
+
+  // ── 消息附件缩略图(设计 §5.2,F3)─────────────────────────────────────────
+
+  const userWithAttachments: Message[] = [
+    {
+      id: '1',
+      role: 'user',
+      content: '看下截图',
+      timestamp: '2024-01-01T00:00:00Z',
+      // 乐观插入的本地消息只有 id/alt(无 mime),渲染不得依赖 mime
+      attachments: [{ id: 'att-1', mime: 'image/png', alt: '首页截图' }, { id: 'att-2', mime: 'image/png' }],
+    },
+  ]
+
+  it('renders attachment thumbnails above the content for user messages', () => {
+    const { container } = render(<MessageList messages={userWithAttachments} />)
+    const strip = screen.getByTestId('msg-attachments')
+    expect(strip).toBeInTheDocument()
+    // 缩略图在 .msg-content 上方(DOM 顺序)
+    const content = container.querySelector('.msg-content')!
+    expect(content.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
+    const imgs = container.querySelectorAll('.msg-attachment-thumb')
+    expect(imgs).toHaveLength(2)
+    expect(imgs[0].getAttribute('src')).toBe('/api/v1/attachments/att-1')
+    expect(imgs[0].getAttribute('alt')).toBe('首页截图')
+    expect(imgs[1].getAttribute('alt')).toBe('')
+  })
+
+  it('does not render the strip for assistant messages or messages without attachments', () => {
+    render(
+      <MessageList
+        messages={[
+          { id: '1', role: 'user', content: 'no pics', timestamp: '' },
+          { id: '2', role: 'assistant', content: 'reply', timestamp: '', attachments: [{ id: 'att-9', mime: 'image/png' }] },
+        ]}
+      />,
+    )
+    expect(screen.queryByTestId('msg-attachments')).not.toBeInTheDocument()
+  })
+
+  it('swaps to a broken placeholder with a retry button on load error', () => {
+    const { container } = render(<MessageList messages={userWithAttachments} />)
+    const img = container.querySelector('.msg-attachment-thumb')!
+    fireEvent.error(img)
+    expect(container.querySelector('.msg-attachment-thumb--broken')).toBeTruthy()
+    expect(screen.getByTestId('attachment-retry')).toHaveTextContent('重试加载')
+    // 重试:重设 src(带 cache-buster)恢复 <img>
+    fireEvent.click(screen.getByTestId('attachment-retry'))
+    const restored = container.querySelector('.msg-attachment-thumb')!
+    expect(restored.getAttribute('src')).toBe('/api/v1/attachments/att-1?r=1')
+    expect(container.querySelector('.msg-attachment-thumb--broken')).toBeNull()
+  })
+
+  it('opens the lightbox on thumbnail click and closes on Escape', () => {
+    const { container } = render(<MessageList messages={userWithAttachments} />)
+    fireEvent.click(screen.getAllByRole('button', { name: '查看图片' })[1])
+    const lightbox = screen.getByTestId('attachment-lightbox')
+    expect(lightbox).toBeInTheDocument()
+    // 缩略图 + lightbox 大图都是 img,用类名定位 lightbox 大图
+    expect(container.querySelector('.lightbox-image')!.getAttribute('src')).toBe('/api/v1/attachments/att-2')
+    expect(screen.getByText('2 / 2')).toBeInTheDocument()
+    fireEvent.keyDown(document, { key: 'ArrowLeft' })
+    expect(container.querySelector('.lightbox-image')!.getAttribute('src')).toBe('/api/v1/attachments/att-1')
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByTestId('attachment-lightbox')).not.toBeInTheDocument()
+  })
 })

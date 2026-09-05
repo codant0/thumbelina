@@ -1,10 +1,12 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { Message, SubagentEventPayload, ToolCall } from '../../types/chat'
+import type { AttachmentRef, Message, SubagentEventPayload, ToolCall } from '../../types/chat'
 import { ArrowDown, Brain, Check, ChevronDown, Copy, RefreshCcw, Wrench } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import { MarkdownContent } from './MarkdownContent'
 import { JsonBlock } from './CodeBlock'
 import { SubagentCard } from './SubagentCard'
+import { AttachmentLightbox } from './AttachmentLightbox'
+import { attachmentUrl } from '../../api/attachments'
 import { splitLeadingJson } from '../../lib/codeUtils'
 import { useCopy } from '../../hooks/useCopy'
 
@@ -147,6 +149,44 @@ function AssistantContent({ content }: { content: string }) {
   )
 }
 
+/**
+ * 用户消息里的单张附件缩略图(设计 §5.2):
+ * - URL 由 attachmentUrl(id) 自拼;乐观插入的本地消息 attachments 无 mime,渲染不得依赖 mime;
+ * - 加载失败(死链/网络)→ 破图占位 + 「重试加载」文本按钮重设 src;
+ * - 点击打开 Lightbox。
+ */
+function MsgAttachmentThumb({ att, onOpen }: { att: AttachmentRef; onOpen: () => void }) {
+  const [broken, setBroken] = useState(false)
+  const [reloadKey, setReloadKey] = useState(0)
+  if (broken) {
+    return (
+      <span className="msg-attachment-thumb--broken" data-broken="true">
+        <button
+          type="button"
+          data-testid="attachment-retry"
+          onClick={() => {
+            setBroken(false)
+            setReloadKey(k => k + 1)
+          }}
+        >
+          {/* T7 i18n:chat.attachments.reload「重试加载」 */}
+          重试加载
+        </button>
+      </span>
+    )
+  }
+  return (
+    <button type="button" className="msg-attachment-thumb-btn" aria-label="查看图片" onClick={onOpen}>
+      <img
+        className="msg-attachment-thumb"
+        src={reloadKey > 0 ? `${attachmentUrl(att.id)}?r=${reloadKey}` : attachmentUrl(att.id)}
+        alt={att.alt ?? ''}
+        onError={() => setBroken(true)}
+      />
+    </button>
+  )
+}
+
 const MessageItem = memo(function MessageItem({
   msg,
   isStreamingMsg,
@@ -163,6 +203,8 @@ const MessageItem = memo(function MessageItem({
   onViewSubagentDetail?: (event: SubagentEventPayload) => void
 }) {
   const { t } = useTranslation()
+  // 该消息附件的 Lightbox 下标;null = 关闭。memo 组件内部 state 即可,无需提升。
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   return (
     <div
       data-testid="message-item"
@@ -174,6 +216,13 @@ const MessageItem = memo(function MessageItem({
       </span>
       {msg.thinking && msg.role === 'assistant' && (
         <ThinkingBlock thinking={msg.thinking} active={isStreamingMsg} />
+      )}
+      {msg.role === 'user' && msg.attachments && msg.attachments.length > 0 && (
+        <div className="msg-attachments" data-testid="msg-attachments">
+          {msg.attachments.map((att, i) => (
+            <MsgAttachmentThumb key={att.id} att={att} onOpen={() => setLightboxIndex(i)} />
+          ))}
+        </div>
       )}
       <div className="msg-content">
         {msg.role === 'assistant' ? (
@@ -204,6 +253,14 @@ const MessageItem = memo(function MessageItem({
         <MessageActions
           text={msg.content}
           onRegenerate={canRegenerate ? onRegenerate : undefined}
+        />
+      )}
+      {lightboxIndex !== null && msg.attachments && msg.attachments.length > 0 && (
+        <AttachmentLightbox
+          attachments={msg.attachments}
+          index={lightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+          onIndexChange={setLightboxIndex}
         />
       )}
     </div>
