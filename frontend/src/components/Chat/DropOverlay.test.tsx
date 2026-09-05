@@ -18,7 +18,7 @@ describe('DropOverlay', () => {
     render(<DropOverlay onFiles={vi.fn()} />)
     dragEnter(['Files'])
     expect(screen.getByTestId('drop-overlay')).toBeInTheDocument()
-    expect(screen.getByText('松开以上传图片')).toBeInTheDocument()
+    expect(screen.getByText('Drop images here')).toBeInTheDocument()
     dragLeave()
     expect(screen.queryByTestId('drop-overlay')).not.toBeInTheDocument()
   })

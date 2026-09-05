@@ -1235,3 +1235,408 @@
   }
 }
 
+/* ===== Attachments: 输入端附件条(设计 §5.1/§5.4,Task F6) =====
+   全部消费主题令牌;唯一硬编码色值是拖放蒙层 rgba(0,0,0,0.45)(规格 §5.4 明示)。 */
+
+.attachments-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+
+/* 📎 附件入口按钮:与 textarea 同高(40px)的 icon 按钮(设计 Task F6)。 */
+.attach-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  padding: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+.attach-btn:hover:not(:disabled) {
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.attach-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.attachment-thumb {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+
+.attachment-thumb:hover {
+  border-color: var(--accent-border);
+}
+
+.attachment-thumb__image {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.attachment-thumb__image img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 右上角 16×16 圆形移除按钮:半透明深底白叉(令牌化:暗取深、亮取浅),hover 转 error。 */
+.attachment-thumb__remove {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  color: var(--text-heading);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.attachment-thumb__remove:hover {
+  background: var(--error);
+  color: var(--user-bubble-text);
+}
+
+/* 右下角 12×12 进度圆环容器:SVG stroke-dashoffset + 匀速旋转,环色 accent。 */
+.attachment-thumb__progress {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+}
+
+.attachment-thumb__progress svg {
+  width: 100%;
+  height: 100%;
+  animation: attachment-spin calc(var(--dur-slow) * 6) linear infinite;
+}
+
+.attachment-thumb__progress-track {
+  stroke: color-mix(in srgb, var(--bg) 60%, transparent);
+}
+
+.attachment-thumb__progress-bar {
+  stroke: var(--accent);
+}
+
+@keyframes attachment-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* 失败态:error 边框 + 右下角「!」警示角标(纯 CSS,不加节点)。 */
+.attachment-thumb--failed {
+  border-color: var(--error);
+}
+
+.attachment-thumb--failed::after {
+  content: "!";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  font-size: 9px;
+  font-weight: var(--fw-semi);
+  line-height: 1;
+  border-radius: var(--radius-full);
+  background: var(--error);
+  color: var(--user-bubble-text);
+  pointer-events: none;
+}
+
+/* 失败态整卡可点重试:重试按钮铺满卡片(title 提示由组件提供)。 */
+.attachment-thumb__retry {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--bg) 62%, transparent);
+  color: var(--text-heading);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-med);
+  font-family: inherit;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.attachment-thumb__retry:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* 输入框上方的一行红字提示:淡入(--dur-fast);消失由组件 2s 后卸载完成。 */
+.attachment-error-hint {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--error);
+  animation: attachment-fade-in var(--dur-fast) var(--ease-out);
+}
+
+/* ChatWindow 拖放路径的提示挂在 chat-area 直下,与输入框内容左对齐。 */
+.chat-area > .attachment-error-hint {
+  padding: 0 var(--sp-4);
+}
+
+@keyframes attachment-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ===== Attachments: 全屏拖放覆盖层(设计 §5.1.2/§5.4,Task F4+F6) ===== */
+
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-toast) - 1); /* 盖过 chat 内容/侧栏/浮层,让位 toast 与 modal */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 内缩 16px:卡片不贴屏幕边 */
+  padding: var(--sp-4);
+  /* 唯一允许硬编码的色值(设计 §5.4) */
+  background: rgba(0, 0, 0, 0.45);
+  animation: attachment-fade-in var(--dur-fast) var(--ease-out);
+}
+
+.drop-overlay__card {
+  padding: var(--sp-4) var(--sp-6);
+  border: 2px dashed var(--accent-border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-med);
+}
+
+/* ===== Attachments: 用户消息附件行(设计 §5.2/§5.4,Task F6) ===== */
+
+.msg-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  max-width: 100%;
+  margin-bottom: var(--sp-1);
+}
+
+.msg-attachment-thumb-btn {
+  display: block;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 0;
+  line-height: 0;
+  cursor: zoom-in;
+}
+
+.msg-attachment-thumb {
+  display: block;
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: transform var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+
+.msg-attachment-thumb-btn:hover .msg-attachment-thumb {
+  transform: scale(1.03);
+  border-color: var(--accent-border);
+}
+
+/* 破图占位:灰底 + 「重试加载」文字按钮居中(text-secondary)。 */
+.msg-attachment-thumb--broken {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  text-align: center;
+}
+
+.msg-attachment-thumb--broken button {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  font-family: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+
+.msg-attachment-thumb--broken button:hover {
+  color: var(--text-primary);
+}
+
+/* ===== Attachments: 图片灯箱(设计 §5.2.1/§5.4,Task F5+F6) ===== */
+
+.lightbox-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-toast) - 1); /* 与 drop-overlay 同层:高于页面浮层,低于 toast/modal */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 纯黑 80% 观片蒙层:与拖放蒙层同理,仅蒙层允许硬编码(设计 §5.2.1) */
+  background: rgba(0, 0, 0, 0.8);
+  animation: attachment-fade-in var(--dur-fast) var(--ease-out);
+}
+
+.lightbox-image {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+}
+
+.lightbox-close,
+.lightbox-prev,
+.lightbox-next {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--bg) 65%, transparent);
+  color: var(--text-heading);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+.lightbox-close:hover,
+.lightbox-prev:hover,
+.lightbox-next:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.lightbox-close {
+  top: var(--sp-4);
+  right: var(--sp-4);
+}
+
+.lightbox-prev {
+  left: var(--sp-4);
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.lightbox-next {
+  right: var(--sp-4);
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* 底部居中计数:观片蒙层恒为深色,文字用恒为浅色的 --user-bubble-text 令牌。 */
+.lightbox-counter {
+  position: absolute;
+  bottom: var(--sp-4);
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: var(--fs-xs);
+  color: var(--user-bubble-text);
+  opacity: 0.75;
+}
+
+/* ===== Attachments: 待发悬浮条图片数徽标(设计 §5.1.3,Task F6) ===== */
+
+.pending-float-attach-badge {
+  align-self: flex-start;
+  padding: 1px var(--sp-2);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-med);
+  color: var(--warning);
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-full);
+  background: var(--warning-muted);
+}
+
+/* ===== Attachments: 窄屏与动效降级(设计评审纪要) ===== */
+
+@media (max-width: 600px) {
+  .attachment-thumb {
+    width: 40px;
+    height: 40px;
+  }
+
+  .msg-attachment-thumb {
+    width: 48px;
+    height: 48px;
+  }
+
+  .msg-attachment-thumb--broken {
+    width: 48px;
+    height: 48px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .attachment-thumb__progress svg,
+  .drop-overlay,
+  .lightbox-backdrop,
+  .attachment-error-hint {
+    animation: none;
+  }
+
+  .msg-attachment-thumb,
+  .attachment-thumb,
+  .attachment-thumb__remove,
+  .attachment-thumb__retry {
+    transition: none;
+  }
+}
+

@@ -7,18 +7,12 @@ export const MAX_ATTACHMENTS = 4
 /** 单张大小上限(与服务端一致,超限不发请求)。 */
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 
-/** 添加管道的临时行内提示类别(T7 i18n:chat.attachments.maxImages / unsupportedType / tooLarge)。 */
+/** 添加管道的临时行内提示类别(对应 i18n 键 chat.attachments.maxImages / unsupportedType / tooLarge)。 */
 export type AttachmentHint = 'maxImages' | 'unsupportedType' | 'tooLarge'
 
-/** 提示文案(T7:替换为 i18n chat.attachments.* 后删除本表)。 */
-const HINT_TEXT: Record<AttachmentHint, string> = {
-  maxImages: '最多 4 张',
-  unsupportedType: '仅支持 PNG / JPEG / WebP / GIF',
-  tooLarge: '图片超过 10MB',
-}
-
-export function attachmentHintText(hint: AttachmentHint): string {
-  return HINT_TEXT[hint]
+/** 提示类别 → i18n 键(chat.attachments.* 命名空间);文案由调用方经 t() 渲染。 */
+export function attachmentHintKey(hint: AttachmentHint): string {
+  return `chat.attachments.${hint}`
 }
 
 /** 本地附件 id:优先 crypto.randomUUID(),不可用时递增兜底(jsdom/旧浏览器)。 */

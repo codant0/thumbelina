@@ -437,7 +437,7 @@ describe('MessageList', () => {
     const img = container.querySelector('.msg-attachment-thumb')!
     fireEvent.error(img)
     expect(container.querySelector('.msg-attachment-thumb--broken')).toBeTruthy()
-    expect(screen.getByTestId('attachment-retry')).toHaveTextContent('重试加载')
+    expect(screen.getByTestId('attachment-retry')).toHaveTextContent('Retry loading')
     // 重试:重设 src(带 cache-buster)恢复 <img>
     fireEvent.click(screen.getByTestId('attachment-retry'))
     const restored = container.querySelector('.msg-attachment-thumb')!
@@ -447,7 +447,7 @@ describe('MessageList', () => {
 
   it('opens the lightbox on thumbnail click and closes on Escape', () => {
     const { container } = render(<MessageList messages={userWithAttachments} />)
-    fireEvent.click(screen.getAllByRole('button', { name: '查看图片' })[1])
+    fireEvent.click(screen.getAllByRole('button', { name: 'View image' })[1])
     const lightbox = screen.getByTestId('attachment-lightbox')
     expect(lightbox).toBeInTheDocument()
     // 缩略图 + lightbox 大图都是 img,用类名定位 lightbox 大图

@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { attachmentUrl } from '../../api/attachments'
+import { useTranslation } from '../../i18n'
 
 /** Lightbox 展示的附件:仅保证 id(乐观插入的用户消息 attachments 无 mime 字段)。 */
 interface LightboxAttachment {
@@ -22,9 +23,10 @@ interface AttachmentLightboxProps {
  * - 全新遮罩组件,不复用 FloatWindow(那是可拖拽迷你窗,定位不符);
  * - position:fixed 全屏遮罩 + 居中图片 + 顶部关闭 + 多图左右切换 + n / total 计数;
  * - 键盘:Esc 关闭、←/→ 切换(仅打开时挂 document keydown);
- * - 样式类名全部由 T7 统一进 styles/chat.css。
+ * - 样式类名统一在 styles/chat.css。
  */
 export function AttachmentLightbox({ attachments, index, onClose, onIndexChange }: AttachmentLightboxProps) {
+  const { t } = useTranslation()
   const total = attachments.length
   const safeIndex = Math.min(Math.max(index, 0), Math.max(total - 1, 0))
   const current = attachments[safeIndex]
@@ -47,12 +49,12 @@ export function AttachmentLightbox({ attachments, index, onClose, onIndexChange 
   if (!current) return null
 
   return (
-    <div className="lightbox-backdrop" role="dialog" aria-modal="true" aria-label="图片预览" data-testid="attachment-lightbox">
+    <div className="lightbox-backdrop" role="dialog" aria-modal="true" aria-label={t('chat.attachments.lightboxOpen')} data-testid="attachment-lightbox">
       <button
         type="button"
         className="lightbox-close"
-        aria-label="关闭"
-        title="关闭"
+        aria-label={t('chat.attachments.lightboxClose')}
+        title={t('chat.attachments.lightboxClose')}
         onClick={onClose}
       >
         <X size={20} />
@@ -64,8 +66,8 @@ export function AttachmentLightbox({ attachments, index, onClose, onIndexChange 
           <button
             type="button"
             className="lightbox-prev"
-            aria-label="上一张"
-            title="上一张"
+            aria-label={t('chat.attachments.lightboxPrev')}
+            title={t('chat.attachments.lightboxPrev')}
             onClick={() => onIndexChange((safeIndex - 1 + total) % total)}
           >
             <ChevronLeft size={24} />
@@ -73,8 +75,8 @@ export function AttachmentLightbox({ attachments, index, onClose, onIndexChange 
           <button
             type="button"
             className="lightbox-next"
-            aria-label="下一张"
-            title="下一张"
+            aria-label={t('chat.attachments.lightboxNext')}
+            title={t('chat.attachments.lightboxNext')}
             onClick={() => onIndexChange((safeIndex + 1) % total)}
           >
             <ChevronRight size={24} />

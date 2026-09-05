@@ -156,6 +156,7 @@ function AssistantContent({ content }: { content: string }) {
  * - 点击打开 Lightbox。
  */
 function MsgAttachmentThumb({ att, onOpen }: { att: AttachmentRef; onOpen: () => void }) {
+  const { t } = useTranslation()
   const [broken, setBroken] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)
   if (broken) {
@@ -169,14 +170,13 @@ function MsgAttachmentThumb({ att, onOpen }: { att: AttachmentRef; onOpen: () =>
             setReloadKey(k => k + 1)
           }}
         >
-          {/* T7 i18n:chat.attachments.reload「重试加载」 */}
-          重试加载
+          {t('chat.attachments.retryLoad')}
         </button>
       </span>
     )
   }
   return (
-    <button type="button" className="msg-attachment-thumb-btn" aria-label="查看图片" onClick={onOpen}>
+    <button type="button" className="msg-attachment-thumb-btn" aria-label={t('chat.attachments.lightboxOpen')} onClick={onOpen}>
       <img
         className="msg-attachment-thumb"
         src={reloadKey > 0 ? `${attachmentUrl(att.id)}?r=${reloadKey}` : attachmentUrl(att.id)}

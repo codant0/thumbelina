@@ -229,7 +229,7 @@ describe('ChatWindow', () => {
       pendingAttachments: [{ id: 'a1' }, { id: 'a2' }],
     }
     renderWindow({ conversationId: 'conv-1' })
-    expect(screen.getByTestId('pending-attach-badge')).toHaveTextContent('+ 2 张图片')
+    expect(screen.getByTestId('pending-attach-badge')).toHaveTextContent('+ 2 image(s)')
   })
 
   it('drops image files into the shared pipeline and sends them with the message', async () => {

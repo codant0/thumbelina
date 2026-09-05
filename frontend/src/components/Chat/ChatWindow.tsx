@@ -3,7 +3,7 @@ import type { ChatSocket } from '../../hooks/useWebSocket'
 import { subscribeSubagentEvents } from '../../hooks/useWebSocket'
 import { MessageList } from './MessageList'
 import { InputBox, type LocalAttachment } from './InputBox'
-import { addFilesToAttachments, attachmentHintText, type AttachmentHint } from './useAttachments'
+import { addFilesToAttachments, attachmentHintKey, type AttachmentHint } from './useAttachments'
 import { DropOverlay } from './DropOverlay'
 import { ConversationModelSelector } from './ConversationModelSelector'
 import { KnowledgeBaseSelector } from './KnowledgeBaseSelector'
@@ -411,8 +411,8 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
       {/* 全屏拖放覆盖层:仅当拖入 dataTransfer 含 Files 时出现;drop 与 📎 按钮共用添加管道。 */}
       <DropOverlay onFiles={handleDropFiles} />
       {dropHint && (
-        /* 拖放添加管道的临时行内提示(2 秒自动消失;T7 i18n + 样式) */
-        <div className="attachment-error-hint" role="status">{attachmentHintText(dropHint)}</div>
+        /* 拖放添加管道的临时行内提示(2 秒自动消失;样式见 chat.css) */
+        <div className="attachment-error-hint" role="status">{t(attachmentHintKey(dropHint))}</div>
       )}
       <InputBox
         onSend={handleSend}

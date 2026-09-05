@@ -288,7 +288,25 @@
     "regenerate": "重新生成",
     "scrollToBottom": "回到最新消息",
     "unnamed": "新对话",
-    "listEmpty": "暂无对话。"
+    "listEmpty": "暂无对话。",
+    "attachments": {
+      "addImage": "添加图片",
+      "dropHint": "松开以上传图片",
+      "removeAlt": "移除图片",
+      "uploading": "上传中…",
+      "uploadFailed": "上传失败，点击重试",
+      "retry": "重试",
+      "tooLarge": "图片超过 10MB",
+      "unsupportedType": "仅支持 PNG / JPEG / WebP / GIF",
+      "maxImages": "最多 4 张",
+      "imagesCount": "+ {n} 张图片",
+      "lightboxOpen": "查看图片",
+      "lightboxClose": "关闭",
+      "lightboxPrev": "上一张",
+      "lightboxNext": "下一张",
+      "retryLoad": "重试加载",
+      "blockingHint": "图片上传中或上传失败"
+    }
   },
   "coder": {
     "sidebarTitle": "码农会话",

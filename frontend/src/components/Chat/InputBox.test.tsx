@@ -292,7 +292,8 @@ describe('InputBox', () => {
 
   it('does not render the attach entry when the attachments feature is not wired', () => {
     render(<InputBox onSend={vi.fn()} />)
-    expect(screen.queryByRole('button', { name: '添加图片' })).not.toBeInTheDocument()
+    // 测试环境默认 locale 为 en(LocaleContext DEFAULT_LOCALE,测试未包 Provider)
+    expect(screen.queryByRole('button', { name: 'Add image' })).not.toBeInTheDocument()
     expect(screen.queryByTestId('attach-input')).not.toBeInTheDocument()
   })
 })
@@ -320,7 +321,7 @@ describe('InputBox attachments', () => {
     render(<InputBox onSend={vi.fn()} onAttachmentsChange={vi.fn()} />)
     const input = screen.getByTestId('attach-input') as HTMLInputElement
     const spy = vi.spyOn(input, 'click')
-    await user.click(screen.getByRole('button', { name: '添加图片' }))
+    await user.click(screen.getByRole('button', { name: 'Add image' }))
     expect(spy).toHaveBeenCalledTimes(1)
   })
 
@@ -346,7 +347,7 @@ describe('InputBox attachments', () => {
         onAttachmentsChange={onAttachmentsChange}
       />,
     )
-    fireEvent.click(screen.getByRole('button', { name: '移除 shot.png' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Remove image' }))
     expect(onAttachmentsChange).toHaveBeenCalledWith([])
   })
 
@@ -398,7 +399,7 @@ describe('InputBox attachments', () => {
     )
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
     expect(screen.getByTestId('attachments-strip').querySelector('[data-status="uploading"]')).toBeTruthy()
-    expect(screen.getByLabelText('上传中')).toBeInTheDocument()
+    expect(screen.getByLabelText('Uploading…')).toBeInTheDocument()
   })
 
   it('offers retry on a failed attachment and re-runs the upload', async () => {
@@ -409,7 +410,7 @@ describe('InputBox attachments', () => {
       expect(screen.getByTestId('attachments-strip').querySelector('[data-status="failed"]')).toBeTruthy()
     })
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
-    fireEvent.click(screen.getByRole('button', { name: '上传失败，重试' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Upload failed, click to retry' }))
     await waitFor(() => {
       expect(screen.getByTestId('attachments-strip').querySelector('[data-status="ready"]')).toBeTruthy()
     })
@@ -422,7 +423,7 @@ describe('InputBox attachments', () => {
     render(<InputBox onSend={vi.fn()} attachments={full} onAttachmentsChange={onAttachmentsChange} />)
     fireEvent.change(screen.getByTestId('attach-input'), { target: { files: [png('extra.png')] } })
     expect(screen.getByTestId('attachments-strip').children).toHaveLength(4)
-    expect(await screen.findByText('最多 4 张')).toBeInTheDocument()
+    expect(await screen.findByText('Up to 4 images')).toBeInTheDocument()
     expect(uploadAttachment).not.toHaveBeenCalled()
   })
 
@@ -431,7 +432,7 @@ describe('InputBox attachments', () => {
     fireEvent.change(screen.getByTestId('attach-input'), {
       target: { files: [new File(['x'], 'doc.pdf', { type: 'application/pdf' })] },
     })
-    expect(await screen.findByText('仅支持 PNG / JPEG / WebP / GIF')).toBeInTheDocument()
+    expect(await screen.findByText('Only PNG / JPEG / WebP / GIF supported')).toBeInTheDocument()
     await waitFor(() => {
       expect(screen.getByTestId('attachments-strip').querySelector('[data-status="failed"]')).toBeTruthy()
     })
@@ -443,7 +444,7 @@ describe('InputBox attachments', () => {
     Object.defineProperty(big, 'size', { value: 11 * 1024 * 1024 })
     render(<Harness />)
     fireEvent.change(screen.getByTestId('attach-input'), { target: { files: [big] } })
-    expect(await screen.findByText('图片超过 10MB')).toBeInTheDocument()
+    expect(await screen.findByText('Image exceeds 10MB')).toBeInTheDocument()
     expect(uploadAttachment).not.toHaveBeenCalled()
   })
 
@@ -474,7 +475,7 @@ describe('InputBox attachments', () => {
         onCancelPending={vi.fn()}
       />,
     )
-    expect(screen.getByTestId('pending-attach-badge')).toHaveTextContent('+ 2 张图片')
+    expect(screen.getByTestId('pending-attach-badge')).toHaveTextContent('+ 2 image(s)')
   })
 
   it('hides the pending-image badge when the queued message has no attachments', () => {
@@ -568,7 +569,7 @@ describe('InputBox preview URL revocation', () => {
     expect(previewUrl).toMatch(/^blob:/)
     revokeSpy.mockClear()
 
-    fireEvent.click(screen.getByRole('button', { name: '移除 gone.png' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Remove image' }))
     expect(revokeSpy).toHaveBeenCalledTimes(1)
     expect(revokeSpy).toHaveBeenCalledWith(previewUrl)
   })

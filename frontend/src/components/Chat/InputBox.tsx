@@ -4,7 +4,7 @@ import { useTranslation } from '../../i18n'
 import { canSendMessage } from '../../hooks/useWebSocket'
 import type { SendAttachmentInput } from '../../types/chat'
 import type { UploadedAttachment } from '../../api/attachments'
-import { addFilesToAttachments, attachmentHintText, removeLocalAttachment, retryLocalAttachment } from './useAttachments'
+import { addFilesToAttachments, attachmentHintKey, removeLocalAttachment, retryLocalAttachment } from './useAttachments'
 
 /**
  * 本地待发附件状态(设计 §5.1):受控数组由 ChatWindow 持有,
@@ -59,13 +59,14 @@ function AttachmentThumb({ att, onRemove, onRetry }: {
   onRemove: () => void
   onRetry: () => void
 }) {
+  const { t } = useTranslation()
   const name = truncateName(att.file.name)
   const dims = att.uploaded?.width != null && att.uploaded?.height != null
     ? `, ${att.uploaded.width}×${att.uploaded.height}`
     : ''
   const failed = att.status === 'failed'
   return (
-    // failed 态整卡可点重试:重试按钮铺满卡片(inset:0,由 T7 样式实现)
+    // failed 态整卡可点重试:重试按钮铺满卡片(inset:0,样式见 chat.css)
     <div
       className={`attachment-thumb${failed ? ' attachment-thumb--failed' : ''}`}
       data-status={att.status}
@@ -74,8 +75,8 @@ function AttachmentThumb({ att, onRemove, onRetry }: {
         {att.previewUrl ? <img src={att.previewUrl} alt="" /> : null}
       </span>
       {att.status === 'uploading' && (
-        <span className="attachment-thumb__progress" aria-label="上传中">
-          {/* 进度环:SVG stroke-dashoffset 动画由 T7 实现(stroke 用 var(--accent)) */}
+        <span className="attachment-thumb__progress" aria-label={t('chat.attachments.uploading')}>
+          {/* 进度环:SVG stroke-dashoffset 动画由 chat.css 实现(stroke 用 var(--accent)) */}
           <svg viewBox="0 0 24 24" width={16} height={16} aria-hidden="true">
             <circle className="attachment-thumb__progress-track" cx="12" cy="12" r="9" fill="none" strokeWidth="3" />
             <circle
@@ -90,18 +91,18 @@ function AttachmentThumb({ att, onRemove, onRetry }: {
         <button
           type="button"
           className="attachment-thumb__retry"
-          aria-label="上传失败，重试"
-          title="上传失败，重试"
+          aria-label={t('chat.attachments.uploadFailed')}
+          title={t('chat.attachments.uploadFailed')}
           onClick={onRetry}
         >
-          重试
+          {t('chat.attachments.retry')}
         </button>
       )}
       <button
         type="button"
         className="attachment-thumb__remove"
-        aria-label={`移除 ${name}`}
-        title={`移除 ${name}`}
+        aria-label={t('chat.attachments.removeAlt')}
+        title={t('chat.attachments.removeAlt')}
         onClick={onRemove}
       >
         <X size={12} />
@@ -128,7 +129,7 @@ export function InputBox({
   const [text, setText] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  // 添加管道的行内提示(2 秒自动消失;T7 美化)
+  // 添加管道的行内提示(存 i18n 键,渲染时经 t() 翻译;2 秒自动消失)
   const [hint, setHint] = useState<string | null>(null)
   // 添加/重试管道在 async 续段里要读最新列表 —— 用 ref 镜像受控数组,避免闭包过期。
   const attachmentsRef = useRef<LocalAttachment[]>(attachments ?? EMPTY_ATTACHMENTS)
@@ -208,7 +209,7 @@ export function InputBox({
       getCurrent: () => attachmentsRef.current,
       update: pushAttachmentUpdate,
     }).then(result => {
-      if (result) setHint(attachmentHintText(result))
+      if (result) setHint(attachmentHintKey(result))
     })
   }
 
@@ -311,9 +312,9 @@ export function InputBox({
           </div>
           <div className="pending-float-text">{pendingMessage}</div>
           {pendingAttachmentCount ? (
-            /* 待发消息携带的图片数徽标(类名占位,T7 出样式;i18n 键 T7 出) */
+            /* 待发消息携带的图片数徽标(样式见 chat.css .pending-float-attach-badge) */
             <span className="pending-float-attach-badge" data-testid="pending-attach-badge">
-              {`+ ${pendingAttachmentCount} 张图片`}
+              {t('chat.attachments.imagesCount', { n: pendingAttachmentCount })}
             </span>
           ) : null}
           <div className="pending-float-actions">
@@ -340,8 +341,8 @@ export function InputBox({
       )}
       {toolbar && <div className="input-toolbar">{toolbar}</div>}
       {hint && (
-        /* 附件添加管道的临时行内提示(2 秒自动消失;T7 i18n + 样式) */
-        <div className="attachment-error-hint" role="status">{hint}</div>
+        /* 附件添加管道的临时行内提示(2 秒自动消失;样式见 chat.css) */
+        <div className="attachment-error-hint" role="status">{t(hint)}</div>
       )}
       {list.length > 0 && (
         <div className="attachments-strip" data-testid="attachments-strip">
@@ -361,8 +362,8 @@ export function InputBox({
             <button
               type="button"
               className="attach-btn"
-              aria-label="添加图片"
-              title="添加图片"
+              aria-label={t('chat.attachments.addImage')}
+              title={t('chat.attachments.addImage')}
               disabled={disabled}
               onClick={() => fileInputRef.current?.click()}
             >
@@ -411,7 +412,7 @@ export function InputBox({
             pendingMessage
               ? t('chat.pendingBlockTitle')
               : hasBlockingAttachments
-                ? '图片上传中或上传失败' // T7 i18n:chat.attachments.blockingHint
+                ? t('chat.attachments.blockingHint')
                 : undefined
           }
         >
