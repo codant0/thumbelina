@@ -30,6 +30,20 @@ router = APIRouter(tags=["websocket"])
 # WebSocket message size limit (1MB)
 MAX_MESSAGE_SIZE = 1024 * 1024
 
+
+def _tool_event_frame(event: dict[str, Any]) -> dict[str, Any]:
+    """把 agent.stream 的 tool_start/tool_end 事件映射为 WS 下行帧。
+
+    下行帧形如 ``{"tool_event": {"phase": "start"|"end", ...字段原样透传}}``:
+    ``type`` 被替换为 ``phase``,其余字段(call_id/name/args/args_truncated/
+    duration_ms/is_error/result_preview/result_truncated)保持不变,
+    ``conversation_id`` 由调用方补充。
+    """
+    payload = {k: v for k, v in event.items() if k != "type"}
+    payload["phase"] = "start" if event["type"] == "tool_start" else "end"
+    return {"tool_event": payload}
+
+
 # Connected chat WebSocket clients (used for cross-channel message broadcast)
 _chat_ws_clients: set[WebSocket] = set()
 
@@ -156,11 +170,18 @@ async def _run_generation(
     只应被 ``asyncio.create_task`` 包裹调用；函数内部自己获取
     ``per_conversation_lock(cid)``，保持跨入口的会话级串行化。
 
+    两种模式都消费 ``agent.stream()``：流式分支把 content/reasoning 事件
+    逐帧转发，工具事件（tool_start/tool_end）映射为 ``tool_event`` 帧
+    立即下发（聊天流内实时工具卡，工具可见性特性）；非流式分支只下发
+    ``tool_event`` 帧，content 累积后仍按现有 ``{"response": ...}`` 单帧
+    发送 —— ``streaming_enabled`` 仅决定 token 是否逐字到达，工具卡行为
+    一致。``done`` 帧的 ``streaming_mode`` 字段语义不变。
+
     ``task.cancel()`` 取消时：流式分支 ``async for agent.stream(...)`` 会
     抛 ``CancelledError`` 且被原样向上传播（不吞），因此取消生效。部分
     响应已通过前面的 ``yield`` 发给前端，但 assistant 消息不会落库
     （``stream`` 只在完整结束时才 ``_persist_message``）—— 这是可接受的：
-    partial 不落库。非流式分支（``agent.run``）同样被 cancel 中断。
+    partial 不落库。非流式分支同样被 cancel 中断。
 
     ``active_conv_ref`` 是 ``websocket_chat`` 持有的可变容器,被
     subagent listener 用来读取"本轮正在生成的会话 ID",以决定把事件推给
@@ -212,18 +233,22 @@ async def _run_generation(
                 async for event in agent.stream(
                     message, context_window_tokens=window_tokens, attachments=attachments
                 ):
-                    text = event["text"]
-                    if event["type"] == "reasoning":
+                    etype = event["type"]
+                    if etype in ("tool_start", "tool_end"):
+                        frame = _tool_event_frame(event)
+                        frame["conversation_id"] = cid
+                        await websocket.send_json(frame)
+                    elif etype == "reasoning":
                         await websocket.send_json(
                             {
-                                "chunk": text,
+                                "chunk": event["text"],
                                 "chunk_type": "reasoning",
                                 "conversation_id": cid,
                             }
                         )
                     else:
-                        full_response += text
-                        await websocket.send_json({"chunk": text, "conversation_id": cid})
+                        full_response += event["text"]
+                        await websocket.send_json({"chunk": event["text"], "conversation_id": cid})
             except asyncio.CancelledError:
                 # 取消必须原样传播：被 stop 打断时任务被中断，部分响应
                 # 已发出但不会落库。不要让普通的异常处理吞掉它。
@@ -239,9 +264,29 @@ async def _run_generation(
                 )
                 return
         else:
-            full_response = await agent.run(
-                message, context_window_tokens=window_tokens, attachments=attachments
-            )
+            # 非流式分支统一消费 stream()（工具可见性特性）：工具事件照发,
+            # reasoning 事件不下发但 stream() 会照常持久化;content 累积后
+            # 仍按单个 ``{"response": ...}`` 帧发送,done 帧语义不变。
+            full_response = ""
+            try:
+                async for event in agent.stream(
+                    message, context_window_tokens=window_tokens, attachments=attachments
+                ):
+                    etype = event["type"]
+                    if etype in ("tool_start", "tool_end"):
+                        frame = _tool_event_frame(event)
+                        frame["conversation_id"] = cid
+                        await websocket.send_json(frame)
+                    elif etype == "content":
+                        full_response += event["text"]
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("Generation failed for conversation %s: %s", cid, exc)
+                await websocket.send_json(
+                    {"error": f"Generation failed: {exc}", "conversation_id": cid}
+                )
+                return
             await websocket.send_json({"response": full_response, "conversation_id": cid})
 
         await websocket.send_json(
