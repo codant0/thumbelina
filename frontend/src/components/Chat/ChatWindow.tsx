@@ -147,7 +147,14 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
   const handleDropFiles = useCallback((files: File[]) => {
     void addFilesToAttachments(files, {
       getCurrent: () => attachmentsRef.current,
-      onChange: setAttachments,
+      // 函数式变更:setState updater 内同步刷新镜像 ref,管道下一个 async 续段
+      // 的 getCurrent() 才能读到最新列表(多张上传的补丁互不覆盖,不会卡死发送)。
+      update: updater =>
+        setAttachments(prev => {
+          const next = updater(prev)
+          attachmentsRef.current = next
+          return next
+        }),
     }).then(hint => {
       if (hint) setDropHint(hint)
     })

@@ -60,12 +60,21 @@ function patchItem(items: LocalAttachment[], localId: string, patch: Partial<Loc
   return changed ? next : items
 }
 
-/** 管道上下文:状态由调用方持有(ChatWindow/InputBox),管道只通过 onChange 同步。 */
+/**
+ * 管道上下文:状态由调用方持有(ChatWindow/InputBox),管道只通过 update 做函数式变更。
+ * 所有变更必须走 update((prev) => next)而非「读快照 → 改 → 整组写回」:
+ * 值式写回在 React 批处理下会拿过期快照覆盖并发修改(多张上传时后一张的补丁
+ * 会覆盖前一张刚落地的 ready,第 1 张永久卡在 uploading)。
+ */
 export interface AttachmentPipelineCtx {
-  /** 读取最新列表(async 续段里必须重读,避免闭包过期覆盖并发修改)。 */
+  /** 读取最新列表(仅用于只读判断:上限校验、重试查找;变更必须走 update)。 */
   getCurrent: () => LocalAttachment[]
-  /** 同步最新列表。 */
-  onChange: (next: LocalAttachment[]) => void
+  /**
+   * 函数式变更:调用方经 setState(prev => ...) 应用 updater,并在 updater 内
+   * 同步刷新镜像 ref,保证随后的 getCurrent() 读到最新列表。
+   * patchItem 对已移除的 localId 原样返回(prev 不变),被删除的项不会复活。
+   */
+  update: (updater: (prev: LocalAttachment[]) => LocalAttachment[]) => void
 }
 
 /** 单张顺序上传:压缩 → 上传 → ready / failed(设计 §5.1.2:顺序执行,无并发队列)。 */
@@ -73,9 +82,9 @@ async function uploadOne(item: LocalAttachment, ctx: AttachmentPipelineCtx): Pro
   try {
     const scaled = await downscaleImage(item.file)
     const uploaded = await uploadAttachment(scaled)
-    ctx.onChange(patchItem(ctx.getCurrent(), item.localId, { status: 'ready', uploaded }))
+    ctx.update(prev => patchItem(prev, item.localId, { status: 'ready', uploaded }))
   } catch {
-    ctx.onChange(patchItem(ctx.getCurrent(), item.localId, { status: 'failed' }))
+    ctx.update(prev => patchItem(prev, item.localId, { status: 'failed' }))
   }
 }
 
@@ -84,13 +93,14 @@ async function uploadOne(item: LocalAttachment, ctx: AttachmentPipelineCtx): Pro
  * 1. 现有列表 + 待加数 > 4 → 返回 maxImages 提示,不上传;
  * 2. 逐张校验:非 image/* 或 >10MB → 该张标记 failed(不发请求),收集提示;
  * 3. 通过校验的按顺序 downscaleImage → uploadAttachment → ready,失败转 failed(可重试);
- * 4. 任何状态变化都通过 ctx.onChange 同步最新数组。
+ * 4. 任何状态变化都通过 ctx.update 函数式落地(基于最新 prev,批内多张互不覆盖)。
  * 返回需要展示的行内提示(无则 null);展示与自动消失由调用方负责。
  */
 export async function addFilesToAttachments(
   files: File[],
   ctx: AttachmentPipelineCtx,
 ): Promise<AttachmentHint | null> {
+  // 上限校验是只读快照(极端并发添加下可能略宽;变更本身走函数式,不会因快照过期丢项)
   const current = ctx.getCurrent()
   if (current.length + files.length > MAX_ATTACHMENTS) return 'maxImages'
 
@@ -109,8 +119,9 @@ export async function addFilesToAttachments(
     }
   })
 
-  // 先整批插入(strip 立即出现缩略图),再按顺序上传
-  ctx.onChange([...current, ...added])
+  // 函数式整批插入(strip 立即出现缩略图):基于最新 prev 追加,
+  // 与批内多张的 ready/failed 补丁及并发的其他添加互不覆盖。
+  ctx.update(prev => [...prev, ...added])
   for (const item of added) {
     if (item.status !== 'uploading') continue
     await uploadOne(item, ctx)
@@ -126,7 +137,7 @@ export async function retryLocalAttachment(localId: string, ctx: AttachmentPipel
   const item = current.find(a => a.localId === localId)
   if (!item || item.status !== 'failed') return
   if (isInvalid(item.file)) return
-  ctx.onChange(patchItem(current, localId, { status: 'uploading' }))
+  ctx.update(prev => patchItem(prev, localId, { status: 'uploading' }))
   await uploadOne(item, ctx)
 }
 

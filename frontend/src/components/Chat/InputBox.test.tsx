@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { useState } from 'react'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { InputBox, type LocalAttachment } from './InputBox'
-import { uploadAttachment } from '../../api/attachments'
+import { uploadAttachment, type UploadedAttachment } from '../../api/attachments'
 import type { SendAttachmentInput } from '../../types/chat'
 
 vi.mock('../../api/attachments', () => ({
@@ -487,6 +487,54 @@ describe('InputBox attachments', () => {
       />,
     )
     expect(screen.queryByTestId('pending-attach-badge')).not.toBeInTheDocument()
+  })
+
+  it('keeps every batch-added attachment ready when uploads resolve individually (race regression)', async () => {
+    // 多文件同批添加的竞态回归:管道曾用「读快照 → 整组写回」打补丁,多张上传时
+    // 后一张会在 React 提交前一张 ready 之前读到过期列表,把前一张覆盖回
+    // uploading(终态 [uploading, ready],第 1 张永久卡住并阻塞发送)。
+    // 这里用受控 deferred 让两张的上传在同一个微任务窗口内先后 resolve
+    // (React 不提交任何 ready 补丁),锁定旧实现的竞态窗口;修复后的管道走
+    // 函数式更新,基于最新 prev 链式落地,任何交错下都全部 ready。
+    const resolveUpload: Array<(v: UploadedAttachment) => void> = []
+    vi.mocked(uploadAttachment)
+      .mockImplementationOnce(
+        () => new Promise<UploadedAttachment>(resolve => { resolveUpload.push(resolve) }),
+      )
+      .mockImplementationOnce(
+        () => new Promise<UploadedAttachment>(resolve => { resolveUpload.push(resolve) }),
+      )
+    const onSend = vi.fn()
+    const user = userEvent.setup()
+    render(<Harness onSend={onSend} />)
+
+    fireEvent.change(screen.getByTestId('attach-input'), {
+      target: { files: [png('first.png'), png('second.png')] },
+    })
+    expect(screen.getByTestId('attachments-strip').children).toHaveLength(2)
+    // 第 1 张上传已发起(此刻仅整批插入提交,无任何 ready 补丁)
+    await waitFor(() => expect(uploadAttachment).toHaveBeenCalledTimes(1))
+
+    // 同一 act 域内:第 1 张 resolve → ready 补丁入队、第 2 张上传发起(仅冲
+    // 微任务)→ 第 2 张也 resolve。React 在 act 结束前不提交任何 ready。
+    await act(async () => {
+      resolveUpload[0]({ ...uploaded, id: 'att-first' })
+      for (let i = 0; i < 20; i++) await Promise.resolve()
+      expect(uploadAttachment).toHaveBeenCalledTimes(2)
+      resolveUpload[1]({ ...uploaded, id: 'att-second' })
+      for (let i = 0; i < 5; i++) await Promise.resolve()
+    })
+
+    // 两张都必须 ready:任何一张停在 uploading 都说明补丁被过期快照覆盖
+    await waitFor(() => {
+      const thumbs = [...screen.getByTestId('attachments-strip').children]
+      expect(thumbs.map(t => t.getAttribute('data-status'))).toEqual(['ready', 'ready'])
+    })
+
+    // 发送不再被阻塞,且携带全部就绪引用(添加顺序)
+    await user.type(screen.getByPlaceholderText(/Type a message/i), '看图')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    expect(onSend).toHaveBeenCalledWith('看图', [{ id: 'att-first' }, { id: 'att-second' }])
   })
 })
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { ChatWindow } from './ChatWindow'
 import type { ChatSocket } from '../../hooks/useWebSocket'
 
@@ -259,5 +259,49 @@ describe('ChatWindow', () => {
     renderWindow({ conversationId: 'conv-1' })
     fireEvent.dragEnter(document, { dataTransfer: { types: ['text/plain'], files: [] } })
     expect(screen.queryByTestId('drop-overlay')).not.toBeInTheDocument()
+  })
+
+  it('keeps every dropped attachment ready when uploads resolve individually (race regression)', async () => {
+    // 拖放多文件的竞态回归(与 InputBox 📎 路径共用管道,覆盖 ChatWindow 侧的
+    // 函数式 ctx):后一张的上传补丁不得用过期快照覆盖前一张刚落地的 ready。
+    const resolveUpload: Array<(v: unknown) => void> = []
+    mockUploadAttachment
+      .mockImplementationOnce(() => new Promise(resolve => { resolveUpload.push(resolve) }))
+      .mockImplementationOnce(() => new Promise(resolve => { resolveUpload.push(resolve) }))
+    renderWindow({ conversationId: 'conv-1' })
+    fireEvent.dragEnter(document, { dataTransfer: { types: ['Files'], files: [] } })
+    fireEvent.drop(document, {
+      dataTransfer: {
+        types: ['Files'],
+        files: [
+          new File(['x'], 'first.png', { type: 'image/png' }),
+          new File(['x'], 'second.png', { type: 'image/png' }),
+        ],
+      },
+    })
+    await waitFor(() => expect(mockUploadAttachment).toHaveBeenCalledTimes(1))
+
+    // 同一 act 域内先后 resolve 两张的上传(仅冲微任务,React 不提交任何 ready)
+    await act(async () => {
+      resolveUpload[0]({ id: 'att-drop-a', mime: 'image/png', size: 1, width: 10, height: 10, sha256: null })
+      for (let i = 0; i < 20; i++) await Promise.resolve()
+      expect(mockUploadAttachment).toHaveBeenCalledTimes(2)
+      resolveUpload[1]({ id: 'att-drop-b', mime: 'image/png', size: 1, width: 10, height: 10, sha256: null })
+      for (let i = 0; i < 5; i++) await Promise.resolve()
+    })
+
+    await waitFor(() => {
+      const thumbs = [...screen.getByTestId('attachments-strip').children]
+      expect(thumbs.map(t => t.getAttribute('data-status'))).toEqual(['ready', 'ready'])
+    })
+
+    fireEvent.change(screen.getByPlaceholderText(/Type a message/i), { target: { value: '看图' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await waitFor(() => {
+      expect(baseState.sendMessage).toHaveBeenCalledWith('看图', 'conv-1', [
+        { id: 'att-drop-a' },
+        { id: 'att-drop-b' },
+      ])
+    })
   })
 })

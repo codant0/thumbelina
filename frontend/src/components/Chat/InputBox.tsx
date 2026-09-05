@@ -40,8 +40,8 @@ interface InputBoxProps {
   onCancelPending?: () => void
   /** 待发附件(受控,由 ChatWindow 持有);不传 = 不启用附件功能。 */
   attachments?: LocalAttachment[]
-  /** 附件数组任何变化的同步出口(添加/删除/清空)。 */
-  onAttachmentsChange?: (next: LocalAttachment[]) => void
+  /** 附件数组任何变化的同步出口(添加/删除/清空);也接受函数式更新(添加管道并发安全)。 */
+  onAttachmentsChange?: (next: LocalAttachment[] | ((prev: LocalAttachment[]) => LocalAttachment[])) => void
   /** 当前待发消息里排队的图片数(悬浮条徽标展示)。 */
   pendingAttachmentCount?: number
 }
@@ -190,12 +190,23 @@ export function InputBox({
     }
   }
 
+  // 添加/重试管道的函数式变更出口:在 setState updater 内同步刷新镜像 ref,
+  // 管道下一个 async 续段的 getCurrent() 才能读到最新列表(多张上传的补丁
+  // 基于最新 prev 计算,互不覆盖——值式写回会被批处理下的过期快照覆盖)。
+  const pushAttachmentUpdate = (updater: (prev: LocalAttachment[]) => LocalAttachment[]) => {
+    onAttachmentsChange?.(prev => {
+      const next = updater(prev)
+      attachmentsRef.current = next
+      return next
+    })
+  }
+
   // 共享添加管道(设计 §5.1.2):与拖放 drop 走同一条 useAttachments.addFilesToAttachments。
   const handleAddFiles = (files: File[]) => {
     if (!onAttachmentsChange || files.length === 0) return
     void addFilesToAttachments(files, {
       getCurrent: () => attachmentsRef.current,
-      onChange: onAttachmentsChange,
+      update: pushAttachmentUpdate,
     }).then(result => {
       if (result) setHint(attachmentHintText(result))
     })
@@ -221,7 +232,7 @@ export function InputBox({
     if (!onAttachmentsChange) return
     void retryLocalAttachment(localId, {
       getCurrent: () => attachmentsRef.current,
-      onChange: onAttachmentsChange,
+      update: pushAttachmentUpdate,
     })
   }
 
