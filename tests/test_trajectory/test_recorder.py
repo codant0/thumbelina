@@ -160,3 +160,24 @@ def test_normalize_llm_usage_empty_and_garbage():
     assert normalize_llm_usage(None) == {}
     assert normalize_llm_usage({}) == {}
     assert normalize_llm_usage({"token_usage": "nope"}) == {}
+
+
+async def test_record_tool_result_duration_ms_optional():
+    """record_tool_result 传入 duration_ms 时 payload 携带该键(工具可见性特性)。"""
+    manager = FakeManager()
+    recorder = TrajectoryRecorder(manager)
+    recorder.begin_turn("conv-1")
+    await recorder.record_tool_result("c1", "fine", is_error=False, duration_ms=1234)
+    payload = json.loads(manager.events[0]["payload"])
+    assert payload["duration_ms"] == 1234
+    assert payload["is_error"] is False
+
+
+async def test_record_tool_result_omits_duration_when_none():
+    """未传 duration_ms 时 payload 不含该键,保持向后兼容。"""
+    manager = FakeManager()
+    recorder = TrajectoryRecorder(manager)
+    recorder.begin_turn("conv-1")
+    await recorder.record_tool_result("c2", "bad", is_error=True)
+    payload = json.loads(manager.events[0]["payload"])
+    assert "duration_ms" not in payload

@@ -96,10 +96,17 @@ class TrajectoryRecorder:
     async def record_tool_call(self, tool: str, args: object, call_id: str) -> None:
         await self._record("tool_call", {"tool": tool, "args": args, "call_id": call_id})
 
-    async def record_tool_result(self, call_id: str, content: str, is_error: bool) -> None:
-        await self._record(
-            "tool_result", {"call_id": call_id, "content": content, "is_error": is_error}
-        )
+    async def record_tool_result(
+        self, call_id: str, content: str, is_error: bool, duration_ms: int | None = None
+    ) -> None:
+        """记录工具结果;``duration_ms`` 为可选执行耗时(工具可见性特性)。
+
+        缺失(``None``)时省略该键,历史 payload 形状保持不变。
+        """
+        payload: dict[str, Any] = {"call_id": call_id, "content": content, "is_error": is_error}
+        if duration_ms is not None:
+            payload["duration_ms"] = duration_ms
+        await self._record("tool_result", payload)
 
     async def record_assistant(self, content: str, reasoning: str | None = None) -> None:
         await self._record("assistant", {"content": content, "reasoning": reasoning})

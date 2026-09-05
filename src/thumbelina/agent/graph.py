@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from collections.abc import AsyncGenerator, Sequence
@@ -21,6 +22,7 @@ from langchain_core.messages import (
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.config import get_stream_writer
 from langgraph.errors import GraphRecursionError
 from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
@@ -222,6 +224,25 @@ def _attachment_summary(attachments: list[dict[str, object]] | None) -> str | No
         if isinstance(alt, str) and alt.strip():
             summary += f", alt: {alt[:50]}"
     return summary
+
+
+# 实时工具事件的预览截断上限(工具可见性特性,设计 §3):结果预览 2KB、
+# 参数序列化 8KB;超出部分截断并置 *_truncated 标记,完整内容仍随
+# trajectory 落库(Trajectory 页可查)。
+TOOL_RESULT_PREVIEW_LIMIT = 2048
+TOOL_ARGS_PREVIEW_LIMIT = 8192
+
+
+def _truncate_text(text: str, limit: int) -> tuple[str, bool]:
+    """按 UTF-8 字节数把 *text* 截断到 *limit*,返回 ``(截断文本, 是否截断)``。
+
+    在字节边界截断时用 ``errors="ignore"`` 丢弃不完整的多字节序列尾部,
+    保证返回值始终是合法字符串。未超限时原样返回且不置截断标记。
+    """
+    encoded = text.encode("utf-8")
+    if len(encoded) <= limit:
+        return text, False
+    return encoded[:limit].decode("utf-8", errors="ignore"), True
 
 
 class ThumbelinaAgent:
@@ -749,7 +770,18 @@ class ThumbelinaAgent:
         return await call_model(state, model, timeout=self.request_timeout)
 
     async def _tool_node_node(self, state: AgentState) -> dict[str, list[Any]]:
-        """Node wrapper for executing tools."""
+        """Node wrapper for executing tools.
+
+        除照旧写 trajectory ``tool_call``/``tool_result`` 外,还通过
+        LangGraph custom stream writer(``get_stream_writer()``)发射
+        ``tool_start``/``tool_end`` 自定义事件供 ``stream()`` 交错转发
+        (工具可见性特性)。图外/无 custom 消费者时 writer 判空降级,
+        ``run()`` 等路径零影响。
+
+        trajectory ``tool_result`` 的 ``is_error`` 与 ``duration_ms`` 来自
+        ``tool_node`` 控制流回调(真实执行状态),不再用
+        ``content.startswith("Error")`` 字符串反推(review P0-13)。
+        """
         calls: list[dict] = []
         last_message = state["messages"][-1]
         if isinstance(last_message, AIMessage):
@@ -758,7 +790,69 @@ class ThumbelinaAgent:
             await self.trajectory_recorder.record_tool_call(
                 tool_call.get("name", ""), tool_call.get("args", {}), tool_call.get("id", "")
             )
-        result = await tool_node(state, self.tools)
+        try:
+            writer = get_stream_writer()
+        except Exception:
+            writer = None
+
+        statuses: dict[str, dict[str, Any]] = {}
+
+        async def on_tool_event(info: dict[str, Any]) -> None:
+            # 逐工具实时触发(不等 gather 整批完成):先登记真实状态供
+            # trajectory 使用,再立即发射 tool_end 事件。
+            call_id = info.get("call_id", "")
+            statuses[call_id] = {
+                "is_error": bool(info.get("is_error")),
+                "duration_ms": int(info.get("duration_ms", 0)),
+            }
+            if writer is None:
+                return
+            preview, truncated = _truncate_text(
+                str(info.get("content", "")), TOOL_RESULT_PREVIEW_LIMIT
+            )
+            writer(
+                {
+                    "tool_end": {
+                        "call_id": call_id,
+                        "duration_ms": statuses[call_id]["duration_ms"],
+                        "is_error": statuses[call_id]["is_error"],
+                        "result_preview": preview,
+                        "result_truncated": truncated,
+                    }
+                }
+            )
+
+        # 执行前对每个 tool_call 发射 tool_start;参数序列化超过上限时
+        # 截断为 ``{"_truncated_json": ...}``(完整参数仍随 trajectory 落库)。
+        for tool_call in calls:
+            if writer is None:
+                continue
+            args = tool_call.get("args", {}) or {}
+            args_json = json.dumps(args, ensure_ascii=False, default=str)
+            if len(args_json.encode("utf-8")) > TOOL_ARGS_PREVIEW_LIMIT:
+                args_preview, _ = _truncate_text(args_json, TOOL_ARGS_PREVIEW_LIMIT)
+                writer(
+                    {
+                        "tool_start": {
+                            "call_id": tool_call.get("id", ""),
+                            "name": tool_call.get("name", ""),
+                            "args": {"_truncated_json": args_preview},
+                            "args_truncated": True,
+                        }
+                    }
+                )
+            else:
+                writer(
+                    {
+                        "tool_start": {
+                            "call_id": tool_call.get("id", ""),
+                            "name": tool_call.get("name", ""),
+                            "args": args,
+                            "args_truncated": False,
+                        }
+                    }
+                )
+        result = await tool_node(state, self.tools, on_tool_event=on_tool_event)
         tool_messages = result.get("messages", [])
         # ``zip`` 会在两侧长度不一致时静默截断,这里显式记录告警以避免
         # 后续 ``tool_node`` 行为变更后丢失轨迹记录而无人察觉。
@@ -771,8 +865,17 @@ class ThumbelinaAgent:
             )
         for tool_call, tool_message in zip(calls, tool_messages):
             content = str(getattr(tool_message, "content", ""))
+            status = statuses.get(tool_call.get("id", ""))
+            if status is None:
+                logger.warning(
+                    "Trajectory: no live status recorded for tool call %r",
+                    tool_call.get("id", ""),
+                )
             await self.trajectory_recorder.record_tool_result(
-                tool_call.get("id", ""), content, is_error=content.startswith("Error")
+                tool_call.get("id", ""),
+                content,
+                is_error=bool(status["is_error"]) if status else False,
+                duration_ms=status["duration_ms"] if status else None,
             )
         if len(calls) > len(tool_messages):
             for orphan in calls[len(tool_messages) :]:
@@ -1217,12 +1320,23 @@ class ThumbelinaAgent:
         user_input: str,
         context_window_tokens: int | None = None,
         attachments: list[dict[str, object]] | None = None,
-    ) -> AsyncGenerator[dict[str, str], None]:
+    ) -> AsyncGenerator[dict[str, Any], None]:
         """Stream the agent's response as typed events.
 
-        Yields dicts of the form ``{"type": "content" | "reasoning",
-        "text": str}`` so callers can render the model's thinking process
-        separately from the visible answer.
+        Yields dicts of one of four forms so callers can render the model's
+        thinking process, the visible answer, and real-time tool call cards::
+
+            {"type": "content",   "text": str}
+            {"type": "reasoning", "text": str}
+            {"type": "tool_start", "call_id": str, "name": str,
+             "args": dict | {"_truncated_json": str}, "args_truncated": bool}
+            {"type": "tool_end",   "call_id": str, "duration_ms": int,
+             "is_error": bool, "result_preview": str, "result_truncated": bool}
+
+        工具事件由 ``_tool_node_node`` 经 LangGraph custom stream writer 发射
+        (``stream_mode=["messages", "custom"]``),不进批量缓冲、立即透传,
+        与 token 流在同一生成器内天然交错;``call_id`` 为 AIMessage 自带的
+        ``tool_calls[].id``,start/end 由它配对。
 
         ``context_window_tokens`` 是可选的按会话上下文窗口（单位为
         token），由调用方解析；它被放入运行配置中供压缩节点使用。
@@ -1258,13 +1372,20 @@ class ThumbelinaAgent:
         last_chunk_metadata: dict | None = None
         chunk_meta_count = 0
 
-        astream_iter = self.graph.astream(initial_state, stream_mode="messages", config=config)
+        astream_iter = self.graph.astream(
+            initial_state, stream_mode=["messages", "custom"], config=config
+        )
         try:
-            async for event in astream_iter:
-                # event is a tuple: (message_chunk, metadata)
-                if not isinstance(event, tuple) or len(event) < 1:
+            async for stream_mode, event in astream_iter:
+                # custom 模式:_tool_node_node 发射的 tool_start/tool_end 事件,
+                # 不进批量缓冲、立即透传(工具可见性特性)。
+                if stream_mode == "custom":
+                    if isinstance(event, dict) and "tool_start" in event:
+                        yield {"type": "tool_start", **event["tool_start"]}
+                    elif isinstance(event, dict) and "tool_end" in event:
+                        yield {"type": "tool_end", **event["tool_end"]}
                     continue
-
+                # messages 模式:event 为 (message_chunk, metadata) 元组。
                 message_chunk = event[0]
                 metadata = event[1] if len(event) > 1 and isinstance(event[1], dict) else {}
                 # 来自压缩节点的状态维护（删除、被剥离的 assistant 重新
