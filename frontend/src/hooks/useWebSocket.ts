@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Message, SubagentEventPayload } from '../types/chat'
+import type { AttachmentRef, Message, SendAttachmentInput, SubagentEventPayload } from '../types/chat'
 
 interface WsIncoming {
   chunk?: string
@@ -77,10 +77,40 @@ const charsPerTick = (revealed: number) => (revealed < 80 ? 5 : revealed < 240 ?
 // when the backend LLM call hangs or the WS frame is silently dropped.
 const REPLY_TIMEOUT_MS = 90_000
 
-/** 流式进行中排队的待发消息(单条/会话)。held:上次回复异常结束(出错/超时),暂停自动发送。 */
+/** 流式进行中排队的待发消息(单条/会话)。held:上次回复异常结束(出错/超时),暂停自动发送。
+ *  attachments:随文字一起排队的附件引用(协议 §4.1),自动发送/「立即执行」时原样带出。 */
 interface PendingEntry {
   text: string
+  attachments?: SendAttachmentInput[]
   held?: boolean
+}
+
+/** WS 上行聊天帧(协议 §4.1):message 与 attachments 至少一项非空,后端校验。 */
+interface ChatSendPayload {
+  message: string
+  conversation_id?: string
+  attachments?: { id: string; alt?: string }[]
+}
+
+/** 发送按钮启用条件(协议 §4.1):有文字或带附件即可发送。纯函数,InputBox 等组件共用。 */
+export function canSendMessage(text: string, attachmentCount: number): boolean {
+  return text.trim() !== '' || attachmentCount > 0
+}
+
+/** 历史回放(协议 §4.2):后端 attachments 为 ``[{id, mime, width?, height?, alt?}]`` 数组。
+ *  容错解析——非数组整体忽略,元素缺 id 的丢弃;空结果视为无附件(老消息该字段为 null)。 */
+function parseHistoryAttachments(raw: unknown): AttachmentRef[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const list: AttachmentRef[] = []
+  for (const item of raw) {
+    if (
+      typeof item === 'object' && item !== null &&
+      typeof (item as { id?: unknown }).id === 'string'
+    ) {
+      list.push(item as AttachmentRef)
+    }
+  }
+  return list.length > 0 ? list : undefined
 }
 
 export function useWebSocket(url: string, activeConversationId?: string) {
@@ -225,7 +255,7 @@ export function useWebSocket(url: string, activeConversationId?: string) {
     }, REPLY_TIMEOUT_MS)
   }, [clearReplyTimer, stopTypewriter, markPendingHeld])
 
-  const sendMessage = useCallback((message: string, conversationId?: string) => {
+  const sendMessage = useCallback((message: string, conversationId?: string, attachments?: SendAttachmentInput[]) => {
     const targetConv = conversationId ?? lastConversationIdRef.current ?? '@pending'
     const inFlight = sessionConvRef.current !== null
     // Only reset stream buffers when no other conversation's reply is in
@@ -248,13 +278,19 @@ export function useWebSocket(url: string, activeConversationId?: string) {
           role: 'user',
           content: message,
           timestamp: new Date().toISOString(),
+          // 乐观插入原样携带附件引用:本地缩略图渲染只需 id/alt,mime 等由历史回放补全
+          attachments: attachments as AttachmentRef[] | undefined,
         },
       ])
       setWaitingConvIds(prev => (prev.includes(targetConv) ? prev : [...prev, targetConv]))
       startReplyTimer()
-      const payload: Record<string, string> = { message }
+      const payload: ChatSendPayload = { message }
       if (conversationId) {
         payload.conversation_id = conversationId
+      }
+      // 协议 §4.1:附件非空才携带(仅 {id, alt});空数组不发,兼容纯文本旧分支
+      if (attachments && attachments.length > 0) {
+        payload.attachments = attachments.map(({ id, alt }) => (alt === undefined ? { id } : { id, alt }))
       }
       try {
         wsRef.current.send(JSON.stringify(payload))
@@ -285,7 +321,7 @@ export function useWebSocket(url: string, activeConversationId?: string) {
     if (!entry) return
     setPendingFor(convId, null)
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      sendMessage(entry.text, convId)
+      sendMessage(entry.text, convId, entry.attachments)
     } else {
       setPendingFor(convId, entry)
     }
@@ -350,13 +386,13 @@ export function useWebSocket(url: string, activeConversationId?: string) {
 
   // 排队待发消息(流式进行中提交)。该会话已无进行中的回复时直接发送,
   // 避免悬浮条在流结束后死等;否则进入单条队列(覆盖旧的待发内容)。
-  const queuePendingMessage = useCallback((message: string, conversationId?: string) => {
+  const queuePendingMessage = useCallback((message: string, conversationId?: string, attachments?: SendAttachmentInput[]) => {
     const conv = conversationId ?? lastConversationIdRef.current
     if (!conv || sessionConvRef.current !== conv) {
-      sendMessage(message, conversationId)
+      sendMessage(message, conversationId, attachments)
       return
     }
-    setPendingFor(conv, { text: message })
+    setPendingFor(conv, { text: message, attachments })
   }, [sendMessage, setPendingFor])
 
   // 「立即执行」:回复进行中则停止当前回复(stopped 帧到达后由 firePendingFor
@@ -372,7 +408,7 @@ export function useWebSocket(url: string, activeConversationId?: string) {
     }
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       setPendingFor(conv, null)
-      sendMessage(entry.text, conversationId)
+      sendMessage(entry.text, conversationId, entry.attachments)
     }
   }, [stopGeneration, sendMessage, setPendingFor])
 
@@ -769,12 +805,13 @@ export function useWebSocket(url: string, activeConversationId?: string) {
       // A slower response for a previously-opened conversation must not
       // overwrite the view of the conversation the user is on now.
       if (fetchId !== historyFetchRef.current) return
-      const history: Message[] = data.messages.map((m: { id: string; role: string; content: string; reasoning_content?: string | null; created_at: string }) => ({
+      const history: Message[] = data.messages.map((m: { id: string; role: string; content: string; reasoning_content?: string | null; created_at: string; attachments?: unknown }) => ({
         id: m.id,
         role: m.role as Message['role'],
         content: m.content,
         thinking: m.reasoning_content ?? undefined,
         timestamp: m.created_at,
+        attachments: parseHistoryAttachments(m.attachments),
       }))
 
       let list: Message[] = history
@@ -862,7 +899,7 @@ export function useWebSocket(url: string, activeConversationId?: string) {
     (!activeConversationId && waitingConvIds.includes('@pending')) || false
   const activePending = activeConversationId ? pendingByConv[activeConversationId] : undefined
 
-  return { messages, isConnected, isStreaming: isStreamingActive, streamingMode, waitingForReply, awaitingMoreContent, lastConversationId, newConversationId, clearNewConversation, pendingMessage: activePending?.text ?? null, pendingHeld: activePending?.held ?? false, queuePendingMessage, sendPendingNow, cancelPendingMessage, sendMessage, stopGeneration, clearMessages, switchConversation, loadHistory, subscribe }
+  return { messages, isConnected, isStreaming: isStreamingActive, streamingMode, waitingForReply, awaitingMoreContent, lastConversationId, newConversationId, clearNewConversation, pendingMessage: activePending?.text ?? null, pendingAttachments: activePending?.attachments ?? undefined, pendingHeld: activePending?.held ?? false, queuePendingMessage, sendPendingNow, cancelPendingMessage, sendMessage, stopGeneration, clearMessages, switchConversation, loadHistory, subscribe }
 }
 
 export type ChatSocket = ReturnType<typeof useWebSocket>

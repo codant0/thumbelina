@@ -25,6 +25,7 @@ const baseState: ChatSocket = {
   newConversationId: null,
   clearNewConversation: vi.fn(),
   pendingMessage: null,
+  pendingAttachments: undefined,
   pendingHeld: false,
   queuePendingMessage: vi.fn(),
   sendPendingNow: vi.fn(),
