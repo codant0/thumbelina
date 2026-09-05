@@ -29,6 +29,7 @@ class MessageSchema(BaseModel):
     role: str
     content: str
     reasoning_content: str | None = None
+    attachments: list[dict[str, object]] | None = None
     created_at: str
 
 
