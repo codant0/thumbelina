@@ -909,9 +909,7 @@ class ThumbelinaAgent:
         if not blocks:
             messages.append(HumanMessage(content=user_input))
         elif user_input.strip():
-            messages.append(
-                HumanMessage(content=[{"type": "text", "text": user_input}, *blocks])
-            )
+            messages.append(HumanMessage(content=[{"type": "text", "text": user_input}, *blocks]))
         else:  # 纯图片消息
             messages.append(HumanMessage(content=[*blocks]))
         await self.trajectory_recorder.record_context(traj_items)

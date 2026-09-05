@@ -41,9 +41,7 @@ def _png_bytes(width: int = 3, height: int = 2) -> bytes:
     return b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\x0dIHDR" + struct.pack(">II", width, height)
 
 
-def _seed_attachment(
-    root: Path, repo: ConversationRepository, data: bytes | None = None
-) -> dict:
+def _seed_attachment(root: Path, repo: ConversationRepository, data: bytes | None = None) -> dict:
     """Write bytes below *root* and record the attachment; returns metadata."""
     data = data if data is not None else _png_bytes()
     relative_path = f"2026/01/seed-{uuid4().hex}.png"
@@ -196,9 +194,7 @@ def test_empty_text_with_attachments_passes_guard(
     assert isinstance(human.content, list)
     # 纯图片轮：全部为图像块，没有文本块
     assert human.content
-    assert all(
-        isinstance(block, dict) and block.get("type") == "image" for block in human.content
-    )
+    assert all(isinstance(block, dict) and block.get("type") == "image" for block in human.content)
 
 
 def test_duplicate_attachment_ids_send_single_image_block(
@@ -209,9 +205,7 @@ def test_duplicate_attachment_ids_send_single_image_block(
     refs = [{"id": record["id"]}, {"id": record["id"]}]
 
     with multimodal_client.websocket_connect("/ws/chat") as ws:
-        ws.send_json(
-            {"message": "重复图", "conversation_id": conversation_id, "attachments": refs}
-        )
+        ws.send_json({"message": "重复图", "conversation_id": conversation_id, "attachments": refs})
         frames = _collect_until_done(ws)
 
     assert any(frame.get("done") for frame in frames)
@@ -258,9 +252,7 @@ def test_missing_attachment_id_rejects_without_persist_or_generation(
     assert not chat_model.ainvoke.called
 
 
-def test_missing_attachment_error_frame_uses_resolved_conversation_id(
-    multimodal_client, ws_repo
-):
+def test_missing_attachment_error_frame_uses_resolved_conversation_id(multimodal_client, ws_repo):
     """回归:首条消息(无 conversation_id)引用缺失附件 → 错误帧携带服务端
     新建会话的 cid,而非 parsed.conversation_id(None)。前端依赖该 id 清除
     等待态;带 None 会白等到 90s 超时。"""

@@ -178,9 +178,7 @@ async def test_build_initial_messages_text_plus_attachments(tmp_path: Path):
     repo = _fake_repo({"att-a": _record("att-a", relative_path=relative_path)})
     agent = _make_agent(repo, root)
 
-    messages = await agent._build_initial_messages(
-        "看这张图", None, attachments=[{"id": "att-a"}]
-    )
+    messages = await agent._build_initial_messages("看这张图", None, attachments=[{"id": "att-a"}])
 
     human = messages[-1]
     assert isinstance(human, HumanMessage)
@@ -202,9 +200,7 @@ async def test_build_initial_messages_pure_image_only_blocks(tmp_path: Path):
     human = messages[-1]
     assert isinstance(human.content, list)
     assert human.content
-    assert all(
-        isinstance(block, dict) and block.get("type") == "image" for block in human.content
-    )
+    assert all(isinstance(block, dict) and block.get("type") == "image" for block in human.content)
 
 
 async def test_build_initial_messages_unresolvable_blocks_fall_back_to_string(
@@ -214,9 +210,7 @@ async def test_build_initial_messages_unresolvable_blocks_fall_back_to_string(
     repo = _fake_repo({"att-a": _record("att-a")})
     agent = _make_agent(repo, root=None)  # 未配置附件根目录 → 全部跳过
 
-    messages = await agent._build_initial_messages(
-        "看这张图", None, attachments=[{"id": "att-a"}]
-    )
+    messages = await agent._build_initial_messages("看这张图", None, attachments=[{"id": "att-a"}])
 
     human = messages[-1]
     assert isinstance(human, HumanMessage)
@@ -229,9 +223,7 @@ async def test_build_initial_messages_missing_record_falls_back_to_string(tmp_pa
     root = tmp_path / "attachments"
     agent = _make_agent(repo, root)
 
-    messages = await agent._build_initial_messages(
-        "看这张图", None, attachments=[{"id": "att-a"}]
-    )
+    messages = await agent._build_initial_messages("看这张图", None, attachments=[{"id": "att-a"}])
 
     assert messages[-1].content == "看这张图"
 

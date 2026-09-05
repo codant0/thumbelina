@@ -30,8 +30,12 @@ def _png_bytes(width: int = 3, height: int = 2) -> bytes:
 
 def _jpeg_bytes(width: int = 4, height: int = 3) -> bytes:
     """JPEG SOI + SOF0 segment (height precedes width, big-endian)."""
-    return b"\xff\xd8" + b"\xff\xc0" + struct.pack(">H", 11) + b"\x08" + struct.pack(
-        ">HH", height, width
+    return (
+        b"\xff\xd8"
+        + b"\xff\xc0"
+        + struct.pack(">H", 11)
+        + b"\x08"
+        + struct.pack(">HH", height, width)
     )
 
 
@@ -211,9 +215,7 @@ def test_get_attachment_missing_file_404(attachment_client, attachment_repo, att
     assert resp.status_code == 404
 
 
-def test_get_attachment_path_traversal_record_404(
-    attachment_client, attachment_repo, tmp_path
-):
+def test_get_attachment_path_traversal_record_404(attachment_client, attachment_repo, tmp_path):
     """手工插入 relative_path='../../x' 的行 → 404 且不抛异常。
 
     The traversal target is created outside the root to prove the response

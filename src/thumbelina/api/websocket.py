@@ -266,9 +266,7 @@ async def websocket_chat(websocket: WebSocket) -> None:
     # 附件根目录接线(Task B3):与上传路由同源解析(绝对路径直接用,
     # 相对路径基于工作目录,config 缺失回退默认目录),克隆实例据此在
     # _build_initial_messages 中读取附件字节构建图像块。
-    agent.attachments_root = resolve_attachments_root(
-        getattr(websocket.app.state, "config", None)
-    )
+    agent.attachments_root = resolve_attachments_root(getattr(websocket.app.state, "config", None))
 
     # Conversation is created lazily on first message, not on connect.
     default_conversation_id: str | None = None

@@ -111,9 +111,7 @@ async def test_non_dict_items_are_filtered(repo: ConversationRepository):
     """list 中混入非 dict 元素 → 过滤掉，只保留 dict 项。"""
     conversation_id = await repo.create_conversation()
     await repo.add_message(conversation_id=conversation_id, role="user", content="hello")
-    _set_raw_attachments(
-        repo, conversation_id, json.dumps([{"id": "keep"}, "junk", 3, None])
-    )
+    _set_raw_attachments(repo, conversation_id, json.dumps([{"id": "keep"}, "junk", 3, None]))
 
     message = _first_message(await repo.get_messages(conversation_id))
     assert message["attachments"] == [{"id": "keep"}]

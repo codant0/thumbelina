@@ -66,9 +66,7 @@ def _image_block_count(content: object) -> int:
     """统计消息 ``content`` 中标准图像内容块（``type == "image"``）的数量。"""
     if not isinstance(content, list):
         return 0
-    return sum(
-        1 for block in content if isinstance(block, dict) and block.get("type") == "image"
-    )
+    return sum(1 for block in content if isinstance(block, dict) and block.get("type") == "image")
 
 
 def estimate_messages_tokens(messages: Sequence[BaseMessage]) -> int:
