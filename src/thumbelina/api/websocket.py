@@ -77,7 +77,8 @@ async def _run_generation(
 
     ``attachments`` 是可选的图像附件引用(``[{id, alt?}]``,Task B3),
     透传给 ``agent.stream``/``agent.run``;微信绑定的会话为纯文本通道,
-    图像附件在此直接忽略(仅文本进入模型)。
+    图像附件在此直接忽略(仅文本进入模型);若该轮文本也为空白(纯图片
+    轮),回错误帧并直接结束,不开始生成。
     """
     # 在本轮范围内,subagent listener 能从 active_conv_ref 读到本次 cid,
     # 因此即便 listener 注册在 connect 时,它仍能正确路由。
@@ -108,7 +109,18 @@ async def _run_generation(
 
         # 微信为纯文本通道(设计 §3.2):绑定会话收到图像附件时直接忽略,
         # 仅文本进入模型。不做 attachment_skipped 降级事件。
+        # 纯图片轮(message 为空白且原附件非空)直接拒绝:若照常置空附件,
+        # 会以空文本 HumanMessage 落库并发给模型。错误帧后直接 return,
+        # 不开新一轮、不落库。带文本的轮次保持原行为(附件丢弃,文本放行)。
         if is_wechat_conversation and attachments:
+            if not message.strip():
+                await websocket.send_json(
+                    {
+                        "error": "WeChat channel does not support image-only messages",
+                        "conversation_id": cid,
+                    }
+                )
+                return
             logger.info("WeChat conversation: skipped %d image attachment(s)", len(attachments))
             attachments = None
 

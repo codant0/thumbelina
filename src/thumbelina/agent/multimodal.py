@@ -41,7 +41,8 @@ async def build_image_blocks(
         仓储管理器;``None`` 时无法解析记录,全部跳过。
     attachment_refs:
         附件引用列表(``[{id, alt?}]``,来自 WS 上行);每项必须是含
-        非空字符串 ``id`` 键的 dict,否则跳过该张。
+        非空字符串 ``id`` 键的 dict,否则跳过该张。重复 ``id`` 以首次
+        出现为准(其余跳过),避免同一张图重复进入模型。
     root:
         附件根目录(``agent.attachments_root``);``None`` 时全部跳过。
 
@@ -53,10 +54,16 @@ async def build_image_blocks(
     if not attachment_refs:
         return []
 
+    # 去重:同一 id 多次引用只保留首次出现,避免同一张图重复发给模型。
     ids: list[str] = []
+    seen_ids: set[str] = set()
     for ref in attachment_refs:
         attachment_id = ref.get("id") if isinstance(ref, dict) else None
         if isinstance(attachment_id, str) and attachment_id:
+            if attachment_id in seen_ids:
+                logger.info("Duplicate attachment id %s; keeping first occurrence", attachment_id)
+                continue
+            seen_ids.add(attachment_id)
             ids.append(attachment_id)
         else:
             logger.warning("Skipping malformed attachment ref: %r", ref)
