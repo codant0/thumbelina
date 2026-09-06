@@ -12,6 +12,7 @@ import asyncio
 import csv
 import io
 import json
+import os
 import re
 from collections import Counter
 from pathlib import Path
@@ -30,6 +31,38 @@ _SEARCH_MAX_HITS = 50
 _SEARCH_MAX_LINE = 500
 _SEARCH_MAX_FILE = 1 * 1024 * 1024
 _MAX_RESULTS = 5
+
+# search_files 遍历时按目录名剪枝：依赖/构建产物/缓存/版本库内部目录体量
+# 巨大（单个 node_modules 即数万文件）且几乎不含有效检索目标，逐文件读取
+# 只会拖慢搜索并污染 OS 文件缓存。
+_SEARCH_EXCLUDED_DIRS = frozenset(
+    {
+        ".git",
+        ".hg",
+        ".svn",
+        ".idea",
+        ".vscode",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".tox",
+        ".nox",
+        ".eggs",
+        ".next",
+        ".nuxt",
+        ".gradle",
+        "__pycache__",
+        "node_modules",
+        ".venv",
+        "venv",
+        "env",
+        "site-packages",
+        "dist",
+        "build",
+        "target",
+        "vendor",
+    }
+)
 
 
 def _truncate(text: str) -> str:
@@ -158,7 +191,8 @@ class SearchFilesTool(PerceptionTool):
     description: str = (
         "Search for a regex pattern in files under the given path.\n\n"
         "Returns up to 50 matches as 'path:line: content' lines. Binary files\n"
-        "and files larger than 1MB are skipped."
+        "and files larger than 1MB are skipped. Dependency/build directories\n"
+        "(node_modules, .venv, .git, ...) are excluded from the walk."
     )
     args_schema: type[BaseModel] = _SearchFilesArgs
 
@@ -175,30 +209,38 @@ class SearchFilesTool(PerceptionTool):
             regex = re.compile(pattern)
         except re.error as exc:
             return f"Error: Invalid pattern: {exc}"
-        hits: list[str] = []
-        try:
-            for entry in root.rglob("*"):
-                # Symlinks are untrusted: they can point outside the workspace,
-                # leaking external content through rglob. Skip them entirely.
-                if entry.is_symlink():
-                    continue
-                if not entry.is_file():
-                    continue
-                if entry.stat().st_size > _SEARCH_MAX_FILE:
-                    continue
-                try:
-                    text = entry.read_text(encoding="utf-8", errors="ignore")
-                except (PermissionError, OSError):
-                    continue
-                for lineno, line in enumerate(text.splitlines(), start=1):
-                    if regex.search(line):
-                        hits.append(f"{entry}:{lineno}: {line[:_SEARCH_MAX_LINE]}")
+
+        def _search_sync() -> list[str]:
+            hits: list[str] = []
+            for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+                # 目录级剪枝:被排除目录整个子树不再进入(含其下所有文件)。
+                dirnames[:] = [d for d in dirnames if d not in _SEARCH_EXCLUDED_DIRS]
+                for name in filenames:
                     if len(hits) >= _SEARCH_MAX_HITS:
                         break
+                    entry = Path(dirpath) / name
+                    try:
+                        # Symlinks are untrusted: they can point outside the
+                        # workspace, leaking external content. Skip them.
+                        if entry.is_symlink() or not entry.is_file():
+                            continue
+                        if entry.stat().st_size > _SEARCH_MAX_FILE:
+                            continue
+                        text = entry.read_text(encoding="utf-8", errors="ignore")
+                    except (PermissionError, OSError):
+                        continue
+                    for lineno, line in enumerate(text.splitlines(), start=1):
+                        if regex.search(line):
+                            hits.append(f"{entry}:{lineno}: {line[:_SEARCH_MAX_LINE]}")
+                        if len(hits) >= _SEARCH_MAX_HITS:
+                            break
                 if len(hits) >= _SEARCH_MAX_HITS:
                     break
-        except (PermissionError, OSError) as exc:
-            return f"Error searching: {exc}"
+            return hits
+
+        # 全盘遍历 + 逐文件读取是纯同步阻塞 IO,必须整体放入工作线程执行;
+        # 在事件循环上直接跑会冻结整个进程(WS 心跳/流式推送/通道轮询全部停摆)。
+        hits = await asyncio.to_thread(_search_sync)
         if not hits:
             return f"No matches for {pattern!r} under {path}"
         return "\n".join(hits)

@@ -97,3 +97,59 @@ async def test_read_file_ainvoke_lifecycle(tmp_path):
     f.write_text("via ainvoke", encoding="utf-8")
     out = await p.ReadFileTool().ainvoke({"path": str(f)})
     assert out == "via ainvoke"
+
+
+@pytest.mark.asyncio
+async def test_search_files_excludes_dependency_dirs(tmp_path):
+    """依赖/venv 目录整个子树不进入遍历(2026-09-06 事故:全盘 6 万文件)。"""
+    (tmp_path / "root.txt").write_text("needle", encoding="utf-8")
+    dep = tmp_path / "node_modules" / "somepkg"
+    dep.mkdir(parents=True)
+    (dep / "dep.txt").write_text("needle", encoding="utf-8")
+    venv = tmp_path / ".venv" / "lib"
+    venv.mkdir(parents=True)
+    (venv / "v.txt").write_text("needle", encoding="utf-8")
+    gitdir = tmp_path / ".git" / "objects"
+    gitdir.mkdir(parents=True)
+    (gitdir / "g.txt").write_text("needle", encoding="utf-8")
+
+    result = await p.SearchFilesTool()._arun(pattern="needle", path=str(tmp_path))
+
+    assert "root.txt:1" in result
+    assert "node_modules" not in result
+    assert ".venv" not in result
+    assert ".git" not in result
+
+
+@pytest.mark.asyncio
+async def test_search_files_keeps_event_loop_responsive(tmp_path):
+    """同步遍历必须整体放入工作线程:搜索进行中事件循环仍可调度其他协程。
+
+    回归锚点:旧实现把 rglob+read_text 直接跑在事件循环上,一次
+    path="." 的全盘搜索冻结整个进程 78 秒(WS 心跳/流式/轮询全部停摆)。
+    """
+    import asyncio
+
+    # 造一棵没有命中的文件树,迫使搜索完整走完(600 个文件,约 5MB)。
+    for i in range(40):
+        d = tmp_path / f"d{i:02d}"
+        d.mkdir()
+        for j in range(15):
+            (d / f"f{j:02d}.txt").write_text(("haystack" + chr(10)) * 1000, encoding="utf-8")
+
+    tool = p.SearchFilesTool()
+    search_task = asyncio.create_task(
+        tool._arun(pattern="zzz-no-hit", path=str(tmp_path))
+    )
+
+    ticks = 0
+    while not search_task.done():
+        ticks += 1
+        await asyncio.sleep(0)
+        if ticks > 200000:  # 防御性上限,避免病态情况挂死测试
+            break
+    await search_task
+
+    # 旧实现(阻塞循环)整个搜索期间协程几乎得不到调度(ticks≈2);
+    # 新实现搜索在工作线程,主循环空闲自旋,ticks 远大于 5。
+    assert ticks > 5, f"event loop starved during search (ticks={ticks})"
