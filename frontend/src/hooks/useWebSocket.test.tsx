@@ -352,6 +352,33 @@ describe('useWebSocket 断线重连与心跳', () => {
     expect(instances).toHaveLength(3)
   })
 
+  it('重连成功后重发 switch_conversation 以重新附加在途回合', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
+      String(input).includes('/api/v1/conversations/')
+        ? ({ ok: true, json: async () => ({ messages: [] }) } as Response)
+        : ({ ok: true, json: async () => ({}) } as Response)
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderHook(() => useWebSocket('ws://localhost/x', 'c1'))
+    const ws1 = instances[0]
+    open(ws1)
+    close(ws1)
+
+    act(() => { vi.advanceTimersByTime(1200) })
+    const ws2 = instances[1]
+    await act(async () => { open(ws2) })
+
+    // 生成与连接解耦:重连后重发 switch,服务端重放在途回合的缓存帧并续流。
+    expect(ws2.send).toHaveBeenCalledWith('{"switch_conversation":"c1"}')
+
+    // 首连不自动发 switch(常规首连由 ChatWindow 的切换 effect 直发)。
+    renderHook(() => useWebSocket('ws://localhost/x', 'c2'))
+    const ws0 = instances[2]
+    open(ws0)
+    expect(ws0.send).not.toHaveBeenCalledWith('{"switch_conversation":"c2"}')
+  })
+
   it('心跳:每 25s 发 ping,持续无帧超过 70s 判死并主动断开', () => {
     renderHook(() => useWebSocket('ws://localhost/x', 'c1'))
     const ws1 = instances[0]

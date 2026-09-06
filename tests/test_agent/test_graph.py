@@ -1107,3 +1107,42 @@ class TestStreamToolEvents:
         )
         agent = ThumbelinaAgent(llm_provider=mock_provider, tools=[_graph_echo_tool])
         assert await agent.run("use the tool") == "done"
+
+
+class TestPersistInterruptedResponse:
+    """取消/停止路径的部分响应落库(2026-09-06 修复:刷新不再丢整轮)。"""
+
+    def _agent_with_repo(self):
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        repo = MagicMock()
+        repo.add_message = AsyncMock()
+        repo.add_trajectory_events = AsyncMock()
+        agent = ThumbelinaAgent(llm_provider=MagicMock(), repository_manager=repo)
+        agent.current_conversation_id = "conv-1"
+        agent.trajectory_recorder.begin_turn("conv-1")
+        return agent, repo
+
+    @pytest.mark.asyncio
+    async def test_persists_partial_with_interrupted_marker(self):
+        agent, repo = self._agent_with_repo()
+
+        await agent.persist_interrupted_response("partial answer")
+
+        assert repo.add_message.await_count == 1
+        kwargs = repo.add_message.await_args.kwargs
+        assert kwargs["conversation_id"] == "conv-1"
+        assert kwargs["role"] == "assistant"
+        assert kwargs["content"].startswith("partial answer")
+        assert "响应中断" in kwargs["content"]
+        # 轨迹同步记录 assistant 事件。
+        assert repo.add_trajectory_events.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_empty_partial_is_not_persisted(self):
+        agent, repo = self._agent_with_repo()
+
+        await agent.persist_interrupted_response("", None)
+
+        repo.add_message.assert_not_awaited()
+        repo.add_trajectory_events.assert_not_awaited()

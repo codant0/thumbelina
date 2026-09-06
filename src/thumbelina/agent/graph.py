@@ -64,6 +64,10 @@ logger = logging.getLogger(__name__)
 # 首次遇到"响应无 LLM 用量元数据"时打一条 WARNING 帮助诊断,后续降级为 DEBUG。
 _llm_usage_warned = False
 
+# 被取消轮次的部分响应落库时追加的标记(persist_interrupted_response)。
+# 用户可见文案:让历史里能一眼分辨"被截断的部分回答"与"完整回答"。
+_INTERRUPTED_RESPONSE_MARKER = "\n\n[响应中断：生成未完成，以上为部分内容]"
+
 
 WORKSPACE_SNAPSHOT_LIMIT = 50
 
@@ -1055,6 +1059,27 @@ class ThumbelinaAgent:
                 )
             except Exception:
                 logger.warning("Failed to persist message to repository", exc_info=True)
+
+    async def persist_interrupted_response(
+        self, content: str, reasoning: str | None = None
+    ) -> None:
+        """把被取消轮次已生成的部分响应落库（消息表 + 轨迹），带中断标记。
+
+        背景：assistant 消息原本只在 ``stream()`` 完整结束时落库；配合
+        "WS 断开即取消生成任务"，用户刷新页面会把整轮已流出的内容全部
+        丢掉（只剩用户消息）。此方法在取消路径上由调用方 best-effort
+        调用，保证用户看到过的部分内容至少留在历史里。
+
+        注意这是有意的取舍：只写 UI 历史（messages 表）与轨迹，不回写
+        LangGraph 检查点 —— 检查点里本轮遗留的悬空 tool_calls 由压缩
+        节点的 ``ensure_tool_pairing`` 自愈，下一轮 LLM 上下文不含该
+        部分内容。空内容（尚未产出任何 token）不落库。
+        """
+        if not content and not reasoning:
+            return
+        marked = content + _INTERRUPTED_RESPONSE_MARKER if content else content
+        await self._persist_message("assistant", marked, reasoning_content=reasoning or None)
+        await self.trajectory_recorder.record_assistant(marked, reasoning or None)
 
     async def _get_skill_context(self, user_input: str) -> str | None:
         """Attempt to find and apply a matching skill for the user input."""

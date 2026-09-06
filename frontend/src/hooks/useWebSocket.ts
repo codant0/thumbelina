@@ -96,8 +96,9 @@ export function advanceFor(revealed: number, elapsedMs: number): number {
 // when the backend LLM call hangs or the WS frame is silently dropped.
 const REPLY_TIMEOUT_MS = 90_000
 // 断线自动重连:指数退避 + 抖动,无上限(自托管部署,服务恢复后自动接上)。
-// onopen 成功即重置计数;后端断开即取消在途生成,重连后靠 loadHistory 对齐
-// 已落库状态,不存在续流。
+// onopen 成功即重置计数。生成任务与连接解耦(后端):断线/刷新不取消在途
+// 生成 —— 重连成功后重发 switch_conversation,服务端重放在途回合的缓存帧
+// 并续流;已完成回合由 loadHistory 对齐落库状态。
 const RECONNECT_BASE_MS = 1_000
 const RECONNECT_MAX_MS = 30_000
 // 应用层心跳:每周期发 {ping}(后端回 {pong}),连续 DEAD_MS 未收到任何帧判定
@@ -203,6 +204,9 @@ export function useWebSocket(url: string, activeConversationId?: string) {
   const lastFrameAtRef = useRef(0)
   const manualCloseRef = useRef(false)
   const [isReconnecting, setIsReconnecting] = useState(false)
+  // 挂起中的 switch_conversation:WS 尚未建立时 ChatWindow 的切换调用会
+  // 丢失,记下来在 onopen 时补发(服务端据此重放在途回合)。
+  const pendingSwitchRef = useRef<string | null>(null)
   // WS effect 声明在 loadHistory 之前,依赖数组不能直接引用它(TDZ);
   // 经 ref 间接调用,重连成功后刷新当前会话历史。
   const loadHistoryRef = useRef<((conversationId: string) => Promise<void>) | null>(null)
@@ -519,15 +523,48 @@ export function useWebSocket(url: string, activeConversationId?: string) {
     ws.onopen = () => {
       setIsConnected(true)
       lastFrameAtRef.current = Date.now()
-      if (everConnectedRef.current) {
+      // 生成与连接解耦:重连后服务端会按 switch_conversation 重放本会话
+      // 在途回合的缓存帧,先清空本地流式缓冲,避免重放内容与旧缓冲叠加。
+      // (已完成回合由下方 loadHistory 对齐落库状态。)
+      const isReconnect = everConnectedRef.current
+      stopTypewriter()
+      bufferRef.current = ''
+      reasoningBufferRef.current = ''
+      displayedRef.current = 0
+      toolCallsRef.current = null
+      toolAnchorsRef.current = null
+      if (isReconnect) {
         // 重连成功:复位退避与提示,并刷新当前会话历史——断线期间后端可能
-        // 产生了变化(断线在途生成已被取消、其他渠道可能有新消息)。
+        // 产生了变化(其他渠道可能有新消息;在途回合经 switch 重放续流)。
         retryAttemptRef.current = 0
         setIsReconnecting(false)
         const conv = activeConversationRef.current
         if (conv) void loadHistoryRef.current?.(conv)
       } else {
         everConnectedRef.current = true
+      }
+      // 重发/补发 switch_conversation:服务端据此把本会话的在途回合重新
+      // 附加到这条新连接(重放缓存帧 + 续流)。重连时回退到当前活跃会话;
+      // 首连仅补发挂起的切换(挂载竞态兜底),常规首连由 ChatWindow 的
+      // 切换 effect 直发或经挂起补发。
+      if (isReconnect) {
+        const switchTarget = pendingSwitchRef.current ?? activeConversationRef.current ?? lastConversationIdRef.current
+        pendingSwitchRef.current = null
+        if (switchTarget) {
+          try {
+            ws.send(JSON.stringify({ switch_conversation: switchTarget }))
+          } catch {
+            // 连接刚建立即失败的场景交由 onclose 统一重连
+          }
+        }
+      } else if (pendingSwitchRef.current) {
+        const queued = pendingSwitchRef.current
+        pendingSwitchRef.current = null
+        try {
+          ws.send(JSON.stringify({ switch_conversation: queued }))
+        } catch {
+          // 连接刚建立即失败的场景交由 onclose 统一重连
+        }
       }
       startHeartbeat()
     }
@@ -1090,6 +1127,9 @@ export function useWebSocket(url: string, activeConversationId?: string) {
   const switchConversation = useCallback((conversationId: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ switch_conversation: conversationId }))
+    } else {
+      // 连接尚未就绪(挂载竞态):挂起,连接建立时由 onopen 补发。
+      pendingSwitchRef.current = conversationId
     }
   }, [])
 

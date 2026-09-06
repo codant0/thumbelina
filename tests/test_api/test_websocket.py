@@ -299,7 +299,9 @@ def test_websocket_stop_cancels_inflight_generation(client):
     client.app.state.agent.stream = _stream
 
     with client.websocket_connect("/ws/chat") as ws:
-        ws.send_json({"message": "Hello"})
+        # 生成与连接解耦后,stopped 帧携带被取消回合自身的会话 id;
+        # 消息带上 conversation_id 与真实前端行为一致。
+        ws.send_json({"message": "Hello", "conversation_id": "test-conv-id"})
         # 先读到第一块 partial，确认生成已在进行中。
         chunk = ws.receive_json()
         assert chunk.get("chunk") == "partial"
@@ -502,3 +504,138 @@ def test_websocket_non_streaming_consumes_stream_with_tool_events(client):
     done = [m for m in messages if m.get("done")]
     assert len(done) == 1
     assert done[0]["streaming_mode"] is False
+
+
+def test_websocket_stop_persists_partial_response(client):
+    """stop 打断后,已流出的部分响应应被 best-effort 落库而非整轮丢失。"""
+    import asyncio as _asyncio
+    from unittest.mock import AsyncMock
+
+    async def _stream(message, context_window_tokens=None, attachments=None):
+        yield {"type": "content", "text": "partial"}
+        # 保持生成进行中，等待 stop 打断。
+        await _asyncio.sleep(30)
+
+    client.app.state.agent.stream = _stream
+    persist_mock = AsyncMock()
+    client.app.state.agent.persist_interrupted_response = persist_mock
+
+    with client.websocket_connect("/ws/chat") as ws:
+        ws.send_json({"message": "Hello"})
+        chunk = ws.receive_json()
+        assert chunk.get("chunk") == "partial"
+
+        ws.send_json({"stop": True, "conversation_id": "test-conv-id"})
+        stopped = ws.receive_json()
+        assert stopped.get("stopped") is True
+
+    # stop 处理器在发送 stopped 帧前等待任务清理,因此此刻落库已完成。
+    persist_mock.assert_awaited_once_with("partial", None)
+
+
+def test_websocket_empty_partial_response_not_persisted(client):
+    """尚未流出任何内容就被打断时,不应落库空 assistant 消息。"""
+    import asyncio as _asyncio
+    from unittest.mock import AsyncMock
+
+    async def _stream(message, context_window_tokens=None, attachments=None):
+        await _asyncio.sleep(30)
+        yield {"type": "content", "text": "never arrives"}
+
+    client.app.state.agent.stream = _stream
+    persist_mock = AsyncMock()
+    client.app.state.agent.persist_interrupted_response = persist_mock
+
+    with client.websocket_connect("/ws/chat") as ws:
+        ws.send_json({"message": "Hello"})
+        ws.send_json({"stop": True, "conversation_id": "test-conv-id"})
+        stopped = ws.receive_json()
+        assert stopped.get("stopped") is True
+
+    persist_mock.assert_not_awaited()
+
+
+def test_generation_survives_disconnect_and_replays_on_reattach(client):
+    """刷新(断开)不取消在途生成:新连接 switch_conversation 重放缓存帧并续流。"""
+    import asyncio as _asyncio
+
+    async def _stream(message, context_window_tokens=None, attachments=None):
+        yield {"type": "content", "text": "part1"}
+        await _asyncio.sleep(0.5)
+        yield {"type": "content", "text": "part2"}
+
+    client.app.state.agent.stream = _stream
+
+    with client.websocket_connect("/ws/chat") as ws1:
+        ws1.send_json({"message": "Hello", "conversation_id": "test-conv-id"})
+        first = ws1.receive_json()
+        assert first.get("chunk") == "part1"
+        # 模拟用户刷新:直接断开连接(不发 stop)。回合应在后台继续。
+    with client.websocket_connect("/ws/chat") as ws2:
+        ws2.send_json({"switch_conversation": "test-conv-id"})
+
+        def _next_data_frame(socket):
+            """跳过 conversation_switched ack(直发,与泵重放帧次序不保证)。"""
+            while True:
+                frame = socket.receive_json()
+                if "chunk" in frame or frame.get("done") or frame.get("stopped"):
+                    return frame
+
+        # 重放缓存帧(part1),然后续流(part2),最后 done。
+        replayed = _next_data_frame(ws2)
+        assert replayed.get("chunk") == "part1"
+        live = _next_data_frame(ws2)
+        assert live.get("chunk") == "part2"
+        done = _next_data_frame(ws2)
+        assert done.get("done") is True
+        assert done.get("conversation_id") == "test-conv-id"
+
+
+def test_stop_from_new_connection_cancels_detached_turn(client):
+    """跨连接 stop:新连接可取消旧连接(已断开)发起的在途回合。"""
+    import asyncio as _asyncio
+
+    from thumbelina.api import websocket as ws_module
+
+    async def _stream(message, context_window_tokens=None, attachments=None):
+        yield {"type": "content", "text": "part1"}
+        await _asyncio.sleep(30)
+        yield {"type": "content", "text": "never"}
+
+    client.app.state.agent.stream = _stream
+
+    with client.websocket_connect("/ws/chat") as ws1:
+        ws1.send_json({"message": "Hello", "conversation_id": "test-conv-id"})
+        assert ws1.receive_json().get("chunk") == "part1"
+    # 旧连接已断,回合仍在注册表中(未被断开取消)。
+    assert "test-conv-id" in ws_module._generation_tasks
+    with client.websocket_connect("/ws/chat") as ws2:
+        # 未 switch → 请求方不在订阅者中,stopped 由处理器直接补发。
+        ws2.send_json({"stop": True, "conversation_id": "test-conv-id"})
+        stopped = ws2.receive_json()
+        assert stopped.get("stopped") is True
+    # 取消后注册表清理。
+    assert "test-conv-id" not in ws_module._generation_tasks
+
+
+def test_reattach_replays_completed_turn_history_not_needed(client):
+    """回合在断线期间正常完成:重连后无在途回合可附加,直接得到 ack。"""
+    import asyncio as _asyncio
+
+    async def _stream(message, context_window_tokens=None, attachments=None):
+        yield {"type": "content", "text": "quick"}
+        await _asyncio.sleep(0.2)
+
+    client.app.state.agent.stream = _stream
+
+    with client.websocket_connect("/ws/chat") as ws1:
+        ws1.send_json({"message": "Hello", "conversation_id": "test-conv-id"})
+        while True:
+            frame = ws1.receive_json()
+            if frame.get("done"):
+                break
+    # 回合已结束:重连后 switch 无在途回合,只回 ack(历史由 HTTP 加载)。
+    with client.websocket_connect("/ws/chat") as ws2:
+        ws2.send_json({"switch_conversation": "test-conv-id"})
+        ack = ws2.receive_json()
+        assert ack.get("conversation_switched") is True
