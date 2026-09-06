@@ -155,6 +155,7 @@ class TestConfirmLogin:
                 app_state,
                 agent,
                 on_message_callback=None,
+                runtime=None,
             ):
                 app_state.config.channels.wechat.enabled = True
                 app_state.config.channels.wechat.bot_token = new_config.bot_token
@@ -214,6 +215,7 @@ class TestConfirmLogin:
                     app_state,
                     agent,
                     on_message_callback=None,
+                    runtime=None,
                 ):
                     captured["callback"] = on_message_callback
                     return True

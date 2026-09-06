@@ -281,6 +281,73 @@ class TestSwapChannel:
 
         assert app_state.wechat_channel is None
 
+    @pytest.mark.asyncio
+    async def test_swap_channel_wechat_forwards_runtime(self, tmp_path):
+        """WeChat hot-swap forwards runtime= to the rebuilt channel.
+
+        缺失 runtime 时,扫码热登录/Settings 保存重建的渠道拿不到
+        app.state —— 会话端点退化到全局默认,附件根目录回落 CWD。
+        """
+        config_file = str(tmp_path / "config.yaml")
+        config = AppConfig()
+        manager = RuntimeConfigManager(config, config_file)
+
+        from thumbelina.channels.config import WeChatChannelConfig
+
+        new_config = WeChatChannelConfig(enabled=True, bot_token="tok")
+
+        app_state = MagicMock()
+        app_state.wechat_channel = None
+
+        new_channel = AsyncMock()
+        new_channel._needs_authentication = False
+        new_channel._agent.current_conversation_id = "conv-1"
+
+        runtime_marker = object()
+
+        with patch(
+            "thumbelina.channels.wechat_channel.WeChatChannel", return_value=new_channel
+        ) as mock_channel_cls:
+            await manager.swap_channel(
+                "wechat",
+                new_config,
+                app_state,
+                MagicMock(),
+                on_message_callback=None,
+                runtime=runtime_marker,
+            )
+
+        mock_channel_cls.assert_called_once()
+        assert mock_channel_cls.call_args.kwargs["runtime"] is runtime_marker
+        # 渠道带上了 runtime,热登录路径与 lifespan 启动路径接线一致
+        assert app_state.wechat_conversation_id == "conv-1"
+
+    @pytest.mark.asyncio
+    async def test_swap_channel_wechat_without_runtime_still_constructs(self, tmp_path):
+        """runtime 参数可省略(向后兼容),渠道仍正常创建。"""
+        config_file = str(tmp_path / "config.yaml")
+        config = AppConfig()
+        manager = RuntimeConfigManager(config, config_file)
+
+        from thumbelina.channels.config import WeChatChannelConfig
+
+        new_config = WeChatChannelConfig(enabled=True, bot_token="tok")
+
+        app_state = MagicMock()
+        app_state.wechat_channel = None
+
+        new_channel = AsyncMock()
+        new_channel._needs_authentication = False
+        new_channel._agent.current_conversation_id = "conv-1"
+
+        with patch(
+            "thumbelina.channels.wechat_channel.WeChatChannel", return_value=new_channel
+        ) as mock_channel_cls:
+            connected = await manager.swap_channel("wechat", new_config, app_state, MagicMock())
+
+        assert connected is True
+        assert mock_channel_cls.call_args.kwargs["runtime"] is None
+
 
 class TestPersistConfig:
     """Tests for persistence from RuntimeConfigManager."""

@@ -131,8 +131,15 @@ class RuntimeConfigManager:
         app_state: Any,
         agent: ThumbelinaAgent,
         on_message_callback: Any = None,
+        runtime: Any = None,
     ) -> bool:
         """Stop the old channel, create/start a new one, update *app_state*.
+
+        ``runtime`` is forwarded to channels that accept it (WeChatChannel)
+        so a hot-swapped instance resolves per-conversation LLM endpoints /
+        context windows and the shared attachments root exactly like the
+        lifespan-created one does (see app.py startup wiring).  Omitting it
+        silently degrades those paths to global defaults.
 
         Returns ``True`` if the channel is connected after the swap.
 
@@ -219,6 +226,10 @@ class RuntimeConfigManager:
                         config=new_config,
                         agent=agent,
                         on_message_callback=on_message_callback,
+                        # 与 app.py 的 lifespan 启动路径同构：不传 runtime 时
+                        # 热登录重建的渠道拿不到 app.state —— 会话端点/上下文
+                        # 窗口退化到全局默认，附件根目录回落到 CWD。
+                        runtime=runtime,
                     )
 
                 try:

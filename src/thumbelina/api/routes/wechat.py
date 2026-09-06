@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hmac
 import logging
+from types import SimpleNamespace
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -291,6 +292,10 @@ async def confirm_wechat_login(
                 app_state=request.app.state,
                 agent=agent,
                 on_message_callback=_on_wechat_message,
+                # 与 lifespan 启动路径同构的惰性 app 引用：缺失时热登录重建的
+                # 渠道拿不到 app.state —— 会话端点/上下文窗口退化到全局默认，
+                # 附件根目录回落到 CWD（自定义目录时入站图片落错盘）。
+                runtime=SimpleNamespace(app=request.app),
             )
         except Exception:
             logger.warning(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from types import SimpleNamespace
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
@@ -320,6 +321,10 @@ async def swap_channel(
             new_config=new_config,
             app_state=request.app.state,
             agent=agent,
+            # 与 lifespan 启动路径同构的惰性 app 引用：缺失时热切换重建的
+            # 微信渠道拿不到 app.state —— 会话端点/上下文窗口退化到全局
+            # 默认，附件根目录回落到 CWD。
+            runtime=SimpleNamespace(app=request.app),
         )
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=422, detail=str(exc))
