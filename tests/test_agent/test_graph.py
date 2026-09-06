@@ -925,7 +925,7 @@ class TestNotifyUserByChannel:
     async def test_notify_explicit_channel_and_user_id(self):
         agent = self._make_agent()
         wechat = self._mock_channel()
-        qq = self._mock_channel(last_user=None)
+        qq = self._mock_channel(last_user="qq-42")  # 收窄后：user_id 必须等于 last_user（spec §4.6）
         agent.register_channel("wechat", wechat)
         agent.register_channel("qq", qq)
 
