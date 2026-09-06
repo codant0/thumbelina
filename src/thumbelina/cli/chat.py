@@ -233,7 +233,10 @@ async def _run_chat_session(config: AppConfig, provider: str, model: str | None)
     try:
         from thumbelina.subagents.manager import SubagentManager
 
-        subagent_manager = SubagentManager(llm_provider=llm_provider)
+        subagent_manager = SubagentManager(
+            llm_provider=llm_provider,
+            tool_timeout=config.tools.tool_timeout,
+        )
     except Exception:
         pass
 
@@ -262,6 +265,18 @@ async def _run_chat_session(config: AppConfig, provider: str, model: str | None)
         context_config=config.context,
         context_window_tokens=config.llm.context_window_tokens,
     )
+
+    # 子 agent 只读工具集(仅感知类),与 Web 端装配保持一致。
+    if subagent_manager is not None:
+        from thumbelina.tools.base import ToolCategory
+
+        subagent_manager.set_tools(
+            [
+                t
+                for t in agent.tools
+                if getattr(t, "category", None) == ToolCategory.PERCEPTION
+            ]
+        )
 
     session = ChatSession(
         agent=agent,

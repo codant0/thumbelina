@@ -29,7 +29,7 @@ class FakeManager:
     def __init__(self, fail=False):
         self.fail, self.agents = fail, [FakeAgent()]
 
-    async def create_agent(self, task):
+    async def create_agent(self, task, conversation_id=None):
         if self.fail:
             raise RuntimeError("no slots")
         return self.agents[0]
@@ -58,7 +58,7 @@ class _StatefulManager:
         self._status_sequence = status_sequence
         self._poll_count = 0
 
-    async def create_agent(self, task):
+    async def create_agent(self, task, conversation_id=None):
         return self.agent
 
     async def run_agent(self, agent_id):

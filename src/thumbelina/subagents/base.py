@@ -39,6 +39,9 @@ class Subagent:
         Wall-clock timestamp when execution began (``run_agent``).
     finished_at:
         Wall-clock timestamp when execution reached a terminal status.
+    conversation_id:
+        发起该子 agent 的会话 id（``CreateSubagentTool`` 从 ContextVar
+        读取）；用于把生命周期事件路由到正确的会话流。
     """
 
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -48,6 +51,7 @@ class Subagent:
     error: str | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
+    conversation_id: str | None = None
 
 
 SubagentEventType = Literal[
@@ -64,6 +68,8 @@ class SubagentEvent:
 
     ``started_at`` and ``finished_at`` are ISO-8601 strings so the payload
     can travel over WebSocket JSON without bespoke datetime encoders.
+    ``conversation_id`` 为发起会话 id（未标注时为 ``None``），供监听方
+    按会话过滤。
     """
 
     type: SubagentEventType
@@ -74,3 +80,4 @@ class SubagentEvent:
     error: str | None = None
     started_at: str | None = None
     finished_at: str | None = None
+    conversation_id: str | None = None

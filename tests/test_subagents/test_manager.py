@@ -6,6 +6,11 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.tools import BaseTool
+from langchain_core.tools import tool as lc_tool
 
 from thumbelina.subagents.base import Subagent, SubagentStatus
 from thumbelina.subagents.manager import SubagentManager
@@ -197,3 +202,196 @@ class TestSubagent:
         assert SubagentStatus.COMPLETED == "completed"
         assert SubagentStatus.FAILED == "failed"
         assert SubagentStatus.CANCELLED == "cancelled"
+
+
+# ---------------------------------------------------------------------------
+# 工具循环模式(2026-09-06 修复):子 agent 绑定只读工具多轮执行,
+# 不再是一次无工具 chat;伪工具语法文本被识别为失败而非结果。
+# ---------------------------------------------------------------------------
+
+
+class _ScriptedChatModel(BaseChatModel):
+    """按脚本依次弹出响应的最小 chat model(工具绑定默认支持)。"""
+
+    responses: list = []
+
+    @property
+    def _llm_type(self) -> str:
+        return "scripted"
+
+    def bind_tools(self, tools, **kwargs):
+        return self
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+        return ChatResult(generations=[ChatGeneration(message=self.responses.pop(0))])
+
+
+@lc_tool
+def probe_tool(dummy: str = "") -> str:
+    """probe returns a fixed result"""
+    return "PROBE_RESULT"
+
+
+async def _wait_terminal(manager, agent_id, timeout=5.0):
+    """轮询直到子 agent 到达终态,返回终态 Subagent。"""
+    deadline = asyncio.get_event_loop().time() + timeout
+    while True:
+        current = await manager.get_agent(agent_id)
+        assert current is not None
+        if current.status in (
+            SubagentStatus.COMPLETED,
+            SubagentStatus.FAILED,
+            SubagentStatus.CANCELLED,
+        ):
+            return current
+        assert asyncio.get_event_loop().time() < deadline, "subagent did not finish"
+        await asyncio.sleep(0.01)
+
+
+class TestSubagentToolLoop:
+    """set_tools 注入工具后的循环执行路径。"""
+
+    @pytest.mark.asyncio
+    async def test_tool_loop_executes_tools_and_returns_final_result(self, manager):
+        manager.set_tools([probe_tool])
+        manager.llm_provider.chat_model = _ScriptedChatModel(
+            responses=[
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "probe_tool",
+                            "args": {"dummy": "x"},
+                            "id": "c1",
+                            "type": "tool_call",
+                        }
+                    ],
+                ),
+                AIMessage(content="final answer cites PROBE_RESULT"),
+            ]
+        )
+
+        agent = await manager.create_agent(task="use the probe")
+        await manager.run_agent(agent.id)
+        current = await _wait_terminal(manager, agent.id)
+
+        assert current.status == SubagentStatus.COMPLETED
+        assert current.result == "final answer cites PROBE_RESULT"
+
+    @pytest.mark.asyncio
+    async def test_tool_loop_round_limit_wraps_up_with_conclusion(self, manager):
+        """达到轮次上限:强制无工具收束,返回'标注 + 基于证据的结论'。"""
+        manager.set_tools([probe_tool])
+        manager.max_rounds = 3
+        manager.llm_provider.chat_model = _ScriptedChatModel(
+            responses=[
+                *[
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {"name": "probe_tool", "args": {}, "id": f"c{i}", "type": "tool_call"}
+                        ],
+                    )
+                    for i in range(3)
+                ],
+                AIMessage(content="concluded: probe always returns PROBE_RESULT"),
+            ]
+        )
+
+        agent = await manager.create_agent(task="loop forever")
+        await manager.run_agent(agent.id)
+        current = await _wait_terminal(manager, agent.id)
+
+        assert current.status == SubagentStatus.COMPLETED
+        assert "tool limit" in current.result
+        assert "concluded" in current.result
+
+    @pytest.mark.asyncio
+    async def test_tool_loop_inherits_workspace_context(self, manager, tmp_path):
+        """子 agent 的 create_task 上下文继承会话工作区(ContextVar)。"""
+        from thumbelina.tools.workspace_context import get_workspace, set_workspace
+
+        seen: list = []
+
+        class _WsProbeTool(BaseTool):
+            name: str = "ws_probe"
+            description: str = "probe active workspace"
+
+            def _run(self) -> str:  # pragma: no cover - 同步路径不使用
+                return "WS=none"
+
+            async def _arun(self) -> str:
+                seen.append(get_workspace())
+                return "probed"
+
+        manager.set_tools([_WsProbeTool()])
+        set_workspace(str(tmp_path))
+        manager.llm_provider.chat_model = _ScriptedChatModel(
+            responses=[
+                AIMessage(
+                    content="",
+                    tool_calls=[{"name": "ws_probe", "args": {}, "id": "c1", "type": "tool_call"}],
+                ),
+                AIMessage(content="done"),
+            ]
+        )
+
+        agent = await manager.create_agent(task="probe workspace")
+        await manager.run_agent(agent.id)
+        current = await _wait_terminal(manager, agent.id)
+
+        assert current.status == SubagentStatus.COMPLETED
+        # 工具在子 agent 任务里观察到的工作区 == 派发会话设置的工作区。
+        assert seen == [str(tmp_path)]
+
+    @pytest.mark.asyncio
+    async def test_model_without_bind_tools_falls_back_to_single_shot(self, manager):
+        """不支持 bind_tools 的模型自动退回单轮 chat 模式。"""
+
+        class _NoBindModel(_ScriptedChatModel):
+            def bind_tools(self, tools, **kwargs):
+                raise NotImplementedError("no tools")
+
+        manager.set_tools([probe_tool])
+        manager.llm_provider.chat_model = _NoBindModel(responses=[AIMessage(content="x")])
+        manager.llm_provider.chat = AsyncMock(return_value="single shot answer")
+
+        agent = await manager.create_agent(task="task")
+        await manager.run_agent(agent.id)
+        current = await _wait_terminal(manager, agent.id)
+
+        assert current.status == SubagentStatus.COMPLETED
+        assert current.result == "single shot answer"
+
+
+class TestSingleShotPseudoToolGuard:
+    """无工具单轮模式必须拒绝伪工具语法文本(2026-09-06 事故根因之一)。"""
+
+    @pytest.mark.asyncio
+    async def test_pseudo_tool_text_marks_subagent_failed(self, manager):
+        manager.llm_provider.chat = AsyncMock(
+            return_value=(
+                "我将对文档进行评审。" + chr(10)
+                + "<read_file>" + chr(10)
+                + "<path>x.md</path>" + chr(10)
+                + "</read_file>"
+            )
+        )
+
+        agent = await manager.create_agent(task="review the doc")
+        await manager.run_agent(agent.id)
+        current = await _wait_terminal(manager, agent.id)
+
+        assert current.status == SubagentStatus.FAILED
+        assert "pseudo tool-call" in (current.error or "")
+
+    @pytest.mark.asyncio
+    async def test_plain_result_still_completes(self, manager):
+        manager.llm_provider.chat = AsyncMock(return_value="评审结论:设计合理。")
+
+        agent = await manager.create_agent(task="review")
+        await manager.run_agent(agent.id)
+        current = await _wait_terminal(manager, agent.id)
+
+        assert current.status == SubagentStatus.COMPLETED
+        assert current.result == "评审结论:设计合理。"

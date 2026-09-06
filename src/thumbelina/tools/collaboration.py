@@ -16,13 +16,16 @@ from pydantic import BaseModel, Field
 
 from thumbelina.subagents.base import SubagentStatus
 from thumbelina.tools.base import ThumbelinaBaseTool, ToolCategory
+from thumbelina.tools.workspace_context import get_current_conversation_id
 
 logger = logging.getLogger(__name__)
 
 # 单次 create_subagent 工具调用的最长等待时间(秒)。
-# 子 Agent 内部单次 LLM chat 可能耗时数十秒;这里给到 5 分钟覆盖大多数任务,
-# 超过则视为超时,把当前 status 返回给主 Agent 让它继续决策。
-SUBAGENT_TOOL_TIMEOUT_SECONDS = 300.0
+# 子 agent 现为工具循环模式,深任务可能远超此限;到点把当前 status 返回
+# 给主 Agent(可用 list_subagents 稍后再查)。上限必须低于主 agent 的
+# per-tool 超时(config.tools.tool_timeout,默认 300s),否则外层超时会
+# 抢在内层优雅降级消息之前把整个工具调用截杀成 "timed out"。
+SUBAGENT_TOOL_TIMEOUT_SECONDS = 240.0
 
 # 等待循环的 tick 间隔;轮询用以保持子 Agent 生命周期事件的实时推送路径不变。
 SUBAGENT_TOOL_POLL_INTERVAL = 0.1
@@ -51,7 +54,11 @@ class CreateSubagentTool(CollaborationTool):
 
     async def _execute(self, task: str) -> str:
         try:
-            agent = await self.manager.create_agent(task)
+            # 标注发起会话 id(生成任务上下文注入):子 agent 生命周期事件
+            # 据此路由到正确的会话流,并发回合间不串话。
+            agent = await self.manager.create_agent(
+                task, conversation_id=get_current_conversation_id()
+            )
         except RuntimeError as exc:
             return f"Failed to create subagent: {exc}"
 

@@ -470,7 +470,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         from thumbelina.subagents.manager import SubagentManager
 
-        subagent_manager = SubagentManager(llm_provider=llm_provider)
+        subagent_manager = SubagentManager(
+            llm_provider=llm_provider,
+            tool_timeout=config.tools.tool_timeout,
+        )
     except Exception:
         logger.debug("Subagent manager not initialized", exc_info=True)
 
@@ -677,6 +680,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         memory_config=config.memory,
     )
     app.state.agent = agent
+
+    # 子 agent 只读工具集:仅感知类(读/搜/取/记忆读),避免嵌套派发
+    # (collaboration)、写/执行副作用与通信通道;空集时 manager 自动退回
+    # 无工具单轮模式。工具在会话 ContextVar 继承下与主 agent 同工作区。
+    if subagent_manager is not None:
+        from thumbelina.tools.base import ToolCategory
+
+        subagent_manager.set_tools(
+            [
+                t
+                for t in agent.tools
+                if getattr(t, "category", None) == ToolCategory.PERCEPTION
+            ]
+        )
     # 暴露 memory_extractor 引用给热切换路径(§9.3);agent 自身的
     # memory_extractor 由 swap_provider 同步,此处仅作冗余入口。
     app.state.memory_extractor = getattr(agent, "memory_extractor", None)
