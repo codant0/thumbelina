@@ -53,6 +53,7 @@ from thumbelina.tools.collaboration import make_collaboration_tools
 from thumbelina.tools.communication import make_communication_tools
 from thumbelina.tools.event_trigger import make_event_tools
 from thumbelina.tools.execution_skill import make_skill_tools
+from thumbelina.tools.permissions import get_permission_mode, is_tool_available
 
 if TYPE_CHECKING:
     from thumbelina.config.models import ContextConfig, MemoryConfig
@@ -771,10 +772,13 @@ class ThumbelinaAgent:
                 state = {**state, "messages": repaired}
         model = self.llm
         if self.tools:
-            try:
-                model = model.bind_tools(self.tools)
-            except NotImplementedError:
-                logger.debug("Model does not support tool binding; tools disabled")
+            mode = get_permission_mode()
+            bindable = [t for t in self.tools if is_tool_available(mode, t.name)]
+            if bindable:
+                try:
+                    model = model.bind_tools(bindable)
+                except NotImplementedError:
+                    logger.debug("Model does not support tool binding; tools disabled")
         return await call_model(state, model, timeout=self.request_timeout)
 
     async def _tool_node_node(self, state: AgentState) -> dict[str, list[Any]]:

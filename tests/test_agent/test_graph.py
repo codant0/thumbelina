@@ -513,6 +513,10 @@ class TestToolBinding:
     async def test_model_is_bound_with_tools(self):
         """The chat model should receive the tool schemas via bind_tools."""
         from thumbelina.agent.graph import ThumbelinaAgent
+        from thumbelina.tools.permissions import (
+            PermissionMode,
+            set_permission_mode,
+        )
 
         echo = self._make_echo_tool()
 
@@ -522,14 +526,21 @@ class TestToolBinding:
         mock_provider.chat_model = MagicMock()
         mock_provider.chat_model.bind_tools.return_value = bound_model
 
-        agent = ThumbelinaAgent(llm_provider=mock_provider, tools=[echo])
-        result = await agent.run("hi")
+        # Task 7：默认 READ_ONLY 模式会按 ``is_tool_available`` 过滤掉 echo
+        # （只允许 READ_ONLY_TOOLS 中的工具）。切到 FULL_ACCESS 验证
+        # ``self.tools`` 完整传给 bind_tools 的路径仍工作。
+        set_permission_mode(PermissionMode.FULL_ACCESS)
+        try:
+            agent = ThumbelinaAgent(llm_provider=mock_provider, tools=[echo])
+            result = await agent.run("hi")
 
-        mock_provider.chat_model.bind_tools.assert_called_once()
-        bound = mock_provider.chat_model.bind_tools.call_args[0][0]
-        assert echo in bound
-        assert {t.name for t in bound} == {"echo", "notify_user_by_channel"}
-        assert result == "ok"
+            mock_provider.chat_model.bind_tools.assert_called_once()
+            bound = mock_provider.chat_model.bind_tools.call_args[0][0]
+            assert echo in bound
+            assert {t.name for t in bound} == {"echo", "notify_user_by_channel"}
+            assert result == "ok"
+        finally:
+            set_permission_mode(PermissionMode.READ_ONLY)
 
     @pytest.mark.asyncio
     async def test_tool_call_loop_executes_tool(self):
