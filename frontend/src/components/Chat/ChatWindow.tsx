@@ -11,6 +11,7 @@ import { RoleSelector } from './RoleSelector'
 import { ThinkingSelector } from './ThinkingSelector'
 import { ContextUsageItem } from '../StatusBar/ContextUsageItem'
 import { CacheHitRateItem } from '../StatusBar/CacheHitRateItem'
+import { useSettledMessages } from '../StatusBar/useSettledMessages'
 import { GitBranchSelector } from '../StatusBar/GitBranchSelector'
 import { Toast } from '../Settings/Toast'
 import { Mail, Eraser, Shrink, Route } from 'lucide-react'
@@ -63,6 +64,11 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
   // 当前会话缓存上一次的映射,确保 useEffect 中能读到上一轮的值。
   const lastConvIdRef = useRef<string | undefined>(conversationId)
   const { t } = useTranslation()
+
+  // 状态栏回合语义:回合进行中(发出消息→响应完成)冻结,收到新响应/切换会话才刷新。
+  // turnActive 已按当前会话归一(useWebSocket 返回值),后台会话的流不影响前台状态栏。
+  const turnActive = isStreaming || waitingForReply
+  const settled = useSettledMessages(messages, turnActive, conversationId)
 
   // Sync from WebSocket when backend reports mode
   useEffect(() => {
@@ -514,13 +520,15 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
                   onChange={(kbId) => onSetKnowledgeBase(conversationId, kbId)}
                 />
               )}
-              {/* 状态栏分组：上下文占用 + KV 缓存命中率（只读展示，不触发 LLM 调用） */}
+              {/* 状态栏分组：上下文占用 + KV 缓存命中率（只读展示，不触发 LLM 调用；
+                  回合进行中冻结，收到新响应/切换会话才刷新，新建会话展示 0/空） */}
               <div className="statusbar-group">
                 <ContextUsageItem
-                  messages={messages}
+                  settledMessages={settled.messages}
+                  settledVersion={settled.version}
                   endpointId={activeConversation?.endpoint_id ?? null}
                 />
-                <CacheHitRateItem conversationId={conversationId} />
+                <CacheHitRateItem conversationId={conversationId} refreshKey={settled.version} />
                 <GitBranchSelector ws={ws} workspace={activeConversation?.workspace ?? null} />
               </div>
             </>

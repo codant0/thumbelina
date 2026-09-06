@@ -25,20 +25,25 @@ function rateOf(d: Record<string, unknown>): number | null {
  *
  * - 数据来自只读端点 /api/v1/trajectory/cache-stats（按会话聚合 llm_usage 事件），
  *   只读展示，不触发 LLM 调用。
+ * - 取数时机（防闪烁）：conversationId 变化（resetKey → 先回占位再取）或
+ *   refreshKey 变化（回合结束落定，后端 llm_usage 早于 done 帧落库，取到必为新值）；
+ *   同会话刷新期间保留旧值，不回占位符。
  * - 受「状态栏栏目开关」控制：关闭时不渲染（且不发起请求）。
  */
-export function CacheHitRateItem({ conversationId }: { conversationId: string }) {
+export function CacheHitRateItem({ conversationId, refreshKey = 0 }: { conversationId: string; refreshKey?: number }) {
   const { config } = useStatusBarConfig()
   if (!config.cacheHit) return null
-  return <CacheHitRateItemInner conversationId={conversationId} />
+  return <CacheHitRateItemInner conversationId={conversationId} refreshKey={refreshKey} />
 }
 
-function CacheHitRateItemInner({ conversationId }: { conversationId: string }) {
+function CacheHitRateItemInner({ conversationId, refreshKey }: { conversationId: string; refreshKey: number }) {
   const { t } = useTranslation()
 
   const item = useMemo<StatusBarItem>(() => ({
     key: 'cacheHit',
     icon: <Zap size={13} aria-hidden="true" />,
+    resetKey: conversationId,
+    refreshKey,
     getData: () => fetchCacheStats(conversationId),
     render: d => {
       const rate = rateOf(d)
@@ -63,7 +68,8 @@ function CacheHitRateItemInner({ conversationId }: { conversationId: string }) {
     },
   // 把 conversationId 写入依赖：会话切换时 item 必须重建,否则 useMemo
   // 缓存里的 getData 闭包仍指向旧会话,fetch 永远查不到新会话的统计。
-  }), [t, conversationId])
+  // refreshKey(回合落定版本号)同理由 ChatWindow 传入,回合结束才重取数。
+  }), [t, conversationId, refreshKey])
 
   return <StatusBar items={[item]} />
 }

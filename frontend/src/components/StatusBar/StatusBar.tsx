@@ -1,4 +1,4 @@
-import { useEffect, useReducer } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { StatusBarItem, StatusData, StatusBarState } from './types'
 import { StatusBarItemView } from './StatusBarItem'
 
@@ -10,78 +10,74 @@ interface ItemState {
   failed?: boolean
 }
 
-type Action =
-  | { type: 'load'; key: string; data: StatusData; state: StatusBarState }
-  | { type: 'error'; key: string }
-  | { type: 'reset'; key: string }
+/**
+ * 单栏目取数控制器：只在栏目声明的 resetKey/refreshKey 两个原始值信号变化时取数。
+ *
+ * item 对象在父组件每次渲染时都可能是新引用（内联 items 数组 / 重建的 useMemo 闭包），
+ * 绝不能进 effect 依赖——否则流式对话期间父组件每 chunk 重渲染都会触发
+ * 「清空回占位 + 重取数」，状态栏持续闪烁（异步栏目还会形成请求风暴）。
+ * 信号变化触发 effect 时，闭包捕获的 item 恰是最近一次渲染的版本，getData 读到的即新值。
+ */
+function StatusBarItemController({ item }: { item: StatusBarItem }) {
+  const [entry, setEntry] = useState<ItemState | null>(null)
+  const { resetKey, refreshKey } = item
+  // 上一次 resetKey：区分「会话切换/新建」（先清空回占位）与「同会话刷新」（旧值保留到新数据到达）。
+  const prevResetRef = useRef(resetKey)
 
-function reducer(state: Record<string, ItemState>, action: Action): Record<string, ItemState> {
-  switch (action.type) {
-    case 'load':
-      return { ...state, [action.key]: { data: action.data, state: action.state } }
-    case 'error':
-      return { ...state, [action.key]: { state: 'error', failed: true } }
-    // 清空某个 key 的展示态：会话切换/新建时立刻回到占位,
-    // 避免「上一会话的统计短暂停留」再被新数据替换。
-    case 'reset': {
-      if (!(action.key in state)) return state
-      const next = { ...state }
-      delete next[action.key]
-      return next
+  useEffect(() => {
+    if (prevResetRef.current !== resetKey) {
+      prevResetRef.current = resetKey
+      // resetKey 变化（会话切换/新建）：立刻回到占位符，而不是停留上一会话的数据。
+      setEntry(null)
     }
-    default:
-      return state
-  }
+    let cancelled = false
+    // 兼容同步与异步 getData，两者抛错都归入 error 降级；
+    // cancelled 保证快速连续取数时，上一轮未完成的响应不会覆盖新一轮的数据（竞态防护）。
+    Promise.resolve()
+      .then(() => item.getData())
+      .then(data => {
+        if (!cancelled) setEntry({ data, state: item.status ? item.status(data) : 'ok' })
+      })
+      .catch(() => {
+        if (!cancelled) setEntry({ state: 'error', failed: true })
+      })
+    return () => {
+      cancelled = true
+    }
+    // item 仅为闭包来源；取数时机完全由 resetKey/refreshKey 驱动（见组件注释）。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resetKey, refreshKey])
+
+  const content = entry?.failed
+    ? '—'
+    : (entry?.data && item.render(entry.data)) ?? '…'
+  return (
+    <StatusBarItemView
+      icon={item.icon}
+      state={entry?.state ?? 'idle'}
+      label={content}
+      title={entry?.data && item.title ? item.title(entry.data) : undefined}
+    />
+  )
 }
 
 interface StatusBarProps {
-  /** 已注册的栏目列表（实现 StatusBarItem 协议）。本版仅 context 一项。 */
+  /** 已注册的栏目列表（实现 StatusBarItem 协议） */
   items: StatusBarItem[]
 }
 
 /**
  * 状态栏容器：遍历注册的栏目，各自取数后统一渲染外壳。
  * 数据获取须为纯函数（只读前端状态 / 只读端点，绝不触发 LLM 调用）。
- * 当 items（或其闭包捕获的实时状态）变化时重新求值，不做整体清空以
- * 避免实时栏目（如随消息流变化的上下文占用）产生闪烁。
+ * 重取数只由栏目声明的 resetKey/refreshKey 信号驱动；父组件重渲染导致的
+ * items/item 引用变化不触发任何取数——流式对话期间状态栏保持冻结、不闪烁。
  */
 export function StatusBar({ items }: StatusBarProps) {
-  const [byKey, dispatch] = useReducer(reducer, {})
-
-  useEffect(() => {
-    for (const item of items) {
-      // 先清掉旧的展示态:items 变化(通常是会话切换/新建)时,
-      // 立刻回到占位符而不是停留上一会话的数据,避免闪烁。
-      dispatch({ type: 'reset', key: item.key })
-      // 兼容同步与异步 getData，两者抛错都归入 error 降级
-      Promise.resolve()
-        .then(() => item.getData())
-        .then(data => {
-          const state = item.status ? item.status(data) : 'ok'
-          dispatch({ type: 'load', key: item.key, data, state })
-        })
-        .catch(() => dispatch({ type: 'error', key: item.key }))
-    }
-  }, [items])
-
   return (
     <div className="statusbar" data-testid="statusbar">
-      {items.map(item => {
-        const st = byKey[item.key]
-        // failed 仅在取数失败时置位 → 展示占位符；st.state 仅用于装饰状态点
-        const content = st?.failed
-          ? '—'
-          : (st?.data && item.render(st.data)) ?? '…'
-        return (
-          <StatusBarItemView
-            key={item.key}
-            icon={item.icon}
-            state={st?.state ?? 'idle'}
-            label={content}
-            title={st?.data && item.title ? item.title(st.data) : undefined}
-          />
-        )
-      })}
+      {items.map(item => (
+        <StatusBarItemController key={item.key} item={item} />
+      ))}
     </div>
   )
 }
