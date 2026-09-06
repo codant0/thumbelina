@@ -98,6 +98,12 @@ def mock_repository():
             return True
         return False
 
+    async def set_conversation_permission(conv_id: str, mode: str) -> bool:
+        if conv_id in conversations:
+            conversations[conv_id]["permission"] = mode
+            return True
+        return False
+
     async def clear_messages(conv_id: str) -> bool:
         if conv_id in conversations:
             messages.clear()
@@ -105,7 +111,14 @@ def mock_repository():
             return True
         return False
 
-    async def create_conversation(name=None, pinned=False, mode="chat", workspace=None, role=None):
+    async def create_conversation(
+        name=None,
+        pinned=False,
+        mode="chat",
+        workspace=None,
+        role=None,
+        permission="full_access",
+    ):
         """Record a new conversation; ids increment per fixture instance."""
         conv_id = f"test-conv-id-{len(conversations) + 1}"
         conversations[conv_id] = {
@@ -115,6 +128,7 @@ def mock_repository():
             "mode": mode,
             "workspace": workspace,
             "role": role,
+            "permission": permission,
             "created_at": "2026-01-01",
             "updated_at": "2026-01-01",
             "summary": None,
@@ -146,6 +160,7 @@ def mock_repository():
     )
     repository.set_conversation_role = AsyncMock(side_effect=set_conversation_role)
     repository.set_conversation_thinking = AsyncMock(side_effect=set_conversation_thinking)
+    repository.set_conversation_permission = AsyncMock(side_effect=set_conversation_permission)
 
     # Mock repository with ping method
     repository.conversation_repository = MagicMock()

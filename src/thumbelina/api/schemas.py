@@ -47,6 +47,7 @@ class ConversationSchema(BaseModel):
     role: str | None = None
     thinking_enabled: bool = False
     thinking_effort: str = "medium"
+    permission: str = "full_access"
     created_at: str
     updated_at: str
     summary: str | None = None
@@ -66,6 +67,7 @@ class ConversationDetailSchema(BaseModel):
     role: str | None = None
     thinking_enabled: bool = False
     thinking_effort: str = "medium"
+    permission: str = "full_access"
     created_at: str
     updated_at: str
     summary: str | None = None

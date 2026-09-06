@@ -45,6 +45,7 @@ class RepositoryManager:
         mode: str = "chat",
         workspace: str | None = None,
         role: str | None = None,
+        permission: str = "full_access",
     ) -> str:
         """Create a new conversation.
 
@@ -60,6 +61,9 @@ class RepositoryManager:
             Absolute workspace directory path for coder conversations.
         role:
             Optional persona role; coder conversations default to 'coder' (set by the API layer).
+        permission:
+            Initial permission mode for the conversation (route layer
+            validates against ``PermissionMode`` before calling).
 
         Returns
         -------
@@ -67,7 +71,12 @@ class RepositoryManager:
             The ID of the newly created conversation.
         """
         return await self.conversation_repository.create_conversation(
-            name=name, pinned=pinned, mode=mode, workspace=workspace, role=role
+            name=name,
+            pinned=pinned,
+            mode=mode,
+            workspace=workspace,
+            role=role,
+            permission=permission,
         )
 
     async def add_message(
@@ -340,6 +349,30 @@ class RepositoryManager:
         """
         return await self.conversation_repository.set_conversation_thinking(
             conversation_id, enabled, effort
+        )
+
+    async def set_conversation_permission(
+        self, conversation_id: str, mode: str
+    ) -> bool:
+        """Set the permission mode for a conversation.
+
+        Parameters
+        ----------
+        conversation_id:
+            ID of the conversation to update.
+        mode:
+            Permission mode key: ``read_only`` / ``workspace_write`` /
+            ``global_write`` / ``full_access`` / ``auto``. The route
+            layer validates the value against ``PermissionMode`` before
+            calling this method, so the manager trusts the input.
+
+        Returns
+        -------
+        bool
+            True if set successfully, False if conversation not found.
+        """
+        return await self.conversation_repository.set_conversation_permission(
+            conversation_id, mode
         )
 
     async def add_trajectory_events(
