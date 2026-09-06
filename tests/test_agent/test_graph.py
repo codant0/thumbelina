@@ -1030,6 +1030,57 @@ class TestStreamToolEvents:
         # 内容事件不受影响
         assert "".join(e["text"] for e in events if e["type"] == "content") == "final answer"
 
+    async def test_stream_flushes_pending_content_before_tool_start(self):
+        """轮文本(不足 batch_size 滞留缓冲)必须先于 tool_start 发出。
+
+        前端在 tool_start 到达时记录工具芯片的穿插锚点;若文本尾巴滞后,
+        锚点落在句中,工具卡会把一句话从中间切开(设计 §5.3 顺序契约)。
+        """
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        mock_provider = _create_mock_provider()
+        mock_provider.chat_model.ainvoke = AsyncMock(
+            side_effect=[
+                AIMessage(
+                    content="先记下绝对路径",  # 7 字符 < batch_size(30),滞留缓冲
+                    tool_calls=[
+                        {"name": "_graph_echo_tool", "args": {"text": "hi"}, "id": "call_1"}
+                    ],
+                ),
+                AIMessage(content="final answer"),
+            ]
+        )
+        agent = ThumbelinaAgent(llm_provider=mock_provider, tools=[_graph_echo_tool])
+        events = [e async for e in agent.stream("use the tool")]
+
+        types = [e["type"] for e in events]
+        start_idx = types.index("tool_start")
+        round1_text = "".join(e["text"] for e in events[:start_idx] if e["type"] == "content")
+        assert "先记下绝对路径" in round1_text
+
+    async def test_stream_nonstreaming_round_keeps_text_before_tool(self):
+        """非流式 provider 的"文本+工具调用"完整 AIMessage 不丢文本。"""
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        mock_provider = _create_mock_provider()
+        mock_provider.chat_model.ainvoke = AsyncMock(
+            side_effect=[
+                AIMessage(
+                    content="先记下绝对路径",
+                    tool_calls=[
+                        {"name": "_graph_echo_tool", "args": {"text": "hi"}, "id": "call_1"}
+                    ],
+                ),
+                AIMessage(content="final answer"),
+            ]
+        )
+        agent = ThumbelinaAgent(llm_provider=mock_provider, tools=[_graph_echo_tool])
+        events = [e async for e in agent.stream("use the tool")]
+
+        content = "".join(e["text"] for e in events if e["type"] == "content")
+        assert "先记下绝对路径" in content
+        assert content.endswith("final answer")
+
     async def test_stream_pure_text_round_has_no_tool_events(self):
         from thumbelina.agent.graph import ThumbelinaAgent
 

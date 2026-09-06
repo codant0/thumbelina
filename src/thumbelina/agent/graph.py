@@ -1380,10 +1380,22 @@ class ThumbelinaAgent:
                 # custom 模式:_tool_node_node 发射的 tool_start/tool_end 事件,
                 # 不进批量缓冲、立即透传(工具可见性特性)。
                 if stream_mode == "custom":
-                    if isinstance(event, dict) and "tool_start" in event:
-                        yield {"type": "tool_start", **event["tool_start"]}
-                    elif isinstance(event, dict) and "tool_end" in event:
-                        yield {"type": "tool_end", **event["tool_end"]}
+                    if isinstance(event, dict) and ("tool_start" in event or "tool_end" in event):
+                        # 透传前必须排空批量缓冲:轮文本尾巴(不足 batch_size 且
+                        # 未到 flush 超时)滞留在 pending 里,若让 tool_start 抢先,
+                        # 前端会把工具芯片锚点记在尾巴之前,一句话被芯片从中间
+                        # 切开、尾巴粘到下一轮文本前(设计 §5.3 锚点顺序契约)。
+                        if pending_reasoning:
+                            yield {"type": "reasoning", "text": pending_reasoning}
+                            pending_reasoning = ""
+                        if pending_content:
+                            yield {"type": "content", "text": pending_content}
+                            pending_content = ""
+                        last_flush = asyncio.get_event_loop().time()
+                        if "tool_start" in event:
+                            yield {"type": "tool_start", **event["tool_start"]}
+                        else:
+                            yield {"type": "tool_end", **event["tool_end"]}
                     continue
                 # messages 模式:event 为 (message_chunk, metadata) 元组。
                 message_chunk = event[0]
@@ -1397,9 +1409,11 @@ class ThumbelinaAgent:
                 # responses (AIMessage). The latter occurs with non-streaming
                 # LLM providers, where astream(stream_mode="messages") emits a
                 # single AIMessage instead of per-token chunks.
-                if not isinstance(message_chunk, AIMessage) or getattr(
-                    message_chunk, "tool_calls", None
-                ):
+                # 带 tool_calls 的消息也要提取文本:非流式 provider 的轮内
+                # "文本+工具调用"是同一条完整 AIMessage,跳过会把工具调用
+                # 之前的文本整个丢掉(不进 full_response、不落库);流式
+                # provider 的 tool-call chunk content 为空,提取是无害 no-op。
+                if not isinstance(message_chunk, AIMessage):
                     continue
                 chunk_metadata = getattr(message_chunk, "response_metadata", None)
                 if isinstance(chunk_metadata, dict) and chunk_metadata:
