@@ -32,6 +32,25 @@ class CommunicationTool(ThumbelinaBaseTool):
     category: ToolCategory = ToolCategory.COMMUNICATION
     agent_ref: Any = None
 
+    @staticmethod
+    def _allowed_user_id(channel: Any) -> str | None:
+        """返回 channel 当前允许触达的用户 id（spec §4.3 收窄）。
+
+        兼容两种属性暴露形式：
+        - ``last_user_id`` property（wechat_channel 等统一封装）；
+        - ``_last_wechat_user_id`` / ``_last_qq_user_id`` 原始字段（QQ 通道）。
+        """
+        for attr in (
+            "last_user_id",
+            "_last_wechat_user_id",
+            "_last_qq_user_id",
+            "_last_user_id",
+        ):
+            value = getattr(channel, attr, None)
+            if value:
+                return str(value)
+        return None
+
     def resolve_target(self, channel_name: str, user_id: str) -> tuple[Any, str, str | None]:
         """返回 (channel|None, target|None, error_message|None)。"""
         ch = self.agent_ref.get_channel(channel_name)
@@ -42,7 +61,23 @@ class CommunicationTool(ThumbelinaBaseTool):
                 "",
                 f"Channel '{channel_name}' is not registered. Available channels: {available}.",
             )
-        target = user_id.strip() or getattr(ch, "last_user_id", None)
+        requested = (user_id or "").strip()
+        allowed = self._allowed_user_id(ch)
+        # 收窄：仅允许触达该 channel 最近一次会话的用户（spec §4.3）。
+        # 空 user_id 走默认回退到 allowed；非空 user_id 必须与 allowed 一致。
+        if requested:
+            if not allowed or requested != allowed:
+                return (
+                    None,
+                    "",
+                    (
+                        f"Error: user_id 不允许（仅限当前会话用户）: "
+                        f"{requested!r}"
+                    ),
+                )
+            target = requested
+        else:
+            target = allowed or ""
         if not target:
             return (
                 None,

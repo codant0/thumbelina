@@ -16,7 +16,7 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from thumbelina.tools.workspace_context import get_workspace, resolve_workspace_path
 
@@ -434,3 +434,104 @@ def _register_app_anchors(config: object | None = None) -> None:
             set_app_anchor(guard, raw)
         except OSError:
             logger.warning("permission anchor resolve failed: %s", guard)
+
+
+# ---------------------------------------------------------------------------
+# 任务 4：判定矩阵 evaluate_tool_call + 工具名册（spec §3.3）
+# ---------------------------------------------------------------------------
+
+
+# 只读工具白名单（按工具 name 索引，spec §3.3 + §6.1）
+# 闸门对 READ_ONLY 模式按 name ∈ READ_ONLY_TOOLS 放行；其余一律
+# deny rule.read_only（白名单型策略，避免列举全量白名单外的工具名）。
+READ_ONLY_TOOLS: frozenset[str] = frozenset({
+    "read_file", "list_directory", "search_files", "search_text",
+    "parse_json", "parse_csv", "analyze_text",
+    "fetch_url", "web_search",
+    "search_memory", "read_memory",
+    "list_subagents", "list_scheduled_tasks", "list_skill_compositions",
+    "notify_user_by_channel",   # spec §4.3：通知用户不改动状态，按只读语义放行
+})
+
+
+# 闸门/工具级 security_review 共同消费的已知工具名册。
+# 命中：按工具类型委托（run_shell→classify_shell_command、write_file→
+# evaluate_write_file、schedule_task→无人值守判定）；未命中：高模式
+# confirm rule.unknown_tool 让用户在审批卡显式确认（闸门 fail-open
+# 上限；READ_ONLY/WORKSPACE_WRITE 走 deny 走 fail-closed）。
+KNOWN_TOOLS: frozenset[str] = frozenset({
+    "read_file", "list_directory", "search_files", "search_text",
+    "parse_json", "parse_csv", "analyze_text",
+    "fetch_url", "web_search",
+    "run_shell", "write_file", "remember",
+    "list_skill_compositions", "create_skill_composition", "execute_skill_composition",
+    "notify_user_by_channel",
+    "create_subagent", "list_subagents",
+    "schedule_task", "list_scheduled_tasks",
+    "search_memory", "read_memory",
+})
+
+
+def evaluate_tool_call(
+    mode: PermissionMode,
+    name: str,
+    category: str | None,      # 签名占位（spec §3.3 按 name 判定，category 备用）
+    args: dict[str, Any] | None,
+) -> PermissionDecision:
+    """闸门单一事实源（spec §3.3）。
+
+    ============ =========================================== =========
+    mode         工具名                                       裁决
+    ============ =========================================== =========
+    READ_ONLY    name ∈ READ_ONLY_TOOLS                       allow
+    READ_ONLY    name ∉ READ_ONLY_TOOLS                       deny rule.read_only
+    其它模式     name ∉ KNOWN_TOOLS                           confirm rule.unknown_tool
+    其它模式     run_shell                                    委托 classify_shell_command
+    其它模式     write_file                                   委托 evaluate_write_file
+    其它模式     schedule_task + mode=prompt                  confirm rule.unattended_task
+                                                              (AUTO → allow auto_allowed=True)
+    其它模式     schedule_task + mode=notify                  allow
+    其它模式     其它 KNOWN_TOOLS                             allow
+    ============ =========================================== =========
+    """
+    args = args or {}
+    if mode is PermissionMode.READ_ONLY:
+        if name in READ_ONLY_TOOLS:
+            return ALLOW
+        return deny("rule.read_only")
+    if name not in KNOWN_TOOLS:
+        # 全局写入及以上：未知工具走审批卡让用户在红卡上显式确认；
+        # 工作区写入及以下：fail-closed 直接拒绝（spec §3.3 矩阵）。
+        if mode in (PermissionMode.GLOBAL_WRITE, PermissionMode.FULL_ACCESS, PermissionMode.AUTO):
+            return confirm("rule.unknown_tool")
+        return deny("rule.unknown_tool")
+    if name == "run_shell":
+        return classify_shell_command(
+            str(args.get("command", "")), auto=mode is PermissionMode.AUTO
+        )
+    if name == "write_file":
+        return evaluate_write_file(mode, str(args.get("path", "")))
+    if name == "schedule_task":
+        schedule_mode = str(args.get("mode") or "prompt")
+        if schedule_mode == "prompt":
+            if mode is PermissionMode.AUTO:
+                # AUTO 豁免：无人值守任务自动放行（spec §3.3 AUTO 语义）
+                return PermissionDecision(
+                    "allow", "dangerous", "rule.unattended_task", True
+                )
+            return confirm("rule.unattended_task")
+        # notify 模式只主动推消息给用户，不挂后台任务，等同只读放行
+        return ALLOW
+    return ALLOW
+
+
+def is_tool_available(mode: PermissionMode, name: str) -> bool:
+    """模型 bind_tools 前的过滤（spec §6.1，Task 7 消费）。
+
+    READ_ONLY 模式只暴露 ``READ_ONLY_TOOLS``；其它模式由调用方在 bind 端
+    另行过滤未知工具（按 ``KNOWN_TOOLS`` 名册），此处一律返回 True 以避免
+    双重过滤造成冲突。
+    """
+    if mode is PermissionMode.READ_ONLY:
+        return name in READ_ONLY_TOOLS
+    return True

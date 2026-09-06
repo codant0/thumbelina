@@ -59,8 +59,18 @@ async def test_notify_no_recipient():
 async def test_receipt_unconfirmed_when_none():
     ch = FakeChannel(result=None)
     t = NotifyUserByChannelTool(agent_ref=FakeAgent(ch))
-    out = await t._arun(message="hi", user_id="u1")
+    out = await t._arun(message="hi", user_id="u9")
     assert "delivery not confirmed" in out
+
+
+@pytest.mark.asyncio
+async def test_notify_rejects_other_user_id():
+    """Task 4 收窄：user_id 必须等于该 channel 的 last_user_id，否则拒绝（spec §4.3）。"""
+    ch = FakeChannel(last_user_id="u9")
+    t = NotifyUserByChannelTool(agent_ref=FakeAgent(ch))
+    out = await t._arun(message="hi", user_id="attacker")
+    assert "user_id 不允许" in out
+    assert ch.sent is None
 
 
 def test_category_and_factory():

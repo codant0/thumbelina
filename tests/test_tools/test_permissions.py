@@ -286,3 +286,99 @@ def test_auto_disabled_by_default():
     decision = classify_shell_command("sudo ls")
     assert decision.verdict == "confirm"
     assert decision.auto_allowed is False
+
+
+# ---------------------------------------------------------------------------
+# 任务 4：判定矩阵 evaluate_tool_call + KNOWN_TOOLS/READ_ONLY_TOOLS
+# ---------------------------------------------------------------------------
+
+
+def test_read_only_allowlist_by_name():
+    """read_only 模式：白名单内按名放行，白名单外一律 deny rule.read_only。"""
+    from thumbelina.tools.permissions import evaluate_tool_call
+
+    for name in (
+        "read_file", "web_search", "list_subagents", "list_scheduled_tasks",
+        "list_skill_compositions", "search_memory", "notify_user_by_channel",
+    ):
+        decision = evaluate_tool_call(PermissionMode.READ_ONLY, name, None, {})
+        assert decision.verdict == "allow", name
+
+    for name in ("write_file", "run_shell", "remember", "schedule_task", "create_subagent"):
+        decision = evaluate_tool_call(PermissionMode.READ_ONLY, name, None, {})
+        assert (decision.verdict, decision.reason) == ("deny", "rule.read_only"), name
+
+
+def test_unknown_tool_fail_closed():
+    """未在 KNOWN_TOOLS 名册里的工具：低模式直接 deny，高模式 confirm 兜底。"""
+    from thumbelina.tools.permissions import evaluate_tool_call
+
+    for mode in (PermissionMode.READ_ONLY, PermissionMode.WORKSPACE_WRITE):
+        decision = evaluate_tool_call(mode, "plugin_tool_x", None, {})
+        assert decision.verdict == "deny", mode
+    for mode in (PermissionMode.GLOBAL_WRITE, PermissionMode.FULL_ACCESS, PermissionMode.AUTO):
+        decision = evaluate_tool_call(mode, "plugin_tool_x", None, {})
+        assert (decision.verdict, decision.reason) == ("confirm", "rule.unknown_tool"), mode
+
+
+def test_schedule_task_prompt_confirm():
+    """schedule_task 的 prompt 模式属于无人值守，confirm；AUTO 自动放行；notify 模式 allow。"""
+    from thumbelina.tools.permissions import evaluate_tool_call
+
+    args_prompt = {
+        "description": "x",
+        "cron_expression": "@daily",
+        "mode": "prompt",
+    }
+    decision = evaluate_tool_call(
+        PermissionMode.WORKSPACE_WRITE, "schedule_task", None, args_prompt
+    )
+    assert (decision.verdict, decision.reason) == ("confirm", "rule.unattended_task")
+
+    decision = evaluate_tool_call(
+        PermissionMode.AUTO, "schedule_task", None, {"mode": "prompt"}
+    )
+    assert decision.verdict == "allow"
+    assert decision.auto_allowed is True
+
+    decision = evaluate_tool_call(
+        PermissionMode.WORKSPACE_WRITE, "schedule_task", None, {"mode": "notify"}
+    )
+    assert decision.verdict == "allow"
+
+
+def test_auto_marks_confirmables():
+    """AUTO 模式下，shell 的 CONFIRM 命中转为 auto_allowed=True 的 allow。"""
+    from thumbelina.tools.permissions import evaluate_tool_call
+
+    decision = evaluate_tool_call(
+        PermissionMode.AUTO, "run_shell", None, {"command": "sudo ls"}
+    )
+    assert decision.verdict == "allow"
+    assert decision.auto_allowed is True
+
+
+def test_known_tools_complete():
+    """关键工具名都登记到 KNOWN_TOOLS（闸门白名单/黑名单的边界依据）。"""
+    from thumbelina.tools.permissions import KNOWN_TOOLS
+
+    assert {
+        "run_shell", "write_file", "remember", "schedule_task", "create_subagent",
+        "notify_user_by_channel",
+    } <= KNOWN_TOOLS
+
+
+def test_is_tool_available_read_only_hides_mutating():
+    """is_tool_available：read_only 只暴露白名单；其他模式全部 True（KNOWN_TOOLS 由调用方过滤）。"""
+    from thumbelina.tools.permissions import is_tool_available
+
+    assert is_tool_available(PermissionMode.READ_ONLY, "read_file") is True
+    assert is_tool_available(PermissionMode.READ_ONLY, "run_shell") is False
+    assert is_tool_available(PermissionMode.READ_ONLY, "schedule_task") is False
+
+    for mode in (
+        PermissionMode.WORKSPACE_WRITE, PermissionMode.GLOBAL_WRITE,
+        PermissionMode.FULL_ACCESS, PermissionMode.AUTO,
+    ):
+        assert is_tool_available(mode, "run_shell") is True
+        assert is_tool_available(mode, "plugin_tool_x") is True
