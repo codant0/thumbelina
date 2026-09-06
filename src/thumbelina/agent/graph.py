@@ -291,6 +291,7 @@ class ThumbelinaAgent:
         tools: list[BaseTool] | None = None,
         repository_manager: RepositoryManager | None = None,
         request_timeout: float | None = None,
+        tool_timeout: float | None = None,
         skill_engine: SkillApplicationEngine | None = None,
         subagent_manager: SubagentManager | None = None,
         scheduler: TaskScheduler | None = None,
@@ -308,6 +309,9 @@ class ThumbelinaAgent:
         self.repository_manager = repository_manager
         self.trajectory_recorder = TrajectoryRecorder(self.repository_manager)
         self.request_timeout = request_timeout
+        # 单工具执行超时(None = 不限时);来自 config.tools.tool_timeout。
+        # 防止单个慢工具挂住整轮对话(工具结果仍保证与 tool_calls 配对)。
+        self.tool_timeout = tool_timeout
         self.skill_engine = skill_engine
         self.subagent_manager = subagent_manager
         self.scheduler = scheduler
@@ -852,7 +856,9 @@ class ThumbelinaAgent:
                         }
                     }
                 )
-        result = await tool_node(state, self.tools, on_tool_event=on_tool_event)
+        result = await tool_node(
+            state, self.tools, on_tool_event=on_tool_event, timeout=self.tool_timeout
+        )
         tool_messages = result.get("messages", [])
         # ``zip`` 会在两侧长度不一致时静默截断,这里显式记录告警以避免
         # 后续 ``tool_node`` 行为变更后丢失轨迹记录而无人察觉。
@@ -1171,6 +1177,7 @@ class ThumbelinaAgent:
             tools=list(self.tools),
             repository_manager=self.repository_manager,
             request_timeout=self.request_timeout,
+            tool_timeout=self.tool_timeout,
             skill_engine=self.skill_engine,
             subagent_manager=self.subagent_manager,
             scheduler=self.scheduler,

@@ -282,9 +282,16 @@ class WebSearchConfig(BaseModel):
 
 
 class ToolsConfig(BaseModel):
-    """内置工具配置。当前仅实现 web_search 搜索后端策略。"""
+    """内置工具配置。"""
 
     web_search: WebSearchConfig = Field(default_factory=WebSearchConfig)
+    tool_timeout: float | None = Field(
+        default=300.0,
+        description=(
+            "单工具执行超时（秒），超时返回错误 ToolMessage 而不是无限期挂住"
+            "整轮对话；None = 不限时。"
+        ),
+    )
 
 
 class SchedulerConfig(BaseModel):

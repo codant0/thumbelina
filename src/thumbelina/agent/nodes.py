@@ -59,6 +59,7 @@ async def tool_node(
     state: AgentState,
     tools: list[BaseTool],
     on_tool_event: ToolEventCallback | None = None,
+    timeout: float | None = None,
 ) -> dict[str, list[ToolMessage]]:
     """Execute tool calls from the last AI message.
 
@@ -74,7 +75,7 @@ async def tool_node(
     Parameters
     ----------
     state:
-        Current agent state containing the message history.
+        Current agent state.
     tools:
         List of available tools.
     on_tool_event:
@@ -84,6 +85,14 @@ async def tool_node(
         exceptions are swallowed (debug log) and never affect tool
         execution. The error state comes from the control flow here, not
         from inspecting the content string.
+    timeout:
+        Optional per-tool execution timeout in seconds. A tool that exceeds
+        it yields an ``Error: tool ... timed out`` ``ToolMessage`` (with
+        ``is_error`` notification) instead of stalling the whole turn —
+        ``tool_calls``/``ToolMessage`` pairing is preserved. The underlying
+        tool coroutine is cancelled at its next await point; work already
+        offloaded to a thread (subprocess, ``to_thread``) cannot be killed
+        and will finish in the background.
 
     Returns
     -------
@@ -123,7 +132,17 @@ async def tool_node(
             return ToolMessage(content=content, tool_call_id=tool_call_id)
 
         try:
-            result = await tool_map[tool_name].ainvoke(tool_call["args"])
+            invocation = tool_map[tool_name].ainvoke(tool_call["args"])
+            if timeout is not None:
+                result = await asyncio.wait_for(invocation, timeout=timeout)
+            else:
+                result = await invocation
+        except TimeoutError:
+            # 必须先于 except Exception:TimeoutError 是 OSError 子类,
+            # 会被宽泛的 Exception 分支吞掉。
+            content = f"Error: tool '{tool_name}' timed out after {timeout:g}s"
+            await _notify(True, content)
+            return ToolMessage(content=content, tool_call_id=tool_call_id)
         except Exception as exc:
             content = f"Error executing tool '{tool_name}': {exc}"
             await _notify(True, content)

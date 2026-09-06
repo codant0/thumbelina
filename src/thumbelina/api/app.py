@@ -663,6 +663,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         tools=get_all_tools(search_config=config.tools),
         repository_manager=repository,
         request_timeout=config.llm.request_timeout,
+        tool_timeout=config.tools.tool_timeout,
         skill_engine=skill_engine,
         subagent_manager=subagent_manager,
         scheduler=task_scheduler,

@@ -252,6 +252,7 @@ async def _run_chat_session(config: AppConfig, provider: str, model: str | None)
         tools=get_all_tools(search_config=config.tools),
         repository_manager=repository_manager,
         request_timeout=config.llm.request_timeout,
+        tool_timeout=config.tools.tool_timeout,
         skill_engine=skill_engine,
         subagent_manager=subagent_manager,
         scheduler=scheduler,

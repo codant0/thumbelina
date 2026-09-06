@@ -243,3 +243,64 @@ class TestToolNodeEventCallback:
             _state_with({"name": "_ok_tool", "args": {}, "id": "c5"}), [_ok_tool]
         )
         assert result["messages"][0].content == "ok result"
+
+
+class TestToolNodeTimeout:
+    """per-tool 超时(2026-09-06 修复):慢工具产出错误 ToolMessage 而非挂死整轮。"""
+
+    @pytest.mark.asyncio
+    async def test_timeout_returns_error_tool_message(self):
+        import asyncio as _asyncio
+
+        from langchain_core.messages import ToolMessage
+
+        from thumbelina.agent.nodes import tool_node
+
+        async def _slow(*args, **kwargs):
+            await _asyncio.sleep(5)
+            return "too late"
+
+        mock_tool = MagicMock()
+        mock_tool.name = "slow"
+        mock_tool.ainvoke = _slow
+
+        events = []
+
+        async def _on_event(info):
+            events.append(info)
+
+        ai_msg = AIMessage(
+            content="", tool_calls=[{"id": "call_1", "name": "slow", "args": {}}]
+        )
+        result = await tool_node(
+            {"messages": [ai_msg]}, [mock_tool], on_tool_event=_on_event, timeout=0.05
+        )
+
+        assert len(result["messages"]) == 1
+        msg = result["messages"][0]
+        assert isinstance(msg, ToolMessage)
+        assert msg.tool_call_id == "call_1"
+        assert "timed out" in msg.content
+        # 配对不变量:tool_calls 与 ToolMessage 数量一致(供 LLM 回填)。
+        assert events and events[0]["is_error"] is True
+        assert events[0]["call_id"] == "call_1"
+
+    @pytest.mark.asyncio
+    async def test_timeout_not_triggered_for_fast_tool(self):
+        from langchain_core.messages import ToolMessage
+
+        from thumbelina.agent.nodes import tool_node
+
+        mock_tool = MagicMock()
+        mock_tool.name = "fast"
+        mock_tool.ainvoke = AsyncMock(return_value="fast result")
+
+        ai_msg = AIMessage(
+            content="", tool_calls=[{"id": "call_1", "name": "fast", "args": {}}]
+        )
+        result = await tool_node(
+            {"messages": [ai_msg]}, [mock_tool], timeout=5.0
+        )
+
+        assert result["messages"][0].content == "fast result"
+        assert isinstance(result["messages"][0], ToolMessage)
