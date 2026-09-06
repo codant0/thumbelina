@@ -711,6 +711,15 @@ describe('useWebSocket', () => {
       const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-1'))
       await act(async () => { vi.advanceTimersByTime(10) })
 
+      // 健康链路:后端对心跳 ping 回 pong(连接存活但 LLM 挂起)。
+      // 否则 70s 无帧会被心跳判死,轮不到 90s 回复超时。
+      const ws0 = MockWebSocket.instances[0]
+      const rawSend = ws0.send.bind(ws0)
+      ws0.send = (data: string) => {
+        rawSend(data)
+        if (JSON.parse(data).ping) ws0.simulateMessage('{"pong":true}')
+      }
+
       // 发出消息后无任何响应帧,直接排队第二条
       act(() => { result.current.sendMessage('first', 'conv-1') })
       act(() => { result.current.queuePendingMessage('second', 'conv-1') })

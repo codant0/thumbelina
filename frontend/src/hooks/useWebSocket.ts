@@ -9,6 +9,8 @@ interface WsIncoming {
   done?: boolean
   /** Backend finished cancelling a streaming reply after the user pressed stop. */
   stopped?: boolean
+  /** 心跳应答:仅作链路活性证明,不参与任何业务状态。 */
+  pong?: boolean
   conversation_id?: string
   error?: string
   streaming_mode?: boolean
@@ -78,10 +80,31 @@ export function subscribeSubagentEvents(fn: SubagentEventListener): () => void {
 // 避免高频闪烁。整体节奏较旧 3/30 提速约 2.5-3 倍。
 const TICK_INTERVAL = 18
 const charsPerTick = (revealed: number) => (revealed < 80 ? 5 : revealed < 240 ? 6 : 3)
+
+/** 单个 tick 应推进的字符数:按真实经过时间折算等效 tick 数后逐档累加。
+ *  浏览器会把后台标签页的定时器节流到约 1 次/秒,固定字数/tick 会让显示进度
+ *  按墙钟大幅落后(切回后从旧进度慢慢补打);折算后单次 tick 按比例补齐,
+ *  前台正常 18ms 间隔下 elapsed≈TICK_INTERVAL → ticks=1,与固定步进完全一致。 */
+export function advanceFor(revealed: number, elapsedMs: number): number {
+  const ticks = Math.max(1, Math.round(elapsedMs / TICK_INTERVAL))
+  let advance = 0
+  for (let i = 0; i < ticks; i++) advance += charsPerTick(revealed + advance)
+  return advance
+}
 // If no response arrives within this window, clear the waiting state
 // and surface a timeout message. Prevents the UI from hanging forever
 // when the backend LLM call hangs or the WS frame is silently dropped.
 const REPLY_TIMEOUT_MS = 90_000
+// 断线自动重连:指数退避 + 抖动,无上限(自托管部署,服务恢复后自动接上)。
+// onopen 成功即重置计数;后端断开即取消在途生成,重连后靠 loadHistory 对齐
+// 已落库状态,不存在续流。
+const RECONNECT_BASE_MS = 1_000
+const RECONNECT_MAX_MS = 30_000
+// 应用层心跳:每周期发 {ping}(后端回 {pong}),连续 DEAD_MS 未收到任何帧判定
+// 死链,主动 close 走 onclose 统一重连。uvicorn 的协议级 ping 只保证
+// server→client 方向的活性,这里补上 client→server 方向的检测。
+const HEARTBEAT_INTERVAL_MS = 25_000
+const HEARTBEAT_DEAD_MS = 70_000
 
 /** 流式进行中排队的待发消息(单条/会话)。held:上次回复异常结束(出错/超时),暂停自动发送。
  *  attachments:随文字一起排队的附件引用(协议 §4.1),自动发送/「立即执行」时原样带出。 */
@@ -168,6 +191,21 @@ export function useWebSocket(url: string, activeConversationId?: string) {
   // indicator in the message list. State mirror guarded by `awaitingMoreRef`.
   const [awaitingMoreContent, setAwaitingMoreContent] = useState(false)
   const awaitingMoreRef = useRef(false)
+  // 断线重连:retryEpoch 变化驱动 WS effect 重跑(新建连接);attempt 计数
+  // 跨 epoch 保留用于退避,连接成功后清零。everConnected 区分首连与重连
+  // (只有重连才提示"重连中"并自动刷新历史)。manualClose 标记 effect
+  // cleanup 的主动关闭,避免卸载/换 url 时误调度重连。
+  const [retryEpoch, setRetryEpoch] = useState(0)
+  const retryAttemptRef = useRef(0)
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const everConnectedRef = useRef(false)
+  const lastFrameAtRef = useRef(0)
+  const manualCloseRef = useRef(false)
+  const [isReconnecting, setIsReconnecting] = useState(false)
+  // WS effect 声明在 loadHistory 之前,依赖数组不能直接引用它(TDZ);
+  // 经 ref 间接调用,重连成功后刷新当前会话历史。
+  const loadHistoryRef = useRef<((conversationId: string) => Promise<void>) | null>(null)
   // 广播事件监听器集合:通过 subscribe() 注册,收到 git_branch 等事件时派发。
   const listenersRef = useRef<Set<WsListener>>(new Set())
   const setAwaitingMore = useCallback((value: boolean) => {
@@ -351,7 +389,13 @@ export function useWebSocket(url: string, activeConversationId?: string) {
 
   const startTypewriter = useCallback(() => {
     if (twTimerRef.current) clearInterval(twTimerRef.current)
+    // 上次 tick 的墙钟时刻:推进量按真实经过时间折算(见 advanceFor),
+    // 后台标签页被节流后单次 tick 按比例补齐;重启时随闭包重新初始化。
+    let lastTickAt = Date.now()
     twTimerRef.current = setInterval(() => {
+      const now = Date.now()
+      const elapsed = now - lastTickAt
+      lastTickAt = now
       const total = bufferRef.current.length
       if (displayedRef.current >= total) {
         if (streamDoneRef.current) {
@@ -368,7 +412,7 @@ export function useWebSocket(url: string, activeConversationId?: string) {
         return
       }
       // Reveal characters
-      displayedRef.current = Math.min(displayedRef.current + charsPerTick(displayedRef.current), total)
+      displayedRef.current = Math.min(displayedRef.current + advanceFor(displayedRef.current, elapsed), total)
       setAwaitingMore(false)
       const displayed = bufferRef.current.slice(0, displayedRef.current)
       setMessages(prev => {
@@ -444,10 +488,49 @@ export function useWebSocket(url: string, activeConversationId?: string) {
   }, [setPendingFor])
 
   useEffect(() => {
+    // 新连接开始(含重连 epoch 重跑):清除上一轮 cleanup 留下的主动关闭标记。
+    manualCloseRef.current = false
     const ws = new WebSocket(url)
     wsRef.current = ws
 
-    ws.onopen = () => setIsConnected(true)
+    const startHeartbeat = () => {
+      if (heartbeatRef.current) clearInterval(heartbeatRef.current)
+      heartbeatRef.current = setInterval(() => {
+        if (ws.readyState !== WebSocket.OPEN) return
+        if (Date.now() - lastFrameAtRef.current > HEARTBEAT_DEAD_MS) {
+          // 判定死链:主动断开,统一走 onclose 的重连调度。
+          ws.close()
+          return
+        }
+        try {
+          ws.send(JSON.stringify({ ping: true }))
+        } catch {
+          // 发送失败说明连接已坏,close/onclose 会接手重连。
+        }
+      }, HEARTBEAT_INTERVAL_MS)
+    }
+    const stopHeartbeat = () => {
+      if (heartbeatRef.current) {
+        clearInterval(heartbeatRef.current)
+        heartbeatRef.current = null
+      }
+    }
+
+    ws.onopen = () => {
+      setIsConnected(true)
+      lastFrameAtRef.current = Date.now()
+      if (everConnectedRef.current) {
+        // 重连成功:复位退避与提示,并刷新当前会话历史——断线期间后端可能
+        // 产生了变化(断线在途生成已被取消、其他渠道可能有新消息)。
+        retryAttemptRef.current = 0
+        setIsReconnecting(false)
+        const conv = activeConversationRef.current
+        if (conv) void loadHistoryRef.current?.(conv)
+      } else {
+        everConnectedRef.current = true
+      }
+      startHeartbeat()
+    }
 
     // 收尾兜底(设计 §6):把当轮 in-flight 消息上残留的 running 工具卡标为
     // interrupted —— 覆盖 done/stopped/error 时后端未再补发 tool_end 的场景。
@@ -469,12 +552,17 @@ export function useWebSocket(url: string, activeConversationId?: string) {
     }
 
     ws.onmessage = (event: MessageEvent) => {
+      // 任何帧(含 pong/error)都作为链路活性证据,供心跳判死使用。
+      lastFrameAtRef.current = Date.now()
       let data: WsIncoming
       try {
         data = JSON.parse(event.data)
       } catch {
         return
       }
+      // 心跳 pong 只证明链路活着,不清回复超时——"连接存活但后端 LLM 挂起"
+      // 的场景下,90s 回复超时必须仍能触发。
+      if (data.pong) return
 
       // Any message from the backend means the connection is alive; clear
       // the reply timeout that was started when sendMessage fired.
@@ -952,6 +1040,7 @@ export function useWebSocket(url: string, activeConversationId?: string) {
     }
 
     ws.onclose = () => {
+      stopHeartbeat()
       setIsConnected(false)
       setIsStreaming(false)
       clearReplyTimer()
@@ -959,9 +1048,22 @@ export function useWebSocket(url: string, activeConversationId?: string) {
       setStreamingConvId(null)
       setWaitingConvIds([])
       setAwaitingMore(false)
+      // 旧 socket 的关闭(StrictMode 双挂载 / 换 url / 重连换代)不参与调度,
+      // 防止双连接;cleanup 的主动关闭同样不调度。
+      if (ws !== wsRef.current || manualCloseRef.current) return
+      if (everConnectedRef.current) setIsReconnecting(true)
+      // 指数退避 + ±20% 抖动,避免服务重启瞬间所有客户端同时重连。
+      const base = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** retryAttemptRef.current)
+      const delay = Math.round(base * (0.8 + Math.random() * 0.4))
+      retryAttemptRef.current += 1
+      reconnectTimerRef.current = setTimeout(() => {
+        reconnectTimerRef.current = null
+        setRetryEpoch(epoch => epoch + 1)
+      }, delay)
     }
 
     ws.onerror = () => {
+      // 仅清状态;浏览器规范保证 error 后必随 close,重连统一在 onclose 调度。
       setIsConnected(false)
       setIsStreaming(false)
       clearReplyTimer()
@@ -972,12 +1074,18 @@ export function useWebSocket(url: string, activeConversationId?: string) {
     }
 
     return () => {
+      manualCloseRef.current = true
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current)
+        reconnectTimerRef.current = null
+      }
+      stopHeartbeat()
       if (twTimerRef.current) clearInterval(twTimerRef.current)
       twTimerRef.current = null
       clearReplyTimer()
       ws.close()
     }
-  }, [url])
+  }, [url, retryEpoch])
 
   const switchConversation = useCallback((conversationId: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -1005,6 +1113,10 @@ export function useWebSocket(url: string, activeConversationId?: string) {
       }))
 
       let list: Message[] = history
+      // done 已到达但打字机被视图切换掐掉时(clearMessages → stopTypewriter 重置
+      // streamDoneRef),tick 追平终结路径的 firePendingFor 不会再触发;在
+      // setMessages 之后统一补发(无待发消息时 no-op,已触发过时幂等)。
+      let finalizePending = false
       // A reply that is still streaming is not persisted until done, so the
       // DB history only contains the user message. Carry the preserved buffer
       // forward so switching away and back does not truncate the response.
@@ -1051,12 +1163,21 @@ export function useWebSocket(url: string, activeConversationId?: string) {
             },
           ]
         }
+        finalizePending = true
       }
       setMessages(list)
+      // 必须在 setMessages 之后:firePendingFor → sendMessage 以 updater 追加
+      // 用户消息,先于整体赋值执行会被这次 setMessages(list) 覆盖掉。
+      if (finalizePending) firePendingFor(conversationId)
     } catch {
       // ignore
     }
-  }, [startTypewriter])
+  }, [startTypewriter, firePendingFor])
+
+  // loadHistory 声明在 WS effect 之后,这里把最新实例同步给 ref 供重连路径调用。
+  useEffect(() => {
+    loadHistoryRef.current = loadHistory
+  }, [loadHistory])
 
   const clearMessages = useCallback((conversationId?: string) => {
     stopTypewriter()
@@ -1101,6 +1222,7 @@ export function useWebSocket(url: string, activeConversationId?: string) {
   return {
     messages,
     isConnected,
+    isReconnecting,
     isStreaming: isStreamingActive,
     streamingMode,
     waitingForReply,

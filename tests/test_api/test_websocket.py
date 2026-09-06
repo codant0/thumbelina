@@ -339,6 +339,17 @@ def test_websocket_recovers_after_stop(client):
         assert any(m.get("done") for m in msgs)
 
 
+def test_websocket_ping_replies_pong(client):
+    """心跳帧 {ping: true} 应回 {pong: true},不触发 error、不影响生成状态。"""
+    with client.websocket_connect("/ws/chat") as ws:
+        ws.send_json({"ping": True})
+        reply = ws.receive_json()
+        if reply.get("connected"):
+            # 部分场景下握手后的默认会话帧会先入队,消费掉再读 pong。
+            reply = ws.receive_json()
+        assert reply == {"pong": True}
+
+
 @pytest.mark.asyncio
 async def test_websocket_forwards_tool_events_streaming():
     """流式分支应把 tool_start/tool_end 事件映射为 tool_event 帧转发,

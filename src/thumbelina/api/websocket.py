@@ -457,6 +457,13 @@ async def websocket_chat(websocket: WebSocket) -> None:
                 )
                 continue
 
+            # 心跳保活:前端定期发送 {ping: true},回 {pong: true} 供其判活。
+            # 不含 message 字段,与 stop 同理必须在 Pydantic 校验之前特判,
+            # 否则会被拒绝成 error 帧(前端会把 error 当作回复异常收尾)。
+            if isinstance(data, dict) and data.get("ping") is True:
+                await websocket.send_json({"pong": True})
+                continue
+
             # Handle conversation switch (no message payload)
             if "switch_conversation" in data:
                 new_cid = data["switch_conversation"]

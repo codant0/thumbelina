@@ -21,6 +21,7 @@
     "minimize": "Minimize",
     "connected": "Connected",
     "disconnected": "Disconnected",
+    "reconnecting": "Reconnecting…",
     "generating": "Generating…",
     "edit": "Edit",
     "retry": "Retry",

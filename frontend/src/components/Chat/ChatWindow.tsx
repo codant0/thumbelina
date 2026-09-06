@@ -36,7 +36,7 @@ interface ChatWindowProps {
 }
 
 export function ChatWindow({ ws, conversationId, conversations, onConversationCreated, onDefaultConversation, onSetEndpoint, onSetKnowledgeBase, onSetRole, onSetThinking, onViewTrajectory }: ChatWindowProps) {
-  const { messages, isConnected, isStreaming, streamingMode: wsStreamingMode, waitingForReply, awaitingMoreContent, newConversationId, clearNewConversation, pendingActive, pendingMessage, pendingAttachments, pendingHeld, queuePendingMessage, sendPendingNow, cancelPendingMessage, sendMessage, stopGeneration, clearMessages, switchConversation, loadHistory } = ws
+  const { messages, isConnected, isReconnecting, isStreaming, streamingMode: wsStreamingMode, waitingForReply, awaitingMoreContent, newConversationId, clearNewConversation, pendingActive, pendingMessage, pendingAttachments, pendingHeld, queuePendingMessage, sendPendingNow, cancelPendingMessage, sendMessage, stopGeneration, clearMessages, switchConversation, loadHistory } = ws
   const [streamingMode, setStreamingMode] = useState(true)
   const [toggling, setToggling] = useState(false)
   const [clearing, setClearing] = useState(false)
@@ -240,7 +240,9 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
     ? isStreaming
       ? t('common.generating')
       : t('common.connected')
-    : t('common.disconnected')
+    : isReconnecting
+      ? t('common.reconnecting')
+      : t('common.disconnected')
 
   const statusClass = isConnected
     ? isStreaming

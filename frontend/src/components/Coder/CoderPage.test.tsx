@@ -10,6 +10,7 @@ import type { Conversation } from '../../types/chat'
 const ws = {
   messages: [],
   isConnected: true,
+  isReconnecting: false,
   isStreaming: false,
   streamingMode: true,
   waitingForReply: false,

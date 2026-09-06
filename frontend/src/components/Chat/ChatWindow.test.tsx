@@ -27,6 +27,7 @@ vi.mock('../../api/attachments', async (importOriginal) => {
 const baseState: ChatSocket = {
   messages: [],
   isConnected: true,
+  isReconnecting: false,
   isStreaming: false,
   streamingMode: true,
   waitingForReply: false,
