@@ -605,7 +605,8 @@
     "running": "调用中…",
     "interrupted": "已中断",
     "durationMs": "{ms} ms",
-    "truncatedHint": "完整内容见轨迹页"
+    "truncatedHint": "完整内容见轨迹页",
+    "detail": "工具调用详情"
   },
   "subagent": {
     "title": "子代理",

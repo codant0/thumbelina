@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { MessageList } from './MessageList'
-import type { Message } from '../../types/chat'
+import type { Message, ToolCall } from '../../types/chat'
 
 describe('MessageList', () => {
   it('should render empty state', () => {
@@ -356,25 +356,23 @@ describe('MessageList', () => {
     expect(screen.getByText(/好的大哥记住了/)).toBeInTheDocument()
   })
 
-  it('collapses tool calls behind a summary toggle', () => {
+  it('opens the tool detail side panel through onViewToolDetail on chip click', () => {
+    const tc: ToolCall = { call_id: 'c1', name: 'web_search', args: { query: 'hello' }, result: 'found 3 results', status: 'ok' }
     const messages: Message[] = [
-      {
-        id: '1', role: 'assistant', content: 'ok', timestamp: '2024-01-01T00:00:00Z',
-        toolCalls: [{ call_id: 'c1', name: 'web_search', args: { query: 'hello' }, result: 'found 3 results', status: 'ok' }],
-      },
+      { id: '1', role: 'assistant', content: 'ok', timestamp: '2024-01-01T00:00:00Z', toolCalls: [tc] },
     ]
-    const { container } = render(<MessageList messages={messages} />)
-    // Collapsed by default: args payload not visible
+    const onViewToolDetail = vi.fn()
+    const { container } = render(<MessageList messages={messages} onViewToolDetail={onViewToolDetail} />)
+    // 内联展开已移除:参数/结果只在侧边面板呈现
     expect(container.querySelector('.tool-call__detail')).toBeNull()
     fireEvent.click(container.querySelector('.tool-call__summary')!)
-    const detail = container.querySelector('.tool-call__detail')
-    expect(detail).toBeTruthy()
-    expect(detail!.textContent).toContain('"query": "hello"')
+    expect(onViewToolDetail).toHaveBeenCalledTimes(1)
+    expect(onViewToolDetail).toHaveBeenCalledWith('1', tc, 0)
   })
 
-  // ── 实时工具卡四态(设计 §5.3)──────────────────────────────────────────
+  // ── 工具芯片四态(设计 §5.3;详情移入侧边面板)──────────────────────────
 
-  it('renders a running tool card with the running label, spinner and no result', () => {
+  it('renders a running tool chip with the running label and spinner', () => {
     const messages: Message[] = [
       {
         id: '1', role: 'assistant', content: '', timestamp: '2024-01-01T00:00:00Z',
@@ -386,10 +384,9 @@ describe('MessageList', () => {
     expect(card.className).toContain('status-running')
     expect(screen.getByText('Running…')).toBeInTheDocument()
     expect(card.querySelector('.tool-call__spinner')).toBeTruthy()
-    expect(screen.queryByText('Result')).toBeNull()
   })
 
-  it('renders an ok tool card with duration and expandable truncated result preview', () => {
+  it('renders an ok tool chip with duration and without inline result', () => {
     const messages: Message[] = [
       {
         id: '1', role: 'assistant', content: '', timestamp: '2024-01-01T00:00:00Z',
@@ -402,12 +399,10 @@ describe('MessageList', () => {
     const { container } = render(<MessageList messages={messages} />)
     expect(container.querySelector('[data-testid="tool-call"]')!.className).toContain('status-ok')
     expect(screen.getByText('✓ 1800 ms')).toBeInTheDocument()
-    fireEvent.click(container.querySelector('.tool-call__summary')!)
-    expect(screen.getByText('found 3 results')).toBeInTheDocument()
-    expect(screen.getByText('Full content in Trajectory page')).toBeInTheDocument()
+    expect(screen.queryByText('found 3 results')).toBeNull()
   })
 
-  it('renders an error tool card with the error variant and error preview', () => {
+  it('renders an error tool chip with the error variant and duration', () => {
     const messages: Message[] = [
       {
         id: '1', role: 'assistant', content: '', timestamp: '2024-01-01T00:00:00Z',
@@ -419,11 +414,10 @@ describe('MessageList', () => {
     ]
     const { container } = render(<MessageList messages={messages} />)
     expect(container.querySelector('[data-testid="tool-call"]')!.className).toContain('status-error')
-    fireEvent.click(container.querySelector('.tool-call__summary')!)
-    expect(screen.getByText("Error executing tool 'web_search': boom")).toBeInTheDocument()
+    expect(screen.getByText('✗ 120 ms')).toBeInTheDocument()
   })
 
-  it('renders an interrupted tool card with the interrupted label', () => {
+  it('renders an interrupted tool chip with the interrupted label', () => {
     const messages: Message[] = [
       {
         id: '1', role: 'assistant', content: '', timestamp: '2024-01-01T00:00:00Z',
@@ -435,21 +429,32 @@ describe('MessageList', () => {
     expect(screen.getByText('Interrupted')).toBeInTheDocument()
   })
 
-  it('shows truncated args verbatim with the trajectory hint', () => {
-    // 契约:args 截断时后端下发 {"_truncated_json": "<json 字符串>"} + args_truncated
+  it('forwards the truncated-args tool call to the detail panel callback', () => {
+    // 契约:args 截断时后端下发 {"_truncated_json": "<json 字符串>"} + args_truncated;
+    // 原样展示移入侧边面板,芯片只负责把完整 ToolCall 交给回调。
+    const tc: ToolCall = {
+      call_id: 'c1', name: 'big_tool', args: { _truncated_json: '{"blob": "aa…' },
+      argsTruncated: true, status: 'ok', durationMs: 5,
+    }
+    const messages: Message[] = [
+      { id: '1', role: 'assistant', content: '', timestamp: '2024-01-01T00:00:00Z', toolCalls: [tc] },
+    ]
+    const onViewToolDetail = vi.fn()
+    const { container } = render(<MessageList messages={messages} onViewToolDetail={onViewToolDetail} />)
+    fireEvent.click(container.querySelector('.tool-call__summary')!)
+    expect(onViewToolDetail).toHaveBeenCalledWith('1', tc, 0)
+  })
+
+  it('keeps the tool chip inert when no detail handler is provided', () => {
     const messages: Message[] = [
       {
         id: '1', role: 'assistant', content: '', timestamp: '2024-01-01T00:00:00Z',
-        toolCalls: [{
-          call_id: 'c1', name: 'big_tool', args: { _truncated_json: '{"blob": "aa…' },
-          argsTruncated: true, status: 'ok', durationMs: 5,
-        }],
+        toolCalls: [{ call_id: 'c1', name: 'web_search', args: {}, status: 'ok', durationMs: 9 }],
       },
     ]
     const { container } = render(<MessageList messages={messages} />)
     fireEvent.click(container.querySelector('.tool-call__summary')!)
-    expect(screen.getByText('{"blob": "aa…')).toBeInTheDocument()
-    expect(screen.getByText('Full content in Trajectory page')).toBeInTheDocument()
+    expect(container.querySelector('.tool-call__detail')).toBeNull()
   })
 
   it('offers regenerate on the last assistant message when idle', () => {

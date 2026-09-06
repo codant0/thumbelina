@@ -605,7 +605,8 @@
     "running": "Running…",
     "interrupted": "Interrupted",
     "durationMs": "{ms} ms",
-    "truncatedHint": "Full content in Trajectory page"
+    "truncatedHint": "Full content in Trajectory page",
+    "detail": "Tool call details"
   },
   "subagent": {
     "title": "Subagent",

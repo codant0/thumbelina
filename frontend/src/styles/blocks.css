@@ -169,40 +169,7 @@
   white-space: nowrap;
 }
 
-.tool-call__caret {
-  flex-shrink: 0;
-  color: var(--text-secondary);
-  transition: transform var(--dur-fast) var(--ease-out);
-}
-
-.tool-call__caret.is-open { transform: rotate(180deg); }
-
-.tool-call__detail {
-  border-top: 1px solid var(--border-subtle);
-}
-
-.tool-call__section-label {
-  padding: var(--sp-2) var(--sp-3) 0;
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-semi);
-  color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.tool-call__detail pre {
-  margin: var(--sp-2) var(--sp-3) var(--sp-3);
-  padding: var(--sp-3);
-  max-height: 280px;
-  overflow: auto;
-  background: var(--code-bg);
-  border-radius: var(--radius-sm);
-  font-size: var(--fs-sm);
-  line-height: 1.5;
-  color: var(--code-text);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
+/* 内联展开的 caret/detail 已移除(设计 §5.3 修订):详情在右侧工具面板呈现 */
 
 /* ===== Tool call cards — live states (设计 §5.3) ===== */
 /* 色值全部走主题令牌;running 动画仅 transform(旋转)。 */

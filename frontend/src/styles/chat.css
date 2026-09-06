@@ -780,6 +780,146 @@
   gap: var(--sp-4);
 }
 
+/* ===== Tool detail side panel (工具详情侧边面板,设计 §5.3 修订) ===== */
+/* 与 subagent 面板同模式:右侧停靠 + 外部遮罩(遮罩复用 .subagent-side-panel__backdrop)。
+   色值全部走主题令牌;入场动画仅 transform/opacity。 */
+.tool-detail-side-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(480px, 50vw);
+  background: var(--bg-surface);
+  border-left: 1px solid var(--border);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  z-index: 60;
+  animation: subagent-side-panel-in 0.18s ease-out;
+}
+
+.tool-detail-side-panel__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.tool-detail-side-panel__title {
+  flex: 1;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semi);
+  color: var(--text-secondary);
+}
+
+.tool-detail-side-panel__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.tool-detail-side-panel__btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.tool-detail-side-panel__btn.is-done {
+  color: var(--success, var(--accent));
+}
+
+.tool-detail-side-panel__close:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.tool-detail-side-panel__body {
+  overflow-y: auto;
+  padding: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.tool-detail-hero {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.tool-detail-hero__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-hover);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.tool-detail-hero__title {
+  font-weight: var(--fw-semi);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  word-break: break-all;
+}
+
+.tool-detail-hero__meta {
+  margin-top: 2px;
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+
+.tool-detail-side-panel[data-status='ok'] .tool-detail-hero__meta { color: var(--success); }
+.tool-detail-side-panel[data-status='error'] .tool-detail-hero__meta { color: var(--error); }
+
+.tool-detail-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.tool-detail-section__label {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semi);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tool-detail-section__pre {
+  margin: 0;
+  padding: var(--sp-3);
+  max-height: 320px;
+  overflow: auto;
+  background: var(--code-bg);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  color: var(--code-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* hint 复用芯片的 .tool-call__hint,但面板内有自己的留白体系,去掉横内边距 */
+.tool-detail-section .tool-call__hint {
+  padding: 0;
+}
+
 /* ===== Floating window (independent of chat dialog size) ===== */
 
 .float-window {
