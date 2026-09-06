@@ -159,7 +159,7 @@ export function useWebSocket(url: string, activeConversationId?: string) {
   const toolAnchorsRef = useRef<ToolAnchor[] | null>(null)
   // Snapshot of a reply that just finished, so a history fetch that races the
   // DB write can still reconcile the response when the user returns to view.
-  const completedContentRef = useRef<{ convId: string; content: string; reasoning: string } | null>(null)
+  const completedContentRef = useRef<{ convId: string; content: string; reasoning: string; toolCalls?: ToolCall[]; toolAnchors?: ToolAnchor[] } | null>(null)
   // Monotonic sequence guarding loadHistory against out-of-order responses.
   const historyFetchRef = useRef(0)
   // Whether a stream is active but has no *new* text to show yet (either the
@@ -825,21 +825,24 @@ export function useWebSocket(url: string, activeConversationId?: string) {
             setNewConversationId(conv)
           }
           clearWaitingFor(conv)
-          // Snapshot the finished reply so a history fetch racing the DB
-          // write can still reconcile the response on the next view.
+          // 兜底:done 前个别工具未收到 tool_end 时,把 running 卡标为 interrupted
+          // (全部正常结束时是 no-op,不打扰已完成卡片)。
+          markInFlightInterrupted()
+          // Snapshot the finished reply (含工具卡与穿插锚点,切回视图时
+          // reconcile 需要) so a history fetch racing the DB write can
+          // still reconcile the response on the next view.
           if (bufferRef.current) {
             completedContentRef.current = {
               convId: conv,
               content: bufferRef.current,
               reasoning: reasoningBufferRef.current,
+              toolCalls: toolCallsRef.current ?? undefined,
+              toolAnchors: toolAnchorsRef.current ?? undefined,
             }
           }
           streamConvRef.current = conv
         }
         sessionConvRef.current = null
-        // 兜底:done 前个别工具未收到 tool_end 时,把 running 卡标为 interrupted
-        // (全部正常结束时是 no-op,不打扰已完成卡片)。
-        markInFlightInterrupted()
         if (twTimerRef.current) {
           // Typewriter running — mark done, it will finalize when caught up.
           // Keep streamingConvId so the streaming conversation (and only it)
@@ -875,11 +878,17 @@ export function useWebSocket(url: string, activeConversationId?: string) {
           }
           clearWaitingFor(conv)
           streamConvRef.current = conv
-          // Snapshot the reply so a history fetch racing the DB write can
-          // reconcile it even when it arrived while this conversation was
-          // not on screen (e.g. the user was on another page).
+          // Snapshot the reply (含工具卡与穿插锚点) so a history fetch racing
+          // the DB write can reconcile it even when it arrived while this
+          // conversation was not on screen (e.g. the user was on another page).
           if (data.response) {
-            completedContentRef.current = { convId: conv, content: data.response, reasoning: '' }
+            completedContentRef.current = {
+              convId: conv,
+              content: data.response,
+              reasoning: '',
+              toolCalls: toolCallsRef.current ? markInterrupted(toolCallsRef.current) : undefined,
+              toolAnchors: toolAnchorsRef.current ?? undefined,
+            }
           }
         }
         sessionConvRef.current = null
@@ -1012,6 +1021,9 @@ export function useWebSocket(url: string, activeConversationId?: string) {
             role: 'assistant',
             content: bufferRef.current,
             thinking: reasoningBufferRef.current || undefined,
+            // 流中切走再切回:重建的流式消息必须带回已累积的工具卡与穿插锚点
+            toolCalls: toolCallsRef.current ?? undefined,
+            toolAnchors: toolAnchorsRef.current ?? undefined,
             timestamp: new Date().toISOString(),
           },
         ]
@@ -1031,6 +1043,10 @@ export function useWebSocket(url: string, activeConversationId?: string) {
               role: 'assistant',
               content: completed.content,
               thinking: completed.reasoning || undefined,
+              // reconcile 追加的消息同样带回工具卡与穿插锚点
+              ...(completed.toolCalls?.length
+                ? { toolCalls: completed.toolCalls, toolAnchors: completed.toolAnchors }
+                : {}),
               timestamp: new Date().toISOString(),
             },
           ]

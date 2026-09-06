@@ -1,5 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { AttachmentRef, Message, SubagentEventPayload, ToolCall } from '../../types/chat'
+import type { AttachmentRef, Message, SubagentEventPayload } from '../../types/chat'
 import { ArrowDown, Brain, Check, ChevronDown, Copy, RefreshCcw, Wrench } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import { MarkdownContent } from './MarkdownContent'
@@ -8,7 +8,7 @@ import { SubagentCard } from './SubagentCard'
 import { AttachmentLightbox } from './AttachmentLightbox'
 import { attachmentUrl } from '../../api/attachments'
 import { splitLeadingJson } from '../../lib/codeUtils'
-import { splitContentByAnchors } from './toolCallEvents'
+import { splitContentByAnchors, summarizeToolCalls } from './toolCallEvents'
 import { useCopy } from '../../hooks/useCopy'
 
 interface MessageListProps {
@@ -24,8 +24,8 @@ interface MessageListProps {
   subagentsByMsgId?: Record<string, SubagentEventPayload[]>
   /** 点击 "查看对话详情" 时的回调;由 ChatWindow 提供用于打开详情 Modal。 */
   onViewSubagentDetail?: (event: SubagentEventPayload) => void
-  /** 点击工具芯片时的回调;由 ChatWindow 提供用于打开右侧工具详情面板。 */
-  onViewToolDetail?: (msgId: string, tc: ToolCall, index: number) => void
+  /** 点击聚合工具入口时的回调;由 ChatWindow 提供用于打开侧边统一面板。 */
+  onViewToolCalls?: (msgId: string) => void
 }
 
 interface ThinkingBlockProps {
@@ -74,28 +74,26 @@ function ThinkingBlock({ thinking, active }: ThinkingBlockProps) {
 }
 
 /**
- * One tool call rendered as a compact live status chip (设计 §5.3):
- * running(脉冲动画+调用中) / ok(✓+耗时) / error(错误红条) / interrupted(中断提示)。
- * 参数/结果不在此内联展开 —— 点击芯片通过 onViewDetail 打开右侧详情面板。
+ * 聚合工具入口(设计修订):一条消息的全部工具调用收拢为一个按钮,
+ * 不再逐工具渲染芯片列表。点击由 ChatWindow 打开侧边统一面板。
+ * 状态取聚合语义:任一 running > 任一 error > interrupted > ok。
  */
-function ToolCallItem({ tc, onViewDetail }: { tc: ToolCall; onViewDetail?: () => void }) {
+function ToolCallsEntry({ msg, onOpen }: { msg: Message; onOpen?: () => void }) {
   const { t } = useTranslation()
+  const s = summarizeToolCalls(msg.toolCalls ?? [])
+  const status =
+    s.running > 0 ? 'running' : s.error > 0 ? 'error' : s.interrupted > 0 ? 'interrupted' : 'ok'
   return (
-    <div className={`tool-call status-${tc.status}`} data-testid="tool-call">
-      <button
-        type="button"
-        className="tool-call__summary"
-        onClick={onViewDetail}
-        aria-haspopup="dialog"
-        title={onViewDetail ? t('toolCalls.detail') : undefined}
-      >
-        <span className="tool-call__name"><Wrench size={13} /><span>{tc.name}</span></span>
-        {tc.status === 'running' && <span className="tool-call__spinner" aria-hidden="true" />}
-        <span className="tool-call__meta">
-          {tc.status === 'running' && t('toolCalls.running')}
-          {tc.status === 'ok' && `✓ ${t('toolCalls.durationMs', { ms: tc.durationMs ?? 0 })}`}
-          {tc.status === 'error' && `✗ ${t('toolCalls.durationMs', { ms: tc.durationMs ?? 0 })}`}
-          {tc.status === 'interrupted' && t('toolCalls.interrupted')}
+    <div className={`tool-calls-entry status-${status}`} data-testid="tool-calls-entry">
+      <button type="button" className="tool-calls-entry__btn" onClick={onOpen} aria-haspopup="dialog">
+        <span className="tool-call__name"><Wrench size={13} /><span>{t('toolCalls.button')}</span></span>
+        <span className="tool-calls-entry__count">{s.total}</span>
+        {s.running > 0 && <span className="tool-call__spinner" aria-hidden="true" />}
+        <span className="tool-calls-entry__meta">
+          {s.running > 0 && t('toolCalls.running')}
+          {s.running === 0 && s.error > 0 && '✗'}
+          {s.running === 0 && s.error === 0 && s.interrupted > 0 && t('toolCalls.interrupted')}
+          {s.running === 0 && s.error === 0 && s.interrupted === 0 && '✓'}
         </span>
       </button>
     </div>
@@ -103,41 +101,33 @@ function ToolCallItem({ tc, onViewDetail }: { tc: ToolCall; onViewDetail?: () =>
 }
 
 /**
- * 穿插渲染(设计 §5.3 修订):按 toolAnchors 把工具芯片切进文本流,
- * 文本段各自走 Markdown 渲染;仅实时消息携带 anchors,历史消息走平铺布局。
+ * 穿插渲染(设计 §5.3 修订):聚合按钮插在**首个**工具锚点处 —— 文本流
+ * 走到工具首次发生的位置即出现入口;仅实时消息携带 anchors,历史消息走平铺。
  */
 function InterleavedContent({
   msg,
-  onViewToolDetail,
+  onViewToolCalls,
 }: {
   msg: Message
-  onViewToolDetail?: (msgId: string, tc: ToolCall, index: number) => void
+  onViewToolCalls?: (msgId: string) => void
 }) {
+  const firstAnchor = useMemo(() => {
+    const anchors = msg.toolAnchors ?? []
+    return anchors.length ? [anchors.reduce((a, b) => (a.offset <= b.offset ? a : b))] : []
+  }, [msg.toolAnchors])
   const segments = useMemo(
-    () => splitContentByAnchors(msg.content, msg.toolAnchors ?? []),
-    [msg.content, msg.toolAnchors],
-  )
-  const byCallId = useMemo(
-    () => new Map((msg.toolCalls ?? []).map(tc => [tc.call_id, tc])),
-    [msg.toolCalls],
+    () => splitContentByAnchors(msg.content, firstAnchor),
+    [msg.content, firstAnchor],
   )
   return (
     <>
-      {segments.map((seg, i) => {
-        if (seg.type === 'text') {
-          return seg.text ? <AssistantContent key={`t${i}`} content={seg.text} /> : null
-        }
-        const tc = byCallId.get(seg.callId ?? '')
-        if (!tc) return null
-        const index = (msg.toolCalls ?? []).indexOf(tc)
-        return (
-          <ToolCallItem
-            key={`c${seg.callId}`}
-            tc={tc}
-            {...(onViewToolDetail ? { onViewDetail: () => onViewToolDetail(msg.id, tc, index) } : {})}
-          />
-        )
-      })}
+      {segments.map((seg, i) =>
+        seg.type === 'text' ? (
+          seg.text ? <AssistantContent key={`t${i}`} content={seg.text} /> : null
+        ) : (
+          <ToolCallsEntry key={`c${i}`} msg={msg} onOpen={onViewToolCalls ? () => onViewToolCalls(msg.id) : undefined} />
+        ),
+      )}
     </>
   )
 }
@@ -229,7 +219,7 @@ const MessageItem = memo(function MessageItem({
   onRegenerate,
   subagents,
   onViewSubagentDetail,
-  onViewToolDetail,
+  onViewToolCalls,
 }: {
   msg: Message
   isStreamingMsg: boolean
@@ -237,7 +227,7 @@ const MessageItem = memo(function MessageItem({
   onRegenerate?: () => void
   subagents?: SubagentEventPayload[]
   onViewSubagentDetail?: (event: SubagentEventPayload) => void
-  onViewToolDetail?: (msgId: string, tc: ToolCall, index: number) => void
+  onViewToolCalls?: (msgId: string) => void
 }) {
   const { t } = useTranslation()
   // 该消息附件的 Lightbox 下标;null = 关闭。memo 组件内部 state 即可,无需提升。
@@ -263,8 +253,15 @@ const MessageItem = memo(function MessageItem({
       )}
       <div className="msg-content">
         {msg.role === 'assistant' ? (
-          msg.toolAnchors?.length ? (
-            <InterleavedContent msg={msg} onViewToolDetail={onViewToolDetail} />
+          msg.toolCalls?.length ? (
+            msg.toolAnchors?.length ? (
+              <InterleavedContent msg={msg} onViewToolCalls={onViewToolCalls} />
+            ) : (
+              <>
+                <AssistantContent content={msg.content} />
+                <ToolCallsEntry msg={msg} onOpen={onViewToolCalls ? () => onViewToolCalls(msg.id) : undefined} />
+              </>
+            )
           ) : (
             <AssistantContent content={msg.content} />
           )
@@ -272,17 +269,6 @@ const MessageItem = memo(function MessageItem({
           msg.content
         )}
       </div>
-      {!(msg.toolAnchors?.length) && msg.toolCalls && msg.toolCalls.length > 0 && (
-        <div className="tool-calls" data-testid="tool-calls">
-          {msg.toolCalls.map((tc, i) => (
-            <ToolCallItem
-              key={tc.call_id ?? i}
-              tc={tc}
-              {...(onViewToolDetail ? { onViewDetail: () => onViewToolDetail(msg.id, tc, i) } : {})}
-            />
-          ))}
-        </div>
-      )}
       {subagents && subagents.length > 0 && (
         <div className="subagent-cards" data-testid="subagent-cards">
           {subagents.map(sa => (
@@ -312,7 +298,7 @@ const MessageItem = memo(function MessageItem({
   )
 })
 
-function MessageListInner({ messages, waitingForReply, isStreaming, awaitingMoreContent, onRegenerate, subagentsByMsgId, onViewSubagentDetail, onViewToolDetail }: MessageListProps) {
+function MessageListInner({ messages, waitingForReply, isStreaming, awaitingMoreContent, onRegenerate, subagentsByMsgId, onViewSubagentDetail, onViewToolCalls }: MessageListProps) {
   const listRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   // Whether to keep following new content. False once the user scrolls up to read.
@@ -441,7 +427,7 @@ function MessageListInner({ messages, waitingForReply, isStreaming, awaitingMore
               onRegenerate={handleRegenerate}
               subagents={subagentsByMsgId?.[msg.id]}
               {...(onViewSubagentDetail ? { onViewSubagentDetail } : {})}
-              {...(onViewToolDetail ? { onViewToolDetail } : {})}
+              {...(onViewToolCalls ? { onViewToolCalls } : {})}
             />
           ))}
           {waitingForReply && (

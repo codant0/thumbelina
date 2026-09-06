@@ -52,6 +52,34 @@ export function upsertToolCall(toolCalls: ToolCall[], ev: ToolEventPayload): Too
   return next
 }
 
+/** 聚合工具入口(设计修订):每条消息一个按钮,统计各状态计数驱动按钮外观。 */
+export interface ToolCallsSummary {
+  total: number
+  ok: number
+  running: number
+  error: number
+  interrupted: number
+}
+
+export function summarizeToolCalls(toolCalls: ToolCall[]): ToolCallsSummary {
+  const s: ToolCallsSummary = { total: toolCalls.length, ok: 0, running: 0, error: 0, interrupted: 0 }
+  for (const tc of toolCalls) s[tc.status] += 1
+  return s
+}
+
+/** 参数文本:截断参数原样输出 ``_truncated_json`` 字符串,普通参数 pretty-print。 */
+export function formatToolArgs(args: Record<string, unknown>, argsTruncated?: boolean): string {
+  const truncated = argsTruncated
+    ? (args as { _truncated_json?: unknown })._truncated_json
+    : undefined
+  if (typeof truncated === 'string') return truncated
+  try {
+    return JSON.stringify(args, null, 2)
+  } catch {
+    return String(args)
+  }
+}
+
 /** 收尾兜底(设计 §6 Stop 取消):把残留 running 卡标为 interrupted;无 running 时返回原数组。 */
 export function markInterrupted(toolCalls: ToolCall[]): ToolCall[] {
   if (!toolCalls.some((tc) => tc.status === 'running')) return toolCalls

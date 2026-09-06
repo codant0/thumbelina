@@ -920,6 +920,115 @@
   padding: 0;
 }
 
+/* ===== Tool calls unified panel (工具调用统一面板,设计修订) ===== */
+/* 与 tool-detail-side-panel 同模式:右侧停靠 + 外部遮罩(遮罩复用
+   .subagent-side-panel__backdrop),行按时间序排列,可展开参数/结果。 */
+.tool-calls-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(480px, 50vw);
+  background: var(--bg-surface);
+  border-left: 1px solid var(--border);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  z-index: 60;
+  animation: subagent-side-panel-in 0.18s ease-out;
+}
+
+.tool-calls-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.tool-calls-panel__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semi);
+  color: var(--text-secondary);
+}
+
+.tool-calls-panel__body {
+  overflow-y: auto;
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.tool-calls-row {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.tool-calls-row__header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.tool-calls-row__header:hover { background: var(--bg-hover); }
+
+.tool-calls-row__name {
+  font-weight: var(--fw-med);
+  color: var(--accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-calls-row__meta {
+  flex: 1;
+  text-align: right;
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.tool-calls-row__caret {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.tool-calls-row__caret.is-open { transform: rotate(180deg); }
+
+.tool-calls-row.status-ok .tool-calls-row__meta { color: var(--success); }
+
+.tool-calls-row.status-error {
+  border-color: var(--error);
+  background: var(--error-muted);
+}
+
+.tool-calls-row.status-error .tool-calls-row__meta { color: var(--error); }
+
+.tool-calls-row__detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-3) var(--sp-3);
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--sp-2);
+}
+
+.tool-calls-row__detail .tool-call__hint { padding: 0; }
+
 /* ===== Floating window (independent of chat dialog size) ===== */
 
 .float-window {

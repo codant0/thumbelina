@@ -74,31 +74,35 @@ describe('ChatWindow', () => {
     },
   ]
 
-  it('opens the tool detail side panel from a tool chip and closes via backdrop', () => {
+  it('opens the unified tool calls panel from the aggregate entry and closes via backdrop', () => {
     wsState = { ...baseState, messages: toolMessages('ok', 'found 3 results') as never }
     const { container } = renderWindow()
-    expect(container.querySelector('[data-testid="tool-detail-side-panel"]')).toBeNull()
-    fireEvent.click(container.querySelector('.tool-call__summary')!)
-    const panel = container.querySelector('[data-testid="tool-detail-side-panel"]')
+    expect(container.querySelector('[data-testid="tool-calls-panel"]')).toBeNull()
+    fireEvent.click(container.querySelector('[data-testid="tool-calls-entry"] button')!)
+    const panel = container.querySelector('[data-testid="tool-calls-panel"]')
     expect(panel).not.toBeNull()
     expect(panel!.textContent).toContain('web_search')
+    // 行默认收起,展开后可见参数/结果详情
+    fireEvent.click(panel!.querySelector('.tool-calls-row__header')!)
     expect(panel!.textContent).toContain('found 3 results')
     fireEvent.click(container.querySelector('[data-testid="tool-detail-backdrop"]')!)
-    expect(container.querySelector('[data-testid="tool-detail-side-panel"]')).toBeNull()
+    expect(container.querySelector('[data-testid="tool-calls-panel"]')).toBeNull()
   })
 
   it('keeps the panel content in sync with the latest tool state while streaming', () => {
     wsState = { ...baseState, messages: toolMessages('running') as never }
     const { container, rerender } = renderWindow()
-    fireEvent.click(container.querySelector('.tool-call__summary')!)
-    expect(container.querySelector('[data-testid="tool-detail-side-panel"]')!.textContent).not.toContain('found 3 results')
-    // running → ok 的 upsert 发生在消息树后面板上实时跟随(按 msgId+call_id 解析)
+    fireEvent.click(container.querySelector('[data-testid="tool-calls-entry"] button')!)
+    const panel = () => container.querySelector('[data-testid="tool-calls-panel"]')!
+    panel().querySelector('.tool-calls-row__header')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(panel().textContent).not.toContain('found 3 results')
+    // running → ok 的 upsert 发生在消息树后面板上实时跟随(按消息 id 解析)
     wsState = { ...baseState, messages: toolMessages('ok', 'found 3 results') as never }
     rerender(<ChatWindow ws={wsState} />)
-    expect(container.querySelector('[data-testid="tool-detail-side-panel"]')!.textContent).toContain('found 3 results')
+    expect(panel().textContent).toContain('found 3 results')
   })
 
-  it('switches panel content when clicking another tool chip', () => {
+  it('switches panel content when clicking another message entry', () => {
     wsState = {
       ...baseState,
       messages: [
@@ -109,17 +113,25 @@ describe('ChatWindow', () => {
           timestamp: '2024-01-01T00:00:00Z',
           toolCalls: [
             { call_id: 'c1', name: 'web_search', args: {}, status: 'ok' as const, durationMs: 10 },
+          ],
+        },
+        {
+          id: 'a2',
+          role: 'assistant' as const,
+          content: 'done too',
+          timestamp: '2024-01-01T00:00:01Z',
+          toolCalls: [
             { call_id: 'c2', name: 'read_file', args: {}, status: 'ok' as const, durationMs: 20 },
           ],
         },
       ],
     }
     const { container } = renderWindow()
-    const chips = container.querySelectorAll('.tool-call__summary')
-    fireEvent.click(chips[0]!)
-    expect(container.querySelector('[data-testid="tool-detail-side-panel"]')!.textContent).toContain('web_search')
-    fireEvent.click(chips[1]!)
-    expect(container.querySelector('[data-testid="tool-detail-side-panel"]')!.textContent).toContain('read_file')
+    const entries = container.querySelectorAll('[data-testid="tool-calls-entry"] button')
+    fireEvent.click(entries[0]!)
+    expect(container.querySelector('[data-testid="tool-calls-panel"]')!.textContent).toContain('web_search')
+    fireEvent.click(entries[1]!)
+    expect(container.querySelector('[data-testid="tool-calls-panel"]')!.textContent).toContain('read_file')
   })
 
   it('should render chat window', () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { markInterrupted, splitContentByAnchors, upsertToolCall } from './toolCallEvents'
+import { formatToolArgs, markInterrupted, splitContentByAnchors, summarizeToolCalls, upsertToolCall } from './toolCallEvents'
 import type { ToolEventPayload } from '../../types/chat'
 
 const start = (call_id: string, name = 'web_search'): ToolEventPayload => ({
@@ -121,5 +121,28 @@ describe('splitContentByAnchors', () => {
 
   it('空内容只有锚点时不产生文本段', () => {
     expect(splitContentByAnchors('', [anchor('c1', 0)])).toEqual([{ type: 'tool', callId: 'c1' }])
+  })
+})
+
+describe('summarizeToolCalls', () => {
+  it('统计总数与各状态计数', () => {
+    const s = summarizeToolCalls([
+      { call_id: 'a', name: 'x', args: {}, status: 'ok', durationMs: 100 },
+      { call_id: 'b', name: 'y', args: {}, status: 'running' },
+      { call_id: 'c', name: 'z', args: {}, status: 'error', durationMs: 50 },
+    ])
+    expect(s).toEqual({ total: 3, ok: 1, running: 1, error: 1, interrupted: 0 })
+  })
+  it('空列表归零', () => {
+    expect(summarizeToolCalls([])).toEqual({ total: 0, ok: 0, running: 0, error: 0, interrupted: 0 })
+  })
+})
+
+describe('formatToolArgs', () => {
+  it('普通参数 pretty-print', () => {
+    expect(formatToolArgs({ query: 'q' })).toBe('{\n  "query": "q"\n}')
+  })
+  it('截断参数原样输出 _truncated_json', () => {
+    expect(formatToolArgs({ _truncated_json: '{"a": 1' }, true)).toBe('{"a": 1')
   })
 })

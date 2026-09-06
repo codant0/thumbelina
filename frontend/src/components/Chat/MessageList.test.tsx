@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { MessageList } from './MessageList'
-import type { Message, ToolCall } from '../../types/chat'
+import type { Message } from '../../types/chat'
 
 describe('MessageList', () => {
   it('should render empty state', () => {
@@ -356,110 +356,9 @@ describe('MessageList', () => {
     expect(screen.getByText(/好的大哥记住了/)).toBeInTheDocument()
   })
 
-  it('opens the tool detail side panel through onViewToolDetail on chip click', () => {
-    const tc: ToolCall = { call_id: 'c1', name: 'web_search', args: { query: 'hello' }, result: 'found 3 results', status: 'ok' }
-    const messages: Message[] = [
-      { id: '1', role: 'assistant', content: 'ok', timestamp: '2024-01-01T00:00:00Z', toolCalls: [tc] },
-    ]
-    const onViewToolDetail = vi.fn()
-    const { container } = render(<MessageList messages={messages} onViewToolDetail={onViewToolDetail} />)
-    // 内联展开已移除:参数/结果只在侧边面板呈现
-    expect(container.querySelector('.tool-call__detail')).toBeNull()
-    fireEvent.click(container.querySelector('.tool-call__summary')!)
-    expect(onViewToolDetail).toHaveBeenCalledTimes(1)
-    expect(onViewToolDetail).toHaveBeenCalledWith('1', tc, 0)
-  })
+  // ── 聚合工具按钮(设计修订:芯片列表收拢为一个入口,穿插于首个锚点)────
 
-  // ── 工具芯片四态(设计 §5.3;详情移入侧边面板)──────────────────────────
-
-  it('renders a running tool chip with the running label and spinner', () => {
-    const messages: Message[] = [
-      {
-        id: '1', role: 'assistant', content: '', timestamp: '2024-01-01T00:00:00Z',
-        toolCalls: [{ call_id: 'c1', name: 'web_search', args: { query: 'hello' }, status: 'running' }],
-      },
-    ]
-    const { container } = render(<MessageList messages={messages} />)
-    const card = container.querySelector('[data-testid="tool-call"]')!
-    expect(card.className).toContain('status-running')
-    expect(screen.getByText('Running…')).toBeInTheDocument()
-    expect(card.querySelector('.tool-call__spinner')).toBeTruthy()
-  })
-
-  it('renders an ok tool chip with duration and without inline result', () => {
-    const messages: Message[] = [
-      {
-        id: '1', role: 'assistant', content: '', timestamp: '2024-01-01T00:00:00Z',
-        toolCalls: [{
-          call_id: 'c1', name: 'web_search', args: { query: 'hello' }, status: 'ok',
-          durationMs: 1800, result: 'found 3 results', resultTruncated: true,
-        }],
-      },
-    ]
-    const { container } = render(<MessageList messages={messages} />)
-    expect(container.querySelector('[data-testid="tool-call"]')!.className).toContain('status-ok')
-    expect(screen.getByText('✓ 1800 ms')).toBeInTheDocument()
-    expect(screen.queryByText('found 3 results')).toBeNull()
-  })
-
-  it('renders an error tool chip with the error variant and duration', () => {
-    const messages: Message[] = [
-      {
-        id: '1', role: 'assistant', content: '', timestamp: '2024-01-01T00:00:00Z',
-        toolCalls: [{
-          call_id: 'c1', name: 'web_search', args: { query: 'hello' }, status: 'error',
-          durationMs: 120, result: "Error executing tool 'web_search': boom",
-        }],
-      },
-    ]
-    const { container } = render(<MessageList messages={messages} />)
-    expect(container.querySelector('[data-testid="tool-call"]')!.className).toContain('status-error')
-    expect(screen.getByText('✗ 120 ms')).toBeInTheDocument()
-  })
-
-  it('renders an interrupted tool chip with the interrupted label', () => {
-    const messages: Message[] = [
-      {
-        id: '1', role: 'assistant', content: '', timestamp: '2024-01-01T00:00:00Z',
-        toolCalls: [{ call_id: 'c1', name: 'web_search', args: { query: 'hello' }, status: 'interrupted' }],
-      },
-    ]
-    const { container } = render(<MessageList messages={messages} />)
-    expect(container.querySelector('[data-testid="tool-call"]')!.className).toContain('status-interrupted')
-    expect(screen.getByText('Interrupted')).toBeInTheDocument()
-  })
-
-  it('forwards the truncated-args tool call to the detail panel callback', () => {
-    // 契约:args 截断时后端下发 {"_truncated_json": "<json 字符串>"} + args_truncated;
-    // 原样展示移入侧边面板,芯片只负责把完整 ToolCall 交给回调。
-    const tc: ToolCall = {
-      call_id: 'c1', name: 'big_tool', args: { _truncated_json: '{"blob": "aa…' },
-      argsTruncated: true, status: 'ok', durationMs: 5,
-    }
-    const messages: Message[] = [
-      { id: '1', role: 'assistant', content: '', timestamp: '2024-01-01T00:00:00Z', toolCalls: [tc] },
-    ]
-    const onViewToolDetail = vi.fn()
-    const { container } = render(<MessageList messages={messages} onViewToolDetail={onViewToolDetail} />)
-    fireEvent.click(container.querySelector('.tool-call__summary')!)
-    expect(onViewToolDetail).toHaveBeenCalledWith('1', tc, 0)
-  })
-
-  it('keeps the tool chip inert when no detail handler is provided', () => {
-    const messages: Message[] = [
-      {
-        id: '1', role: 'assistant', content: '', timestamp: '2024-01-01T00:00:00Z',
-        toolCalls: [{ call_id: 'c1', name: 'web_search', args: {}, status: 'ok', durationMs: 9 }],
-      },
-    ]
-    const { container } = render(<MessageList messages={messages} />)
-    fireEvent.click(container.querySelector('.tool-call__summary')!)
-    expect(container.querySelector('.tool-call__detail')).toBeNull()
-  })
-
-  // ── 穿插渲染(toolAnchors,设计 §5.3 修订)─────────────────────────────
-
-  const interleaveMsg = (over: Partial<Message> = {}): Message => ({
+  const toolMsg = (over: Partial<Message> = {}): Message => ({
     id: '1',
     role: 'assistant',
     content: 'before-after',
@@ -469,57 +368,71 @@ describe('MessageList', () => {
     ...over,
   })
 
-  it('renders tool chips interleaved at their anchors inside the content flow', () => {
-    const { container } = render(<MessageList messages={[interleaveMsg()]} />)
-    const item = container.querySelector('[data-testid="message-item"]')!
-    const text = item.textContent!
-    // DOM 顺序:文本前段 → 芯片 → 文本后段
-    expect(text.indexOf('before-')).toBeLessThan(text.indexOf('web_search'))
-    expect(text.indexOf('web_search')).toBeLessThan(text.indexOf('after'))
-    // 穿插模式下没有底部独立工具块
-    expect(item.querySelector('.tool-calls')).toBeNull()
-  })
-
-  it('chip click still opens the detail panel in interleaved mode', () => {
-    const onViewToolDetail = vi.fn()
-    const { container } = render(
-      <MessageList messages={[interleaveMsg()]} onViewToolDetail={onViewToolDetail} />
-    )
-    fireEvent.click(container.querySelector('.tool-call__summary')!)
-    expect(onViewToolDetail).toHaveBeenCalledWith('1', interleaveMsg().toolCalls![0], 0)
-  })
-
-  it('clamps anchors beyond the content to the end of the flow', () => {
-    const { container } = render(
-      <MessageList messages={[interleaveMsg({ toolAnchors: [{ callId: 'c1', offset: 999 }] })]} />
-    )
-    const text = container.querySelector('[data-testid="message-item"]')!.textContent!
-    expect(text.indexOf('before-after')).toBeLessThan(text.indexOf('web_search'))
-  })
-
-  it('groups same-offset anchors in arrival order between texts', () => {
-    const messages: Message[] = [{
-      id: '1', role: 'assistant', content: 'AB', timestamp: '2024-01-01T00:00:00Z',
-      toolCalls: [
-        { call_id: 'c2', name: 'read_file', args: {}, status: 'ok', durationMs: 1 },
-        { call_id: 'c1', name: 'web_search', args: {}, status: 'ok', durationMs: 2 },
-      ],
-      toolAnchors: [{ callId: 'c2', offset: 1 }, { callId: 'c1', offset: 1 }],
-    }]
-    const { container } = render(<MessageList messages={messages} />)
-    const text = container.querySelector('[data-testid="message-item"]')!.textContent!
-    expect(text.indexOf('A')).toBeLessThan(text.indexOf('read_file'))
-    expect(text.indexOf('read_file')).toBeLessThan(text.indexOf('web_search'))
-    expect(text.indexOf('web_search')).toBeLessThan(text.indexOf('B'))
-  })
-
-  it('messages without anchors keep the flat bottom tool-calls block', () => {
+  it('renders one aggregate tool entry instead of a chip list', () => {
     const messages: Message[] = [{
       id: '1', role: 'assistant', content: 'hi', timestamp: '2024-01-01T00:00:00Z',
-      toolCalls: [{ call_id: 'c1', name: 'web_search', args: {}, status: 'ok', durationMs: 5 }],
+      toolCalls: [
+        { call_id: 'a', name: 'web_search', args: {}, status: 'ok', durationMs: 1 },
+        { call_id: 'b', name: 'read_file', args: {}, status: 'ok', durationMs: 2 },
+        { call_id: 'c', name: 'run_shell', args: {}, status: 'running' },
+      ],
     }]
     const { container } = render(<MessageList messages={messages} />)
-    expect(container.querySelector('.tool-calls')).not.toBeNull()
+    expect(container.querySelectorAll('[data-testid="tool-calls-entry"]')).toHaveLength(1)
+    expect(container.querySelectorAll('[data-testid="tool-call"]')).toHaveLength(0)
+    expect(container.querySelector('[data-testid="tool-calls-entry"]')!.textContent).toContain('3')
+  })
+
+  it('places the entry inline at the first anchor when anchors exist', () => {
+    const { container } = render(<MessageList messages={[toolMsg()]} />)
+    const text = container.querySelector('[data-testid="message-item"]')!.textContent!
+    expect(text.indexOf('before-')).toBeLessThan(text.indexOf('Tool calls'))
+    expect(text.indexOf('Tool calls')).toBeLessThan(text.indexOf('after'))
+  })
+
+  it('falls back to placing the entry after the content without anchors', () => {
+    const { container } = render(<MessageList messages={[toolMsg({ toolAnchors: undefined })]} />)
+    const text = container.querySelector('[data-testid="message-item"]')!.textContent!
+    expect(text.indexOf('before-after')).toBeLessThan(text.indexOf('Tool calls'))
+  })
+
+  it('shows the running aggregate state with a spinner', () => {
+    const { container } = render(
+      <MessageList
+        messages={[toolMsg({ toolCalls: [{ call_id: 'c1', name: 'web_search', args: {}, status: 'running' }] })]}
+      />
+    )
+    const entry = container.querySelector('[data-testid="tool-calls-entry"]')!
+    expect(entry.className).toContain('status-running')
+    expect(entry.querySelector('.tool-call__spinner')).toBeTruthy()
+    expect(entry.textContent).toContain('Running…')
+  })
+
+  it('shows the error aggregate state when any call failed', () => {
+    const { container } = render(
+      <MessageList
+        messages={[toolMsg({
+          toolCalls: [
+            { call_id: 'a', name: 'web_search', args: {}, status: 'ok', durationMs: 1 },
+            { call_id: 'b', name: 'run_shell', args: {}, status: 'error', durationMs: 2 },
+          ],
+        })]}
+      />
+    )
+    expect(container.querySelector('[data-testid="tool-calls-entry"]')!.className).toContain('status-error')
+  })
+
+  it('clicking the entry asks ChatWindow to open the unified panel', () => {
+    const onViewToolCalls = vi.fn()
+    const { container } = render(<MessageList messages={[toolMsg()]} onViewToolCalls={onViewToolCalls} />)
+    fireEvent.click(container.querySelector('[data-testid="tool-calls-entry"] button')!)
+    expect(onViewToolCalls).toHaveBeenCalledWith('1')
+  })
+
+  it('keeps the entry inert without a handler', () => {
+    const { container } = render(<MessageList messages={[toolMsg()]} />)
+    fireEvent.click(container.querySelector('[data-testid="tool-calls-entry"] button')!)
+    expect(container.querySelector('[data-testid="tool-calls-panel"]')).toBeNull()
   })
 
   it('offers regenerate on the last assistant message when idle', () => {

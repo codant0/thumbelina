@@ -1162,4 +1162,56 @@ describe('useWebSocket', () => {
       expect(second!.toolAnchors).toEqual([{ callId: 'c2', offset: 0 }])
     })
   })
+
+  describe('锚点丢失修复(切会话/完成后 reconcile 不丢工具卡)', () => {
+    const startFrame = (callId = 'c1') =>
+      JSON.stringify({ tool_event: { phase: 'start', call_id: callId, name: 'web_search', args: {} }, conversation_id: 'conv-1' })
+    const userHistory = {
+      ok: true,
+      json: async () => ({
+        messages: [{ id: 'u1', role: 'user', content: 'q', created_at: '2024-01-01T00:00:00Z' }],
+      }),
+    }
+
+    it('流中切走再切回:loadHistory 重建的流式消息携带 toolCalls 与 toolAnchors', async () => {
+      vi.useFakeTimers()
+      const fetchMock = vi.fn()
+      globalThis.fetch = fetchMock
+      fetchMock.mockResolvedValueOnce(userHistory)
+      const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-1'))
+      await act(async () => { vi.advanceTimersByTime(10) })
+
+      act(() => { MockWebSocket.instances[0].simulateMessage(JSON.stringify({ chunk: 'hello ', conversation_id: 'conv-1' })) })
+      act(() => { MockWebSocket.instances[0].simulateMessage(startFrame()) })
+
+      await act(async () => { await result.current.loadHistory('conv-1') })
+
+      const rebuilt = result.current.messages.filter(m => m.role === 'assistant').at(-1)!
+      expect(rebuilt.toolCalls![0]).toMatchObject({ call_id: 'c1', status: 'running' })
+      expect(rebuilt.toolAnchors).toEqual([{ callId: 'c1', offset: 6 }])
+      vi.useRealTimers()
+    })
+
+    it('完成后切回:reconcile 追加的消息携带工具卡与锚点', async () => {
+      vi.useFakeTimers()
+      const fetchMock = vi.fn()
+      globalThis.fetch = fetchMock
+      const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-1'))
+      await act(async () => { vi.advanceTimersByTime(10) })
+
+      act(() => { MockWebSocket.instances[0].simulateMessage(JSON.stringify({ chunk: 'hello ', conversation_id: 'conv-1' })) })
+      act(() => { MockWebSocket.instances[0].simulateMessage(startFrame()) })
+      act(() => { MockWebSocket.instances[0].simulateMessage(JSON.stringify({ done: true, conversation_id: 'conv-1' })) })
+      await act(async () => { vi.advanceTimersByTime(500) })
+
+      // 历史里没有该 assistant 消息(DB 写入竞态)→ reconcile 追加
+      fetchMock.mockResolvedValueOnce(userHistory)
+      await act(async () => { await result.current.loadHistory('conv-1') })
+
+      const appended = result.current.messages.filter(m => m.role === 'assistant').at(-1)!
+      expect(appended.toolCalls![0]).toMatchObject({ call_id: 'c1' })
+      expect(appended.toolAnchors).toEqual([{ callId: 'c1', offset: 6 }])
+      vi.useRealTimers()
+    })
+  })
 })

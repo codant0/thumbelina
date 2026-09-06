@@ -14,12 +14,12 @@ import { CacheHitRateItem } from '../StatusBar/CacheHitRateItem'
 import { GitBranchSelector } from '../StatusBar/GitBranchSelector'
 import { Toast } from '../Settings/Toast'
 import { Mail, Eraser, Shrink, Route } from 'lucide-react'
-import type { Conversation, SendAttachmentInput, SubagentEventPayload, ThinkingEffort, ToolCall } from '../../types/chat'
+import type { Conversation, SendAttachmentInput, SubagentEventPayload, ThinkingEffort } from '../../types/chat'
 import { useTranslation } from '../../i18n'
 import { clearConversationMessages, compressConversation } from '../../api/conversations'
 import { ConfirmDialog } from '../common/ConfirmDialog'
 import { SubagentSidePanel } from './SubagentSidePanel'
-import { ToolDetailPanel } from './ToolDetailPanel'
+import { ToolCallsPanel } from './ToolCallsPanel'
 
 interface ChatWindowProps {
   /** WebSocket state lifted to App so the connection survives page switches. */
@@ -57,9 +57,9 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
   const [subagentsByConvId, setSubagentsByConvId] = useState<Record<string, Record<string, Record<string, SubagentEventPayload>>>>({})
   // 右侧详情面板:同时只展示一个 subagent;null 表示收起。
   const [selectedSubagentId, setSelectedSubagentId] = useState<string | null>(null)
-  // 工具详情面板:记录被点芯片的定位(msgId + call_id,call_id 缺失时退回下标),
-  // 由 selectedToolCall 从当前消息树实时解析 —— running 期间 upsert 后面板跟随。
-  const [selectedToolKey, setSelectedToolKey] = useState<{ msgId: string; callId: string; index: number } | null>(null)
+  // 工具统一面板:记录被点聚合按钮的消息 id,面板内容按消息从 messages 实时
+  // 解析 —— running 期间 upsert 后列表与状态实时跟随。
+  const [toolPanelMsgId, setToolPanelMsgId] = useState<string | null>(null)
   // 当前会话缓存上一次的映射,确保 useEffect 中能读到上一轮的值。
   const lastConvIdRef = useRef<string | undefined>(conversationId)
   const { t } = useTranslation()
@@ -277,7 +277,7 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
 
   // 点击 subagent 卡片时打开(同一会话内同一时间只展示一个)。
   const openSubagentDetail = useCallback((event: SubagentEventPayload) => {
-    setSelectedToolKey(null)
+    setToolPanelMsgId(null)
     setSelectedSubagentId(event.id)
   }, [])
 
@@ -286,36 +286,31 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
     setSelectedSubagentId(null)
   }, [])
 
-  // 从当前消息树解析被选工具的最新对象:面板内容随 upsert 实时更新。
-  const selectedToolCall = useMemo(() => {
-    if (!selectedToolKey) return null
-    const msg = messages.find(m => m.id === selectedToolKey.msgId)
-    if (!msg?.toolCalls?.length) return null
-    if (selectedToolKey.callId) {
-      return msg.toolCalls.find(tc => tc.call_id === selectedToolKey.callId) ?? null
-    }
-    return msg.toolCalls[selectedToolKey.index] ?? null
-  }, [messages, selectedToolKey])
+  // 被选消息从 messages 实时解析:工具卡 upsert 后面板列表与状态跟随更新。
+  const toolPanelMessage = useMemo(
+    () => (toolPanelMsgId ? messages.find(m => m.id === toolPanelMsgId) ?? null : null),
+    [messages, toolPanelMsgId],
+  )
 
-  // 点击工具芯片时打开(与 subagent 面板互斥:打开一个关另一个)。
-  const openToolDetail = useCallback((msgId: string, tc: ToolCall, index: number) => {
+  // 点击聚合工具入口时打开(与 subagent 面板互斥:打开一个关另一个)。
+  const openToolCalls = useCallback((msgId: string) => {
     setSelectedSubagentId(null)
-    setSelectedToolKey({ msgId, callId: tc.call_id ?? '', index })
+    setToolPanelMsgId(msgId)
   }, [])
 
-  const closeToolDetail = useCallback(() => {
-    setSelectedToolKey(null)
+  const closeToolCalls = useCallback(() => {
+    setToolPanelMsgId(null)
   }, [])
 
   // Esc 关闭详情面板。仅在面板打开时监听,避免无谓事件。
   useEffect(() => {
-    if (!selectedToolKey) return
+    if (!toolPanelMsgId) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') closeToolDetail()
+      if (e.key === 'Escape') closeToolCalls()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [selectedToolKey, closeToolDetail])
+  }, [toolPanelMsgId, closeToolCalls])
 
   // Esc 关闭详情面板。仅在面板打开时监听,避免无谓事件。
   useEffect(() => {
@@ -333,7 +328,7 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
     if (lastConvIdRef.current !== conversationId) {
       lastConvIdRef.current = conversationId
       setSelectedSubagentId(null)
-      setSelectedToolKey(null)
+      setToolPanelMsgId(null)
       setAttachments([])
     }
   }, [conversationId])
@@ -432,7 +427,7 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
           onRegenerate={handleRegenerate}
           subagentsByMsgId={subagentsByMsgId}
           onViewSubagentDetail={openSubagentDetail}
-          onViewToolDetail={openToolDetail}
+          onViewToolCalls={openToolCalls}
         />
       )}
       {/* 右侧详情面板 + 外部遮罩:点击遮罩或面板 X 即可关闭。
@@ -455,20 +450,20 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
           )}
         </>
       )}
-      {/* 工具详情面板:与 subagent 面板同模式(遮罩 + 右侧停靠,互斥)。内容按
-          msgId+call_id 从消息树实时解析,running → ok 的 upsert 面板实时跟随。 */}
-      {selectedToolCall && (
+      {/* 工具统一面板:与 subagent 面板同模式(遮罩 + 右侧停靠,互斥)。内容按
+          消息 id 从 messages 实时解析,running → ok 的 upsert 面板实时跟随。 */}
+      {toolPanelMessage?.toolCalls?.length ? (
         <>
           <button
             type="button"
             className="subagent-side-panel__backdrop"
             data-testid="tool-detail-backdrop"
             aria-label={t('common.close')}
-            onClick={closeToolDetail}
+            onClick={closeToolCalls}
           />
-          <ToolDetailPanel toolCall={selectedToolCall} onClose={closeToolDetail} />
+          <ToolCallsPanel message={toolPanelMessage} onClose={closeToolCalls} />
         </>
-      )}
+      ) : null}
       {/* 全屏拖放覆盖层:仅当拖入 dataTransfer 含 Files 时出现;drop 与 📎 按钮共用添加管道。 */}
       <DropOverlay onFiles={handleDropFiles} />
       {dropHint && (

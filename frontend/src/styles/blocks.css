@@ -133,8 +133,17 @@
   white-space: pre;
 }
 
-/* ===== Tool call cards (collapsed by default) ===== */
-.tool-call__summary {
+/* ===== Tool calls aggregate entry (设计修订:每消息一个入口按钮) ===== */
+/* 一条消息的全部工具调用收拢为一个按钮;详情在侧边统一面板(ToolCallsPanel)。 */
+.tool-calls-entry {
+  margin: var(--sp-1) 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.tool-calls-entry__btn {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
@@ -142,11 +151,42 @@
   padding: var(--sp-2) var(--sp-3);
   font-size: var(--fs-sm);
   color: var(--text-primary);
-  border-radius: var(--radius);
   transition: background var(--dur-fast) var(--ease-out);
 }
 
-.tool-call__summary:hover { background: var(--bg-hover); }
+.tool-calls-entry__btn:hover { background: var(--bg-hover); }
+
+.tool-calls-entry__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-full);
+  background: var(--bg-hover);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semi);
+  color: var(--text-secondary);
+}
+
+.tool-calls-entry__meta {
+  flex: 1;
+  text-align: right;
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-calls-entry.status-running { border-color: var(--accent); }
+.tool-calls-entry.status-error {
+  border-color: var(--error);
+  background: var(--error-muted);
+  box-shadow: inset 3px 0 0 var(--error);
+}
+.tool-calls-entry.status-error .tool-calls-entry__meta { color: var(--error); }
 
 .tool-call__name {
   display: inline-flex;
@@ -159,33 +199,8 @@
 
 .tool-call__name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.tool-call__meta {
-  flex: 1;
-  min-width: 0;
-  font-size: var(--fs-xs);
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* 内联展开的 caret/detail 已移除(设计 §5.3 修订):详情在右侧工具面板呈现 */
-
-/* ===== Tool call cards — live states (设计 §5.3) ===== */
-/* 色值全部走主题令牌;running 动画仅 transform(旋转)。 */
-.tool-call.status-ok .tool-call__meta { color: var(--success); }
-
-.tool-call.status-error {
-  border-color: var(--error);
-  background: var(--error-muted);
-  box-shadow: inset 3px 0 0 var(--error);
-}
-
-.tool-call.status-error .tool-call__meta { color: var(--error); }
-
-.tool-call.status-running .tool-call__meta,
-.tool-call.status-interrupted .tool-call__meta { color: var(--text-secondary); }
-
+/* spinner/hint 仍被聚合入口与统一面板复用;色值全部走主题令牌,
+   running 动画仅 transform(旋转)。 */
 .tool-call__spinner {
   flex-shrink: 0;
   width: 12px;
