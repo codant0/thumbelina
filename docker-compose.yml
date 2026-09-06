@@ -33,6 +33,10 @@ services:
       # 微信扫码登录凭据（{bot_id}.json）存进持久卷，重建容器无需重新扫码。
       # 不设置时默认工作目录下 CHANNEL/.weclaw/accounts（容器内 /app/CHANNEL，不在卷里，重建即丢）。
       - THUMBELINA_CHANNELS__WECHAT__ACCOUNTS_DIR=/app/data/CHANNEL/.weclaw/accounts
+      # 图片附件上传目录（repository.attachments_directory）放进持久卷。
+      # 不设置时默认为相对工作目录的 attachments/（容器内 /app/attachments，不在卷里），
+      # 重建后数据库里的附件记录还在、图片字节全部丢失 —— 历史消息坏链不可恢复。
+      - THUMBELINA_REPOSITORY__ATTACHMENTS_DIRECTORY=/app/data/attachments
       # Embedding model download via hf-mirror (huggingface.co unreachable
       # from CN); override with host HF_ENDPOINT if needed
       - HF_ENDPOINT=${HF_ENDPOINT:-https://hf-mirror.com}
