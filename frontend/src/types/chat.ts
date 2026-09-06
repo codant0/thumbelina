@@ -83,12 +83,21 @@ export interface SendAttachmentInput {
   height?: number
 }
 
+/** 工具在内容流中的锚点(设计 §5.3 修订):offset 为 tool_start 到达时
+ *  已接收的内容字符数,渲染时按它把芯片穿插进文本流。仅实时消息携带
+ *  (useWebSocket 当轮生成),历史回放消息无此字段、维持底部布局。 */
+export interface ToolAnchor {
+  callId: string
+  offset: number
+}
+
 export interface Message {
   id: string
   role: 'user' | 'assistant' | 'system'
   content: string
   timestamp: string
   toolCalls?: ToolCall[]
+  toolAnchors?: ToolAnchor[]
   thinking?: string
   attachments?: AttachmentRef[]
 }

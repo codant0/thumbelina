@@ -1109,4 +1109,57 @@ describe('useWebSocket', () => {
       expect(result.current.awaitingMoreContent).toBe(false)
     })
   })
+
+  describe('tool_anchors 内容锚点（穿插布局）', () => {
+    const toolStart = (callId = 'c1', conv = 'conv-1') =>
+      JSON.stringify({
+        tool_event: { phase: 'start', call_id: callId, name: 'web_search', args: { query: 'q' } },
+        conversation_id: conv,
+      })
+    const chunk = (text: string, conv = 'conv-1') =>
+      JSON.stringify({ chunk: text, conversation_id: conv })
+    const assistantsOf = (result: { current: { messages: Message[] } }) =>
+      result.current.messages.filter(m => m.role === 'assistant')
+
+    it('tool_start 以当时已接收内容长度记录锚点并随消息携带', async () => {
+      vi.useFakeTimers()
+      const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-1'))
+      await act(async () => { vi.advanceTimersByTime(10) })
+
+      act(() => { MockWebSocket.instances[0].simulateMessage(chunk('hello ')) })
+      act(() => { MockWebSocket.instances[0].simulateMessage(toolStart()) })
+      act(() => { MockWebSocket.instances[0].simulateMessage(chunk('world')) })
+
+      const assistants = assistantsOf(result)
+      expect(assistants).toHaveLength(1)
+      expect(assistants[0].toolAnchors).toEqual([{ callId: 'c1', offset: 6 }])
+    })
+
+    it('done 后锚点保留在消息上,新一轮工具锚点从 0 重新计', async () => {
+      vi.useFakeTimers()
+      const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-1'))
+      await act(async () => { vi.advanceTimersByTime(10) })
+
+      act(() => { MockWebSocket.instances[0].simulateMessage(chunk('hello ')) })
+      act(() => { MockWebSocket.instances[0].simulateMessage(toolStart('c1')) })
+      act(() => {
+        MockWebSocket.instances[0].simulateMessage(
+          JSON.stringify({ done: true, conversation_id: 'conv-1' }),
+        )
+      })
+      await act(async () => { vi.advanceTimersByTime(500) })
+
+      const first = assistantsOf(result)[0]
+      expect(first.toolAnchors).toEqual([{ callId: 'c1', offset: 6 }])
+      expect(first.id).not.toMatch(/^stream-/)
+
+      // 第二轮:refs 已作废,新 tool_start 的锚点从 0 开始
+      act(() => { result.current.sendMessage('again', 'conv-1') })
+      act(() => { MockWebSocket.instances[0].simulateMessage(toolStart('c2')) })
+      const second = assistantsOf(result).at(-1)
+      expect(second).toBeDefined()
+      expect(second!.id).not.toBe(first.id)
+      expect(second!.toolAnchors).toEqual([{ callId: 'c2', offset: 0 }])
+    })
+  })
 })

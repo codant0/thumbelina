@@ -8,6 +8,7 @@ import { SubagentCard } from './SubagentCard'
 import { AttachmentLightbox } from './AttachmentLightbox'
 import { attachmentUrl } from '../../api/attachments'
 import { splitLeadingJson } from '../../lib/codeUtils'
+import { splitContentByAnchors } from './toolCallEvents'
 import { useCopy } from '../../hooks/useCopy'
 
 interface MessageListProps {
@@ -101,8 +102,47 @@ function ToolCallItem({ tc, onViewDetail }: { tc: ToolCall; onViewDetail?: () =>
   )
 }
 
-/** Copy (and, for the last assistant turn, regenerate) actions on hover. */
-function MessageActions({ text, onRegenerate }: { text: string; onRegenerate?: () => void }) {
+/**
+ * 穿插渲染(设计 §5.3 修订):按 toolAnchors 把工具芯片切进文本流,
+ * 文本段各自走 Markdown 渲染;仅实时消息携带 anchors,历史消息走平铺布局。
+ */
+function InterleavedContent({
+  msg,
+  onViewToolDetail,
+}: {
+  msg: Message
+  onViewToolDetail?: (msgId: string, tc: ToolCall, index: number) => void
+}) {
+  const segments = useMemo(
+    () => splitContentByAnchors(msg.content, msg.toolAnchors ?? []),
+    [msg.content, msg.toolAnchors],
+  )
+  const byCallId = useMemo(
+    () => new Map((msg.toolCalls ?? []).map(tc => [tc.call_id, tc])),
+    [msg.toolCalls],
+  )
+  return (
+    <>
+      {segments.map((seg, i) => {
+        if (seg.type === 'text') {
+          return seg.text ? <AssistantContent key={`t${i}`} content={seg.text} /> : null
+        }
+        const tc = byCallId.get(seg.callId ?? '')
+        if (!tc) return null
+        const index = (msg.toolCalls ?? []).indexOf(tc)
+        return (
+          <ToolCallItem
+            key={`c${seg.callId}`}
+            tc={tc}
+            {...(onViewToolDetail ? { onViewDetail: () => onViewToolDetail(msg.id, tc, index) } : {})}
+          />
+        )
+      })}
+    </>
+  )
+}
+
+/** Copy (and, for the last assistant turn, regenerate) actions on hover. */function MessageActions({ text, onRegenerate }: { text: string; onRegenerate?: () => void }) {
   const { copied, copy } = useCopy()
   const { t } = useTranslation()
   return (
@@ -223,12 +263,16 @@ const MessageItem = memo(function MessageItem({
       )}
       <div className="msg-content">
         {msg.role === 'assistant' ? (
-          <AssistantContent content={msg.content} />
+          msg.toolAnchors?.length ? (
+            <InterleavedContent msg={msg} onViewToolDetail={onViewToolDetail} />
+          ) : (
+            <AssistantContent content={msg.content} />
+          )
         ) : (
           msg.content
         )}
       </div>
-      {msg.toolCalls && msg.toolCalls.length > 0 && (
+      {!(msg.toolAnchors?.length) && msg.toolCalls && msg.toolCalls.length > 0 && (
         <div className="tool-calls" data-testid="tool-calls">
           {msg.toolCalls.map((tc, i) => (
             <ToolCallItem

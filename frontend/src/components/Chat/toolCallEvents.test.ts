@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { markInterrupted, upsertToolCall } from './toolCallEvents'
+import { markInterrupted, splitContentByAnchors, upsertToolCall } from './toolCallEvents'
 import type { ToolEventPayload } from '../../types/chat'
 
 const start = (call_id: string, name = 'web_search'): ToolEventPayload => ({
@@ -70,5 +70,56 @@ describe('markInterrupted', () => {
   it('无 running 时返回原数组', () => {
     const list = upsertToolCall(upsertToolCall([], start('c1')), end('c1'))
     expect(markInterrupted(list)).toBe(list)
+  })
+})
+
+describe('splitContentByAnchors', () => {
+  const anchor = (callId: string, offset: number) => ({ callId, offset })
+
+  it('无锚点时返回单一文本段', () => {
+    expect(splitContentByAnchors('hello world', [])).toEqual([{ type: 'text', text: 'hello world' }])
+  })
+
+  it('按 offset 把内容切分为 文本-工具-文本 的有序段', () => {
+    const segments = splitContentByAnchors('before-after', [anchor('c1', 7)])
+    expect(segments).toEqual([
+      { type: 'text', text: 'before-' },
+      { type: 'tool', callId: 'c1' },
+      { type: 'text', text: 'after' },
+    ])
+  })
+
+  it('offset 超出内容长度时钳制到末尾', () => {
+    const segments = splitContentByAnchors('abc', [anchor('c1', 99)])
+    expect(segments).toEqual([{ type: 'text', text: 'abc' }, { type: 'tool', callId: 'c1' }])
+  })
+
+  it('offset 0 时芯片位于全部文本之前', () => {
+    const segments = splitContentByAnchors('text', [anchor('c1', 0)])
+    expect(segments).toEqual([{ type: 'tool', callId: 'c1' }, { type: 'text', text: 'text' }])
+  })
+
+  it('同 offset 的锚点保持到达顺序(稳定排序)', () => {
+    const segments = splitContentByAnchors('AB', [anchor('c2', 1), anchor('c1', 1)])
+    expect(segments).toEqual([
+      { type: 'text', text: 'A' },
+      { type: 'tool', callId: 'c2' },
+      { type: 'tool', callId: 'c1' },
+      { type: 'text', text: 'B' },
+    ])
+  })
+
+  it('多锚点按 offset 升序穿插且不产生空文本段', () => {
+    const segments = splitContentByAnchors('abc', [anchor('c1', 3), anchor('c2', 1)])
+    expect(segments).toEqual([
+      { type: 'text', text: 'a' },
+      { type: 'tool', callId: 'c2' },
+      { type: 'text', text: 'bc' },
+      { type: 'tool', callId: 'c1' },
+    ])
+  })
+
+  it('空内容只有锚点时不产生文本段', () => {
+    expect(splitContentByAnchors('', [anchor('c1', 0)])).toEqual([{ type: 'tool', callId: 'c1' }])
   })
 })

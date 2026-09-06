@@ -59,3 +59,38 @@ export function markInterrupted(toolCalls: ToolCall[]): ToolCall[] {
     tc.status === 'running' ? { ...tc, status: 'interrupted' as const } : tc
   )
 }
+
+/** 内容锚点(设计 §5.3 修订:工具芯片按发生顺序穿插在文本流中):
+ *  tool_start 事件到达时已接收的内容字符数,即该工具在内容流中的切分位置。 */
+export interface ToolAnchor {
+  callId: string
+  offset: number
+}
+
+/** 内容流中的一段:文本(走 Markdown 渲染)或工具芯片(按 call_id 引用 toolCalls)。 */
+export interface ContentSegment {
+  type: 'text' | 'tool'
+  text?: string
+  callId?: string
+}
+
+/** 按 anchors(offset 升序、同 offset 保持到达顺序)把 content 切分为穿插段。
+ *
+ * offset 超出内容长度时钳制到末尾(打字机未追平时芯片跟随在已显示文本之后,
+ * 追平后自然落位);不产生空文本段;无锚点时退化为单一文本段(历史消息布局)。
+ */
+export function splitContentByAnchors(content: string, anchors: ToolAnchor[]): ContentSegment[] {
+  if (anchors.length === 0) return content ? [{ type: 'text', text: content }] : []
+  const sorted = [...anchors].sort((a, b) => a.offset - b.offset)
+  const segments: ContentSegment[] = []
+  let cursor = 0
+  for (const { callId, offset } of sorted) {
+    const at = Math.min(offset, content.length)
+    if (at > cursor) segments.push({ type: 'text', text: content.slice(cursor, at) })
+    segments.push({ type: 'tool', callId })
+    cursor = Math.max(cursor, at)
+  }
+  if (cursor < content.length) segments.push({ type: 'text', text: content.slice(cursor) })
+  return segments
+}
+

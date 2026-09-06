@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { AttachmentRef, Message, SendAttachmentInput, SubagentEventPayload, ToolCall, ToolEventPayload } from '../types/chat'
+import type { AttachmentRef, Message, SendAttachmentInput, SubagentEventPayload, ToolAnchor, ToolCall, ToolEventPayload } from '../types/chat'
 import { markInterrupted, upsertToolCall } from '../components/Chat/toolCallEvents'
 
 interface WsIncoming {
@@ -154,6 +154,9 @@ export function useWebSocket(url: string, activeConversationId?: string) {
   // 当轮 in-flight 工具卡的权威状态(设计 §5.2):与 bufferRef 同生命周期。
   // 视图切走再切回时消息可能被重建,工具卡据此回填;流终结(finalize)时清空。
   const toolCallsRef = useRef<ToolCall[] | null>(null)
+  // 穿插锚点(设计 §5.3 修订):tool_start 到达时已接收的内容字符数,渲染端
+  // 按它把芯片切进文本流。与 toolCallsRef 同生命周期(终结/重置/清理同步)。
+  const toolAnchorsRef = useRef<ToolAnchor[] | null>(null)
   // Snapshot of a reply that just finished, so a history fetch that races the
   // DB write can still reconcile the response when the user returns to view.
   const completedContentRef = useRef<{ convId: string; content: string; reasoning: string } | null>(null)
@@ -241,7 +244,10 @@ export function useWebSocket(url: string, activeConversationId?: string) {
     setIsStreaming(false)
     setStreamingConvId(null)
     // 带终态 id 的终结代表一轮回复结束:当轮工具卡状态已落到消息上,ref 作废。
-    if (finalId) toolCallsRef.current = null
+    if (finalId) {
+      toolCallsRef.current = null
+      toolAnchorsRef.current = null
+    }
   }, [setAwaitingMore])
 
   const startReplyTimer = useCallback(() => {
@@ -278,6 +284,7 @@ export function useWebSocket(url: string, activeConversationId?: string) {
       displayedRef.current = 0
       completedContentRef.current = null
       toolCallsRef.current = null
+      toolAnchorsRef.current = null
       streamConvRef.current = targetConv
       sessionConvRef.current = targetConv
     }
@@ -380,6 +387,7 @@ export function useWebSocket(url: string, activeConversationId?: string) {
               thinking: reasoningBufferRef.current || undefined,
               // 视图切走期间收到过工具事件时,消息重建需回填已累积的工具卡
               toolCalls: toolCallsRef.current ?? undefined,
+              toolAnchors: toolAnchorsRef.current ?? undefined,
               timestamp: new Date().toISOString(),
             },
           ]
@@ -523,6 +531,7 @@ export function useWebSocket(url: string, activeConversationId?: string) {
           sessionConvRef.current = null
           setStreamingConvId(null)
           toolCallsRef.current = null
+          toolAnchorsRef.current = null
         }
         // 异常结束:待发消息不自动发送,挂起等用户处理
         if (conv) markPendingHeld(conv)
@@ -653,6 +662,15 @@ export function useWebSocket(url: string, activeConversationId?: string) {
         if (conv) setStreamingConvId(conv)
         streamDoneRef.current = false
 
+        // 穿插锚点(设计 §5.3 修订):start 到达时记录当前已接收内容长度,
+        // 供渲染端把芯片按发生顺序切进文本流;重复 start 与 upsertToolCall
+        // 同样忽略。end 不产生锚点。
+        if (data.tool_event.phase === 'start') {
+          const anchors = (toolAnchorsRef.current ??= [])
+          if (!anchors.some(a => a.callId === data.tool_event!.call_id)) {
+            anchors.push({ callId: data.tool_event.call_id, offset: bufferRef.current.length })
+          }
+        }
         toolCallsRef.current = upsertToolCall(toolCallsRef.current ?? [], data.tool_event)
         const isActiveView = !conv || conv === activeConversationRef.current
         const streamingId = twMsgIdRef.current
@@ -668,6 +686,7 @@ export function useWebSocket(url: string, activeConversationId?: string) {
                 role: 'assistant',
                 content: '',
                 toolCalls: toolCallsRef.current ?? [],
+                toolAnchors: toolAnchorsRef.current ?? undefined,
                 timestamp: new Date().toISOString(),
               },
             ])
@@ -678,7 +697,11 @@ export function useWebSocket(url: string, activeConversationId?: string) {
             const idx = prev.findIndex(m => m.id === streamingId)
             if (idx === -1) return prev
             const updated = [...prev]
-            updated[idx] = { ...updated[idx], toolCalls: toolCallsRef.current ?? [] }
+            updated[idx] = {
+              ...updated[idx],
+              toolCalls: toolCallsRef.current ?? [],
+              toolAnchors: toolAnchorsRef.current ?? undefined,
+            }
             return updated
           })
         }
@@ -868,13 +891,17 @@ export function useWebSocket(url: string, activeConversationId?: string) {
         if (streamingId) {
           markInFlightInterrupted()
           const liveCards = toolCallsRef.current
+          const liveAnchors = toolAnchorsRef.current
           stopTypewriter()
           toolCallsRef.current = null
+          toolAnchorsRef.current = null
           setIsStreaming(false)
           if (!conv || conv === activeConversationRef.current) {
             setMessages(prev => {
               const idx = prev.findIndex(m => m.id === streamingId)
-              const cards = liveCards && liveCards.length > 0 ? { toolCalls: liveCards } : undefined
+              const cards = liveCards && liveCards.length > 0
+                ? { toolCalls: liveCards, toolAnchors: liveAnchors ?? undefined }
+                : undefined
               if (idx === -1) {
                 // 占位消息不在列表(视图曾切走)→ 追加完整回复并带工具卡
                 return [
@@ -1028,6 +1055,7 @@ export function useWebSocket(url: string, activeConversationId?: string) {
       displayedRef.current = 0
       completedContentRef.current = null
       toolCallsRef.current = null
+      toolAnchorsRef.current = null
     }
     // 显式清空某会话上下文时,连带清掉该会话的待发消息;
     // 无参调用(切换会话视图)不影响任何待发消息。

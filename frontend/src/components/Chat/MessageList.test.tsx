@@ -457,6 +457,71 @@ describe('MessageList', () => {
     expect(container.querySelector('.tool-call__detail')).toBeNull()
   })
 
+  // ── 穿插渲染(toolAnchors,设计 §5.3 修订)─────────────────────────────
+
+  const interleaveMsg = (over: Partial<Message> = {}): Message => ({
+    id: '1',
+    role: 'assistant',
+    content: 'before-after',
+    timestamp: '2024-01-01T00:00:00Z',
+    toolCalls: [{ call_id: 'c1', name: 'web_search', args: {}, status: 'ok', durationMs: 10 }],
+    toolAnchors: [{ callId: 'c1', offset: 7 }],
+    ...over,
+  })
+
+  it('renders tool chips interleaved at their anchors inside the content flow', () => {
+    const { container } = render(<MessageList messages={[interleaveMsg()]} />)
+    const item = container.querySelector('[data-testid="message-item"]')!
+    const text = item.textContent!
+    // DOM 顺序:文本前段 → 芯片 → 文本后段
+    expect(text.indexOf('before-')).toBeLessThan(text.indexOf('web_search'))
+    expect(text.indexOf('web_search')).toBeLessThan(text.indexOf('after'))
+    // 穿插模式下没有底部独立工具块
+    expect(item.querySelector('.tool-calls')).toBeNull()
+  })
+
+  it('chip click still opens the detail panel in interleaved mode', () => {
+    const onViewToolDetail = vi.fn()
+    const { container } = render(
+      <MessageList messages={[interleaveMsg()]} onViewToolDetail={onViewToolDetail} />
+    )
+    fireEvent.click(container.querySelector('.tool-call__summary')!)
+    expect(onViewToolDetail).toHaveBeenCalledWith('1', interleaveMsg().toolCalls![0], 0)
+  })
+
+  it('clamps anchors beyond the content to the end of the flow', () => {
+    const { container } = render(
+      <MessageList messages={[interleaveMsg({ toolAnchors: [{ callId: 'c1', offset: 999 }] })]} />
+    )
+    const text = container.querySelector('[data-testid="message-item"]')!.textContent!
+    expect(text.indexOf('before-after')).toBeLessThan(text.indexOf('web_search'))
+  })
+
+  it('groups same-offset anchors in arrival order between texts', () => {
+    const messages: Message[] = [{
+      id: '1', role: 'assistant', content: 'AB', timestamp: '2024-01-01T00:00:00Z',
+      toolCalls: [
+        { call_id: 'c2', name: 'read_file', args: {}, status: 'ok', durationMs: 1 },
+        { call_id: 'c1', name: 'web_search', args: {}, status: 'ok', durationMs: 2 },
+      ],
+      toolAnchors: [{ callId: 'c2', offset: 1 }, { callId: 'c1', offset: 1 }],
+    }]
+    const { container } = render(<MessageList messages={messages} />)
+    const text = container.querySelector('[data-testid="message-item"]')!.textContent!
+    expect(text.indexOf('A')).toBeLessThan(text.indexOf('read_file'))
+    expect(text.indexOf('read_file')).toBeLessThan(text.indexOf('web_search'))
+    expect(text.indexOf('web_search')).toBeLessThan(text.indexOf('B'))
+  })
+
+  it('messages without anchors keep the flat bottom tool-calls block', () => {
+    const messages: Message[] = [{
+      id: '1', role: 'assistant', content: 'hi', timestamp: '2024-01-01T00:00:00Z',
+      toolCalls: [{ call_id: 'c1', name: 'web_search', args: {}, status: 'ok', durationMs: 5 }],
+    }]
+    const { container } = render(<MessageList messages={messages} />)
+    expect(container.querySelector('.tool-calls')).not.toBeNull()
+  })
+
   it('offers regenerate on the last assistant message when idle', () => {
     const messages: Message[] = [
       { id: '1', role: 'user', content: 'hi', timestamp: '2024-01-01T00:00:00Z' },
