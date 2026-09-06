@@ -15,7 +15,10 @@ import contextvars
 import re
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 from typing import Literal
+
+from thumbelina.tools.workspace_context import get_workspace, resolve_workspace_path
 
 
 class PermissionMode(StrEnum):
@@ -255,15 +258,179 @@ def classify_shell_command(
     for key, pat in DANGEROUS_PATTERNS:
         if pat.search(cmd):
             return deny(key, dangerous=True)
-    for key, pat in CONFIRM_PATTERNS:
-        if pat.search(cmd):
-            if auto:
-                return PermissionDecision("allow", "dangerous", key, True)
-            return confirm(key)
+    # 写穿收紧先于 CONFIRM_PATTERNS：``echo x > /etc/hosts`` 同时命中
+    # ``confirm.system_path_write`` 与 ``confirm.absolute_write``，按 spec
+    # §4.4 设计意图以更具体的「写意图 + 绝对路径」为准（plan Task 2 用例）。
     if _absolute_write(cmd):
         if auto:
             return PermissionDecision(
                 "allow", "dangerous", "confirm.absolute_write", True
             )
         return confirm("confirm.absolute_write")
+    for key, pat in CONFIRM_PATTERNS:
+        if pat.search(cmd):
+            if auto:
+                return PermissionDecision("allow", "dangerous", key, True)
+            return confirm(key)
     return ALLOW
+
+
+# ---------------------------------------------------------------------------
+# 任务 3：写路径分类与保护路径第二锚点（spec §4.5）
+# ---------------------------------------------------------------------------
+
+
+PROTECTED_PATH_PATTERNS: list[str] = [
+    "thumbelina.db",
+    "MEMORY/",
+    "prompts/roles/",
+    "plugins/",
+    ".env",
+    "TODO/",          # v3 新增（spec §4.5）：任务清单被改写可社会工程用户
+    "attachments/",     # v3 新增：覆盖后经 WS→WeChat 转发链注入对端内容
+]
+
+
+# 启动时由 app.py lifespan 经 _register_app_anchors 注册的绝对锚点
+# （spec §4.5：workspace≠CWD 时目录类守卫存在锚定盲区）。
+_app_anchors: dict[str, str] = {}
+
+
+def set_app_anchor(guard: str, absolute_path: str) -> None:
+    """注册守卫名（如 ``"MEMORY/"``）对应的解析后绝对路径（第二锚点）。"""
+    _app_anchors[guard] = str(Path(absolute_path).resolve())
+
+
+def get_app_anchors() -> dict[str, str]:
+    """返回当前已注册的应用锚点映射（供调试/测试观察）。"""
+    return dict(_app_anchors)
+
+
+def _is_protected(raw: str) -> str | None:
+    """命中保护路径则返回该模式，否则 None。
+
+    目录类守卫双锚定（修复 spec §4.5 锚定盲区）：
+    1) 工作区相对前缀分段（原行为，深层同名目录不误伤）；
+    2) 启动注册的绝对路径第二锚点（解决 workspace≠CWD 时绝对路径
+       ``F:\\…\\MEMORY\\x.md`` 不命中目录类守卫的问题）。
+
+    文件名类守卫（thumbelina.db、.env）任意层级分段匹配，数据/秘密
+    放到哪都危险。
+    """
+    posix = raw.replace("\\", "/").lower()
+    parts = [seg for seg in posix.split("/") if seg]
+    ws = get_workspace()
+    base = (ws or "").replace("\\", "/").rstrip("/").lower()
+    base_parts = [seg for seg in base.split("/") if seg]
+    rel = parts
+    if base_parts and parts[: len(base_parts)] == base_parts:
+        rel = parts[len(base_parts) :]
+    for guard in PROTECTED_PATH_PATTERNS:
+        g = guard.lower()
+        if g.endswith("/"):
+            dirs = [seg for seg in g.rstrip("/").split("/") if seg]
+            if rel[: len(dirs)] == dirs:
+                return guard
+            anchor = _app_anchors.get(guard)
+            if anchor:
+                a = anchor.replace("\\", "/").lower().rstrip("/").split("/")
+                if parts[: len(a)] == a:
+                    return guard
+        else:
+            for seg in parts:
+                if seg == g or seg.startswith(g):
+                    return guard
+    return None
+
+
+PathKind = Literal["in_workspace", "escape", "unbounded", "protected"]
+
+
+def classify_write_path(path: str) -> PathKind:
+    """写路径分类（闸门与工具 security_review 共用）。
+
+    优先级：protected > escape > in_workspace > unbounded（无工作区兜底）。
+    """
+    if _is_protected(path):
+        return "protected"
+    try:
+        resolved = resolve_workspace_path(path)
+    except ValueError:
+        return "escape"
+    return "unbounded" if resolved is None else "in_workspace"
+
+
+def evaluate_write_file(mode: PermissionMode, path: str) -> PermissionDecision:
+    """按 spec §3.3 矩阵 + §4.5 保护路径裁决 write_file 调用。
+
+    =========== ================== ================ =================
+    kind         workspace_write    global_write     full_access/auto
+    =========== ================== ================ =================
+    protected    deny(dangerous)    confirm          allow
+    escape       deny               allow            allow
+    in_workspace allow              allow            allow
+    unbounded    deny(no_workspace)  allow            allow
+    =========== ================== ================ =================
+
+    注：READ_ONLY 不在此处处理 —— 闸门（Task 8 evaluate_tool_call）已先
+    拒绝全部写工具；本函数仅供 gate 通过后 mode≥WORKSPACE_WRITE 路径
+    复用。工具级 security_review 在委托前自行读 ContextVar 兜底拒绝。
+    """
+    kind = classify_write_path(path)
+    if kind == "protected":
+        if mode is PermissionMode.WORKSPACE_WRITE:
+            return deny("rule.protected_path", dangerous=True)
+        if mode is PermissionMode.GLOBAL_WRITE:
+            return confirm("rule.protected_path")
+        return ALLOW  # full_access / auto
+    if kind == "escape":
+        if mode is PermissionMode.WORKSPACE_WRITE:
+            return deny("rule.workspace_escape")
+        return ALLOW  # global_write 起（write_file 的执行期二次复核同步放开）
+    if kind == "in_workspace":
+        return ALLOW
+    # unbounded（无工作区）：workspace_write 等效只读兜底
+    if mode is PermissionMode.WORKSPACE_WRITE:
+        return deny("rule.no_workspace")
+    return ALLOW
+
+
+def _register_app_anchors(config: object | None = None) -> None:
+    """按 config 实际值解析应用内部目录为绝对锚点。
+
+    典型调用点（Task 6 接线，在 app.py lifespan 装配完 memory/todo/
+    attachments 服务之后）：
+
+        from thumbelina.tools.permissions import (
+            set_app_anchor,
+            _register_app_anchors,
+        )
+        _register_app_anchors(config)
+
+    解析失败的守卫仅记录 WARNING 日志，不抛 —— 启动必须继续，无锚点
+    退化为"workspace 相对前缀"单一锚点（深层保护路径仍生效）。
+    """
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    def _resolve_memory(default: str) -> str:
+        if config is None:
+            return default
+        mem = getattr(config, "memory", None)
+        if mem is None:
+            return default
+        return str(getattr(mem, "directory", None) or default)
+
+    mapping: dict[str, str] = {
+        "MEMORY/": _resolve_memory("MEMORY"),
+        "TODO/": "TODO",
+        "attachments/": "attachments",
+        "prompts/roles/": str(Path("prompts") / "roles"),
+        "plugins/": "plugins",
+    }
+    for guard, raw in mapping.items():
+        try:
+            set_app_anchor(guard, raw)
+        except OSError:
+            logger.warning("permission anchor resolve failed: %s", guard)
