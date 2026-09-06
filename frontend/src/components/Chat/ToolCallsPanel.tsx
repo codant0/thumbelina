@@ -1,23 +1,24 @@
 import { useState } from 'react'
 import { ChevronDown, Wrench, X } from 'lucide-react'
 import { useTranslation } from '../../i18n'
-import type { Message } from '../../types/chat'
+import type { ToolCall } from '../../types/chat'
 import { formatToolArgs } from './toolCallEvents'
 
 interface ToolCallsPanelProps {
-  /** 拥有本轮全部工具调用的消息(ChatWindow 按消息 id 实时解析,upsert 后面板跟随)。 */
-  message: Message
+  /** 本批次(同一轮 LLM 响应)的工具调用;由 ChatWindow 按消息实时解析,
+   *  upsert 后面板行与状态实时跟随。 */
+  toolCalls: ToolCall[]
   /** 点击右上角 X 或外部遮罩时调用,关闭右侧面板。 */
   onClose: () => void
 }
 
-/** 右侧停靠面板:统一展示一条消息(一个 turn)的全部工具调用。
+/** 右侧停靠面板:统一展示一个批次(同一轮大模型响应)的全部工具调用。
  *
  * 行按时间序排列(即 toolCalls 数组序,即事件到达序),每行显示状态与耗时,
- * 可展开参数/结果;running 行带 spinner 并实时跟随消息更新。
+ * 可展开参数/结果;running 行带 spinner 并实时跟随。
  * 与 SubagentSidePanel 同一套停靠交互:X 或外部遮罩关闭。
  */
-export function ToolCallsPanel({ message, onClose }: ToolCallsPanelProps) {
+export function ToolCallsPanel({ toolCalls, onClose }: ToolCallsPanelProps) {
   const { t } = useTranslation()
   const [openIndex, setOpenIndex] = useState<number | null>(null)
   return (
@@ -39,7 +40,7 @@ export function ToolCallsPanel({ message, onClose }: ToolCallsPanelProps) {
         </button>
       </header>
       <div className="tool-calls-panel__body">
-        {(message.toolCalls ?? []).map((tc, i) => (
+        {toolCalls.map((tc, i) => (
           <div
             key={tc.call_id ?? i}
             className={`tool-calls-row status-${tc.status}`}

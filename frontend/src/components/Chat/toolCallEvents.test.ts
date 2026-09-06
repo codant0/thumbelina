@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatToolArgs, markInterrupted, splitContentByAnchors, summarizeToolCalls, upsertToolCall } from './toolCallEvents'
+import { formatToolArgs, groupAnchorsByOffset, markInterrupted, splitContentByAnchors, summarizeToolCalls, upsertToolCall } from './toolCallEvents'
 import type { ToolEventPayload } from '../../types/chat'
 
 const start = (call_id: string, name = 'web_search'): ToolEventPayload => ({
@@ -144,5 +144,28 @@ describe('formatToolArgs', () => {
   })
   it('截断参数原样输出 _truncated_json', () => {
     expect(formatToolArgs({ _truncated_json: '{"a": 1' }, true)).toBe('{"a": 1')
+  })
+})
+
+describe('groupAnchorsByOffset', () => {
+  const anchor = (callId: string, offset: number) => ({ callId, offset })
+
+  it('同一轮(相同 offset)的工具归入一个批次', () => {
+    const batches = groupAnchorsByOffset([anchor('c1', 7), anchor('c2', 7), anchor('c3', 7)])
+    expect(batches).toEqual([{ offset: 7, callIds: ['c1', 'c2', 'c3'] }])
+  })
+
+  it('不同轮按 offset 升序分批,批内保持到达顺序', () => {
+    const batches = groupAnchorsByOffset([
+      anchor('c3', 12), anchor('c1', 7), anchor('c4', 12), anchor('c2', 7),
+    ])
+    expect(batches).toEqual([
+      { offset: 7, callIds: ['c1', 'c2'] },
+      { offset: 12, callIds: ['c3', 'c4'] },
+    ])
+  })
+
+  it('空锚点返回空数组', () => {
+    expect(groupAnchorsByOffset([])).toEqual([])
   })
 })

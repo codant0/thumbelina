@@ -57,9 +57,9 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
   const [subagentsByConvId, setSubagentsByConvId] = useState<Record<string, Record<string, Record<string, SubagentEventPayload>>>>({})
   // 右侧详情面板:同时只展示一个 subagent;null 表示收起。
   const [selectedSubagentId, setSelectedSubagentId] = useState<string | null>(null)
-  // 工具统一面板:记录被点聚合按钮的消息 id,面板内容按消息从 messages 实时
-  // 解析 —— running 期间 upsert 后列表与状态实时跟随。
-  const [toolPanelMsgId, setToolPanelMsgId] = useState<string | null>(null)
+  // 工具统一面板:记录被点批次入口(消息 id + 批次 callIds),面板内容按
+  // 消息实时解析并按 callIds 过滤 —— running 期间 upsert 后列表与状态跟随。
+  const [toolPanelSelection, setToolPanelSelection] = useState<{ msgId: string; callIds: string[] } | null>(null)
   // 当前会话缓存上一次的映射,确保 useEffect 中能读到上一轮的值。
   const lastConvIdRef = useRef<string | undefined>(conversationId)
   const { t } = useTranslation()
@@ -277,7 +277,7 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
 
   // 点击 subagent 卡片时打开(同一会话内同一时间只展示一个)。
   const openSubagentDetail = useCallback((event: SubagentEventPayload) => {
-    setToolPanelMsgId(null)
+    setToolPanelSelection(null)
     setSelectedSubagentId(event.id)
   }, [])
 
@@ -286,31 +286,34 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
     setSelectedSubagentId(null)
   }, [])
 
-  // 被选消息从 messages 实时解析:工具卡 upsert 后面板列表与状态跟随更新。
-  const toolPanelMessage = useMemo(
-    () => (toolPanelMsgId ? messages.find(m => m.id === toolPanelMsgId) ?? null : null),
-    [messages, toolPanelMsgId],
-  )
+  // 被选批次从 messages 实时解析:按 callIds 过滤出本批工具调用。
+  const toolPanelCalls = useMemo(() => {
+    if (!toolPanelSelection) return []
+    const msg = messages.find(m => m.id === toolPanelSelection.msgId)
+    if (!msg?.toolCalls?.length) return []
+    const idSet = new Set(toolPanelSelection.callIds)
+    return msg.toolCalls.filter(tc => idSet.has(tc.call_id ?? ''))
+  }, [messages, toolPanelSelection])
 
-  // 点击聚合工具入口时打开(与 subagent 面板互斥:打开一个关另一个)。
-  const openToolCalls = useCallback((msgId: string) => {
+  // 点击批次入口时打开(与 subagent 面板互斥:打开一个关另一个)。
+  const openToolCalls = useCallback((msgId: string, callIds: string[]) => {
     setSelectedSubagentId(null)
-    setToolPanelMsgId(msgId)
+    setToolPanelSelection({ msgId, callIds })
   }, [])
 
   const closeToolCalls = useCallback(() => {
-    setToolPanelMsgId(null)
+    setToolPanelSelection(null)
   }, [])
 
   // Esc 关闭详情面板。仅在面板打开时监听,避免无谓事件。
   useEffect(() => {
-    if (!toolPanelMsgId) return
+    if (!toolPanelSelection) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') closeToolCalls()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [toolPanelMsgId, closeToolCalls])
+  }, [toolPanelSelection, closeToolCalls])
 
   // Esc 关闭详情面板。仅在面板打开时监听,避免无谓事件。
   useEffect(() => {
@@ -328,7 +331,7 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
     if (lastConvIdRef.current !== conversationId) {
       lastConvIdRef.current = conversationId
       setSelectedSubagentId(null)
-      setToolPanelMsgId(null)
+      setToolPanelSelection(null)
       setAttachments([])
     }
   }, [conversationId])
@@ -452,7 +455,7 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
       )}
       {/* 工具统一面板:与 subagent 面板同模式(遮罩 + 右侧停靠,互斥)。内容按
           消息 id 从 messages 实时解析,running → ok 的 upsert 面板实时跟随。 */}
-      {toolPanelMessage?.toolCalls?.length ? (
+      {toolPanelCalls.length ? (
         <>
           <button
             type="button"
@@ -461,7 +464,7 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
             aria-label={t('common.close')}
             onClick={closeToolCalls}
           />
-          <ToolCallsPanel message={toolPanelMessage} onClose={closeToolCalls} />
+          <ToolCallsPanel toolCalls={toolPanelCalls} onClose={closeToolCalls} />
         </>
       ) : null}
       {/* 全屏拖放覆盖层:仅当拖入 dataTransfer 含 Files 时出现;drop 与 📎 按钮共用添加管道。 */}

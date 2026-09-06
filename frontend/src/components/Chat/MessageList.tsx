@@ -1,5 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { AttachmentRef, Message, SubagentEventPayload } from '../../types/chat'
+import type { AttachmentRef, Message, SubagentEventPayload, ToolCall } from '../../types/chat'
 import { ArrowDown, Brain, Check, ChevronDown, Copy, RefreshCcw, Wrench } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import { MarkdownContent } from './MarkdownContent'
@@ -8,7 +8,7 @@ import { SubagentCard } from './SubagentCard'
 import { AttachmentLightbox } from './AttachmentLightbox'
 import { attachmentUrl } from '../../api/attachments'
 import { splitLeadingJson } from '../../lib/codeUtils'
-import { splitContentByAnchors, summarizeToolCalls } from './toolCallEvents'
+import { groupAnchorsByOffset, splitContentByAnchors, summarizeToolCalls } from './toolCallEvents'
 import { useCopy } from '../../hooks/useCopy'
 
 interface MessageListProps {
@@ -25,7 +25,7 @@ interface MessageListProps {
   /** 点击 "查看对话详情" 时的回调;由 ChatWindow 提供用于打开详情 Modal。 */
   onViewSubagentDetail?: (event: SubagentEventPayload) => void
   /** 点击聚合工具入口时的回调;由 ChatWindow 提供用于打开侧边统一面板。 */
-  onViewToolCalls?: (msgId: string) => void
+  onViewToolCalls?: (msgId: string, callIds: string[]) => void
 }
 
 interface ThinkingBlockProps {
@@ -74,13 +74,13 @@ function ThinkingBlock({ thinking, active }: ThinkingBlockProps) {
 }
 
 /**
- * 聚合工具入口(设计修订):一条消息的全部工具调用收拢为一个按钮,
- * 不再逐工具渲染芯片列表。点击由 ChatWindow 打开侧边统一面板。
+ * 聚合工具入口(设计修订):一个批次(同一轮 LLM 响应的并发调用)收拢为
+ * 一个按钮,点击由 ChatWindow 打开侧边面板展示本批调用。
  * 状态取聚合语义:任一 running > 任一 error > interrupted > ok。
  */
-function ToolCallsEntry({ msg, onOpen }: { msg: Message; onOpen?: () => void }) {
+function ToolCallsEntry({ calls, onOpen }: { calls: ToolCall[]; onOpen?: () => void }) {
   const { t } = useTranslation()
-  const s = summarizeToolCalls(msg.toolCalls ?? [])
+  const s = summarizeToolCalls(calls)
   const status =
     s.running > 0 ? 'running' : s.error > 0 ? 'error' : s.interrupted > 0 ? 'interrupted' : 'ok'
   return (
@@ -101,33 +101,47 @@ function ToolCallsEntry({ msg, onOpen }: { msg: Message; onOpen?: () => void }) 
 }
 
 /**
- * 穿插渲染(设计 §5.3 修订):聚合按钮插在**首个**工具锚点处 —— 文本流
- * 走到工具首次发生的位置即出现入口;仅实时消息携带 anchors,历史消息走平铺。
+ * 穿插渲染(设计 §5.3 修订):按锚点 offset 把工具调用**分批**切进文本流 ——
+ * 同一轮大模型响应的并发调用(offset 相同)共享一个入口按钮,插在该轮文本
+ * 之后;后续轮次的工具是下一个批次按钮。仅实时消息携带 anchors,历史消息
+ * 走平铺布局。
  */
 function InterleavedContent({
   msg,
   onViewToolCalls,
 }: {
   msg: Message
-  onViewToolCalls?: (msgId: string) => void
+  onViewToolCalls?: (msgId: string, callIds: string[]) => void
 }) {
-  const firstAnchor = useMemo(() => {
-    const anchors = msg.toolAnchors ?? []
-    return anchors.length ? [anchors.reduce((a, b) => (a.offset <= b.offset ? a : b))] : []
-  }, [msg.toolAnchors])
+  const batches = useMemo(() => groupAnchorsByOffset(msg.toolAnchors ?? []), [msg.toolAnchors])
   const segments = useMemo(
-    () => splitContentByAnchors(msg.content, firstAnchor),
-    [msg.content, firstAnchor],
+    () => splitContentByAnchors(msg.content, batches.map(b => ({ callId: b.callIds[0], offset: b.offset }))),
+    [msg.content, batches],
+  )
+  const byCallId = useMemo(
+    () => new Map((msg.toolCalls ?? []).map(tc => [tc.call_id, tc])),
+    [msg.toolCalls],
   )
   return (
     <>
-      {segments.map((seg, i) =>
-        seg.type === 'text' ? (
-          seg.text ? <AssistantContent key={`t${i}`} content={seg.text} /> : null
-        ) : (
-          <ToolCallsEntry key={`c${i}`} msg={msg} onOpen={onViewToolCalls ? () => onViewToolCalls(msg.id) : undefined} />
-        ),
-      )}
+      {segments.map((seg, i) => {
+        if (seg.type === 'text') {
+          return seg.text ? <AssistantContent key={`t${i}`} content={seg.text} /> : null
+        }
+        const batch = batches.find(b => b.callIds[0] === seg.callId)
+        if (!batch) return null
+        const calls = batch.callIds
+          .map(id => byCallId.get(id))
+          .filter((tc): tc is ToolCall => Boolean(tc))
+        if (!calls.length) return null
+        return (
+          <ToolCallsEntry
+            key={`c${i}`}
+            calls={calls}
+            onOpen={onViewToolCalls ? () => onViewToolCalls(msg.id, batch.callIds) : undefined}
+          />
+        )
+      })}
     </>
   )
 }
@@ -227,7 +241,7 @@ const MessageItem = memo(function MessageItem({
   onRegenerate?: () => void
   subagents?: SubagentEventPayload[]
   onViewSubagentDetail?: (event: SubagentEventPayload) => void
-  onViewToolCalls?: (msgId: string) => void
+  onViewToolCalls?: (msgId: string, callIds: string[]) => void
 }) {
   const { t } = useTranslation()
   // 该消息附件的 Lightbox 下标;null = 关闭。memo 组件内部 state 即可,无需提升。
@@ -259,7 +273,14 @@ const MessageItem = memo(function MessageItem({
             ) : (
               <>
                 <AssistantContent content={msg.content} />
-                <ToolCallsEntry msg={msg} onOpen={onViewToolCalls ? () => onViewToolCalls(msg.id) : undefined} />
+                <ToolCallsEntry
+                  calls={msg.toolCalls}
+                  onOpen={
+                    onViewToolCalls
+                      ? () => onViewToolCalls(msg.id, msg.toolCalls!.map(tc => tc.call_id ?? ''))
+                      : undefined
+                  }
+                />
               </>
             )
           ) : (

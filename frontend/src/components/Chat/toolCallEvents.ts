@@ -95,6 +95,27 @@ export interface ToolAnchor {
   offset: number
 }
 
+/** 一个"批次" = 同一轮大模型响应中并发调用的全部工具(锚点 offset 相同),
+ *  在对话流中共享同一个聚合入口按钮。 */
+export interface ToolCallBatch {
+  offset: number
+  callIds: string[]
+}
+
+/** 按锚点 offset 分批(升序;同 offset 内保持到达顺序/稳定排序)。 */
+export function groupAnchorsByOffset(anchors: ToolAnchor[]): ToolCallBatch[] {
+  const batches: ToolCallBatch[] = []
+  for (const { callId, offset } of [...anchors].sort((a, b) => a.offset - b.offset)) {
+    const last = batches[batches.length - 1]
+    if (last && last.offset === offset) {
+      last.callIds.push(callId)
+    } else {
+      batches.push({ offset, callIds: [callId] })
+    }
+  }
+  return batches
+}
+
 /** 内容流中的一段:文本(走 Markdown 渲染)或工具芯片(按 call_id 引用 toolCalls)。 */
 export interface ContentSegment {
   type: 'text' | 'tool'

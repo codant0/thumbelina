@@ -134,6 +134,41 @@ describe('ChatWindow', () => {
     expect(container.querySelector('[data-testid="tool-calls-panel"]')!.textContent).toContain('read_file')
   })
 
+  it('shows only the clicked batch when a message has multiple batch entries', () => {
+    wsState = {
+      ...baseState,
+      messages: [
+        {
+          id: 'a1',
+          role: 'assistant' as const,
+          content: 'before-mid-after',
+          timestamp: '2024-01-01T00:00:00Z',
+          toolCalls: [
+            { call_id: 'c1', name: 'web_search', args: {}, status: 'ok' as const, durationMs: 10 },
+            { call_id: 'c2', name: 'read_file', args: {}, status: 'ok' as const, durationMs: 5 },
+            { call_id: 'c3', name: 'run_shell', args: {}, status: 'ok' as const, durationMs: 8 },
+          ],
+          toolAnchors: [
+            { callId: 'c1', offset: 7 },
+            { callId: 'c2', offset: 7 },
+            { callId: 'c3', offset: 12 },
+          ],
+        },
+      ],
+    }
+    const { container } = renderWindow()
+    const entries = container.querySelectorAll('[data-testid="tool-calls-entry"] button')
+    expect(entries).toHaveLength(2)
+    fireEvent.click(entries[0]!)
+    const panelText = () => container.querySelector('[data-testid="tool-calls-panel"]')!.textContent!
+    expect(panelText()).toContain('web_search')
+    expect(panelText()).toContain('read_file')
+    expect(panelText()).not.toContain('run_shell')
+    fireEvent.click(entries[1]!)
+    expect(panelText()).toContain('run_shell')
+    expect(panelText()).not.toContain('web_search')
+  })
+
   it('should render chat window', () => {
     renderWindow()
     expect(screen.getByTestId('chat-window')).toBeInTheDocument()

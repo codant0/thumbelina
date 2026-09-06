@@ -773,6 +773,9 @@
 }
 
 .subagent-side-panel__body {
+  /* flex:1 + min-height:0:同工具面板,防止内容撑开导致滚动失效。 */
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: var(--sp-4);
   display: flex;
@@ -958,6 +961,10 @@
 }
 
 .tool-calls-panel__body {
+  /* flex:1 + min-height:0:固定高度 flex 列容器内,缺 min-height:0 时
+     子项会被内容撑开导致 overflow 失效(调用多时信息展示不全)。 */
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: var(--sp-3);
   display: flex;
