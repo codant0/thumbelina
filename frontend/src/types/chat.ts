@@ -1,7 +1,34 @@
+/**
+ * 聊天流内实时工具调用卡(设计 §5.1):由 WS ``tool_event`` 帧实时驱动,
+ * 按 ``call_id`` 在同一 assistant 消息上 upsert。
+ * ``args`` 为截断参数时后端下发 ``{"_truncated_json": "<json 字符串>"}``
+ * 并置 ``argsTruncated``(契约冻结段);完整参数/结果事后在轨迹页查看。
+ */
 export interface ToolCall {
+  call_id?: string
   name: string
   args: Record<string, unknown>
   result?: string
+  status: 'running' | 'ok' | 'error' | 'interrupted'
+  durationMs?: number
+  resultTruncated?: boolean
+  argsTruncated?: boolean
+}
+
+/**
+ * WS 下行 ``{tool_event: …}`` 帧体(契约冻结):``phase`` 由后端 WS 层从
+ * stream() 的 tool_start/tool_end 事件映射,其余字段原样透传。
+ */
+export interface ToolEventPayload {
+  phase: 'start' | 'end'
+  call_id: string
+  name?: string
+  args?: Record<string, unknown>
+  args_truncated?: boolean
+  duration_ms?: number
+  is_error?: boolean
+  result_preview?: string
+  result_truncated?: boolean
 }
 
 export type ThinkingEffort = 'low' | 'medium' | 'high'
@@ -56,12 +83,21 @@ export interface SendAttachmentInput {
   height?: number
 }
 
+/** 工具在内容流中的锚点(设计 §5.3 修订):offset 为 tool_start 到达时
+ *  已接收的内容字符数,渲染时按它把芯片穿插进文本流。仅实时消息携带
+ *  (useWebSocket 当轮生成),历史回放消息无此字段、维持底部布局。 */
+export interface ToolAnchor {
+  callId: string
+  offset: number
+}
+
 export interface Message {
   id: string
   role: 'user' | 'assistant' | 'system'
   content: string
   timestamp: string
   toolCalls?: ToolCall[]
+  toolAnchors?: ToolAnchor[]
   thinking?: string
   attachments?: AttachmentRef[]
 }

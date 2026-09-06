@@ -773,12 +773,268 @@
 }
 
 .subagent-side-panel__body {
+  /* flex:1 + min-height:0:同工具面板,防止内容撑开导致滚动失效。 */
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: var(--sp-4);
   display: flex;
   flex-direction: column;
   gap: var(--sp-4);
 }
+
+/* ===== Tool detail side panel (工具详情侧边面板,设计 §5.3 修订) ===== */
+/* 与 subagent 面板同模式:右侧停靠 + 外部遮罩(遮罩复用 .subagent-side-panel__backdrop)。
+   色值全部走主题令牌;入场动画仅 transform/opacity。 */
+.tool-detail-side-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(480px, 50vw);
+  background: var(--bg-surface);
+  border-left: 1px solid var(--border);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  z-index: 60;
+  animation: subagent-side-panel-in 0.18s ease-out;
+}
+
+.tool-detail-side-panel__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.tool-detail-side-panel__title {
+  flex: 1;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semi);
+  color: var(--text-secondary);
+}
+
+.tool-detail-side-panel__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.tool-detail-side-panel__btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.tool-detail-side-panel__btn.is-done {
+  color: var(--success, var(--accent));
+}
+
+.tool-detail-side-panel__close:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.tool-detail-side-panel__body {
+  overflow-y: auto;
+  padding: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.tool-detail-hero {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.tool-detail-hero__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-hover);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.tool-detail-hero__title {
+  font-weight: var(--fw-semi);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  word-break: break-all;
+}
+
+.tool-detail-hero__meta {
+  margin-top: 2px;
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+
+.tool-detail-side-panel[data-status='ok'] .tool-detail-hero__meta { color: var(--success); }
+.tool-detail-side-panel[data-status='error'] .tool-detail-hero__meta { color: var(--error); }
+
+.tool-detail-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.tool-detail-section__label {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semi);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tool-detail-section__pre {
+  margin: 0;
+  padding: var(--sp-3);
+  max-height: 320px;
+  overflow: auto;
+  background: var(--code-bg);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  color: var(--code-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* hint 复用芯片的 .tool-call__hint,但面板内有自己的留白体系,去掉横内边距 */
+.tool-detail-section .tool-call__hint {
+  padding: 0;
+}
+
+/* ===== Tool calls unified panel (工具调用统一面板,设计修订) ===== */
+/* 与 tool-detail-side-panel 同模式:右侧停靠 + 外部遮罩(遮罩复用
+   .subagent-side-panel__backdrop),行按时间序排列,可展开参数/结果。 */
+.tool-calls-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(480px, 50vw);
+  background: var(--bg-surface);
+  border-left: 1px solid var(--border);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  z-index: 60;
+  animation: subagent-side-panel-in 0.18s ease-out;
+}
+
+.tool-calls-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.tool-calls-panel__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semi);
+  color: var(--text-secondary);
+}
+
+.tool-calls-panel__body {
+  /* flex:1 + min-height:0:固定高度 flex 列容器内,缺 min-height:0 时
+     子项会被内容撑开导致 overflow 失效(调用多时信息展示不全)。 */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.tool-calls-row {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.tool-calls-row__header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.tool-calls-row__header:hover { background: var(--bg-hover); }
+
+.tool-calls-row__name {
+  font-weight: var(--fw-med);
+  color: var(--accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-calls-row__meta {
+  flex: 1;
+  text-align: right;
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.tool-calls-row__caret {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.tool-calls-row__caret.is-open { transform: rotate(180deg); }
+
+.tool-calls-row.status-ok .tool-calls-row__meta { color: var(--success); }
+
+.tool-calls-row.status-error {
+  border-color: var(--error);
+  background: var(--error-muted);
+}
+
+.tool-calls-row.status-error .tool-calls-row__meta { color: var(--error); }
+
+.tool-calls-row__detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-3) var(--sp-3);
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--sp-2);
+}
+
+.tool-calls-row__detail .tool-call__hint { padding: 0; }
 
 /* ===== Floating window (independent of chat dialog size) ===== */
 

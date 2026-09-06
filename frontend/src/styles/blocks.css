@@ -133,8 +133,17 @@
   white-space: pre;
 }
 
-/* ===== Tool call cards (collapsed by default) ===== */
-.tool-call__summary {
+/* ===== Tool calls aggregate entry (设计修订:每消息一个入口按钮) ===== */
+/* 一条消息的全部工具调用收拢为一个按钮;详情在侧边统一面板(ToolCallsPanel)。 */
+.tool-calls-entry {
+  margin: var(--sp-1) 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.tool-calls-entry__btn {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
@@ -142,11 +151,42 @@
   padding: var(--sp-2) var(--sp-3);
   font-size: var(--fs-sm);
   color: var(--text-primary);
-  border-radius: var(--radius);
   transition: background var(--dur-fast) var(--ease-out);
 }
 
-.tool-call__summary:hover { background: var(--bg-hover); }
+.tool-calls-entry__btn:hover { background: var(--bg-hover); }
+
+.tool-calls-entry__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-full);
+  background: var(--bg-hover);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semi);
+  color: var(--text-secondary);
+}
+
+.tool-calls-entry__meta {
+  flex: 1;
+  text-align: right;
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-calls-entry.status-running { border-color: var(--accent); }
+.tool-calls-entry.status-error {
+  border-color: var(--error);
+  background: var(--error-muted);
+  box-shadow: inset 3px 0 0 var(--error);
+}
+.tool-calls-entry.status-error .tool-calls-entry__meta { color: var(--error); }
 
 .tool-call__name {
   display: inline-flex;
@@ -159,49 +199,30 @@
 
 .tool-call__name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.tool-call__meta {
-  flex: 1;
-  min-width: 0;
-  font-size: var(--fs-xs);
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tool-call__caret {
+/* spinner/hint 仍被聚合入口与统一面板复用;色值全部走主题令牌,
+   running 动画仅 transform(旋转)。 */
+.tool-call__spinner {
   flex-shrink: 0;
-  color: var(--text-secondary);
-  transition: transform var(--dur-fast) var(--ease-out);
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: var(--radius-full);
+  animation: toolCallSpin 0.8s linear infinite;
 }
 
-.tool-call__caret.is-open { transform: rotate(180deg); }
-
-.tool-call__detail {
-  border-top: 1px solid var(--border-subtle);
+@keyframes toolCallSpin {
+  to { transform: rotate(360deg); }
 }
 
-.tool-call__section-label {
-  padding: var(--sp-2) var(--sp-3) 0;
+.tool-call__hint {
+  padding: 0 var(--sp-3) var(--sp-2);
   font-size: var(--fs-xs);
-  font-weight: var(--fw-semi);
   color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
-.tool-call__detail pre {
-  margin: var(--sp-2) var(--sp-3) var(--sp-3);
-  padding: var(--sp-3);
-  max-height: 280px;
-  overflow: auto;
-  background: var(--code-bg);
-  border-radius: var(--radius-sm);
-  font-size: var(--fs-sm);
-  line-height: 1.5;
-  color: var(--code-text);
-  white-space: pre-wrap;
-  word-break: break-word;
+@media (prefers-reduced-motion: reduce) {
+  .tool-call__spinner { animation: none; }
 }
 
 /* ===== Message-level actions (copy / retry) ===== */

@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.tools import tool
 
 
 class TestCallModelNode:
@@ -149,3 +150,96 @@ class TestToolNode:
         assert isinstance(msg, ToolMessage)
         assert msg.tool_call_id == "call_1"
         assert "boom" in msg.content
+
+
+@tool
+def _ok_tool(dummy: str = "") -> str:
+    """always returns ok"""
+    return "ok result"
+
+
+@tool
+def _boom_tool(dummy: str = "") -> str:
+    """always raises"""
+    raise RuntimeError("boom")
+
+
+def _state_with(tool_call: dict):
+    return {"messages": [AIMessage(content="", tool_calls=[tool_call])]}
+
+
+class TestToolNodeEventCallback:
+    """tool_node 的 on_tool_event 回调(工具可见性特性,Task 1)。"""
+
+    async def test_success_event_payload(self):
+        from thumbelina.agent.nodes import tool_node
+
+        events = []
+
+        async def cb(info):
+            events.append(info)
+
+        await tool_node(
+            _state_with({"name": "_ok_tool", "args": {}, "id": "c1"}),
+            [_ok_tool],
+            on_tool_event=cb,
+        )
+        assert len(events) == 1
+        assert events[0]["call_id"] == "c1"
+        assert events[0]["is_error"] is False
+        assert events[0]["content"] == "ok result"
+        assert isinstance(events[0]["duration_ms"], int) and events[0]["duration_ms"] >= 0
+
+    async def test_exception_event_is_error(self):
+        from thumbelina.agent.nodes import tool_node
+
+        events = []
+
+        async def cb(info):
+            events.append(info)
+
+        result = await tool_node(
+            _state_with({"name": "_boom_tool", "args": {}, "id": "c2"}),
+            [_boom_tool],
+            on_tool_event=cb,
+        )
+        assert events[0]["is_error"] is True
+        assert "boom" in events[0]["content"]
+        assert result["messages"][0].content.startswith("Error executing tool")
+
+    async def test_unknown_tool_event_is_error(self):
+        from thumbelina.agent.nodes import tool_node
+
+        events = []
+
+        async def cb(info):
+            events.append(info)
+
+        await tool_node(
+            _state_with({"name": "nope", "args": {}, "id": "c3"}),
+            [_ok_tool],
+            on_tool_event=cb,
+        )
+        assert events[0]["is_error"] is True
+        assert events[0]["content"] == "Error: Unknown tool 'nope'"
+
+    async def test_callback_exception_does_not_break_execution(self):
+        from thumbelina.agent.nodes import tool_node
+
+        async def cb(info):
+            raise ValueError("callback exploded")
+
+        result = await tool_node(
+            _state_with({"name": "_ok_tool", "args": {}, "id": "c4"}),
+            [_ok_tool],
+            on_tool_event=cb,
+        )
+        assert result["messages"][0].content == "ok result"
+
+    async def test_no_callback_default_unchanged(self):
+        from thumbelina.agent.nodes import tool_node
+
+        result = await tool_node(
+            _state_with({"name": "_ok_tool", "args": {}, "id": "c5"}), [_ok_tool]
+        )
+        assert result["messages"][0].content == "ok result"

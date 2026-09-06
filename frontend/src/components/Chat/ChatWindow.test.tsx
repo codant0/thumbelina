@@ -60,6 +60,115 @@ beforeEach(() => {
 })
 
 describe('ChatWindow', () => {
+  // ── 工具详情侧边面板(点击芯片打开,遮罩/X 关闭,内容实时跟随)──────────
+
+  const toolMessages = (status: 'running' | 'ok', result?: string) => [
+    {
+      id: 'a1',
+      role: 'assistant' as const,
+      content: 'done',
+      timestamp: '2024-01-01T00:00:00Z',
+      toolCalls: [
+        { call_id: 'c1', name: 'web_search', args: { query: 'hi' }, status, ...(result ? { result, durationMs: 42 } : {}) },
+      ],
+    },
+  ]
+
+  it('opens the unified tool calls panel from the aggregate entry and closes via backdrop', () => {
+    wsState = { ...baseState, messages: toolMessages('ok', 'found 3 results') as never }
+    const { container } = renderWindow()
+    expect(container.querySelector('[data-testid="tool-calls-panel"]')).toBeNull()
+    fireEvent.click(container.querySelector('[data-testid="tool-calls-entry"] button')!)
+    const panel = container.querySelector('[data-testid="tool-calls-panel"]')
+    expect(panel).not.toBeNull()
+    expect(panel!.textContent).toContain('web_search')
+    // 行默认收起,展开后可见参数/结果详情
+    fireEvent.click(panel!.querySelector('.tool-calls-row__header')!)
+    expect(panel!.textContent).toContain('found 3 results')
+    fireEvent.click(container.querySelector('[data-testid="tool-detail-backdrop"]')!)
+    expect(container.querySelector('[data-testid="tool-calls-panel"]')).toBeNull()
+  })
+
+  it('keeps the panel content in sync with the latest tool state while streaming', () => {
+    wsState = { ...baseState, messages: toolMessages('running') as never }
+    const { container, rerender } = renderWindow()
+    fireEvent.click(container.querySelector('[data-testid="tool-calls-entry"] button')!)
+    const panel = () => container.querySelector('[data-testid="tool-calls-panel"]')!
+    panel().querySelector('.tool-calls-row__header')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(panel().textContent).not.toContain('found 3 results')
+    // running → ok 的 upsert 发生在消息树后面板上实时跟随(按消息 id 解析)
+    wsState = { ...baseState, messages: toolMessages('ok', 'found 3 results') as never }
+    rerender(<ChatWindow ws={wsState} />)
+    expect(panel().textContent).toContain('found 3 results')
+  })
+
+  it('switches panel content when clicking another message entry', () => {
+    wsState = {
+      ...baseState,
+      messages: [
+        {
+          id: 'a1',
+          role: 'assistant' as const,
+          content: 'done',
+          timestamp: '2024-01-01T00:00:00Z',
+          toolCalls: [
+            { call_id: 'c1', name: 'web_search', args: {}, status: 'ok' as const, durationMs: 10 },
+          ],
+        },
+        {
+          id: 'a2',
+          role: 'assistant' as const,
+          content: 'done too',
+          timestamp: '2024-01-01T00:00:01Z',
+          toolCalls: [
+            { call_id: 'c2', name: 'read_file', args: {}, status: 'ok' as const, durationMs: 20 },
+          ],
+        },
+      ],
+    }
+    const { container } = renderWindow()
+    const entries = container.querySelectorAll('[data-testid="tool-calls-entry"] button')
+    fireEvent.click(entries[0]!)
+    expect(container.querySelector('[data-testid="tool-calls-panel"]')!.textContent).toContain('web_search')
+    fireEvent.click(entries[1]!)
+    expect(container.querySelector('[data-testid="tool-calls-panel"]')!.textContent).toContain('read_file')
+  })
+
+  it('shows only the clicked batch when a message has multiple batch entries', () => {
+    wsState = {
+      ...baseState,
+      messages: [
+        {
+          id: 'a1',
+          role: 'assistant' as const,
+          content: 'before-mid-after',
+          timestamp: '2024-01-01T00:00:00Z',
+          toolCalls: [
+            { call_id: 'c1', name: 'web_search', args: {}, status: 'ok' as const, durationMs: 10 },
+            { call_id: 'c2', name: 'read_file', args: {}, status: 'ok' as const, durationMs: 5 },
+            { call_id: 'c3', name: 'run_shell', args: {}, status: 'ok' as const, durationMs: 8 },
+          ],
+          toolAnchors: [
+            { callId: 'c1', offset: 7 },
+            { callId: 'c2', offset: 7 },
+            { callId: 'c3', offset: 12 },
+          ],
+        },
+      ],
+    }
+    const { container } = renderWindow()
+    const entries = container.querySelectorAll('[data-testid="tool-calls-entry"] button')
+    expect(entries).toHaveLength(2)
+    fireEvent.click(entries[0]!)
+    const panelText = () => container.querySelector('[data-testid="tool-calls-panel"]')!.textContent!
+    expect(panelText()).toContain('web_search')
+    expect(panelText()).toContain('read_file')
+    expect(panelText()).not.toContain('run_shell')
+    fireEvent.click(entries[1]!)
+    expect(panelText()).toContain('run_shell')
+    expect(panelText()).not.toContain('web_search')
+  })
+
   it('should render chat window', () => {
     renderWindow()
     expect(screen.getByTestId('chat-window')).toBeInTheDocument()

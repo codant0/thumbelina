@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { useWebSocket } from './useWebSocket'
+import type { Message } from '../types/chat'
 
 // Mock WebSocket
 class MockWebSocket {
@@ -948,6 +949,269 @@ describe('useWebSocket', () => {
       ])
       const assistantMsg = result.current.messages.find(m => m.role === 'assistant')
       expect(assistantMsg?.content).toBe('这是你发的图片')
+    })
+  })
+
+  describe('tool_event 实时工具卡', () => {
+    const toolStart = (callId = 'c1', conv = 'conv-1') =>
+      JSON.stringify({
+        tool_event: {
+          phase: 'start', call_id: callId, name: 'web_search',
+          args: { query: 'q' }, args_truncated: false,
+        },
+        conversation_id: conv,
+      })
+    const toolEnd = (callId = 'c1', conv = 'conv-1') =>
+      JSON.stringify({
+        tool_event: {
+          phase: 'end', call_id: callId, duration_ms: 1800, is_error: false,
+          result_preview: 'found 3', result_truncated: true,
+        },
+        conversation_id: conv,
+      })
+
+    const assistantsOf = (result: { current: { messages: Message[] } }) =>
+      result.current.messages.filter(m => m.role === 'assistant')
+
+    it('start 创建占位 assistant 消息并带 running 卡,end 原地更新为 ok', async () => {
+      vi.useFakeTimers()
+      const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-1'))
+      await act(async () => { vi.advanceTimersByTime(10) })
+
+      act(() => { MockWebSocket.instances[0].simulateMessage(toolStart()) })
+      const placeholder = assistantsOf(result)[0]
+      expect(placeholder).toBeDefined()
+      expect(placeholder.content).toBe('')
+      expect(placeholder.toolCalls).toEqual([
+        { call_id: 'c1', name: 'web_search', args: { query: 'q' }, argsTruncated: false, status: 'running' },
+      ])
+
+      act(() => { MockWebSocket.instances[0].simulateMessage(toolEnd()) })
+      const assistants = assistantsOf(result)
+      // 占位消息被复用,不追加第二条
+      expect(assistants).toHaveLength(1)
+      expect(assistants[0].toolCalls![0]).toMatchObject({
+        call_id: 'c1', status: 'ok', durationMs: 1800, resultTruncated: true,
+      })
+    })
+
+    it('工具卡与后续 chunk 落在同一条消息,done 后终结', async () => {
+      vi.useFakeTimers()
+      const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-1'))
+      await act(async () => { vi.advanceTimersByTime(10) })
+
+      act(() => { MockWebSocket.instances[0].simulateMessage(toolStart()) })
+      act(() => {
+        MockWebSocket.instances[0].simulateMessage(
+          JSON.stringify({ chunk: 'answer ', conversation_id: 'conv-1' }),
+        )
+      })
+      await act(async () => { vi.advanceTimersByTime(500) })
+      act(() => { MockWebSocket.instances[0].simulateMessage(toolEnd()) })
+      act(() => {
+        MockWebSocket.instances[0].simulateMessage(
+          JSON.stringify({ done: true, conversation_id: 'conv-1' }),
+        )
+      })
+      await act(async () => { vi.advanceTimersByTime(500) })
+
+      const assistants = assistantsOf(result)
+      expect(assistants).toHaveLength(1)
+      expect(assistants[0].content).toBe('answer ')
+      expect(assistants[0].toolCalls![0].status).toBe('ok')
+      expect(assistants[0].id).not.toMatch(/^stream-/)
+      expect(result.current.isStreaming).toBe(false)
+    })
+
+    it('stopped 把残留 running 卡标为 interrupted', async () => {
+      vi.useFakeTimers()
+      const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-1'))
+      await act(async () => { vi.advanceTimersByTime(10) })
+
+      act(() => { result.current.sendMessage('hello', 'conv-1') })
+      act(() => { MockWebSocket.instances[0].simulateMessage(toolStart()) })
+      act(() => {
+        MockWebSocket.instances[0].simulateMessage(
+          JSON.stringify({ stopped: true, conversation_id: 'conv-1' }),
+        )
+      })
+
+      const assistants = assistantsOf(result)
+      expect(assistants).toHaveLength(1)
+      expect(assistants[0].toolCalls![0].status).toBe('interrupted')
+      expect(assistants[0].id).not.toMatch(/^stream-/)
+      expect(result.current.isStreaming).toBe(false)
+    })
+
+    it('done 兜底:未收到 tool_end 的 running 卡标记为 interrupted', async () => {
+      vi.useFakeTimers()
+      const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-1'))
+      await act(async () => { vi.advanceTimersByTime(10) })
+
+      act(() => { MockWebSocket.instances[0].simulateMessage(toolStart()) })
+      act(() => {
+        MockWebSocket.instances[0].simulateMessage(
+          JSON.stringify({ done: true, conversation_id: 'conv-1' }),
+        )
+      })
+      await act(async () => { vi.advanceTimersByTime(500) })
+
+      expect(assistantsOf(result)[0].toolCalls![0].status).toBe('interrupted')
+      expect(result.current.isStreaming).toBe(false)
+    })
+
+    it('error 收尾:残留 running 卡标为 interrupted', async () => {
+      vi.useFakeTimers()
+      const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-1'))
+      await act(async () => { vi.advanceTimersByTime(10) })
+
+      act(() => { MockWebSocket.instances[0].simulateMessage(toolStart()) })
+      act(() => {
+        MockWebSocket.instances[0].simulateMessage(
+          JSON.stringify({ error: 'boom', conversation_id: 'conv-1' }),
+        )
+      })
+
+      expect(assistantsOf(result)[0].toolCalls![0].status).toBe('interrupted')
+      expect(result.current.isStreaming).toBe(false)
+    })
+
+    it('忽略其它会话的 tool_event,不串话', async () => {
+      vi.useFakeTimers()
+      const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'B'))
+      await act(async () => { vi.advanceTimersByTime(10) })
+
+      act(() => { MockWebSocket.instances[0].simulateMessage(toolStart('c1', 'A')) })
+      act(() => { MockWebSocket.instances[0].simulateMessage(toolEnd('c1', 'A')) })
+
+      expect(result.current.messages).toHaveLength(0)
+    })
+
+    it('非流式:response 帧并入占位消息并保留工具卡,不留空气泡', async () => {
+      vi.useFakeTimers()
+      const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-1'))
+      await act(async () => { vi.advanceTimersByTime(10) })
+
+      act(() => { MockWebSocket.instances[0].simulateMessage(toolStart()) })
+      act(() => { MockWebSocket.instances[0].simulateMessage(toolEnd()) })
+      act(() => {
+        MockWebSocket.instances[0].simulateMessage(
+          JSON.stringify({ response: 'final answer', conversation_id: 'conv-1' }),
+        )
+      })
+
+      const assistants = assistantsOf(result)
+      expect(assistants).toHaveLength(1)
+      expect(assistants[0].content).toBe('final answer')
+      expect(assistants[0].toolCalls![0].status).toBe('ok')
+      expect(assistants[0].id).not.toMatch(/^stream-/)
+      expect(result.current.isStreaming).toBe(false)
+      expect(result.current.awaitingMoreContent).toBe(false)
+    })
+  })
+
+  describe('tool_anchors 内容锚点（穿插布局）', () => {
+    const toolStart = (callId = 'c1', conv = 'conv-1') =>
+      JSON.stringify({
+        tool_event: { phase: 'start', call_id: callId, name: 'web_search', args: { query: 'q' } },
+        conversation_id: conv,
+      })
+    const chunk = (text: string, conv = 'conv-1') =>
+      JSON.stringify({ chunk: text, conversation_id: conv })
+    const assistantsOf = (result: { current: { messages: Message[] } }) =>
+      result.current.messages.filter(m => m.role === 'assistant')
+
+    it('tool_start 以当时已接收内容长度记录锚点并随消息携带', async () => {
+      vi.useFakeTimers()
+      const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-1'))
+      await act(async () => { vi.advanceTimersByTime(10) })
+
+      act(() => { MockWebSocket.instances[0].simulateMessage(chunk('hello ')) })
+      act(() => { MockWebSocket.instances[0].simulateMessage(toolStart()) })
+      act(() => { MockWebSocket.instances[0].simulateMessage(chunk('world')) })
+
+      const assistants = assistantsOf(result)
+      expect(assistants).toHaveLength(1)
+      expect(assistants[0].toolAnchors).toEqual([{ callId: 'c1', offset: 6 }])
+    })
+
+    it('done 后锚点保留在消息上,新一轮工具锚点从 0 重新计', async () => {
+      vi.useFakeTimers()
+      const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-1'))
+      await act(async () => { vi.advanceTimersByTime(10) })
+
+      act(() => { MockWebSocket.instances[0].simulateMessage(chunk('hello ')) })
+      act(() => { MockWebSocket.instances[0].simulateMessage(toolStart('c1')) })
+      act(() => {
+        MockWebSocket.instances[0].simulateMessage(
+          JSON.stringify({ done: true, conversation_id: 'conv-1' }),
+        )
+      })
+      await act(async () => { vi.advanceTimersByTime(500) })
+
+      const first = assistantsOf(result)[0]
+      expect(first.toolAnchors).toEqual([{ callId: 'c1', offset: 6 }])
+      expect(first.id).not.toMatch(/^stream-/)
+
+      // 第二轮:refs 已作废,新 tool_start 的锚点从 0 开始
+      act(() => { result.current.sendMessage('again', 'conv-1') })
+      act(() => { MockWebSocket.instances[0].simulateMessage(toolStart('c2')) })
+      const second = assistantsOf(result).at(-1)
+      expect(second).toBeDefined()
+      expect(second!.id).not.toBe(first.id)
+      expect(second!.toolAnchors).toEqual([{ callId: 'c2', offset: 0 }])
+    })
+  })
+
+  describe('锚点丢失修复(切会话/完成后 reconcile 不丢工具卡)', () => {
+    const startFrame = (callId = 'c1') =>
+      JSON.stringify({ tool_event: { phase: 'start', call_id: callId, name: 'web_search', args: {} }, conversation_id: 'conv-1' })
+    const userHistory = {
+      ok: true,
+      json: async () => ({
+        messages: [{ id: 'u1', role: 'user', content: 'q', created_at: '2024-01-01T00:00:00Z' }],
+      }),
+    }
+
+    it('流中切走再切回:loadHistory 重建的流式消息携带 toolCalls 与 toolAnchors', async () => {
+      vi.useFakeTimers()
+      const fetchMock = vi.fn()
+      globalThis.fetch = fetchMock
+      fetchMock.mockResolvedValueOnce(userHistory)
+      const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-1'))
+      await act(async () => { vi.advanceTimersByTime(10) })
+
+      act(() => { MockWebSocket.instances[0].simulateMessage(JSON.stringify({ chunk: 'hello ', conversation_id: 'conv-1' })) })
+      act(() => { MockWebSocket.instances[0].simulateMessage(startFrame()) })
+
+      await act(async () => { await result.current.loadHistory('conv-1') })
+
+      const rebuilt = result.current.messages.filter(m => m.role === 'assistant').at(-1)!
+      expect(rebuilt.toolCalls![0]).toMatchObject({ call_id: 'c1', status: 'running' })
+      expect(rebuilt.toolAnchors).toEqual([{ callId: 'c1', offset: 6 }])
+      vi.useRealTimers()
+    })
+
+    it('完成后切回:reconcile 追加的消息携带工具卡与锚点', async () => {
+      vi.useFakeTimers()
+      const fetchMock = vi.fn()
+      globalThis.fetch = fetchMock
+      const { result } = renderHook(() => useWebSocket('ws://localhost:8000/ws/chat', 'conv-1'))
+      await act(async () => { vi.advanceTimersByTime(10) })
+
+      act(() => { MockWebSocket.instances[0].simulateMessage(JSON.stringify({ chunk: 'hello ', conversation_id: 'conv-1' })) })
+      act(() => { MockWebSocket.instances[0].simulateMessage(startFrame()) })
+      act(() => { MockWebSocket.instances[0].simulateMessage(JSON.stringify({ done: true, conversation_id: 'conv-1' })) })
+      await act(async () => { vi.advanceTimersByTime(500) })
+
+      // 历史里没有该 assistant 消息(DB 写入竞态)→ reconcile 追加
+      fetchMock.mockResolvedValueOnce(userHistory)
+      await act(async () => { await result.current.loadHistory('conv-1') })
+
+      const appended = result.current.messages.filter(m => m.role === 'assistant').at(-1)!
+      expect(appended.toolCalls![0]).toMatchObject({ call_id: 'c1' })
+      expect(appended.toolAnchors).toEqual([{ callId: 'c1', offset: 6 }])
+      vi.useRealTimers()
     })
   })
 })

@@ -144,16 +144,29 @@ def test_websocket_passes_context_window_to_stream(client):
     assert any(m.get("done") for m in messages)
 
 
-def test_websocket_passes_context_window_to_run_when_not_streaming(client):
-    """非流式路径应接收到解析出的上下文窗口。"""
+def test_websocket_passes_context_window_to_stream_when_not_streaming(client):
+    """非流式路径同样消费 stream()，应接收到解析出的上下文窗口。
+
+    （非流式分支统一改为消费 stream() 后，旧版对 agent.run kwargs 的断言
+    由本用例承接：window 经 stream() 的 context_window_tokens 透传。）
+    """
     client.app.state.config.llm.streaming_enabled = False
+    recorded = {}
+
+    async def _stream(message, context_window_tokens=None, attachments=None):
+        recorded["message"] = message
+        recorded["window"] = context_window_tokens
+        yield {"type": "content", "text": "Agent response"}
+
+    client.app.state.agent.stream = _stream
 
     with client.websocket_connect("/ws/chat") as ws:
         ws.send_json({"message": "Hello"})
         _collect_ws_messages(ws)
 
-    run_kwargs = client.app.state.agent.run.await_args.kwargs
-    assert run_kwargs["context_window_tokens"] == 128_000
+    assert recorded["message"] == "Hello"
+    # fixture 中未配置端点 → 使用 llm.context_window 默认值（128K）。
+    assert recorded["window"] == 128_000
 
 
 @pytest.mark.asyncio
@@ -324,3 +337,157 @@ def test_websocket_recovers_after_stop(client):
         msgs = _collect_ws_messages(ws)
         assert any(m.get("chunk") == "second reply" for m in msgs)
         assert any(m.get("done") for m in msgs)
+
+
+@pytest.mark.asyncio
+async def test_websocket_forwards_tool_events_streaming():
+    """流式分支应把 tool_start/tool_end 事件映射为 tool_event 帧转发,
+    且出现在 content chunk 与 done 之前(工具可见性特性)。
+
+    用本文件既有的 FakeWS 模式(asyncio 任务 + sent 帧列表)而非阻塞式
+    ``receive_json`` 循环:旧实现遇到无 ``text`` 键的工具事件会 KeyError
+    并只发 error 帧不发 done,阻塞式读帧会永久挂起。
+    """
+    from thumbelina.api import websocket as ws_module
+
+    async def _stream(message, context_window_tokens=None, attachments=None):
+        yield {
+            "type": "tool_start",
+            "call_id": "c1",
+            "name": "search",
+            "args": {"q": "x"},
+            "args_truncated": False,
+        }
+        yield {
+            "type": "tool_end",
+            "call_id": "c1",
+            "duration_ms": 12,
+            "is_error": False,
+            "result_preview": "res",
+            "result_truncated": False,
+        }
+        yield {"type": "content", "text": "Answer"}
+
+    agent = SimpleNamespace()
+    agent.clone = lambda: agent
+    agent.repository_manager = None
+    agent.current_conversation_id = None
+    agent.stream = _stream
+
+    state = SimpleNamespace(
+        agent=agent,
+        config=SimpleNamespace(
+            llm=SimpleNamespace(streaming_enabled=True, context_window_tokens=128_000)
+        ),
+    )
+
+    class ToolFakeWS:
+        def __init__(self) -> None:
+            self.app = SimpleNamespace(state=state)
+            self.sent: list[dict] = []
+            self._message = json.dumps({"message": "Hello", "conversation_id": "cid-tool"})
+            self.disconnect = asyncio.Event()
+
+        async def accept(self) -> None:
+            pass
+
+        async def receive_text(self) -> str:
+            if self._message is not None:
+                message, self._message = self._message, None
+                return message
+            await self.disconnect.wait()
+            raise WebSocketDisconnect()
+
+        async def send_json(self, payload: dict) -> None:
+            self.sent.append(payload)
+
+    fake_ws = ToolFakeWS()
+    task = asyncio.create_task(ws_module.websocket_chat(fake_ws))
+    # 有界等待生成结束(done 帧出现);旧实现只发 error 帧不发 done,等待
+    # 超时后直接对已收帧做断言,保证 RED 阶段干净失败而非挂死。
+    for _ in range(500):
+        if any(m.get("done") for m in fake_ws.sent):
+            break
+        await asyncio.sleep(0.01)
+    fake_ws.disconnect.set()
+    await asyncio.gather(task)
+
+    messages = fake_ws.sent
+    tool_frames = [m for m in messages if "tool_event" in m]
+    assert len(tool_frames) == 2
+    start_frame, end_frame = tool_frames
+    assert start_frame["tool_event"]["phase"] == "start"
+    assert start_frame["tool_event"]["call_id"] == "c1"
+    assert start_frame["tool_event"]["name"] == "search"
+    assert start_frame["tool_event"]["args"] == {"q": "x"}
+    assert start_frame["conversation_id"] == "cid-tool"
+    assert end_frame["tool_event"]["phase"] == "end"
+    assert end_frame["tool_event"]["duration_ms"] == 12
+    assert end_frame["tool_event"]["is_error"] is False
+    assert end_frame["tool_event"]["result_preview"] == "res"
+    assert end_frame["conversation_id"] == "cid-tool"
+
+    # tool_event 帧在 content chunk 与 done 之前。
+    first_tool_idx = messages.index(start_frame)
+    chunk_idx = next(i for i, m in enumerate(messages) if "chunk" in m)
+    done_idx = next(i for i, m in enumerate(messages) if m.get("done"))
+    assert first_tool_idx < chunk_idx < done_idx
+    # content chunk 与 done 帧不受影响。
+    assert any(m.get("chunk") == "Answer" for m in messages)
+    done = [m for m in messages if m.get("done")]
+    assert done[0]["streaming_mode"] is True
+
+
+def test_websocket_non_streaming_consumes_stream_with_tool_events(client):
+    """非流式分支统一消费 stream():tool_event 帧照发,content 累积后仍按
+    单个 ``{"response": ...}`` 帧发送,done 帧的 streaming_mode 语义不变。"""
+    recorded = {}
+
+    async def _stream(message, context_window_tokens=None, attachments=None):
+        recorded["message"] = message
+        recorded["window"] = context_window_tokens
+        yield {
+            "type": "tool_start",
+            "call_id": "c1",
+            "name": "search",
+            "args": {"q": "x"},
+            "args_truncated": False,
+        }
+        yield {
+            "type": "tool_end",
+            "call_id": "c1",
+            "duration_ms": 20,
+            "is_error": True,
+            "result_preview": "Error executing tool 'search': boom",
+            "result_truncated": False,
+        }
+        yield {"type": "reasoning", "text": "thinking"}
+        yield {"type": "content", "text": "Final"}
+
+    client.app.state.config.llm.streaming_enabled = False
+    client.app.state.agent.stream = _stream
+
+    with client.websocket_connect("/ws/chat") as ws:
+        ws.send_json({"message": "Hello"})
+        messages = _collect_ws_messages(ws)
+
+    # 非流式路径同样消费 stream() 并透传上下文窗口。
+    assert recorded["message"] == "Hello"
+    assert recorded["window"] == 128_000
+
+    tool_frames = [m for m in messages if "tool_event" in m]
+    assert len(tool_frames) == 2
+    assert tool_frames[0]["tool_event"]["phase"] == "start"
+    assert tool_frames[1]["tool_event"]["phase"] == "end"
+    assert tool_frames[1]["tool_event"]["is_error"] is True
+
+    # content 累积为单个 response 帧;reasoning 不下发。
+    responses = [m for m in messages if "response" in m]
+    assert len(responses) == 1
+    assert responses[0]["response"] == "Final"
+    assert not any("chunk" in m for m in messages)
+
+    # done 帧语义不变。
+    done = [m for m in messages if m.get("done")]
+    assert len(done) == 1
+    assert done[0]["streaming_mode"] is False

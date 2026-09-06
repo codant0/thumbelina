@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.tools import tool
 
 
 def _create_mock_provider():
@@ -984,3 +985,74 @@ class TestNotifyUserByChannel:
 
         assert cloned._channels is agent._channels
         assert cloned.get_channel("wechat") is ch
+
+
+@tool
+def _graph_echo_tool(text: str = "") -> str:
+    """echoes its input"""
+    return f"echo:{text}"
+
+
+class TestStreamToolEvents:
+    """stream() 双模式(messages + custom)产出的实时工具事件(工具可见性特性)。"""
+
+    async def test_stream_emits_tool_start_and_end(self):
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        mock_provider = _create_mock_provider()
+        mock_provider.chat_model.ainvoke = AsyncMock(
+            side_effect=[
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {"name": "_graph_echo_tool", "args": {"text": "hi"}, "id": "call_1"}
+                    ],
+                ),
+                AIMessage(content="final answer"),
+            ]
+        )
+        agent = ThumbelinaAgent(llm_provider=mock_provider, tools=[_graph_echo_tool])
+        events = [e async for e in agent.stream("use the tool")]
+
+        types = [e["type"] for e in events]
+        assert "tool_start" in types and "tool_end" in types
+        start = next(e for e in events if e["type"] == "tool_start")
+        end = next(e for e in events if e["type"] == "tool_end")
+        assert start["call_id"] == "call_1"
+        assert start["name"] == "_graph_echo_tool"
+        assert start["args"] == {"text": "hi"}
+        assert start["args_truncated"] is False
+        assert end["call_id"] == "call_1"
+        assert end["is_error"] is False
+        assert end["result_preview"] == "echo:hi"
+        assert end["result_truncated"] is False
+        assert isinstance(end["duration_ms"], int)
+        # 内容事件不受影响
+        assert "".join(e["text"] for e in events if e["type"] == "content") == "final answer"
+
+    async def test_stream_pure_text_round_has_no_tool_events(self):
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        mock_provider = _create_mock_provider()
+        mock_provider.chat_model.ainvoke.return_value = AIMessage(content="plain")
+        agent = ThumbelinaAgent(llm_provider=mock_provider)
+        events = [e async for e in agent.stream("hi")]
+        assert all(e["type"] in ("content", "reasoning") for e in events)
+
+    async def test_run_path_unchanged_no_events(self):
+        from thumbelina.agent.graph import ThumbelinaAgent
+
+        mock_provider = _create_mock_provider()
+        mock_provider.chat_model.ainvoke = AsyncMock(
+            side_effect=[
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {"name": "_graph_echo_tool", "args": {"text": "x"}, "id": "call_2"}
+                    ],
+                ),
+                AIMessage(content="done"),
+            ]
+        )
+        agent = ThumbelinaAgent(llm_provider=mock_provider, tools=[_graph_echo_tool])
+        assert await agent.run("use the tool") == "done"

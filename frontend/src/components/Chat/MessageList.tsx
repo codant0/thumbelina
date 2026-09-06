@@ -8,6 +8,7 @@ import { SubagentCard } from './SubagentCard'
 import { AttachmentLightbox } from './AttachmentLightbox'
 import { attachmentUrl } from '../../api/attachments'
 import { splitLeadingJson } from '../../lib/codeUtils'
+import { groupAnchorsByOffset, splitContentByAnchors, summarizeToolCalls } from './toolCallEvents'
 import { useCopy } from '../../hooks/useCopy'
 
 interface MessageListProps {
@@ -23,6 +24,8 @@ interface MessageListProps {
   subagentsByMsgId?: Record<string, SubagentEventPayload[]>
   /** 点击 "查看对话详情" 时的回调;由 ChatWindow 提供用于打开详情 Modal。 */
   onViewSubagentDetail?: (event: SubagentEventPayload) => void
+  /** 点击聚合工具入口时的回调;由 ChatWindow 提供用于打开侧边统一面板。 */
+  onViewToolCalls?: (msgId: string, callIds: string[]) => void
 }
 
 interface ThinkingBlockProps {
@@ -70,44 +73,80 @@ function ThinkingBlock({ thinking, active }: ThinkingBlockProps) {
   )
 }
 
-/** One tool call rendered as a collapsed summary card. */
-function ToolCallItem({ tc }: { tc: ToolCall }) {
-  const [open, setOpen] = useState(false)
+/**
+ * 聚合工具入口(设计修订):一个批次(同一轮 LLM 响应的并发调用)收拢为
+ * 一个按钮,点击由 ChatWindow 打开侧边面板展示本批调用。
+ * 状态取聚合语义:任一 running > 任一 error > interrupted > ok。
+ */
+function ToolCallsEntry({ calls, onOpen }: { calls: ToolCall[]; onOpen?: () => void }) {
   const { t } = useTranslation()
-  const argsText = useMemo(() => {
-    try {
-      return JSON.stringify(tc.args, null, 2)
-    } catch {
-      return String(tc.args)
-    }
-  }, [tc.args])
+  const s = summarizeToolCalls(calls)
+  const status =
+    s.running > 0 ? 'running' : s.error > 0 ? 'error' : s.interrupted > 0 ? 'interrupted' : 'ok'
   return (
-    <div className="tool-call" data-testid="tool-call">
-      <button type="button" className="tool-call__summary" aria-expanded={open} onClick={() => setOpen(o => !o)}>
-        <span className="tool-call__name"><Wrench size={13} /><span>{tc.name}</span></span>
-        <span className="tool-call__meta">
-          {tc.result ? t('toolCalls.hasResult') : t('toolCalls.arguments')}
+    <div className={`tool-calls-entry status-${status}`} data-testid="tool-calls-entry">
+      <button type="button" className="tool-calls-entry__btn" onClick={onOpen} aria-haspopup="dialog">
+        <span className="tool-call__name"><Wrench size={13} /><span>{t('toolCalls.button')}</span></span>
+        <span className="tool-calls-entry__count">{s.total}</span>
+        {s.running > 0 && <span className="tool-call__spinner" aria-hidden="true" />}
+        <span className="tool-calls-entry__meta">
+          {s.running > 0 && t('toolCalls.running')}
+          {s.running === 0 && s.error > 0 && '✗'}
+          {s.running === 0 && s.error === 0 && s.interrupted > 0 && t('toolCalls.interrupted')}
+          {s.running === 0 && s.error === 0 && s.interrupted === 0 && '✓'}
         </span>
-        <ChevronDown size={14} className={`tool-call__caret${open ? ' is-open' : ''}`} />
       </button>
-      {open && (
-        <div className="tool-call__detail">
-          <div className="tool-call__section-label">{t('toolCalls.arguments')}</div>
-          <pre>{argsText}</pre>
-          {tc.result && (
-            <>
-              <div className="tool-call__section-label">{t('toolCalls.result')}</div>
-              <pre>{tc.result}</pre>
-            </>
-          )}
-        </div>
-      )}
     </div>
   )
 }
 
-/** Copy (and, for the last assistant turn, regenerate) actions on hover. */
-function MessageActions({ text, onRegenerate }: { text: string; onRegenerate?: () => void }) {
+/**
+ * 穿插渲染(设计 §5.3 修订):按锚点 offset 把工具调用**分批**切进文本流 ——
+ * 同一轮大模型响应的并发调用(offset 相同)共享一个入口按钮,插在该轮文本
+ * 之后;后续轮次的工具是下一个批次按钮。仅实时消息携带 anchors,历史消息
+ * 走平铺布局。
+ */
+function InterleavedContent({
+  msg,
+  onViewToolCalls,
+}: {
+  msg: Message
+  onViewToolCalls?: (msgId: string, callIds: string[]) => void
+}) {
+  const batches = useMemo(() => groupAnchorsByOffset(msg.toolAnchors ?? []), [msg.toolAnchors])
+  const segments = useMemo(
+    () => splitContentByAnchors(msg.content, batches.map(b => ({ callId: b.callIds[0], offset: b.offset }))),
+    [msg.content, batches],
+  )
+  const byCallId = useMemo(
+    () => new Map((msg.toolCalls ?? []).map(tc => [tc.call_id, tc])),
+    [msg.toolCalls],
+  )
+  return (
+    <>
+      {segments.map((seg, i) => {
+        if (seg.type === 'text') {
+          return seg.text ? <AssistantContent key={`t${i}`} content={seg.text} /> : null
+        }
+        const batch = batches.find(b => b.callIds[0] === seg.callId)
+        if (!batch) return null
+        const calls = batch.callIds
+          .map(id => byCallId.get(id))
+          .filter((tc): tc is ToolCall => Boolean(tc))
+        if (!calls.length) return null
+        return (
+          <ToolCallsEntry
+            key={`c${i}`}
+            calls={calls}
+            onOpen={onViewToolCalls ? () => onViewToolCalls(msg.id, batch.callIds) : undefined}
+          />
+        )
+      })}
+    </>
+  )
+}
+
+/** Copy (and, for the last assistant turn, regenerate) actions on hover. */function MessageActions({ text, onRegenerate }: { text: string; onRegenerate?: () => void }) {
   const { copied, copy } = useCopy()
   const { t } = useTranslation()
   return (
@@ -194,6 +233,7 @@ const MessageItem = memo(function MessageItem({
   onRegenerate,
   subagents,
   onViewSubagentDetail,
+  onViewToolCalls,
 }: {
   msg: Message
   isStreamingMsg: boolean
@@ -201,6 +241,7 @@ const MessageItem = memo(function MessageItem({
   onRegenerate?: () => void
   subagents?: SubagentEventPayload[]
   onViewSubagentDetail?: (event: SubagentEventPayload) => void
+  onViewToolCalls?: (msgId: string, callIds: string[]) => void
 }) {
   const { t } = useTranslation()
   // 该消息附件的 Lightbox 下标;null = 关闭。memo 组件内部 state 即可,无需提升。
@@ -226,18 +267,29 @@ const MessageItem = memo(function MessageItem({
       )}
       <div className="msg-content">
         {msg.role === 'assistant' ? (
-          <AssistantContent content={msg.content} />
+          msg.toolCalls?.length ? (
+            msg.toolAnchors?.length ? (
+              <InterleavedContent msg={msg} onViewToolCalls={onViewToolCalls} />
+            ) : (
+              <>
+                <AssistantContent content={msg.content} />
+                <ToolCallsEntry
+                  calls={msg.toolCalls}
+                  onOpen={
+                    onViewToolCalls
+                      ? () => onViewToolCalls(msg.id, msg.toolCalls!.map(tc => tc.call_id ?? ''))
+                      : undefined
+                  }
+                />
+              </>
+            )
+          ) : (
+            <AssistantContent content={msg.content} />
+          )
         ) : (
           msg.content
         )}
       </div>
-      {msg.toolCalls && msg.toolCalls.length > 0 && (
-        <div className="tool-calls" data-testid="tool-calls">
-          {msg.toolCalls.map((tc, i) => (
-            <ToolCallItem key={i} tc={tc} />
-          ))}
-        </div>
-      )}
       {subagents && subagents.length > 0 && (
         <div className="subagent-cards" data-testid="subagent-cards">
           {subagents.map(sa => (
@@ -267,7 +319,7 @@ const MessageItem = memo(function MessageItem({
   )
 })
 
-function MessageListInner({ messages, waitingForReply, isStreaming, awaitingMoreContent, onRegenerate, subagentsByMsgId, onViewSubagentDetail }: MessageListProps) {
+function MessageListInner({ messages, waitingForReply, isStreaming, awaitingMoreContent, onRegenerate, subagentsByMsgId, onViewSubagentDetail, onViewToolCalls }: MessageListProps) {
   const listRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   // Whether to keep following new content. False once the user scrolls up to read.
@@ -396,6 +448,7 @@ function MessageListInner({ messages, waitingForReply, isStreaming, awaitingMore
               onRegenerate={handleRegenerate}
               subagents={subagentsByMsgId?.[msg.id]}
               {...(onViewSubagentDetail ? { onViewSubagentDetail } : {})}
+              {...(onViewToolCalls ? { onViewToolCalls } : {})}
             />
           ))}
           {waitingForReply && (

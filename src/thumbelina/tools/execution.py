@@ -24,6 +24,7 @@ import asyncio
 import logging
 import os
 import re
+import subprocess
 from abc import abstractmethod
 from pathlib import Path
 from typing import Any
@@ -47,6 +48,51 @@ from thumbelina.tools.workspace_context import (
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = 30
+
+_fallback_warned = False
+
+
+def _kill_process_tree(proc: subprocess.Popen[bytes]) -> None:
+    """杀掉 shell 进程及其整棵子进程树。
+
+    Windows 上 ``shell=True`` 产生的 cmd.exe 被单独 kill 时,其孙子进程
+    (如 ping)仍持有继承的 stdout 管道,``communicate`` 会一直阻塞到孤儿
+    跑完 —— 必须用 ``taskkill /T`` 连树一起杀;POSIX 直接 kill 即可。
+    """
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+            capture_output=True,
+        )
+    else:
+        proc.kill()
+
+
+def _run_blocking(command: str, cwd: str) -> str:
+    """线程池兜底执行:与 asyncio 路径同契约(stderr 合并、100KB 截断、
+    超时文案、exit code 标记)。仅当运行中的事件循环不支持 asyncio 子进程
+    时被使用(Windows 下 uvicorn --reload 强制 SelectorEventLoop)。
+    """
+    popen = subprocess.Popen(
+        command,
+        shell=True,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    try:
+        stdout, _ = popen.communicate(timeout=_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        _kill_process_tree(popen)
+        try:
+            popen.communicate(timeout=10)
+        except (subprocess.TimeoutExpired, OSError):
+            logger.warning("RunShellTool fallback: child process did not exit after tree kill")
+        return f"Error: Command timed out after {_TIMEOUT} seconds"
+    output = stdout.decode("utf-8", errors="replace") if stdout else ""
+    if len(output) > 100_000:
+        output = output[:100_000] + "\n... (truncated)"
+    return output + f"\n[exit code: {popen.returncode}]"
 
 
 def _rm_root_patterns() -> list[tuple[str, re.Pattern[str]]]:
@@ -243,13 +289,28 @@ class RunShellTool(ExecutionTool):
           起点约束,非沙箱;逃逸靠黑名单与部署边界兜,见模块 docstring)。
         """
         cwd = get_workspace() or os.getcwd()
-        proc = await asyncio.create_subprocess_shell(
-            command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            shell=True,
-            cwd=cwd,
-        )
+        try:
+            proc = await asyncio.create_subprocess_shell(
+                command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                shell=True,
+                cwd=cwd,
+            )
+        except NotImplementedError:
+            # Windows 下 uvicorn --reload 让 uvicorn 强制选用
+            # SelectorEventLoop(uvicorn/loops/asyncio.py 对
+            # use_subprocess=True 的既定行为),而 Selector 循环不实现
+            # asyncio 子进程 —— 降级到线程池跑阻塞 subprocess,契约不变。
+            global _fallback_warned
+            if not _fallback_warned:
+                logger.warning(
+                    "Event loop lacks asyncio subprocess support (Windows "
+                    "SelectorEventLoop under uvicorn --reload); RunShellTool "
+                    "falling back to thread-pool subprocess"
+                )
+                _fallback_warned = True
+            return await asyncio.to_thread(_run_blocking, command, cwd)
         try:
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=_TIMEOUT)
         except TimeoutError:

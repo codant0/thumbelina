@@ -19,6 +19,7 @@ import { useTranslation } from '../../i18n'
 import { clearConversationMessages, compressConversation } from '../../api/conversations'
 import { ConfirmDialog } from '../common/ConfirmDialog'
 import { SubagentSidePanel } from './SubagentSidePanel'
+import { ToolCallsPanel } from './ToolCallsPanel'
 
 interface ChatWindowProps {
   /** WebSocket state lifted to App so the connection survives page switches. */
@@ -56,6 +57,9 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
   const [subagentsByConvId, setSubagentsByConvId] = useState<Record<string, Record<string, Record<string, SubagentEventPayload>>>>({})
   // 右侧详情面板:同时只展示一个 subagent;null 表示收起。
   const [selectedSubagentId, setSelectedSubagentId] = useState<string | null>(null)
+  // 工具统一面板:记录被点批次入口(消息 id + 批次 callIds),面板内容按
+  // 消息实时解析并按 callIds 过滤 —— running 期间 upsert 后列表与状态跟随。
+  const [toolPanelSelection, setToolPanelSelection] = useState<{ msgId: string; callIds: string[] } | null>(null)
   // 当前会话缓存上一次的映射,确保 useEffect 中能读到上一轮的值。
   const lastConvIdRef = useRef<string | undefined>(conversationId)
   const { t } = useTranslation()
@@ -273,6 +277,7 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
 
   // 点击 subagent 卡片时打开(同一会话内同一时间只展示一个)。
   const openSubagentDetail = useCallback((event: SubagentEventPayload) => {
+    setToolPanelSelection(null)
     setSelectedSubagentId(event.id)
   }, [])
 
@@ -280,6 +285,35 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
   const closeSubagentDetail = useCallback(() => {
     setSelectedSubagentId(null)
   }, [])
+
+  // 被选批次从 messages 实时解析:按 callIds 过滤出本批工具调用。
+  const toolPanelCalls = useMemo(() => {
+    if (!toolPanelSelection) return []
+    const msg = messages.find(m => m.id === toolPanelSelection.msgId)
+    if (!msg?.toolCalls?.length) return []
+    const idSet = new Set(toolPanelSelection.callIds)
+    return msg.toolCalls.filter(tc => idSet.has(tc.call_id ?? ''))
+  }, [messages, toolPanelSelection])
+
+  // 点击批次入口时打开(与 subagent 面板互斥:打开一个关另一个)。
+  const openToolCalls = useCallback((msgId: string, callIds: string[]) => {
+    setSelectedSubagentId(null)
+    setToolPanelSelection({ msgId, callIds })
+  }, [])
+
+  const closeToolCalls = useCallback(() => {
+    setToolPanelSelection(null)
+  }, [])
+
+  // Esc 关闭详情面板。仅在面板打开时监听,避免无谓事件。
+  useEffect(() => {
+    if (!toolPanelSelection) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeToolCalls()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [toolPanelSelection, closeToolCalls])
 
   // Esc 关闭详情面板。仅在面板打开时监听,避免无谓事件。
   useEffect(() => {
@@ -297,6 +331,7 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
     if (lastConvIdRef.current !== conversationId) {
       lastConvIdRef.current = conversationId
       setSelectedSubagentId(null)
+      setToolPanelSelection(null)
       setAttachments([])
     }
   }, [conversationId])
@@ -395,6 +430,7 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
           onRegenerate={handleRegenerate}
           subagentsByMsgId={subagentsByMsgId}
           onViewSubagentDetail={openSubagentDetail}
+          onViewToolCalls={openToolCalls}
         />
       )}
       {/* 右侧详情面板 + 外部遮罩:点击遮罩或面板 X 即可关闭。
@@ -417,6 +453,20 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
           )}
         </>
       )}
+      {/* 工具统一面板:与 subagent 面板同模式(遮罩 + 右侧停靠,互斥)。内容按
+          消息 id 从 messages 实时解析,running → ok 的 upsert 面板实时跟随。 */}
+      {toolPanelCalls.length ? (
+        <>
+          <button
+            type="button"
+            className="subagent-side-panel__backdrop"
+            data-testid="tool-detail-backdrop"
+            aria-label={t('common.close')}
+            onClick={closeToolCalls}
+          />
+          <ToolCallsPanel toolCalls={toolPanelCalls} onClose={closeToolCalls} />
+        </>
+      ) : null}
       {/* 全屏拖放覆盖层:仅当拖入 dataTransfer 含 Files 时出现;drop 与 📎 按钮共用添加管道。 */}
       <DropOverlay onFiles={handleDropFiles} />
       {dropHint && (

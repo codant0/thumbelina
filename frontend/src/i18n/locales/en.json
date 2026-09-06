@@ -601,7 +601,13 @@
   "toolCalls": {
     "arguments": "Arguments",
     "result": "Result",
-    "hasResult": "has result"
+    "hasResult": "has result",
+    "running": "Running…",
+    "interrupted": "Interrupted",
+    "durationMs": "{ms} ms",
+    "truncatedHint": "Full content in Trajectory page",
+    "detail": "Tool call details",
+    "button": "Tool calls"
   },
   "subagent": {
     "title": "Subagent",
