@@ -18,6 +18,7 @@ from langchain_core.messages import (
     HumanMessage,
     RemoveMessage,
     SystemMessage,
+    ToolMessage,
 )
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
@@ -781,37 +782,212 @@ class ThumbelinaAgent:
                     logger.debug("Model does not support tool binding; tools disabled")
         return await call_model(state, model, timeout=self.request_timeout)
 
+    async def _permission_gate(
+        self, calls: list[dict[str, Any]]
+    ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]], list[ToolMessage]]:
+        """spec §5.2：逐 call 裁决。返回（可执行 calls, call_id→事件 verdict, 拒绝 ToolMessage）。
+
+        - ``allow`` → exec_idx
+        - ``confirm`` 且无审批者 → 直接合成拒绝 ToolMessage + verdict="denied"
+          （绝不调 interrupt,无人值守路径 fail-closed,spec §5.2-4）。
+        - ``confirm`` 且有审批者 → 构造 payload（含 run_shell 的
+          ``args_display`` 归一化命令,spec §4.6），调
+          ``langgraph.types.interrupt``。首过抛出 GraphInterrupt,resume 后
+          按决策列表放行/拒绝。
+        - ``auto_allowed=True`` → 标 verdict="auto_allowed"。
+        """
+        from langgraph.types import interrupt
+
+        from thumbelina.tools.permissions import (
+            evaluate_tool_call,
+            get_permission_mode,
+            has_approver,
+            normalize_shell_command,
+        )
+
+        mode = get_permission_mode()
+        decisions = [
+            evaluate_tool_call(
+                mode,
+                c.get("name", ""),
+                self._tool_category(c.get("name", "")),
+                c.get("args"),
+            )
+            for c in calls
+        ]
+        exec_idx: list[int] = [i for i, d in enumerate(decisions) if d.verdict == "allow"]
+        verdicts: dict[str, dict[str, Any]] = {
+            calls[i]["id"]: {"verdict": "allowed"} for i in exec_idx
+        }
+        denied: list[ToolMessage] = []
+        # 直接 deny（READ_ONLY / rule.* / dangerous.*）→ 合成拒绝 ToolMessage。
+        for i, d in enumerate(decisions):
+            if d.verdict == "deny":
+                denied.append(
+                    ToolMessage(
+                        content=f"Error: 权限拒绝: {d.reason}",
+                        tool_call_id=calls[i]["id"],
+                    )
+                )
+                verdicts[calls[i]["id"]] = {"verdict": "denied", "reason": d.reason}
+        pending = [i for i, d in enumerate(decisions) if d.verdict == "confirm"]
+        if pending:
+            if not has_approver():
+                # 无人值守（run() 路径/无审批连接）：confirm 一律拒绝,
+                # 绝不 interrupt（spec §5.2-4）。
+                for i in pending:
+                    d = decisions[i]
+                    denied.append(
+                        ToolMessage(
+                            content=f"Error: 权限拒绝（无人值守）: {d.reason}",
+                            tool_call_id=calls[i]["id"],
+                        )
+                    )
+                    verdicts[calls[i]["id"]] = {"verdict": "denied", "reason": d.reason}
+            else:
+                payload_calls: list[dict[str, Any]] = []
+                for i in pending:
+                    c = calls[i]
+                    entry: dict[str, Any] = {
+                        "call_id": c["id"],
+                        "name": c.get("name", ""),
+                        "args": c.get("args", {}),
+                        "risk": "dangerous",
+                        "reason": decisions[i].reason,
+                    }
+                    if c.get("name") == "run_shell":
+                        # 审批卡展示分类器实际输入(折续行/剥注释,spec §4.6)
+                        entry["args_display"] = normalize_shell_command(
+                            str(c.get("args", {}).get("command", ""))
+                        )
+                    payload_calls.append(entry)
+                payload = {"calls": payload_calls}
+                # 首过在此抛出 GraphInterrupt；resume 后返回决策列表。
+                resumed = interrupt(payload)
+                for i in pending:
+                    c = calls[i]
+                    approved = any(
+                        r.get("call_id") == c["id"] and r.get("approved")
+                        for r in (resumed or [])
+                    )
+                    if approved:
+                        exec_idx.append(i)
+                        verdicts[c["id"]] = {"verdict": "confirmed"}
+                    else:
+                        denied.append(
+                            ToolMessage(
+                                content=f"Error: 用户拒绝了该操作: {c.get('name', '')}",
+                                tool_call_id=c["id"],
+                            )
+                        )
+                        verdicts[c["id"]] = {"verdict": "denied", "reason": "user_denied"}
+        # auto_allowed 标记（覆盖 allow 的 verdict）
+        for i, d in enumerate(decisions):
+            if d.auto_allowed:
+                verdicts[calls[i]["id"]] = {"verdict": "auto_allowed", "reason": d.reason}
+        exec_calls = [calls[i] for i in sorted(exec_idx)]
+        return exec_calls, verdicts, denied
+
+    def _tool_category(self, name: str) -> str | None:
+        """按 name 在 self.tools 中查找对应工具的 category（签名占位）。"""
+        for t in self.tools:
+            if t.name == name:
+                return str(getattr(t, "category", "") or "") or None
+        return None
+
     async def _tool_node_node(self, state: AgentState) -> dict[str, list[Any]]:
-        """Node wrapper for executing tools.
+        """Node wrapper for executing tools（Task 8 闸门首行重排版）。
 
-        除照旧写 trajectory ``tool_call``/``tool_result`` 外,还通过
-        LangGraph custom stream writer(``get_stream_writer()``)发射
-        ``tool_start``/``tool_end`` 自定义事件供 ``stream()`` 交错转发
-        (工具可见性特性)。图外/无 custom 消费者时 writer 判空降级,
-        ``run()`` 等路径零影响。
+        **第一件事**调 :meth:`_permission_gate` —— 任何 trajectory 记录、
+        ``get_stream_writer()`` 取流、``tool_start`` 发射、``tool_node``
+        执行都必须在闸门之后（评审 P2-1：重放幂等；闸门不进
+        ``except Exception`` —— GraphInterrupt 继承 Exception 会被吞，
+        见评审 T5）。
 
-        trajectory ``tool_result`` 的 ``is_error`` 与 ``duration_ms`` 来自
-        ``tool_node`` 控制流回调(真实执行状态),不再用
-        ``content.startswith("Error")`` 字符串反推(review P0-13)。
+        闸门裁决：
+        - allow → 喂 ``tool_node`` 执行；轨迹正常记 call/result；
+        - denied → 合成 ToolMessage 立即经 writer 发
+          ``tool_start(verdict="denied")`` + ``tool_end(is_error=True,
+          verdict="denied")``，trajectory 只记 call 不记 result。
+        - confirmed/auto_allowed → 正常执行但 tool_start 附 verdict。
+
+        ``tool_result`` 的 ``is_error``/``duration_ms`` 来自 ``tool_node``
+        控制流回调（真实执行状态），不再用字符串反推（review P0-13）。
         """
         calls: list[dict] = []
         last_message = state["messages"][-1]
         if isinstance(last_message, AIMessage):
             calls = list(last_message.tool_calls or [])
+
+        # 第一件事：闸门（must come before any trajectory/writer/tool_start）。
+        # 闸门代码本身不得包进 ``except Exception`` —— GraphInterrupt 会被吞。
+        exec_calls, verdicts, denied = await self._permission_gate(calls)
+
+        # 记录全部原始 calls 的轨迹（denied 也记 call，不记 result）。
         for tool_call in calls:
+            call_id = tool_call.get("id", "")
+            verdict_entry = verdicts.get(call_id, {})
             await self.trajectory_recorder.record_tool_call(
-                tool_call.get("name", ""), tool_call.get("args", {}), tool_call.get("id", "")
+                tool_call.get("name", ""),
+                tool_call.get("args", {}),
+                call_id,
+                verdict=verdict_entry.get("verdict"),
+                reason=verdict_entry.get("reason"),
             )
+
         try:
             writer = get_stream_writer()
         except Exception:
             writer = None
 
+        # 立即发射 denied 的 tool_start/tool_end（trajectory 已记 call）。
+        for tool_message in denied:
+            cid = tool_message.tool_call_id
+            orig = next((c for c in calls if c.get("id") == cid), {})
+            if writer is not None:
+                args = orig.get("args", {}) or {}
+                args_json = json.dumps(args, ensure_ascii=False, default=str)
+                if len(args_json.encode("utf-8")) > TOOL_ARGS_PREVIEW_LIMIT:
+                    args_preview, _ = _truncate_text(args_json, TOOL_ARGS_PREVIEW_LIMIT)
+                    writer(
+                        {
+                            "tool_start": {
+                                "call_id": cid,
+                                "name": orig.get("name", ""),
+                                "args": {"_truncated_json": args_preview},
+                                "args_truncated": True,
+                                "verdict": "denied",
+                            }
+                        }
+                    )
+                else:
+                    writer(
+                        {
+                            "tool_start": {
+                                "call_id": cid,
+                                "name": orig.get("name", ""),
+                                "args": args,
+                                "args_truncated": False,
+                                "verdict": "denied",
+                            }
+                        }
+                    )
+                writer(
+                    {
+                        "tool_end": {
+                            "call_id": cid,
+                            "duration_ms": 0,
+                            "is_error": True,
+                            "result_preview": str(tool_message.content),
+                            "result_truncated": False,
+                            "verdict": "denied",
+                        }
+                    }
+                )
+
         statuses: dict[str, dict[str, Any]] = {}
 
         async def on_tool_event(info: dict[str, Any]) -> None:
-            # 逐工具实时触发(不等 gather 整批完成):先登记真实状态供
-            # trajectory 使用,再立即发射 tool_end 事件。
             call_id = info.get("call_id", "")
             statuses[call_id] = {
                 "is_error": bool(info.get("is_error")),
@@ -830,26 +1006,29 @@ class ThumbelinaAgent:
                         "is_error": statuses[call_id]["is_error"],
                         "result_preview": preview,
                         "result_truncated": truncated,
+                        "verdict": verdicts.get(call_id, {}).get("verdict"),
                     }
                 }
             )
 
-        # 执行前对每个 tool_call 发射 tool_start;参数序列化超过上限时
-        # 截断为 ``{"_truncated_json": ...}``(完整参数仍随 trajectory 落库)。
-        for tool_call in calls:
+        # 执行前对每个待执行 tool_call 发射 tool_start（附 verdict）。
+        for tool_call in exec_calls:
             if writer is None:
                 continue
             args = tool_call.get("args", {}) or {}
             args_json = json.dumps(args, ensure_ascii=False, default=str)
+            cid = tool_call.get("id", "")
+            v = verdicts.get(cid, {}).get("verdict")
             if len(args_json.encode("utf-8")) > TOOL_ARGS_PREVIEW_LIMIT:
                 args_preview, _ = _truncate_text(args_json, TOOL_ARGS_PREVIEW_LIMIT)
                 writer(
                     {
                         "tool_start": {
-                            "call_id": tool_call.get("id", ""),
+                            "call_id": cid,
                             "name": tool_call.get("name", ""),
                             "args": {"_truncated_json": args_preview},
                             "args_truncated": True,
+                            "verdict": v,
                         }
                     }
                 )
@@ -857,27 +1036,43 @@ class ThumbelinaAgent:
                 writer(
                     {
                         "tool_start": {
-                            "call_id": tool_call.get("id", ""),
+                            "call_id": cid,
                             "name": tool_call.get("name", ""),
                             "args": args,
                             "args_truncated": False,
+                            "verdict": v,
                         }
                     }
                 )
-        result = await tool_node(
-            state, self.tools, on_tool_event=on_tool_event, timeout=self.tool_timeout
-        )
-        tool_messages = result.get("messages", [])
-        # ``zip`` 会在两侧长度不一致时静默截断,这里显式记录告警以避免
-        # 后续 ``tool_node`` 行为变更后丢失轨迹记录而无人察觉。
-        if len(calls) != len(tool_messages):
-            logger.error(
-                "Tool call/result count mismatch in trajectory recording: "
-                "%d call(s) but %d tool message(s); pairing by zip truncation",
-                len(calls),
-                len(tool_messages),
+
+        # 构造只含 exec_calls 的子集 AIMessage 喂 tool_node。
+        if exec_calls:
+            sub_state = {
+                **state,
+                "messages": [last_message.model_copy(update={"tool_calls": exec_calls})],
+            }
+            result = await tool_node(
+                sub_state, self.tools, on_tool_event=on_tool_event, timeout=self.tool_timeout
             )
-        for tool_call, tool_message in zip(calls, tool_messages):
+            executed_tool_messages = result.get("messages", [])
+        else:
+            executed_tool_messages = []
+
+        # 把 executed_tool_messages 与 denied 按原 tool_calls 顺序合并。
+        executed_by_id: dict[str, ToolMessage] = {
+            tm.tool_call_id: tm for tm in executed_tool_messages
+        }
+        denied_by_id: dict[str, ToolMessage] = {tm.tool_call_id: tm for tm in denied}
+        ordered_tool_messages: list[ToolMessage] = []
+        for tool_call in calls:
+            cid = tool_call.get("id", "")
+            if cid in executed_by_id:
+                ordered_tool_messages.append(executed_by_id[cid])
+            elif cid in denied_by_id:
+                ordered_tool_messages.append(denied_by_id[cid])
+
+        # 轨迹记 result（denied 不记）。
+        for tool_call, tool_message in zip(exec_calls, executed_tool_messages):
             content = str(getattr(tool_message, "content", ""))
             status = statuses.get(tool_call.get("id", ""))
             if status is None:
@@ -891,14 +1086,15 @@ class ThumbelinaAgent:
                 is_error=bool(status["is_error"]) if status else False,
                 duration_ms=status["duration_ms"] if status else None,
             )
-        if len(calls) > len(tool_messages):
-            for orphan in calls[len(tool_messages) :]:
+        if len(exec_calls) > len(executed_tool_messages):
+            for orphan in exec_calls[len(executed_tool_messages) :]:
                 logger.warning(
                     "Trajectory: tool call %r has no ToolMessage counterpart; "
                     "skipping result record",
                     orphan.get("id", ""),
                 )
-        return result
+
+        return {"messages": ordered_tool_messages}
 
     def _run_config(self, context_window_tokens: int | None = None) -> RunnableConfig | None:
         """构建用于检查点的 LangGraph 运行配置。

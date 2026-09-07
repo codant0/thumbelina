@@ -93,8 +93,26 @@ class TrajectoryRecorder:
     async def record_context(self, items: list[dict[str, str]]) -> None:
         await self._record("context", {"items": items})
 
-    async def record_tool_call(self, tool: str, args: object, call_id: str) -> None:
-        await self._record("tool_call", {"tool": tool, "args": args, "call_id": call_id})
+    async def record_tool_call(
+        self,
+        tool: str,
+        args: object,
+        call_id: str,
+        verdict: str | None = None,
+        reason: str | None = None,
+    ) -> None:
+        """记录 tool_call（闸门裁决版本 spec §3.2）。
+
+        ``verdict``/``reason`` 由 Task 8 闸门裁决注入（allow/confirm/
+        deny/confirmed/auto_allowed/denied），未传时省略该键保持历史
+        payload 形状兼容。
+        """
+        payload: dict[str, Any] = {"tool": tool, "args": args, "call_id": call_id}
+        if verdict is not None:
+            payload["verdict"] = verdict
+        if reason is not None:
+            payload["reason"] = reason
+        await self._record("tool_call", payload)
 
     async def record_tool_result(
         self, call_id: str, content: str, is_error: bool, duration_ms: int | None = None
