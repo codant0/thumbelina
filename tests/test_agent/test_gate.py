@@ -10,10 +10,15 @@ Task 8: ``ThumbelinaAgent._permission_gate`` 节点首行闸门裁决：
 - confirm + 有审批者 → 调 ``langgraph.types.interrupt``；首过抛出 GraphInterrupt，
   resume 后按决策列表放行/拒绝；
 - AUTO 模式 → confirm 命中转为 ``auto_allowed`` allow。
+
+Task 10/11: ``stream()`` / ``run()`` 对 LangGraph 暂停的 interrupt 走
+``aget_state`` 检测 + ``Command(resume=...)`` 恢复；闸门入口感知保证
+不出现意外 interrupt，兜底按现状处理。
 """
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -222,3 +227,230 @@ async def test_gate_confirm_attended_interrupts_then_settles(make_agent, monkeyp
     assert denied == []
     assert verdicts["c1"]["verdict"] == "confirmed"
 
+
+# ---------------------------------------------------------------------------
+# Task 10：stream() interrupt 检测 + resume 循环
+# Task 11：run() approval_handler 循环
+# ---------------------------------------------------------------------------
+
+
+def _make_llm_with_tool_call_then_text(text_after: str = "done") -> MagicMock:
+    """构造 LLM provider：首次返回 ``run_shell`` tool_call，resume 后返回纯文本。
+
+    ``aiter`` / ``ainvoke`` 共用同一序列：
+    - ``ainvoke`` 第 1 次:``AIMessage(tool_calls=[run_shell sudo])``
+    - ``ainvoke`` 后续:``AIMessage(content=text_after)``
+    """
+    provider = MagicMock()
+    provider.chat_model = MagicMock()
+    provider.chat_model.bind_tools.return_value = provider.chat_model
+
+    side_effects: list[AIMessage] = [
+        AIMessage(
+            content="",
+            tool_calls=[
+                {"name": "run_shell", "args": {"command": "sudo ls"}, "id": "c1"}
+            ],
+        ),
+        AIMessage(content=text_after),
+    ]
+
+    async def _ainvoke(*_args: Any, **_kwargs: Any) -> AIMessage:
+        if side_effects:
+            return side_effects.pop(0)
+        return AIMessage(content=text_after)
+
+    provider.chat_model.ainvoke.side_effect = _ainvoke
+
+    # ``astream`` 用于 stream()：每条 AIMessageChunk 作为完整消息发射。
+    async def _aiter(*_args: Any, **_kwargs: Any):
+        # 首轮：tool_call chunk；后续轮：纯文本 chunk（mock 简化）。
+        yield AIMessage(
+            content="",
+            tool_calls=[
+                {"name": "run_shell", "args": {"command": "sudo ls"}, "id": "c1"}
+            ],
+        )
+
+    provider.chat_model.astream.side_effect = _aiter
+    return provider
+
+
+def _make_run_shell_tool() -> Any:
+    """真实 ``run_shell`` 工具：闸门在执行前已批准/拒绝，本工具实际被调用次数有限。"""
+
+    @tool
+    async def run_shell(command: str) -> str:
+        """Execute a shell command."""
+        return f"ran: {command}"
+
+    return run_shell
+
+
+@pytest.fixture
+def memory_agent_factory():
+    """返回一个构造 ``ThumbelinaAgent`` 的工厂（带 ``MemorySaver`` checkpointer）。
+
+    与 ``make_agent`` 不同：本 fixture 真实编译图节点（``tools → agent`` 循环），
+    用于 stream/run 端到端集成测试。
+    """
+    from langgraph.checkpoint.memory import MemorySaver
+
+    from thumbelina.agent.graph import ThumbelinaAgent
+
+    def _factory(tools: list[Any] | None = None) -> ThumbelinaAgent:
+        provider = _make_llm_with_tool_call_then_text()
+        agent = ThumbelinaAgent(
+            llm_provider=provider,
+            tools=list(tools or [_make_run_shell_tool()]),
+            checkpointer=MemorySaver(),
+        )
+        return agent
+
+    return _factory
+
+
+@pytest.mark.asyncio
+async def test_stream_interrupt_resume_roundtrip(memory_agent_factory) -> None:
+    """真 agent + MemorySaver：``run_shell(sudo ls)`` → ``permission_request`` 事件
+    → 决策（全部批准）→ 工具执行 → 收尾文本事件。
+
+    验证：
+    - ``astream`` 不投递 interrupt 事件，stream() 必须通过 ``_pending_interrupt``
+      （aget_state）检测；
+    - ``approval_waiter`` 阻塞拿到决策后以 ``Command(resume=...)`` 复用同一
+      ``config`` 继续 astream；
+    - ``permission_request`` 事件含 ``request_id`` / ``calls``；
+    - 收尾段（_persist_message / record_assistant / auto-name / 记忆抽取）只执行一次。
+    """
+    set_permission_mode(PermissionMode.FULL_ACCESS)
+    set_approval_context(True)
+
+    agent = memory_agent_factory()
+
+    events: list[Any] = []
+    waiter_calls: list[Any] = []
+
+    async def waiter(request_id: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        waiter_calls.append((request_id, payload))
+        return [
+            {"call_id": c.get("call_id", ""), "approved": True}
+            for c in payload.get("calls", [])
+        ]
+
+    async for ev in agent.stream("run sudo ls", approval_waiter=waiter):
+        events.append(ev)
+
+    # 1. waiter 必须被调用（confirm + 有审批者 → interrupt 路径）。
+    assert len(waiter_calls) == 1
+    req_id, payload = waiter_calls[0]
+    assert isinstance(req_id, str) and req_id
+    assert payload["calls"][0]["reason"] == "confirm.sudo"
+    assert payload["calls"][0]["args_display"] == "sudo ls"
+
+    # 2. 事件流必须含 ``permission_request`` 与至少一个 ``tool_start`` /
+    #    ``tool_end``（resume 后工具被闸门放行并执行）。
+    types = [e["type"] for e in events]
+    assert "permission_request" in types
+    perm_event = next(e for e in events if e["type"] == "permission_request")
+    assert perm_event["request_id"] == req_id
+    assert perm_event["calls"][0]["reason"] == "confirm.sudo"
+    assert "tool_start" in types
+    assert "tool_end" in types
+    # 收尾文本：第二次 ainvoke 返回的 "done"。
+    assert "content" in types
+    joined = "".join(e["text"] for e in events if e["type"] == "content")
+    assert joined == "done"
+
+
+@pytest.mark.asyncio
+async def test_stream_unattended_no_approval_waiter_continues_normally(
+    memory_agent_factory,
+) -> None:
+    """``approval_waiter=None`` 且 FULL_ACCESS（无 confirm 触发）：正常生成。
+
+    闸门入口感知默认 fail-closed，但工具 LLM 不会调 run_shell 时无 interrupt
+    出现 —— stream 直接走收尾段（attended 默认 False 时 confirm 自动拒绝，但
+    本测试 LLM 返回的就是 run_shell 的 tool_call：confirm 命中 + 无审批者 →
+    闸门直接合成拒绝 ToolMessage）。无论如何，approval_waiter 为 None 时不应
+    yield ``permission_request``，且无中断抛出。
+    """
+    set_permission_mode(PermissionMode.FULL_ACCESS)
+    set_approval_context(False)
+
+    agent = memory_agent_factory()
+
+    events: list[Any] = []
+    async for ev in agent.stream("just chat"):
+        events.append(ev)
+
+    types = [e["type"] for e in events]
+    # 无审批者：无 permission_request 事件（闸门 fail-closed 把 confirm 转拒绝）。
+    assert "permission_request" not in types
+    # 闸门合成拒绝 ToolMessage：tool_end 带 is_error=True。
+    assert "tool_end" in types
+    tool_ends = [e for e in events if e["type"] == "tool_end"]
+    assert any(e.get("is_error") for e in tool_ends)
+
+
+@pytest.mark.asyncio
+async def test_run_with_approval_handler(memory_agent_factory) -> None:
+    """``run()`` 路径：handler 全批准 → 模型后续生成 "done"。
+
+    handler 被调用一次，决策全批准，最终响应是模型第二轮的纯文本。
+    """
+    set_permission_mode(PermissionMode.FULL_ACCESS)
+    set_approval_context(True)
+
+    agent = memory_agent_factory()
+    handler_calls: list[Any] = []
+
+    async def handler(payload: dict[str, Any]) -> list[dict[str, Any]]:
+        handler_calls.append(payload)
+        return [
+            {"call_id": c.get("call_id", ""), "approved": True}
+            for c in payload.get("calls", [])
+        ]
+
+    response = await agent.run("run sudo ls", approval_handler=handler)
+
+    assert response == "done"
+    assert len(handler_calls) == 1
+    assert handler_calls[0]["calls"][0]["reason"] == "confirm.sudo"
+
+
+@pytest.mark.asyncio
+async def test_run_no_interrupt_no_extra_loop() -> None:
+    """无 interrupt 时：handler 调用计数 == 0，``ainvoke`` 走单次路径。
+
+    LLM 返回纯文本（无 tool_call），run 路径不触发闸门，handler 永远不被调用。
+    """
+    from langgraph.checkpoint.memory import MemorySaver
+
+    from thumbelina.agent.graph import ThumbelinaAgent
+
+    set_permission_mode(PermissionMode.FULL_ACCESS)
+    set_approval_context(True)
+
+    provider = MagicMock()
+    provider.chat_model = MagicMock()
+    provider.chat_model.bind_tools.return_value = provider.chat_model
+    provider.chat_model.ainvoke = AsyncMock(return_value=AIMessage(content="plain answer"))
+
+    agent = ThumbelinaAgent(
+        llm_provider=provider,
+        checkpointer=MemorySaver(),
+    )
+
+    handler_calls: list[Any] = []
+
+    async def handler(payload: dict[str, Any]) -> list[dict[str, Any]]:
+        handler_calls.append(payload)
+        return []
+
+    response = await agent.run("hi", approval_handler=handler)
+
+    assert response == "plain answer"
+    assert handler_calls == []
+    # 单次 ainvoke（无 resume 轮）。
+    assert provider.chat_model.ainvoke.call_count == 1

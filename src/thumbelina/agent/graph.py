@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 import re
-from collections.abc import AsyncGenerator, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -1148,6 +1148,30 @@ class ThumbelinaAgent:
             return True
         return not snapshot.values.get("messages")
 
+    async def _pending_interrupt(self, config: RunnableConfig | None) -> Any | None:
+        """从检查点线程的图状态中查找当前挂起的 ``interrupt()``。
+
+        spec §5.3:LangGraph 的 ``astream`` 不投递 ``__interrupt__`` 事件,
+        因此检测必须走 ``aget_state`` 读取快照,在
+        ``snapshot.tasks[].interrupts[0]`` 上拿到首条待审批请求。无
+        checkpointer、无 config、aget_state 异常或任何字段缺失时返回
+        ``None``,作为调用方「无 interrupt」的判据。
+        """
+        if self._checkpointer is None or config is None:
+            return None
+        try:
+            snapshot = await self.graph.aget_state(config)
+        except Exception:
+            logger.debug("Pending interrupt lookup failed; treating as none", exc_info=True)
+            return None
+        if snapshot is None:
+            return None
+        for task in getattr(snapshot, "tasks", None) or []:
+            interrupts = getattr(task, "interrupts", None)
+            if interrupts:
+                return interrupts[0]
+        return None
+
     async def _build_initial_messages(
         self,
         user_input: str,
@@ -1474,6 +1498,7 @@ class ThumbelinaAgent:
         user_input: str,
         context_window_tokens: int | None = None,
         attachments: list[dict[str, object]] | None = None,
+        approval_handler: Callable[[dict[str, Any]], Awaitable[list[dict[str, Any]]]] | None = None,
     ) -> str:
         """Run the agent with user input and return the response.
 
@@ -1489,6 +1514,15 @@ class ThumbelinaAgent:
             可选的图像附件引用（``[{id, alt?}]``，设计 §4.1）：非空时
             随消息落库，并把最后一轮 ``HumanMessage`` 组装为文本 +
             标准图像内容块（解析失败 fail-soft 回退纯文本）。
+        approval_handler:
+            Task 11(CLI 通路):可选审批回调。当 ``ainvoke`` 返回的结果含
+            ``__interrupt__`` 时被调用,以 ``Interrupt.value``(载荷 ``dict``)
+            为入参,返回 ``[{"call_id": ..., "approved": bool}, ...]`` 决策
+            列表;若返回 ``None``,等同于「handler 未提供」,按兜底逻辑取
+            最后一条消息。
+            ``None`` 时不该出现 interrupt(闸门入口感知已保证,无人值守
+            confirm 一律拒绝不调 interrupt);若异常出现,按现状取最后一
+            条消息,保证主流程不被打断。
         """
         await self._ensure_conversation()
         self.trajectory_recorder.begin_turn(self.current_conversation_id)
@@ -1518,6 +1552,42 @@ class ThumbelinaAgent:
             await self.trajectory_recorder.record_assistant(fallback)
             asyncio.create_task(self._maybe_auto_name())
             return fallback
+
+        # Task 11:审批循环 —— interrupt 后用 ``Command(resume=...)`` 复用同一
+        # ``config`` 继续 ``ainvoke``,直到结果不再含 ``__interrupt__``。handler 为
+        # ``None`` 时跳过循环(handler 兜底:出现 interrupt 则按现状取最后消息)。
+        if approval_handler is not None:
+            from langgraph.types import Command
+
+            while isinstance(result, dict) and result.get("__interrupt__"):
+                interrupts = result.get("__interrupt__") or []
+                if not interrupts:
+                    break
+                interrupt_obj = interrupts[0]
+                payload = getattr(interrupt_obj, "value", None) or {}
+                try:
+                    decisions = await approval_handler(dict(payload))
+                except Exception:
+                    logger.warning("Approval handler raised; treating as deny-all", exc_info=True)
+                    decisions = [
+                        {"call_id": c.get("call_id", ""), "approved": False}
+                        for c in payload.get("calls", [])
+                    ]
+                try:
+                    result = await self.graph.ainvoke(
+                        Command(resume=decisions), config=config
+                    )
+                except GraphRecursionError:
+                    logger.warning(
+                        "Agent recursion limit (recursion_limit=%d) exceeded after resume; "
+                        "returning fallback reply",
+                        int((config or {}).get("recursion_limit", 25)),
+                    )
+                    fallback = "Conversation reached the step limit; please retry or reset."
+                    await self._persist_message("assistant", fallback)
+                    await self.trajectory_recorder.record_assistant(fallback)
+                    asyncio.create_task(self._maybe_auto_name())
+                    return fallback
 
         last_message = result["messages"][-1]
         response = str(last_message.content)
@@ -1552,11 +1622,15 @@ class ThumbelinaAgent:
         user_input: str,
         context_window_tokens: int | None = None,
         attachments: list[dict[str, object]] | None = None,
+        approval_waiter: (
+            Callable[[str, dict[str, Any]], Awaitable[list[dict[str, Any]]]] | None
+        ) = None,
     ) -> AsyncGenerator[dict[str, Any], None]:
         """Stream the agent's response as typed events.
 
-        Yields dicts of one of four forms so callers can render the model's
-        thinking process, the visible answer, and real-time tool call cards::
+        Yields dicts of one of these forms so callers can render the model's
+        thinking process, the visible answer, real-time tool call cards and
+        permission requests::
 
             {"type": "content",   "text": str}
             {"type": "reasoning", "text": str}
@@ -1564,17 +1638,28 @@ class ThumbelinaAgent:
              "args": dict | {"_truncated_json": str}, "args_truncated": bool}
             {"type": "tool_end",   "call_id": str, "duration_ms": int,
              "is_error": bool, "result_preview": str, "result_truncated": bool}
+            {"type": "permission_request", "request_id": str, "calls": list}
 
         工具事件由 ``_tool_node_node`` 经 LangGraph custom stream writer 发射
         (``stream_mode=["messages", "custom"]``),不进批量缓冲、立即透传,
         与 token 流在同一生成器内天然交错;``call_id`` 为 AIMessage 自带的
         ``tool_calls[].id``,start/end 由它配对。
 
+        Task 10(权限审批, spec §5.3):LangGraph 的 ``astream`` 不投递
+        ``__interrupt__`` 事件,因此检测走 ``_pending_interrupt``
+        (``aget_state``);每检测到一次挂起请求,先 yield
+        ``permission_request``,再用 ``approval_waiter(request_id, payload)``
+        阻塞等待决策,以 ``Command(resume=decisions)`` 复用同一 ``config``
+        继续 ``astream`` —— ``thread_id`` 一致性由 config 局部对象保证。
+
         ``context_window_tokens`` 是可选的按会话上下文窗口（单位为
         token），由调用方解析；它被放入运行配置中供压缩节点使用。
         ``attachments`` 是可选的图像附件引用（``[{id, alt?}]``）：
         非空时随消息落库，并把最后一轮 ``HumanMessage`` 组装为文本 +
         标准图像内容块（解析失败 fail-soft 回退纯文本）。
+        ``approval_waiter`` 是可选审批回调:WS 通路注入 ``PermissionBroker``
+        适配的 waiter(``Task 12``);``None`` 时不应有 interrupt 出现
+        (闸门 fail-closed),即便检测到也按现状直接退出 stream 收尾段。
         """
         await self._ensure_conversation()
         self.trajectory_recorder.begin_turn(self.current_conversation_id)
@@ -1594,106 +1679,155 @@ class ThumbelinaAgent:
         initial_state: AgentState = {"messages": initial_messages}
         full_response = ""
         full_reasoning = ""
-        pending_content = ""
-        pending_reasoning = ""
         # Batch tokens before yielding: send when buffer reaches size OR timeout
         batch_size = 30  # characters per batch
         flush_interval = 0.05  # seconds (50ms) - flush even if batch size not reached
-        last_flush = asyncio.get_event_loop().time()
         # 流式 chunk 的 usage 通常出现在最后一片的 response_metadata 中。
         last_chunk_metadata: dict | None = None
         chunk_meta_count = 0
 
-        astream_iter = self.graph.astream(
-            initial_state, stream_mode=["messages", "custom"], config=config
-        )
-        try:
-            async for stream_mode, event in astream_iter:
-                # custom 模式:_tool_node_node 发射的 tool_start/tool_end 事件,
-                # 不进批量缓冲、立即透传(工具可见性特性)。
-                if stream_mode == "custom":
-                    if isinstance(event, dict) and ("tool_start" in event or "tool_end" in event):
-                        # 透传前必须排空批量缓冲:轮文本尾巴(不足 batch_size 且
-                        # 未到 flush 超时)滞留在 pending 里,若让 tool_start 抢先,
-                        # 前端会把工具芯片锚点记在尾巴之前,一句话被芯片从中间
-                        # 切开、尾巴粘到下一轮文本前(设计 §5.3 锚点顺序契约)。
-                        if pending_reasoning:
-                            yield {"type": "reasoning", "text": pending_reasoning}
-                            pending_reasoning = ""
-                        if pending_content:
-                            yield {"type": "content", "text": pending_content}
-                            pending_content = ""
-                        last_flush = asyncio.get_event_loop().time()
-                        if "tool_start" in event:
-                            yield {"type": "tool_start", **event["tool_start"]}
-                        else:
-                            yield {"type": "tool_end", **event["tool_end"]}
-                    continue
-                # messages 模式:event 为 (message_chunk, metadata) 元组。
-                message_chunk = event[0]
-                metadata = event[1] if len(event) > 1 and isinstance(event[1], dict) else {}
-                # 来自压缩节点的状态维护（删除、被剥离的 assistant 重新
-                # 发出）不属于回复内容。
-                if metadata.get("langgraph_node") == "compress":
-                    continue
+        # Task 10:resume 循环。首轮用 ``initial_state``,resume 轮用
+        # ``Command(resume=decisions)`` 复用同一 ``config``(thread_id 一致)。
+        # 闸门 ``interrupt()`` 首过抛 GraphInterrupt 被 ``astream`` 吞,既不
+        # 投递事件也不在 result 里 —— 检测走 ``_pending_interrupt``(aget_state)。
+        # ``astream`` 的 ``GraphRecursionError`` 只在第一轮检测(recursion 是图
+        # 级不变量,resume 复用同一递归预算不会更激进);处理保留现状。
+        from langgraph.types import Command
 
-                # Accept both streaming chunks (AIMessageChunk) and complete
-                # responses (AIMessage). The latter occurs with non-streaming
-                # LLM providers, where astream(stream_mode="messages") emits a
-                # single AIMessage instead of per-token chunks.
-                # 带 tool_calls 的消息也要提取文本:非流式 provider 的轮内
-                # "文本+工具调用"是同一条完整 AIMessage,跳过会把工具调用
-                # 之前的文本整个丢掉(不进 full_response、不落库);流式
-                # provider 的 tool-call chunk content 为空,提取是无害 no-op。
-                if not isinstance(message_chunk, AIMessage):
-                    continue
-                chunk_metadata = getattr(message_chunk, "response_metadata", None)
-                if isinstance(chunk_metadata, dict) and chunk_metadata:
-                    last_chunk_metadata = chunk_metadata
-                    chunk_meta_count += 1
-                    if "token_usage" in chunk_metadata:
-                        logger.debug(
-                            "trajectory: stream chunk carries token_usage: %r",
-                            chunk_metadata["token_usage"],
-                        )
-
-                content, reasoning = _extract_chunk_parts(message_chunk)
-                if content:
-                    full_response += content
-                    pending_content += content
-                if reasoning:
-                    full_reasoning += reasoning
-                    pending_reasoning += reasoning
-                if not content and not reasoning:
-                    continue
-
-                # Yield when buffer reaches batch size or time interval
-                now = asyncio.get_event_loop().time()
-                due = (now - last_flush) >= flush_interval
-                if pending_reasoning and (len(pending_reasoning) >= batch_size or due):
-                    yield {"type": "reasoning", "text": pending_reasoning}
-                    pending_reasoning = ""
-                    last_flush = now
-                if pending_content and (len(pending_content) >= batch_size or due):
-                    yield {"type": "content", "text": pending_content}
-                    pending_content = ""
-                    last_flush = now
-        except GraphRecursionError:
-            logger.warning(
-                "Agent recursion limit (recursion_limit=%d) exceeded mid-stream; "
-                "yielding fallback reply",
-                int((config or {}).get("recursion_limit", 25)),
+        resume_input: Any = initial_state
+        while True:
+            pending_content = ""
+            pending_reasoning = ""
+            last_flush = asyncio.get_event_loop().time()
+            astream_iter = self.graph.astream(
+                resume_input, stream_mode=["messages", "custom"], config=config
             )
-            fallback = "Conversation reached the step limit; please retry or reset."
-            if not full_response:
-                full_response = fallback
-            yield {"type": "content", "text": fallback}
+            try:
+                async for stream_mode, event in astream_iter:
+                    # custom 模式:_tool_node_node 发射的 tool_start/tool_end 事件,
+                    # 不进批量缓冲、立即透传(工具可见性特性)。
+                    if stream_mode == "custom":
+                        if isinstance(event, dict) and (
+                            "tool_start" in event or "tool_end" in event
+                        ):
+                            # 透传前必须排空批量缓冲:轮文本尾巴(不足 batch_size 且
+                            # 未到 flush 超时)滞留在 pending 里,若让 tool_start 抢先,
+                            # 前端会把工具芯片锚点记在尾巴之前,一句话被芯片从中间
+                            # 切开、尾巴粘到下一轮文本前(设计 §5.3 锚点顺序契约)。
+                            if pending_reasoning:
+                                yield {"type": "reasoning", "text": pending_reasoning}
+                                pending_reasoning = ""
+                            if pending_content:
+                                yield {"type": "content", "text": pending_content}
+                                pending_content = ""
+                            last_flush = asyncio.get_event_loop().time()
+                            if "tool_start" in event:
+                                yield {"type": "tool_start", **event["tool_start"]}
+                            else:
+                                yield {"type": "tool_end", **event["tool_end"]}
+                        continue
+                    # messages 模式:event 为 (message_chunk, metadata) 元组。
+                    message_chunk = event[0]
+                    metadata = (
+                        event[1] if len(event) > 1 and isinstance(event[1], dict) else {}
+                    )
+                    # 来自压缩节点的状态维护（删除、被剥离的 assistant 重新
+                    # 发出）不属于回复内容。
+                    if metadata.get("langgraph_node") == "compress":
+                        continue
 
-        # Yield any remaining content
-        if pending_reasoning:
-            yield {"type": "reasoning", "text": pending_reasoning}
-        if pending_content:
-            yield {"type": "content", "text": pending_content}
+                    # Accept both streaming chunks (AIMessageChunk) and complete
+                    # responses (AIMessage). The latter occurs with non-streaming
+                    # LLM providers, where astream(stream_mode="messages") emits a
+                    # single AIMessage instead of per-token chunks.
+                    # 带 tool_calls 的消息也要提取文本:非流式 provider 的轮内
+                    # "文本+工具调用"是同一条完整 AIMessage,跳过会把工具调用
+                    # 之前的文本整个丢掉(不进 full_response、不落库);流式
+                    # provider 的 tool-call chunk content 为空,提取是无害 no-op。
+                    if not isinstance(message_chunk, AIMessage):
+                        continue
+                    chunk_metadata = getattr(message_chunk, "response_metadata", None)
+                    if isinstance(chunk_metadata, dict) and chunk_metadata:
+                        last_chunk_metadata = chunk_metadata
+                        chunk_meta_count += 1
+                        if "token_usage" in chunk_metadata:
+                            logger.debug(
+                                "trajectory: stream chunk carries token_usage: %r",
+                                chunk_metadata["token_usage"],
+                            )
+
+                    content, reasoning = _extract_chunk_parts(message_chunk)
+                    if content:
+                        full_response += content
+                        pending_content += content
+                    if reasoning:
+                        full_reasoning += reasoning
+                        pending_reasoning += reasoning
+                    if not content and not reasoning:
+                        continue
+
+                    # Yield when buffer reaches batch size or time interval
+                    now = asyncio.get_event_loop().time()
+                    due = (now - last_flush) >= flush_interval
+                    if pending_reasoning and (
+                        len(pending_reasoning) >= batch_size or due
+                    ):
+                        yield {"type": "reasoning", "text": pending_reasoning}
+                        pending_reasoning = ""
+                        last_flush = now
+                    if pending_content and (len(pending_content) >= batch_size or due):
+                        yield {"type": "content", "text": pending_content}
+                        pending_content = ""
+                        last_flush = now
+            except GraphRecursionError:
+                logger.warning(
+                    "Agent recursion limit (recursion_limit=%d) exceeded mid-stream; "
+                    "yielding fallback reply",
+                    int((config or {}).get("recursion_limit", 25)),
+                )
+                fallback = "Conversation reached the step limit; please retry or reset."
+                if not full_response:
+                    full_response = fallback
+                # 一次性把本轮的尾巴排空(避免跨 fallback / resume 串味)。
+                pending_reasoning = ""
+                pending_content = ""
+                yield {"type": "content", "text": fallback}
+                # 不再进入 resume 循环:recursion 已超限。
+                break
+
+            # Yield any remaining content from this round before interrupt detection.
+            if pending_reasoning:
+                yield {"type": "reasoning", "text": pending_reasoning}
+            if pending_content:
+                yield {"type": "content", "text": pending_content}
+
+            # 闸门 / LangGraph 可能在此前产生 interrupt(s);astream 不投递,
+            # 必须通过 _pending_interrupt 走 aget_state 探测。检测到且
+            # approval_waiter 提供时:yield 通知 + 阻塞拿决策 + Command resume。
+            pending = await self._pending_interrupt(config)
+            if pending is None or approval_waiter is None:
+                break
+            payload = dict(getattr(pending, "value", None) or {})
+            request_id = str(getattr(pending, "id", "") or uuid4())
+            # payload 写回 request_id：broker.register 优先取用（spec §5.4）。
+            payload["request_id"] = request_id
+            yield {
+                "type": "permission_request",
+                "request_id": request_id,
+                "calls": payload.get("calls", []),
+            }
+            try:
+                decisions = await approval_waiter(request_id, payload)
+            except Exception:
+                logger.warning(
+                    "approval_waiter raised; treating as deny-all for %s", request_id,
+                    exc_info=True,
+                )
+                decisions = [
+                    {"call_id": c.get("call_id", ""), "approved": False}
+                    for c in payload.get("calls", [])
+                ]
+            resume_input = Command(resume=decisions)
 
         llm_usage = normalize_llm_usage(last_chunk_metadata)
         if llm_usage:
