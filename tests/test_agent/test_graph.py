@@ -936,7 +936,7 @@ class TestNotifyUserByChannel:
     async def test_notify_explicit_channel_and_user_id(self):
         agent = self._make_agent()
         wechat = self._mock_channel()
-        qq = self._mock_channel(last_user="qq-42")  # 收窄后：user_id 必须等于 last_user（spec §4.6）
+        qq = self._mock_channel(last_user="qq-42")  # spec §4.6：user_id 必须等于 last_user
         agent.register_channel("wechat", wechat)
         agent.register_channel("qq", qq)
 
@@ -1007,8 +1007,23 @@ def _graph_echo_tool(text: str = "") -> str:
 class TestStreamToolEvents:
     """stream() 双模式(messages + custom)产出的实时工具事件(工具可见性特性)。"""
 
-    async def test_stream_emits_tool_start_and_end(self):
+    async def test_stream_emits_tool_start_and_end(self, monkeypatch):
+        import thumbelina.tools.permissions as perms_mod
         from thumbelina.agent.graph import ThumbelinaAgent
+        from thumbelina.tools.permissions import (
+            PermissionMode,
+            set_approval_context,
+            set_permission_mode,
+        )
+
+        # Task 8：闸门按 KNOWN_TOOLS 裁决；本测试工具是 _graph_echo_tool，
+        # 不在内置名册里会被 confirm → 无审批者拒绝。把名册临时扩进该
+        # 工具名，专注测试 stream 的事件序列。
+        monkeypatch.setattr(
+            perms_mod,
+            "KNOWN_TOOLS",
+            perms_mod.KNOWN_TOOLS | {"_graph_echo_tool"},
+        )
 
         mock_provider = _create_mock_provider()
         mock_provider.chat_model.ainvoke = AsyncMock(
@@ -1022,8 +1037,17 @@ class TestStreamToolEvents:
                 AIMessage(content="final answer"),
             ]
         )
-        agent = ThumbelinaAgent(llm_provider=mock_provider, tools=[_graph_echo_tool])
-        events = [e async for e in agent.stream("use the tool")]
+        # Task 8：闸门在 _tool_node_node 首行（READ_ONLY 默认拒绝执行类
+        # 工具）。本测试关注 stream 的事件序列，工具侧设为 FULL_ACCESS 绕
+        # 开闸门裁决，单独覆盖 is_error=False 路径。
+        set_permission_mode(PermissionMode.FULL_ACCESS)
+        set_approval_context(False)
+        try:
+            agent = ThumbelinaAgent(llm_provider=mock_provider, tools=[_graph_echo_tool])
+            events = [e async for e in agent.stream("use the tool")]
+        finally:
+            set_permission_mode(PermissionMode.READ_ONLY)
+            set_approval_context(False)
 
         types = [e["type"] for e in events]
         assert "tool_start" in types and "tool_end" in types
@@ -1041,13 +1065,27 @@ class TestStreamToolEvents:
         # 内容事件不受影响
         assert "".join(e["text"] for e in events if e["type"] == "content") == "final answer"
 
-    async def test_stream_flushes_pending_content_before_tool_start(self):
+    async def test_stream_flushes_pending_content_before_tool_start(self, monkeypatch):
         """轮文本(不足 batch_size 滞留缓冲)必须先于 tool_start 发出。
 
         前端在 tool_start 到达时记录工具芯片的穿插锚点;若文本尾巴滞后,
         锚点落在句中,工具卡会把一句话从中间切开(设计 §5.3 顺序契约)。
         """
+        import thumbelina.tools.permissions as perms_mod
         from thumbelina.agent.graph import ThumbelinaAgent
+        from thumbelina.tools.permissions import (
+            PermissionMode,
+            set_approval_context,
+            set_permission_mode,
+        )
+
+        monkeypatch.setattr(
+            perms_mod,
+            "KNOWN_TOOLS",
+            perms_mod.KNOWN_TOOLS | {"_graph_echo_tool"},
+        )
+        set_permission_mode(PermissionMode.FULL_ACCESS)
+        set_approval_context(False)
 
         mock_provider = _create_mock_provider()
         mock_provider.chat_model.ainvoke = AsyncMock(
@@ -1069,9 +1107,23 @@ class TestStreamToolEvents:
         round1_text = "".join(e["text"] for e in events[:start_idx] if e["type"] == "content")
         assert "先记下绝对路径" in round1_text
 
-    async def test_stream_nonstreaming_round_keeps_text_before_tool(self):
+    async def test_stream_nonstreaming_round_keeps_text_before_tool(self, monkeypatch):
         """非流式 provider 的"文本+工具调用"完整 AIMessage 不丢文本。"""
+        import thumbelina.tools.permissions as perms_mod
         from thumbelina.agent.graph import ThumbelinaAgent
+        from thumbelina.tools.permissions import (
+            PermissionMode,
+            set_approval_context,
+            set_permission_mode,
+        )
+
+        monkeypatch.setattr(
+            perms_mod,
+            "KNOWN_TOOLS",
+            perms_mod.KNOWN_TOOLS | {"_graph_echo_tool"},
+        )
+        set_permission_mode(PermissionMode.FULL_ACCESS)
+        set_approval_context(False)
 
         mock_provider = _create_mock_provider()
         mock_provider.chat_model.ainvoke = AsyncMock(
@@ -1101,8 +1153,22 @@ class TestStreamToolEvents:
         events = [e async for e in agent.stream("hi")]
         assert all(e["type"] in ("content", "reasoning") for e in events)
 
-    async def test_run_path_unchanged_no_events(self):
+    async def test_run_path_unchanged_no_events(self, monkeypatch):
+        import thumbelina.tools.permissions as perms_mod
         from thumbelina.agent.graph import ThumbelinaAgent
+        from thumbelina.tools.permissions import (
+            PermissionMode,
+            set_approval_context,
+            set_permission_mode,
+        )
+
+        monkeypatch.setattr(
+            perms_mod,
+            "KNOWN_TOOLS",
+            perms_mod.KNOWN_TOOLS | {"_graph_echo_tool"},
+        )
+        set_permission_mode(PermissionMode.FULL_ACCESS)
+        set_approval_context(False)
 
         mock_provider = _create_mock_provider()
         mock_provider.chat_model.ainvoke = AsyncMock(
