@@ -67,6 +67,7 @@ from thumbelina.scheduler.scheduler import TaskScheduler
 from thumbelina.scheduler.store import TaskStore
 from thumbelina.security.auth import AuthService
 from thumbelina.security.rate_limit import RateLimiter
+from thumbelina.tools.permissions import _register_app_anchors
 
 logger = logging.getLogger(__name__)
 
@@ -354,6 +355,22 @@ def _make_prompt_runner(app: FastAPI, repository: RepositoryManager) -> PromptRu
             # conversation state, shared provider/repository/checkpointer.
             isolated = app.state.agent.clone()
             isolated.current_conversation_id = cid
+            # 任务继承会话的 permission + 工作区(spec §5.5:用户改会话权限
+            # 即改定时任务权限,语义一致且少一列 source_permission)。
+            # 调度器入口无审批者 → unattended=True;任务未绑定会话时跳过,
+            # ContextVar 默认 fail-closed(只读+无审批者)兜底。
+            if task.conversation_id:
+                try:
+                    from thumbelina.api.routes.chat import apply_conversation_runtime
+
+                    await apply_conversation_runtime(
+                        app, isolated, cid, unattended=True
+                    )
+                except Exception:
+                    logger.warning(
+                        "prompt task permission wiring failed; fail-closed",
+                        exc_info=True,
+                    )
             reply: str = await isolated.run(task.content)
 
         try:
@@ -633,6 +650,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             app.state.memory_service = None
     else:
         app.state.memory_service = None
+
+    # 启动时按 config 解析应用内部目录为绝对锚点(spec §4.5:目录类守卫
+    # 在 workspace≠CWD 时只锚定"相对前缀分段"会漏绝对路径)。失败仅
+    # WARNING 日志——启动必须继续,无锚点退化为"workspace 相对前缀"
+    # 单一锚点(深层保护路径仍生效)。
+    try:
+        _register_app_anchors(config)
+    except Exception:
+        logger.warning("permission app anchor registration failed", exc_info=True)
 
     # Initialize conversation auto-namer (shares the active LLM provider)
     from thumbelina.analysis.namer import ConversationNamer

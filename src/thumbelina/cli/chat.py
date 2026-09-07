@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,11 @@ from thumbelina.agent.graph import ThumbelinaAgent
 from thumbelina.config import AppConfig, load_config
 from thumbelina.llm.factory import create_provider
 from thumbelina.repository.manager import RepositoryManager
+from thumbelina.tools.permissions import (
+    PermissionMode,
+    set_approval_context,
+    set_permission_mode,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -277,6 +283,14 @@ async def _run_chat_session(config: AppConfig, provider: str, model: str | None)
                 if getattr(t, "category", None) == ToolCategory.PERCEPTION
             ]
         )
+
+    # CLI ContextVar 接线(spec §8:TTY 检测 → set_approval_context;
+    # 完整审批回路由 Task 17 在 run() 上挂 approval_handler)。设置 mode
+    # 为 FULL_ACCESS:CLI 不做工作区降级,操作粒度由 Task 17 的 TTY 审批卡
+    # 决定(交互模式按下 `y` 才放行 confirm 级调用)。管道/重定向时
+    # isatty()=False → 无审批者 → confirm 一律 deny。
+    set_permission_mode(PermissionMode.FULL_ACCESS)
+    set_approval_context(sys.stdin.isatty())
 
     session = ChatSession(
         agent=agent,

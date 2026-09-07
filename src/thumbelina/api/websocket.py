@@ -363,8 +363,10 @@ async def _run_generation(
                 # 供 CreateSubagentTool 标注子 agent 的发起会话,使事件能
                 # 路由回本回合的帧流。
                 set_current_conversation_id(cid)
-                # 应用会话的端点与角色（与 HTTP / 通道共用同一套逻辑）
-                await apply_conversation_runtime(websocket, agent, cid)
+                # 应用会话的端点、角色、工作区与权限（与 HTTP / 通道共用同一套逻辑）。
+                # WS 是 attended 入口（有审批者）：显式 unattended=False 让
+                # confirm 级操作走 interrupt()/审批卡路径（spec §8）。
+                await apply_conversation_runtime(websocket, agent, cid, unattended=False)
 
             # 解析会话的上下文窗口（会话端点 → 全局活跃端点 →
             # llm.context_window），供压缩阶段使用。

@@ -60,6 +60,11 @@ class QQChannel(Channel):
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._ready = asyncio.Event()
+        # QQ 通道按 spec §8 无人值守：每条入站消息都通过一个 pinned
+        # QQ 会话走 _apply_conversation_permission 接线，保证 mode 与
+        # 工作区在 ContextVar 中落地（spec §8 规则 2：confirm 一律 deny）。
+        # 启动时由 start() 创建/复用并写入 self._agent.current_conversation_id。
+        self._conversation_name = "QQClawbot"
 
     def _create_client(self) -> Any:
         """Create and return a botpy Client subclass.
@@ -128,6 +133,32 @@ class QQChannel(Channel):
         )
         return _ThumbelinaBotClient(intents=intents)
 
+    async def _ensure_qq_conversation(self) -> None:
+        """复用或创建 pinned QQ 会话(与微信 WeChatChannel._ensure_wechat_conversation 同模式)。
+
+        用于把 spec §8 的 apply_conversation_runtime 接线到会话 id;缺失
+        时入站消息仍按 ContextVar 默认值(fail-closed)兜底,绝不抛出。
+        """
+        mm = self._agent.repository_manager
+        if mm is None:
+            logger.warning("No repository manager — QQ messages will not be persisted")
+            return
+        try:
+            conversations = await mm.get_conversations()
+            for conv in conversations:
+                if conv.get("name") == self._conversation_name:
+                    self._agent.current_conversation_id = conv["id"]
+                    logger.info("Reusing existing QQ conversation %s", conv["id"])
+                    return
+            conv_id = await mm.create_conversation(
+                name=self._conversation_name,
+                pinned=True,
+            )
+            self._agent.current_conversation_id = conv_id
+            logger.info("Created QQ conversation %s", conv_id)
+        except Exception:
+            logger.exception("Failed to ensure QQ conversation")
+
     async def _handle_message(
         self,
         user_id: str,
@@ -178,6 +209,29 @@ class QQChannel(Channel):
             cleaned[:100],
         )
 
+        # spec §8:QQ 通道无人值守(无审批者)。每条入站消息前调一次
+        # apply_conversation_runtime(unattended=True):为闸门/工具级
+        # security_review 写入正确的 ContextVar(permission + workspace),
+        # 失败仅 WARNING,继续走 ContextVar 默认值兜底。
+        cid = getattr(self._agent, "current_conversation_id", None)
+        if cid and self._agent.repository_manager is not None:
+            try:
+                from thumbelina.api.routes.chat import apply_conversation_runtime
+
+                # QQ 通道没有 runtime shim,共享 self._agent 上的 app.state
+                # 没有引用;apply_conversation_runtime 只访问 app.state 上的
+                # endpoint_manager(可空)与 config(可空),空上下文满足需求。
+                from types import SimpleNamespace
+
+                await apply_conversation_runtime(
+                    SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace())),
+                    self._agent,
+                    cid,
+                    unattended=True,
+                )
+            except Exception:
+                logger.warning("Failed to apply QQ conversation runtime", exc_info=True)
+
         try:
             # Use the registered handler if set, otherwise fall back to agent
             if self._handler is not None:
@@ -201,6 +255,16 @@ class QQChannel(Channel):
         except ImportError:
             logger.warning("Cannot start QQ channel: qq-botpy is not installed.")
             return
+
+        # 启动时复用/创建 pinned QQ 会话(与微信 WeChatChannel 同模式),
+        # 写入 self._agent.current_conversation_id 供后续入站消息调用
+        # apply_conversation_runtime(..., unattended=True) 使用。
+        # 失败仅 WARNING,通道照常启动 — agent.run() 仍走 ContextVar 默认
+        # 值(fail-closed:只读 + 无审批者)。
+        try:
+            await self._ensure_qq_conversation()
+        except Exception:
+            logger.warning("Failed to ensure QQ conversation", exc_info=True)
 
         def _run_bot() -> None:
             try:
