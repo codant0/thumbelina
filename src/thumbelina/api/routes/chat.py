@@ -296,7 +296,7 @@ async def _apply_conversation_permission(
        闸门,confirm 一律 deny(规则 1)。
     """
     mode = PermissionMode.FULL_ACCESS
-    has_ws = agent.workspace is not None
+    has_ws = bool(getattr(agent, "workspace", None))
     repository = agent.repository_manager
     if repository is not None:
         try:
