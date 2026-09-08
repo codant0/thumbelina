@@ -10,7 +10,6 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import BaseTool
-from langchain_core.tools import tool as lc_tool
 
 from thumbelina.subagents.base import Subagent, SubagentStatus
 from thumbelina.subagents.manager import SubagentManager
@@ -226,10 +225,22 @@ class _ScriptedChatModel(BaseChatModel):
         return ChatResult(generations=[ChatGeneration(message=self.responses.pop(0))])
 
 
-@lc_tool
-def probe_tool(dummy: str = "") -> str:
-    """probe returns a fixed result"""
-    return "PROBE_RESULT"
+# Task 13(权限闸门)：子 agent 的工具调用要过 ``evaluate_tool_call``，未知
+# 工具名在任何模式下都拿不到 allow（READ_ONLY → deny rule.read_only；高模式
+# → confirm rule.unknown_tool，而 subagent 无审批者同样拒绝）。因此工具循环
+# 的测试探针必须使用真实白名单工具名（``read_file``），否则测的是被拒路径。
+class _ProbeTool(BaseTool):
+    name: str = "read_file"
+    description: str = "probe returns a fixed result"
+
+    def _run(self, dummy: str = "") -> str:  # pragma: no cover - 同步路径不使用
+        return "PROBE_RESULT"
+
+    async def _arun(self, dummy: str = "") -> str:
+        return "PROBE_RESULT"
+
+
+probe_tool = _ProbeTool()
 
 
 async def _wait_terminal(manager, agent_id, timeout=5.0):
@@ -260,7 +271,7 @@ class TestSubagentToolLoop:
                     content="",
                     tool_calls=[
                         {
-                            "name": "probe_tool",
+                            "name": "read_file",
                             "args": {"dummy": "x"},
                             "id": "c1",
                             "type": "tool_call",
@@ -289,7 +300,7 @@ class TestSubagentToolLoop:
                     AIMessage(
                         content="",
                         tool_calls=[
-                            {"name": "probe_tool", "args": {}, "id": f"c{i}", "type": "tool_call"}
+                            {"name": "read_file", "args": {}, "id": f"c{i}", "type": "tool_call"}
                         ],
                     )
                     for i in range(3)
@@ -314,7 +325,7 @@ class TestSubagentToolLoop:
         seen: list = []
 
         class _WsProbeTool(BaseTool):
-            name: str = "ws_probe"
+            name: str = "list_directory"
             description: str = "probe active workspace"
 
             def _run(self) -> str:  # pragma: no cover - 同步路径不使用
@@ -330,7 +341,7 @@ class TestSubagentToolLoop:
             responses=[
                 AIMessage(
                     content="",
-                    tool_calls=[{"name": "ws_probe", "args": {}, "id": "c1", "type": "tool_call"}],
+                    tool_calls=[{"name": "list_directory", "args": {}, "id": "c1", "type": "tool_call"}],
                 ),
                 AIMessage(content="done"),
             ]
@@ -395,3 +406,173 @@ class TestSingleShotPseudoToolGuard:
 
         assert current.status == SubagentStatus.COMPLETED
         assert current.result == "评审结论:设计合理。"
+
+
+# ---------------------------------------------------------------------------
+# 权限闸门(Task 13, spec §9 subagent):子 agent 无审批者,confirm/deny 一律
+# 拒绝 —— 工具不执行,合成 "Error: 权限拒绝" ToolMessage 回填。
+# ---------------------------------------------------------------------------
+
+
+class TestSubagentPermissionGate:
+    """_run_tool_loop 前置 evaluate_tool_call 裁决。"""
+
+    @pytest.fixture(autouse=True)
+    def _reset_mode(self):
+        from thumbelina.tools.permissions import PermissionMode, set_permission_mode
+
+        set_permission_mode(PermissionMode.READ_ONLY)
+        yield
+        set_permission_mode(PermissionMode.READ_ONLY)
+
+    @pytest.mark.asyncio
+    async def test_read_only_denies_run_shell_without_executing(self, manager):
+        """READ_ONLY 下 run_shell 被拒:工具体不执行,模型看到权限拒绝文案。"""
+        executed: list[str] = []
+
+        class _RunShellStub(BaseTool):
+            name: str = "run_shell"
+            description: str = "run a shell command"
+
+            def _run(self, command: str = "") -> str:  # pragma: no cover
+                executed.append(command)
+                return "EXECUTED"
+
+            async def _arun(self, command: str = "") -> str:
+                executed.append(command)
+                return "EXECUTED"
+
+        manager.set_tools([_RunShellStub()])
+        manager.llm_provider.chat_model = _ScriptedChatModel(
+            responses=[
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "run_shell",
+                            "args": {"command": "echo hi"},
+                            "id": "c1",
+                            "type": "tool_call",
+                        }
+                    ],
+                ),
+                AIMessage(content="I could not run the command"),
+            ]
+        )
+
+        agent = await manager.create_agent(task="run something")
+        await manager.run_agent(agent.id)
+        current = await _wait_terminal(manager, agent.id)
+
+        assert current.status == SubagentStatus.COMPLETED
+        assert executed == []
+        assert current.result == "I could not run the command"
+
+    @pytest.mark.asyncio
+    async def test_confirm_level_call_denied_without_approver(self, manager):
+        """FULL_ACCESS 下的 confirm 级调用(sudo)在子 agent 里同样被拒。"""
+        from thumbelina.tools.permissions import PermissionMode, set_permission_mode
+
+        set_permission_mode(PermissionMode.FULL_ACCESS)
+        executed: list[str] = []
+        seen_tool_messages: list[str] = []
+
+        class _RunShellStub(BaseTool):
+            name: str = "run_shell"
+            description: str = "run a shell command"
+
+            def _run(self, command: str = "") -> str:  # pragma: no cover
+                executed.append(command)
+                return "EXECUTED"
+
+            async def _arun(self, command: str = "") -> str:
+                executed.append(command)
+                return "EXECUTED"
+
+        class _CapturingModel(_ScriptedChatModel):
+            def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+                for m in messages:
+                    if type(m).__name__ == "ToolMessage":
+                        seen_tool_messages.append(str(m.content))
+                return super()._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
+
+        manager.set_tools([_RunShellStub()])
+        manager.llm_provider.chat_model = _CapturingModel(
+            responses=[
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "run_shell",
+                            "args": {"command": "sudo rm /etc/hosts"},
+                            "id": "c1",
+                            "type": "tool_call",
+                        }
+                    ],
+                ),
+                AIMessage(content="denied, reporting back"),
+            ]
+        )
+
+        agent = await manager.create_agent(task="sudo something")
+        await manager.run_agent(agent.id)
+        current = await _wait_terminal(manager, agent.id)
+
+        assert current.status == SubagentStatus.COMPLETED
+        assert executed == []
+        assert any("权限拒绝" in c for c in seen_tool_messages), seen_tool_messages
+
+    @pytest.mark.asyncio
+    async def test_mixed_batch_keeps_tool_call_order(self, manager):
+        """混合批次:允许的执行、被拒的合成,顺序与 tool_calls 一致。"""
+        seen_pairs: list[tuple[str, str]] = []
+
+        class _DenyProbe(BaseTool):
+            name: str = "run_shell"
+            description: str = "run a shell command"
+
+            def _run(self, command: str = "") -> str:  # pragma: no cover
+                return "EXECUTED"
+
+            async def _arun(self, command: str = "") -> str:
+                return "EXECUTED"
+
+        class _CapturingModel(_ScriptedChatModel):
+            def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+                for m in messages:
+                    if type(m).__name__ == "ToolMessage":
+                        seen_pairs.append((m.tool_call_id, str(m.content)))
+                return super()._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
+
+        manager.set_tools([probe_tool, _DenyProbe()])
+        manager.llm_provider.chat_model = _CapturingModel(
+            responses=[
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "run_shell",
+                            "args": {"command": "echo hi"},
+                            "id": "deny-1",
+                            "type": "tool_call",
+                        },
+                        {
+                            "name": "read_file",
+                            "args": {"path": "x"},
+                            "id": "allow-1",
+                            "type": "tool_call",
+                        },
+                    ],
+                ),
+                AIMessage(content="mixed handled"),
+            ]
+        )
+
+        agent = await manager.create_agent(task="mixed batch")
+        await manager.run_agent(agent.id)
+        current = await _wait_terminal(manager, agent.id)
+
+        assert current.status == SubagentStatus.COMPLETED
+        ids = [cid for cid, _ in seen_pairs]
+        assert ids == ["deny-1", "allow-1"], seen_pairs
+        assert "权限拒绝" in seen_pairs[0][1]

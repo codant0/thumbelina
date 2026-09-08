@@ -707,9 +707,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     app.state.agent = agent
 
+    # 权限审批桥(spec §5.4):WS 通路的 interrupt 请求登记于此,任意连接的
+    # {"permission_response": ...} 按 request_id 结算;超时(默认 600s)按全拒。
+    from thumbelina.api.permission_broker import PermissionBroker
+
+    app.state.permission_broker = PermissionBroker(
+        timeout_seconds=float(getattr(config.tools, "approval_timeout_seconds", 600) or 600)
+    )
+
     # 子 agent 只读工具集:仅感知类(读/搜/取/记忆读),避免嵌套派发
     # (collaboration)、写/执行副作用与通信通道;空集时 manager 自动退回
     # 无工具单轮模式。工具在会话 ContextVar 继承下与主 agent 同工作区。
+    #
+    # 权限(spec §9 subagent):子 agent 无审批者,confirm/deny 一律拒绝 ——
+    # 白名单在此扩类(加入写/执行类工具)时,必须确认 _run_tool_loop 里的
+    # evaluate_tool_call 闸门覆盖新工具名,否则会绕过权限矩阵。
     if subagent_manager is not None:
         from thumbelina.tools.base import ToolCategory
 

@@ -273,6 +273,10 @@ async def _run_chat_session(config: AppConfig, provider: str, model: str | None)
     )
 
     # 子 agent 只读工具集(仅感知类),与 Web 端装配保持一致。
+    #
+    # 权限(spec §9 subagent):子 agent 无审批者,confirm/deny 一律拒绝 ——
+    # 白名单在此扩类(加入写/执行类工具)时,必须确认 _run_tool_loop 里的
+    # evaluate_tool_call 闸门覆盖新工具名,否则会绕过权限矩阵。
     if subagent_manager is not None:
         from thumbelina.tools.base import ToolCategory
 

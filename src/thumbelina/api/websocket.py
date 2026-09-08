@@ -18,6 +18,7 @@ from thumbelina.api.routes.chat import (
     apply_conversation_runtime,
     resolve_run_window,
 )
+from thumbelina.api.permission_broker import PermissionBroker
 from thumbelina.api.schemas import WebSocketMessage
 from thumbelina.concurrency import per_conversation_lock
 from thumbelina.subagents.base import SubagentEvent
@@ -246,6 +247,29 @@ async def _pump_turn_frames(
         return
 
 
+def _make_waiter(
+    broker: PermissionBroker | None, cid: str | None
+) -> Callable[[str, dict[str, Any]], Any]:
+    """构造 ``agent.stream`` 的 ``approval_waiter``（spec §5.4）。
+
+    注册请求到 broker（payload 已由 Task 10 写回 ``request_id``，``register``
+    直接取用），随后阻塞在 ``broker.wait`` 直到某个连接经
+    ``{"permission_response": ...}`` 结算或超时（超时按全拒）。
+    """
+
+    async def _waiter(request_id: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        if broker is None:
+            # 防御：无 broker 的 WS 场景（未装配）按全拒结算，不挂死回合。
+            return [
+                {"call_id": c.get("call_id", ""), "approved": False}
+                for c in payload.get("calls", [])
+            ]
+        broker.register(cid, payload)
+        return await broker.wait(payload["request_id"])
+
+    return _waiter
+
+
 async def _persist_partial_response(
     agent: ThumbelinaAgent,
     cid: str | None,
@@ -393,16 +417,36 @@ async def _run_generation(
             streaming = websocket.app.state.config.llm.streaming_enabled
             full_response = ""
             full_reasoning = ""
+            # 审批桥（spec §5.4）：waiter 把 interrupt 请求登记到 broker 并
+            # 阻塞等 WS 上行决策；permission_request 帧走全连接广播，多标签页
+            # 都能看到同一张审批卡。
+            broker: PermissionBroker | None = getattr(
+                websocket.app.state, "permission_broker", None
+            )
+            approval_waiter = _make_waiter(broker, cid)
             if streaming:
                 try:
                     async for event in agent.stream(
-                        message, context_window_tokens=window_tokens, attachments=attachments
+                        message,
+                        context_window_tokens=window_tokens,
+                        attachments=attachments,
+                        approval_waiter=approval_waiter,
                     ):
                         etype = event["type"]
                         if etype in ("tool_start", "tool_end"):
                             frame = _tool_event_frame(event)
                             frame["conversation_id"] = cid
                             await _emit(frame)
+                        elif etype == "permission_request":
+                            await broadcast_chat_message(
+                                {
+                                    "permission_request": {
+                                        "request_id": event["request_id"],
+                                        "calls": event["calls"],
+                                    },
+                                    "conversation_id": cid,
+                                }
+                            )
                         elif etype == "reasoning":
                             full_reasoning += event["text"]
                             await _emit(
@@ -439,13 +483,26 @@ async def _run_generation(
                 full_response = ""
                 try:
                     async for event in agent.stream(
-                        message, context_window_tokens=window_tokens, attachments=attachments
+                        message,
+                        context_window_tokens=window_tokens,
+                        attachments=attachments,
+                        approval_waiter=approval_waiter,
                     ):
                         etype = event["type"]
                         if etype in ("tool_start", "tool_end"):
                             frame = _tool_event_frame(event)
                             frame["conversation_id"] = cid
                             await _emit(frame)
+                        elif etype == "permission_request":
+                            await broadcast_chat_message(
+                                {
+                                    "permission_request": {
+                                        "request_id": event["request_id"],
+                                        "calls": event["calls"],
+                                    },
+                                    "conversation_id": cid,
+                                }
+                            )
                         elif etype == "content":
                             full_response += event["text"]
                 except asyncio.CancelledError:
@@ -634,6 +691,48 @@ async def websocket_chat(websocket: WebSocket) -> None:
                 await websocket.send_json({"pong": True})
                 continue
 
+            # 权限审批响应(spec §5.4)。必须在 switch_conversation 与普通
+            # 消息路径的 ``_wait_task_cleared`` 阻塞点之前特判 —— 主循环是
+            # broker 唯一的唤醒位置,若排在阻塞点之后,回合等审批、审批等
+            # 主循环,双向死锁。任何连接的响应都被接受(按 request_id 结算)。
+            broker: PermissionBroker | None = getattr(
+                websocket.app.state, "permission_broker", None
+            )
+            if isinstance(data, dict) and "permission_response" in data:
+                body = data["permission_response"] or {}
+                ok = bool(broker) and broker.resolve(
+                    str(body.get("request_id", "")), list(body.get("decisions") or [])
+                )
+                if not ok:
+                    # code 分流:前端不得把它当作"本轮失败"收尾(spec §5.4)。
+                    await websocket.send_json(
+                        {
+                            "error": "Unknown or expired permission request",
+                            "code": "permission_unknown_request",
+                            "conversation_id": data.get("conversation_id"),
+                        }
+                    )
+                continue
+
+            # pending 审批快照查询:重连/切页后重建审批卡。
+            if isinstance(data, dict) and "get_pending_approval" in data:
+                cid_q = data["get_pending_approval"]
+                pending_snapshot = broker.snapshot(cid_q) if broker else None
+                await websocket.send_json(
+                    {
+                        "pending_approval": (
+                            {
+                                "request_id": pending_snapshot["request_id"],
+                                "calls": pending_snapshot["calls"],
+                            }
+                            if pending_snapshot
+                            else None
+                        ),
+                        "conversation_id": cid_q,
+                    }
+                )
+                continue
+
             # Handle conversation switch (no message payload)
             if "switch_conversation" in data:
                 new_cid = data["switch_conversation"]
@@ -656,10 +755,14 @@ async def websocket_chat(websocket: WebSocket) -> None:
                     active_stream.subscribe(websocket)
                     pump = _spawn_turn_pump(websocket, active_stream.queues[websocket])
                     subscription = (active_stream, pump)
+                switch_pending = broker.snapshot(new_cid) if broker else None
                 await websocket.send_json(
                     {
                         "conversation_switched": True,
                         "conversation_id": new_cid,
+                        # 切入的会话若有在途审批,ack 直接带上快照:新连接
+                        # 无需额外往返即可重建审批卡(spec §5.4)。
+                        "pending_approval": switch_pending,
                     }
                 )
                 continue
@@ -687,6 +790,38 @@ async def websocket_chat(websocket: WebSocket) -> None:
                 if existing is None:
                     await websocket.send_json({"error": f"Conversation not found: {cid}"})
                     continue
+
+            # 在途回合正等审批时不得在此阻塞等它结束(spec §5.4):主循环是
+            # broker 唯一唤醒点,阻塞即死锁。明确回 busy 让用户先处理审批卡。
+            busy_task = _generation_tasks.get(cid) or last_started_task
+            if (
+                broker is not None
+                and busy_task is not None
+                and not busy_task.done()
+                and broker.pending_for(cid)
+            ):
+                await websocket.send_json(
+                    {
+                        "error": "等待权限审批",
+                        "code": "busy_pending_approval",
+                        "conversation_id": cid,
+                    }
+                )
+                continue
+
+            # 等待权限审批(spec §5.4 busy 守卫):避免主循环在
+            # ``_wait_task_cleared`` 上无限阻塞而心跳判死,直接回 error 帧。
+            # 前端应把该会话切到"审批等待中"等效流式态。
+            pending_for_cid = broker.pending_for(cid) if broker else None
+            if pending_for_cid:
+                await websocket.send_json(
+                    {
+                        "error": "等待权限审批",
+                        "code": "busy_pending_approval",
+                        "conversation_id": cid,
+                    }
+                )
+                continue
 
             # 同会话已有在途回合(可能来自刷新前的旧连接)先等它结束,保持
             # 会话串行;同连接上一回合(跨会话)按既有语义串行。生成任务
