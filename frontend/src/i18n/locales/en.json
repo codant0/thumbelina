@@ -608,7 +608,91 @@
     "durationMs": "{ms} ms",
     "truncatedHint": "Full content in Trajectory page",
     "detail": "Tool call details",
-    "button": "Tool calls"
+    "button": "Tool calls",
+    "verdict": {
+      "allowed": "Allowed",
+      "autoAllowed": "Auto-allowed",
+      "confirmed": "User-confirmed",
+      "denied": "Denied"
+    }
+  },
+  "permission": {
+    "selector": {
+      "label": "Permission",
+      "title": "Conversation permission mode",
+      "hiddenModeHint": "Current mode is hidden for this conversation type — switching will reveal it"
+    },
+    "mode": {
+      "readOnly": "Read-only",
+      "readOnlyDesc": "No local side effects. Only reading tools are exposed.",
+      "workspaceWrite": "Workspace write",
+      "workspaceWriteDesc": "Local writes limited to the active workspace.",
+      "globalWrite": "Global write",
+      "globalWriteDesc": "Writes allowed anywhere; protected paths still need approval.",
+      "fullAccess": "Full access",
+      "fullAccessDesc": "Writes allowed everywhere; only dangerous commands need approval.",
+      "auto": "Auto (no confirmation)",
+      "autoDesc": "Like full access but skips the approval step for unattended runs."
+    },
+    "card": {
+      "title": "Dangerous operations need your approval",
+      "callsCount": "{count} pending operation(s)",
+      "riskBadge": "Dangerous",
+      "ruleLabel": "Rule",
+      "commandPreview": "Normalized command",
+      "approveAll": "Approve all",
+      "denyAll": "Deny all",
+      "approveOne": "Approve",
+      "waitingHint": "Waiting for your decision…",
+      "resolvedApproved": "Approved — continuing",
+      "resolvedDenied": "Denied — operation cancelled",
+      "expiredHint": "Approval request expired and was denied"
+    },
+    "badge": {
+      "title": {
+        "readOnly": "Read-only — no local side effects",
+        "workspaceWrite": "Workspace write — limited to workspace",
+        "globalWrite": "Global write — anywhere on disk",
+        "fullAccess": "Full access — protected paths also writable",
+        "auto": "Auto — unattended, no approval"
+      }
+    },
+    "rule": {
+      "dangerous_rm_root": "Recursive delete targeting the filesystem root",
+      "dangerous_mkfs": "Format a block device with mkfs",
+      "dangerous_dd_block": "Write to a raw block device via dd",
+      "dangerous_fork_bomb": "Classic shell fork bomb",
+      "dangerous_shutdown": "Power off or reboot the host",
+      "dangerous_pipe_remote": "Pipe remote content directly into a shell",
+      "dangerous_redirect_block": "Redirect output into a block device",
+      "dangerous_chmod_root": "chmod 777 on the filesystem root",
+      "dangerous_rd_recursive": "Recursive delete of an absolute Windows path",
+      "dangerous_ri_recursive": "PowerShell Remove-Item -Recurse on a Windows root",
+      "dangerous_format": "Format a Windows drive",
+      "dangerous_cipher_w": "Wipe a drive via cipher /w",
+      "dangerous_vssadmin": "Delete Windows shadow copies",
+      "dangerous_bcdedit": "Edit the Windows boot configuration",
+      "dangerous_ps_encoded": "Encoded PowerShell execution",
+      "confirm_git_force_push": "Force-push to a Git remote",
+      "confirm_npm_publish": "Publish an npm package",
+      "confirm_docker_remove": "Remove a Docker container or image",
+      "confirm_sudo": "Invoke sudo",
+      "confirm_system_path_write": "Write to a system path (POSIX)",
+      "confirm_system_dir_windows": "Write to a Windows system directory",
+      "confirm_drive_root_redirect": "Redirect output into a drive root",
+      "confirm_reg_add": "Add a Windows registry entry",
+      "confirm_schtasks": "Create a Windows scheduled task",
+      "confirm_windows_service": "Modify or stop a Windows service",
+      "confirm_absolute_write": "Write to an absolute path",
+      "rule_empty_command": "Empty shell command",
+      "rule_read_only": "Tool blocked by read-only mode",
+      "rule_workspace_escape": "Write escapes the active workspace",
+      "rule_no_workspace": "No workspace bound — write denied",
+      "rule_protected_path": "Write touches a protected internal path",
+      "rule_unknown_tool": "Unknown or unregistered tool — requires approval",
+      "rule_unattended_task": "Scheduled task that will run unattended",
+      "user_denied": "Denied by user"
+    }
   },
   "subagent": {
     "title": "Subagent",

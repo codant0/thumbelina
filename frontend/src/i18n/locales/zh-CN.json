@@ -608,7 +608,91 @@
     "durationMs": "{ms} ms",
     "truncatedHint": "完整内容见轨迹页",
     "detail": "工具调用详情",
-    "button": "工具调用"
+    "button": "工具调用",
+    "verdict": {
+      "allowed": "已放行",
+      "autoAllowed": "自动放行",
+      "confirmed": "用户已确认",
+      "denied": "已拒绝"
+    }
+  },
+  "permission": {
+    "selector": {
+      "label": "权限",
+      "title": "会话权限模式",
+      "hiddenModeHint": "当前模式在该会话类型下被隐藏，切换后将重新可见"
+    },
+    "mode": {
+      "readOnly": "只读",
+      "readOnlyDesc": "无本地副作用，只暴露只读类工具。",
+      "workspaceWrite": "工作区写入",
+      "workspaceWriteDesc": "本地写入限制在当前工作区内。",
+      "globalWrite": "全区写入",
+      "globalWriteDesc": "放开到整盘写入，但内部保护路径仍需确认。",
+      "fullAccess": "完全访问",
+      "fullAccessDesc": "任意路径可直接写入，仅危险命令需要确认。",
+      "auto": "自动（免确认）",
+      "autoDesc": "等同于完全访问，但跳过审批步骤以支持无人值守。"
+    },
+    "card": {
+      "title": "以下危险操作需要你授权",
+      "callsCount": "{count} 个待授权操作",
+      "riskBadge": "危险",
+      "ruleLabel": "触发规则",
+      "commandPreview": "归一化命令",
+      "approveAll": "全部批准",
+      "denyAll": "全部拒绝",
+      "approveOne": "批准此项",
+      "waitingHint": "等待你的决定…",
+      "resolvedApproved": "已批准，继续执行",
+      "resolvedDenied": "已拒绝，操作取消",
+      "expiredHint": "审批请求超时，已按拒绝处理"
+    },
+    "badge": {
+      "title": {
+        "readOnly": "只读 — 无本地副作用",
+        "workspaceWrite": "工作区写入 — 仅限工作区内",
+        "globalWrite": "全区写入 — 整盘可写",
+        "fullAccess": "完全访问 — 保护路径也可写",
+        "auto": "自动 — 无人值守，无需审批"
+      }
+    },
+    "rule": {
+      "dangerous_rm_root": "递归删除文件系统根目录",
+      "dangerous_mkfs": "使用 mkfs 格式化块设备",
+      "dangerous_dd_block": "通过 dd 写入裸块设备",
+      "dangerous_fork_bomb": "经典的 shell fork bomb",
+      "dangerous_shutdown": "关闭或重启主机",
+      "dangerous_pipe_remote": "将远端内容直接管道到 shell",
+      "dangerous_redirect_block": "将输出重定向到块设备",
+      "dangerous_chmod_root": "对文件系统根目录执行 chmod 777",
+      "dangerous_rd_recursive": "递归删除 Windows 上的绝对路径",
+      "dangerous_ri_recursive": "PowerShell Remove-Item -Recurse 作用于 Windows 根目录",
+      "dangerous_format": "格式化 Windows 驱动器",
+      "dangerous_cipher_w": "通过 cipher /w 擦除驱动器",
+      "dangerous_vssadmin": "删除 Windows 卷影副本",
+      "dangerous_bcdedit": "修改 Windows 启动配置",
+      "dangerous_ps_encoded": "经过编码的 PowerShell 执行",
+      "confirm_git_force_push": "强制推送到 Git 远程",
+      "confirm_npm_publish": "发布 npm 包",
+      "confirm_docker_remove": "删除 Docker 容器或镜像",
+      "confirm_sudo": "调用 sudo",
+      "confirm_system_path_write": "写入 POSIX 系统路径",
+      "confirm_system_dir_windows": "写入 Windows 系统目录",
+      "confirm_drive_root_redirect": "重定向输出到驱动器根目录",
+      "confirm_reg_add": "添加 Windows 注册表项",
+      "confirm_schtasks": "创建 Windows 计划任务",
+      "confirm_windows_service": "修改或停止 Windows 服务",
+      "confirm_absolute_write": "写入绝对路径",
+      "rule_empty_command": "空 shell 命令",
+      "rule_read_only": "只读模式下禁止该工具",
+      "rule_workspace_escape": "写入操作超出工作区边界",
+      "rule_no_workspace": "未绑定工作区，写入被拒绝",
+      "rule_protected_path": "写入涉及内部保护路径",
+      "rule_unknown_tool": "未登记的工具 — 需要审批",
+      "rule_unattended_task": "计划任务将以无人值守方式运行",
+      "user_denied": "用户拒绝"
+    }
   },
   "subagent": {
     "title": "子代理",

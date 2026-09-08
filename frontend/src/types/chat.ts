@@ -13,6 +13,10 @@ export interface ToolCall {
   durationMs?: number
   resultTruncated?: boolean
   argsTruncated?: boolean
+  /** 闸门裁决结果(spec §3.2);实时流与轨迹页共用 */
+  verdict?: ToolCallVerdict
+  /** 拒绝/标红原因规则键(spec §3.2 reason),i18n 映射文案 */
+  reason?: string
 }
 
 /**
@@ -29,7 +33,13 @@ export interface ToolEventPayload {
   is_error?: boolean
   result_preview?: string
   result_truncated?: boolean
+  /** 闸门裁决结果(spec §3.2/§5.2):allowed/auto_allowed 正常执行;confirmed 用户批准;
+   *  denied 用户拒绝或策略拒绝。 */
+  verdict?: ToolCallVerdict
 }
+
+/** 闸门裁决枚举(spec §3.2):与轨迹页/卡片/工具栏徽标共用 */
+export type ToolCallVerdict = 'allowed' | 'confirmed' | 'denied' | 'auto_allowed'
 
 export type ThinkingEffort = 'low' | 'medium' | 'high'
 
@@ -114,6 +124,8 @@ export interface Conversation {
   role?: string | null
   thinking_enabled?: boolean
   thinking_effort?: ThinkingEffort
+  /** 会话权限模式(spec §3.1 五档);默认 full_access */
+  permission?: PermissionMode
   created_at: string
   updated_at: string
   summary?: string | null
@@ -131,3 +143,60 @@ export interface ChatResponse {
   response: string
   conversation_id: string
 }
+
+/**
+ * 会话权限模式(spec §3.1 五档,严格递增)。
+ * 闸门与工具绑定过滤的输入;前端用此联合类型保证可见集与 PUT 路由一致。
+ */
+export type PermissionMode =
+  | 'read_only'
+  | 'workspace_write'
+  | 'global_write'
+  | 'full_access'
+  | 'auto'
+
+/** 闸门裁决输出:allow/confirm/deny 三态(spec §3.2) */
+export type ToolCallDecision = 'allow' | 'confirm' | 'deny'
+
+/** 闸门裁决附加的语义标签(供轨迹页/审批卡渲染) */
+export type PermissionRisk = 'normal' | 'dangerous'
+
+/**
+ * WS 下行 ``{permission_request: {request_id, calls}}`` 帧体(spec §5.4)。
+ * 后端 `interrupt(payload)` 时把 `calls` 原样下发;`request_id` 来自
+ * `Interrupt.id`(langgraph 生成,稳定)。
+ */
+export interface PermissionCallPayload {
+  call_id: string
+  name: string
+  args: Record<string, unknown>
+  risk: PermissionRisk
+  /** 稳定规则键(spec §3.2),如 `confirm.sudo`/`rule.protected_path`;
+   *  前端按 key 在 i18n `permission.rule.*` 命名空间下查文案。 */
+  reason: string
+  /** 仅 run_shell 存在:归一化命令(折续行/剥注释,spec §4.6) */
+  args_display?: string
+}
+
+export interface PermissionRequestPayload {
+  request_id: string
+  calls: PermissionCallPayload[]
+}
+
+/** WS 上行 ``{permission_response: {request_id, decisions}}`` 帧体 */
+export interface PermissionDecision {
+  call_id: string
+  approved: boolean
+}
+
+export interface PermissionResponseFrame {
+  request_id: string
+  decisions: PermissionDecision[]
+}
+
+/** WS 下行 `pending_approval` 快照帧体 */
+export interface PendingApprovalSnapshot {
+  request_id: string
+  calls: PermissionCallPayload[]
+}
+
