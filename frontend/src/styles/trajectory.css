@@ -81,6 +81,14 @@
 .tool-call-result--error:hover { background: var(--error-muted); box-shadow: inset 3px 0 0 var(--error), var(--shadow-sm); }
 .tool-call-missing { grid-column: 1 / -1; font-size: var(--fs-xs); color: var(--text-secondary); }
 
+/* 闸门裁决徽标(spec §3.2):denied/confirmed/auto_allowed 三态着色,
+   allowed 不展示徽标(默认路径,避免视觉噪音)。 */
+.verdict-badge { display: inline-flex; align-items: center; gap: var(--sp-1); margin-left: var(--sp-2); padding: 1px var(--sp-2); border-radius: var(--radius-full); font-size: var(--fs-xs); font-weight: 500; line-height: 1.4; vertical-align: middle; }
+.verdict-badge--denied { background: var(--error-muted); color: var(--error); }
+.verdict-badge--confirmed { background: var(--warning-muted); color: var(--warning); }
+.verdict-badge--auto { background: var(--accent-muted); color: var(--accent); }
+.verdict-badge--allowed { background: var(--bg-active); color: var(--text-secondary); }
+
 .event-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; color: var(--text-primary); font-size: var(--fs-sm); }
 .event-more { font-size: var(--fs-xs); color: var(--accent); white-space: nowrap; }
 

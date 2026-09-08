@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { TrajectoryPage } from './TrajectoryPage'
-import { collapseMiddle, groupToolEvents, usageSummary } from './trajectoryDisplay'
+import { collapseMiddle, groupToolEvents, reasonLabelKey, usageSummary, verdictInfo } from './trajectoryDisplay'
 import type { ToolCallGroup } from './trajectoryDisplay'
 import type { TrajectoryEvent } from '../../types/trajectory'
 import { LocaleProvider } from '../../i18n'
@@ -161,6 +161,175 @@ describe('usageSummary', () => {
 
   it('全空回退到无事件文案', () => {
     expect(usageSummary(stubT, {})).toBe('无事件记录')
+  })
+})
+
+describe('verdictInfo', () => {
+  it('denied → 红色徽标类 + denied 文案键', () => {
+    expect(verdictInfo({ verdict: 'denied', reason: 'rule.sudo' })).toEqual({
+      kind: 'denied',
+      labelKey: 'toolCalls.verdict.denied',
+      badgeClass: 'verdict-badge--denied',
+    })
+  })
+
+  it('confirmed → 黄色徽标 + 用户确认文案', () => {
+    expect(verdictInfo({ verdict: 'confirmed' })).toEqual({
+      kind: 'confirmed',
+      labelKey: 'toolCalls.verdict.confirmed',
+      badgeClass: 'verdict-badge--confirmed',
+    })
+  })
+
+  it('auto_allowed → 橙色徽标 + 自动放行文案', () => {
+    expect(verdictInfo({ verdict: 'auto_allowed', reason: 'confirm.sudo' })).toEqual({
+      kind: 'auto_allowed',
+      labelKey: 'toolCalls.verdict.autoAllowed',
+      badgeClass: 'verdict-badge--auto',
+    })
+  })
+
+  it('allowed → 中性徽标类(UI 隐藏)', () => {
+    const v = verdictInfo({ verdict: 'allowed' })
+    expect(v.kind).toBe('allowed')
+    expect(v.labelKey).toBe('toolCalls.verdict.allowed')
+  })
+
+  it('无 verdict 字段 → null kind(无徽标)', () => {
+    expect(verdictInfo({})).toEqual({ kind: null, labelKey: '', badgeClass: '' })
+  })
+
+  it('未知 verdict 字符串 → null kind(不展示)', () => {
+    expect(verdictInfo({ verdict: 'mystery' })).toEqual({ kind: null, labelKey: '', badgeClass: '' })
+  })
+})
+
+describe('reasonLabelKey', () => {
+  it('点号替换为下划线,与 PermissionRequestCard 同形', () => {
+    expect(reasonLabelKey('rule.sudo')).toBe('permission.rule.rule_sudo')
+    expect(reasonLabelKey('dangerous.rm_root')).toBe('permission.rule.dangerous_rm_root')
+    expect(reasonLabelKey('user_denied')).toBe('permission.rule.user_denied')
+  })
+
+  it('空串 / null / undefined → null', () => {
+    expect(reasonLabelKey('')).toBeNull()
+    expect(reasonLabelKey(null)).toBeNull()
+    expect(reasonLabelKey(undefined)).toBeNull()
+  })
+
+  it('非字符串类型 → null', () => {
+    // 故意打破类型守卫验证运行期健壮性
+    expect(reasonLabelKey(123 as unknown as string)).toBeNull()
+  })
+})
+
+/** 闸门裁决徽标(spec §3.2/§5.2)集成测试:在 Trajectory 卡片上确认渲染。 */
+describe('ToolCallCard verdict badge', () => {
+  function mockTrajectoryWithEvents(events: TrajectoryEvent[]) {
+    return vi.spyOn(globalThis, 'fetch').mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/trajectory/')) {
+        return Promise.resolve(new Response(JSON.stringify({
+          ...TRAJECTORY_DATA,
+          turns: [{
+            turn_id: 'tv',
+            started_at: '2026-08-22T12:00:00',
+            events,
+          }],
+        }), { status: 200 }))
+      }
+      return Promise.resolve(new Response(JSON.stringify(CONVERSATIONS), { status: 200 }))
+    })
+  }
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    localStorage.setItem('thumbelina-locale', 'zh-CN')
+    mockFetchOnce(CONVERSATIONS)
+  })
+
+  it('denied 徽标红/橙/警示色,展示本地化文案 + reason tooltip', async () => {
+    mockTrajectoryWithEvents([
+      { seq: 0, event_type: 'user', payload: { content: '删库' }, created_at: '2026-08-22T12:00:00' },
+      {
+        seq: 1,
+        event_type: 'tool_call',
+        payload: { tool: 'run_shell', args: { command: 'rm -rf /' }, call_id: 'a', verdict: 'denied', reason: 'dangerous.rm_root' },
+        created_at: '2026-08-22T12:00:01',
+      },
+    ])
+    renderWithI18n(<TrajectoryPage />)
+    await selectConversation()
+    const badge = await screen.findByTestId('verdict-badge')
+    expect(badge).toHaveAttribute('data-verdict', 'denied')
+    expect(badge.className).toContain('verdict-badge--denied')
+    expect(badge.textContent).toContain('已拒绝')
+  })
+
+  it('confirmed 徽标为警示色,展示"用户已确认"', async () => {
+    mockTrajectoryWithEvents([
+      { seq: 0, event_type: 'user', payload: { content: 'hi' }, created_at: '2026-08-22T12:00:00' },
+      {
+        seq: 1,
+        event_type: 'tool_call',
+        payload: { tool: 'run_shell', args: { command: 'sudo ls' }, call_id: 'b', verdict: 'confirmed', reason: 'rule.sudo' },
+        created_at: '2026-08-22T12:00:01',
+      },
+    ])
+    renderWithI18n(<TrajectoryPage />)
+    await selectConversation()
+    const badge = await screen.findByTestId('verdict-badge')
+    expect(badge).toHaveAttribute('data-verdict', 'confirmed')
+    expect(badge.className).toContain('verdict-badge--confirmed')
+    expect(badge.textContent).toContain('用户已确认')
+  })
+
+  it('auto_allowed 徽标为橙色,展示"自动放行"', async () => {
+    mockTrajectoryWithEvents([
+      { seq: 0, event_type: 'user', payload: { content: 'hi' }, created_at: '2026-08-22T12:00:00' },
+      {
+        seq: 1,
+        event_type: 'tool_call',
+        payload: { tool: 'run_shell', args: { command: 'sudo ls' }, call_id: 'c', verdict: 'auto_allowed', reason: 'confirm.sudo' },
+        created_at: '2026-08-22T12:00:01',
+      },
+    ])
+    renderWithI18n(<TrajectoryPage />)
+    await selectConversation()
+    const badge = await screen.findByTestId('verdict-badge')
+    expect(badge).toHaveAttribute('data-verdict', 'auto_allowed')
+    expect(badge.className).toContain('verdict-badge--auto')
+    expect(badge.textContent).toContain('自动放行')
+  })
+
+  it('allowed 不显示徽标(默认放行不制造视觉噪音)', async () => {
+    mockTrajectoryWithEvents([
+      { seq: 0, event_type: 'user', payload: { content: 'hi' }, created_at: '2026-08-22T12:00:00' },
+      {
+        seq: 1,
+        event_type: 'tool_call',
+        payload: { tool: 'search', args: { q: 'x' }, call_id: 'd', verdict: 'allowed' },
+        created_at: '2026-08-22T12:00:01',
+      },
+    ])
+    renderWithI18n(<TrajectoryPage />)
+    await selectConversation()
+    expect(screen.queryByTestId('verdict-badge')).not.toBeInTheDocument()
+  })
+
+  it('无 verdict 字段(旧 trajectory)不渲染徽标', async () => {
+    mockTrajectoryWithEvents([
+      { seq: 0, event_type: 'user', payload: { content: 'hi' }, created_at: '2026-08-22T12:00:00' },
+      {
+        seq: 1,
+        event_type: 'tool_call',
+        payload: { tool: 'search', args: { q: 'x' }, call_id: 'e' },
+        created_at: '2026-08-22T12:00:01',
+      },
+    ])
+    renderWithI18n(<TrajectoryPage />)
+    await selectConversation()
+    expect(screen.queryByTestId('verdict-badge')).not.toBeInTheDocument()
   })
 })
 
