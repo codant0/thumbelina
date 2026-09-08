@@ -72,6 +72,3 @@ thumbelina.db*
 cc_overview.html
 .zcode/**
 attachments/**
-
-# Isolated worktrees
-.worktrees/
