@@ -4,9 +4,9 @@ import { Header, type Page } from './components/Layout/Header'
 import { Sidebar, WECHAT_CONVERSATION_NAME } from './components/Layout/Sidebar'
 import { ChatWindow } from './components/Chat/ChatWindow'
 import { useWebSocket } from './hooks/useWebSocket'
-import { renameConversation, setConversationEndpoint, setConversationKnowledgeBase, setConversationRole, setConversationThinking, createConversation, fetchConversations as fetchConversationsApi } from './api/conversations'
+import { renameConversation, setConversationEndpoint, setConversationKnowledgeBase, setConversationRole, setConversationThinking, setConversationPermission, createConversation, fetchConversations as fetchConversationsApi } from './api/conversations'
 import { CoderPage } from './components/Coder/CoderPage'
-import type { Conversation, ThinkingEffort } from './types/chat'
+import type { Conversation, PermissionMode, ThinkingEffort } from './types/chat'
 
 // Everything except the chat/coder shells is deferred: each page becomes its
 // own chunk so the initial bundle only carries what the landing view needs.
@@ -63,6 +63,7 @@ interface ChatRouteProps {
   onSetKnowledgeBase: (id: string, knowledgeBaseId: string | null) => void
   onSetRole: (id: string, role: string | null) => void
   onSetThinking: (id: string, enabled: boolean, effort: ThinkingEffort) => void
+  onSetPermission: (id: string, mode: PermissionMode) => void
   onViewTrajectory: (id: string) => void
   sidebarOpen: boolean
   onCloseSidebar: () => void
@@ -71,7 +72,7 @@ interface ChatRouteProps {
 function ChatRoute({
   ws, conversations, onConversationCreated, onSelectConversation, onNewConversation,
   onDeleteConversation, onRenameConversation, onDefaultConversation,
-  onSetEndpoint, onSetKnowledgeBase, onSetRole, onSetThinking, onViewTrajectory,
+  onSetEndpoint, onSetKnowledgeBase, onSetRole, onSetThinking, onSetPermission, onViewTrajectory,
   sidebarOpen, onCloseSidebar,
 }: ChatRouteProps) {
   const { conversationId: paramId } = useParams()
@@ -94,12 +95,14 @@ function ChatRoute({
         ws={ws}
         conversationId={activeId}
         conversations={conversations}
+        conversationType="chat"
         onConversationCreated={onConversationCreated}
         onDefaultConversation={onDefaultConversation}
         onSetEndpoint={onSetEndpoint}
         onSetKnowledgeBase={onSetKnowledgeBase}
         onSetRole={onSetRole}
         onSetThinking={onSetThinking}
+        onSetPermission={onSetPermission}
         onViewTrajectory={onViewTrajectory}
       />
     </>
@@ -276,6 +279,13 @@ function AppInner() {
     } catch { /* ignore */ }
   }, [updateConversationInState])
 
+  const handleSetPermission = useCallback(async (id: string, mode: PermissionMode) => {
+    try {
+      const updated = await setConversationPermission(id, mode)
+      updateConversationInState(updated)
+    } catch { /* ignore */ }
+  }, [updateConversationInState])
+
   const handleViewTrajectory = useCallback((id: string) => {
     navigate(`/trajectory/${id}`)
   }, [navigate])
@@ -293,6 +303,7 @@ function AppInner() {
     onSetKnowledgeBase: handleSetKnowledgeBase,
     onSetRole: handleSetRole,
     onSetThinking: handleSetThinking,
+    onSetPermission: handleSetPermission,
     onViewTrajectory: handleViewTrajectory,
     sidebarOpen,
     onCloseSidebar: () => setSidebarOpen(false),
@@ -313,6 +324,7 @@ function AppInner() {
     onSetKnowledgeBase: handleSetKnowledgeBase,
     onSetRole: handleSetRole,
     onSetThinking: handleSetThinking,
+    onSetPermission: handleSetPermission,
     onViewTrajectory: handleViewTrajectory,
     sidebarOpen,
     onCloseSidebar: () => setSidebarOpen(false),

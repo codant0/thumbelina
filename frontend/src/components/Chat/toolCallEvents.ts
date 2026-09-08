@@ -10,36 +10,47 @@ import type { ToolCall, ToolEventPayload } from '../../types/chat'
  * 按 ``call_id`` 合并一条工具事件:
  * - start:已在列则忽略(重复帧防御);否则追加一张 running 卡。
  * - end:命中则写入结果/耗时/状态;孤立 end(未见过 start)防御性建卡。
+ *
+ * verdict 字段(spec §5.2): start 帧带 verdict=allowed/auto_allowed, end 帧
+ * 带 verdict=confirmed/denied/allowed/auto_allowed。start 分支必须显式拷贝
+ * verdict(否则 denied tool_event 会被记为 allowed 状态);end 分支通过
+ * spread 自动透传。ToolCall.reason 由轨迹/审批帧另行补足, 此处只搬
+ * verdict(规则键 reason 通常由后端 tool_event 后随的 trajectory/审批帧
+ * 提供)。
  */
 export function upsertToolCall(toolCalls: ToolCall[], ev: ToolEventPayload): ToolCall[] {
   const idx = toolCalls.findIndex((tc) => tc.call_id === ev.call_id)
   if (ev.phase === 'start') {
     if (idx >= 0) return toolCalls
-    return [
-      ...toolCalls,
-      {
-        call_id: ev.call_id,
-        name: ev.name ?? 'unknown',
-        args: ev.args ?? {},
-        argsTruncated: ev.args_truncated ?? false,
-        status: 'running' as const,
-      },
-    ]
+    const entry: ToolCall = {
+      call_id: ev.call_id,
+      name: ev.name ?? 'unknown',
+      args: ev.args ?? {},
+      argsTruncated: ev.args_truncated ?? false,
+      status: 'running' as const,
+    }
+    // start 帧带 verdict(闸门裁决):显式拷贝以反映 denied/auto_allowed 等
+    // 非默认状态。allowed(隐式默认)不携带, 不写以保持字段纯净。
+    if (ev.verdict && ev.verdict !== 'allowed') {
+      entry.verdict = ev.verdict
+    }
+    return [...toolCalls, entry]
   }
   const status = ev.is_error ? ('error' as const) : ('ok' as const)
   if (idx < 0) {
-    return [
-      ...toolCalls,
-      {
-        call_id: ev.call_id,
-        name: 'unknown',
-        args: {},
-        status,
-        result: ev.result_preview,
-        resultTruncated: ev.result_truncated,
-        durationMs: ev.duration_ms,
-      },
-    ]
+    const entry: ToolCall = {
+      call_id: ev.call_id,
+      name: 'unknown',
+      args: {},
+      status,
+      result: ev.result_preview,
+      resultTruncated: ev.result_truncated,
+      durationMs: ev.duration_ms,
+    }
+    // 孤立 end: 同样透传 verdict(spec §5.2 后端可能先发 end 后才被 start
+    // upsert 命中, 如拒绝 ToolMessage 立即合成的场景)。
+    if (ev.verdict) entry.verdict = ev.verdict
+    return [...toolCalls, entry]
   }
   const next = [...toolCalls]
   next[idx] = {
@@ -48,6 +59,9 @@ export function upsertToolCall(toolCalls: ToolCall[], ev: ToolEventPayload): Too
     result: ev.result_preview,
     resultTruncated: ev.result_truncated,
     durationMs: ev.duration_ms,
+    // end 帧的 verdict 覆盖 start 帧写入的值(spec §5.2: 闸门决定后端
+    // 可能在 end 帧带 confirmed/denied; 此处按字面覆盖而非合并)。
+    ...(ev.verdict ? { verdict: ev.verdict } : {}),
   }
   return next
 }

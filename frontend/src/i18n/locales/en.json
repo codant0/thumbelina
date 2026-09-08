@@ -36,7 +36,8 @@
     "hide": "Hide",
     "refresh": "Refresh",
     "error": "Something went wrong",
-    "confirm": "Confirm"
+    "confirm": "Confirm",
+    "expand": "Expand"
   },
   "settings": {
     "title": "Settings",
@@ -280,6 +281,7 @@
     "pendingHint": "Will be sent when the current reply finishes",
     "pendingHeldHint": "Previous reply ended abnormally — auto-send paused",
     "sendNow": "Send now",
+    "sendNowApprovalHint": "Sending now will deny the pending approval and continue",
     "pendingBlockTitle": "A queued message is pending — resolve it above first",
     "generating": "Generating…",
     "viewTrajectory": "View trajectory",

@@ -9,13 +9,15 @@ import { ConversationModelSelector } from './ConversationModelSelector'
 import { KnowledgeBaseSelector } from './KnowledgeBaseSelector'
 import { RoleSelector } from './RoleSelector'
 import { ThinkingSelector } from './ThinkingSelector'
+import { PermissionSelector } from './PermissionSelector'
+import { PermissionBadge } from '../StatusBar/PermissionBadge'
 import { ContextUsageItem } from '../StatusBar/ContextUsageItem'
 import { CacheHitRateItem } from '../StatusBar/CacheHitRateItem'
 import { useSettledMessages } from '../StatusBar/useSettledMessages'
 import { GitBranchSelector } from '../StatusBar/GitBranchSelector'
 import { Toast } from '../Settings/Toast'
 import { Mail, Eraser, Shrink, Route } from 'lucide-react'
-import type { Conversation, SendAttachmentInput, SubagentEventPayload, ThinkingEffort } from '../../types/chat'
+import type { Conversation, PermissionDecision, PermissionMode, SendAttachmentInput, SubagentEventPayload, ThinkingEffort } from '../../types/chat'
 import { useTranslation } from '../../i18n'
 import { clearConversationMessages, compressConversation } from '../../api/conversations'
 import { ConfirmDialog } from '../common/ConfirmDialog'
@@ -27,17 +29,20 @@ interface ChatWindowProps {
   ws: ChatSocket
   conversationId?: string
   conversations?: Conversation[]
+  /** 'chat' / 'coder': 控制 PermissionSelector 可见集(spec §3.1 chat 隐藏 workspace_write)。 */
+  conversationType?: 'chat' | 'coder'
   onConversationCreated?: () => void
   onDefaultConversation?: (id: string) => void
   onSetEndpoint?: (id: string, endpointId: string | null, model: string | null) => void
   onSetKnowledgeBase?: (id: string, knowledgeBaseId: string | null) => void
   onSetRole?: (id: string, role: string | null) => void
   onSetThinking?: (id: string, enabled: boolean, effort: ThinkingEffort) => void
+  onSetPermission?: (id: string, mode: PermissionMode) => void
   onViewTrajectory?: (id: string) => void
 }
 
-export function ChatWindow({ ws, conversationId, conversations, onConversationCreated, onDefaultConversation, onSetEndpoint, onSetKnowledgeBase, onSetRole, onSetThinking, onViewTrajectory }: ChatWindowProps) {
-  const { messages, isConnected, isReconnecting, isStreaming, streamingMode: wsStreamingMode, waitingForReply, awaitingMoreContent, newConversationId, clearNewConversation, pendingActive, pendingMessage, pendingAttachments, pendingHeld, queuePendingMessage, sendPendingNow, cancelPendingMessage, sendMessage, stopGeneration, clearMessages, switchConversation, loadHistory } = ws
+export function ChatWindow({ ws, conversationId, conversations, conversationType = 'chat', onConversationCreated, onDefaultConversation, onSetEndpoint, onSetKnowledgeBase, onSetRole, onSetThinking, onSetPermission, onViewTrajectory }: ChatWindowProps) {
+  const { messages, isConnected, isReconnecting, isStreaming, streamingMode: wsStreamingMode, waitingForReply, awaitingMoreContent, newConversationId, clearNewConversation, pendingActive, pendingMessage, pendingAttachments, pendingHeld, queuePendingMessage, sendPendingNow, cancelPendingMessage, sendMessage, stopGeneration, clearMessages, switchConversation, loadHistory, pendingApproval, sendPermissionResponse } = ws
   const [streamingMode, setStreamingMode] = useState(true)
   const [toggling, setToggling] = useState(false)
   const [clearing, setClearing] = useState(false)
@@ -204,11 +209,21 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
   }, [conversationId, compressing, t])
 
   const handleStop = useCallback(() => {
+    // 审批等待态(pendingApproval 非空): 取消 = 拒绝 + 终止轮次(spec §5.4)。
+    // stop 帧到达后端后, broker 按全拒结算, 后续回合不再 resume; 此时再走
+    // 一次 pendingApproval.calls 全拒决策覆盖, 防止 broker 仍处于等待态。
+    if (pendingApproval) {
+      const denials: PermissionDecision[] = pendingApproval.calls.map(c => ({
+        call_id: c.call_id,
+        approved: false,
+      }))
+      sendPermissionResponse(denials)
+    }
     // Fire-and-forget over WS; the backend cancels the reply and replies with
     // { stopped: true }, at which point the hook clears isStreaming and this
     // button disappears.
     stopGeneration()
-  }, [stopGeneration])
+  }, [stopGeneration, pendingApproval, sendPermissionResponse])
 
   const handleRegenerate = useCallback(() => {
     if (isStreaming || !isConnected) return
@@ -439,6 +454,8 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
           subagentsByMsgId={subagentsByMsgId}
           onViewSubagentDetail={openSubagentDetail}
           onViewToolCalls={openToolCalls}
+          permissionRequest={pendingApproval}
+          onPermissionDecide={sendPermissionResponse}
         />
       )}
       {/* 右侧详情面板 + 外部遮罩:点击遮罩或面板 X 即可关闭。
@@ -495,6 +512,16 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
         onQueueSend={handleQueueSend}
         onSendPendingNow={() => sendPendingNow(conversationId)}
         onCancelPending={() => cancelPendingMessage(conversationId)}
+        pendingApproval={Boolean(pendingApproval)}
+        onCancelApproval={() => {
+          if (pendingApproval) {
+            const denials: PermissionDecision[] = pendingApproval.calls.map(c => ({
+              call_id: c.call_id,
+              approved: false,
+            }))
+            sendPermissionResponse(denials)
+          }
+        }}
         toolbar={
           conversationId ? (
             <>
@@ -520,8 +547,18 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
                   onChange={(kbId) => onSetKnowledgeBase(conversationId, kbId)}
                 />
               )}
-              {/* 状态栏分组：上下文占用 + KV 缓存命中率（只读展示，不触发 LLM 调用；
-                  回合进行中冻结，收到新响应/切换会话才刷新，新建会话展示 0/空） */}
+              {onSetPermission && (
+                <PermissionSelector
+                  conversationId={conversationId}
+                  mode={activeConversation?.permission ?? 'full_access'}
+                  conversationType={conversationType}
+                  onChange={(mode) => onSetPermission(conversationId, mode)}
+                />
+              )}
+              {/* 状态栏分组：上下文占用 + KV 缓存命中率 + 当前会话权限徽标
+                  (PermissionBadge 常显, 不进 useStatusBarConfig 开关, spec §6.1);
+                  只读展示，不触发 LLM 调用；回合进行中冻结，收到新响应/切换会
+                  话才刷新，新建会话展示 0/空 */}
               <div className="statusbar-group">
                 <ContextUsageItem
                   settledMessages={settled.messages}
@@ -529,6 +566,7 @@ export function ChatWindow({ ws, conversationId, conversations, onConversationCr
                   endpointId={activeConversation?.endpoint_id ?? null}
                 />
                 <CacheHitRateItem conversationId={conversationId} refreshKey={settled.version} />
+                <PermissionBadge mode={activeConversation?.permission ?? 'full_access'} />
                 <GitBranchSelector ws={ws} workspace={activeConversation?.workspace ?? null} />
               </div>
             </>

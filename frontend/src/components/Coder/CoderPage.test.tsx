@@ -31,7 +31,10 @@ const ws = {
   switchConversation: vi.fn(),
   loadHistory: vi.fn(),
   subscribe: vi.fn(() => () => {}),
-} as ChatSocket
+  pendingApproval: null,
+  sendPermissionResponse: vi.fn(),
+  getPendingApproval: vi.fn(),
+} as unknown as ChatSocket
 
 const conv = (id: string, mode: 'chat' | 'coder'): Conversation => ({
   id,

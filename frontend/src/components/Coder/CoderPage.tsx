@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Code2, FolderOpen } from 'lucide-react'
 import type { ChatSocket } from '../../hooks/useWebSocket'
-import type { Conversation, ThinkingEffort } from '../../types/chat'
+import type { Conversation, PermissionMode, ThinkingEffort } from '../../types/chat'
 import { ChatWindow } from '../Chat/ChatWindow'
 import { CoderSidebar } from './CoderSidebar'
 import { WorkspacePicker } from './WorkspacePicker'
@@ -23,13 +23,14 @@ interface CoderPageProps {
   onSetKnowledgeBase?: (id: string, knowledgeBaseId: string | null) => void
   onSetRole?: (id: string, role: string | null) => void
   onSetThinking?: (id: string, enabled: boolean, effort: ThinkingEffort) => void
+  onSetPermission?: (id: string, mode: PermissionMode) => void
   onViewTrajectory?: (id: string) => void
   /** Mobile drawer state (session list overlays the viewport on small screens). */
   sidebarOpen?: boolean
   onCloseSidebar?: () => void
 }
 
-export function CoderPage({ ws, conversations, selectedId, onSelect, onCreated, onDelete, onRename, onRefresh, coderLoading, coderError, onSetEndpoint, onSetKnowledgeBase, onSetRole, onSetThinking, onViewTrajectory, sidebarOpen, onCloseSidebar }: CoderPageProps) {
+export function CoderPage({ ws, conversations, selectedId, onSelect, onCreated, onDelete, onRename, onRefresh, coderLoading, coderError, onSetEndpoint, onSetKnowledgeBase, onSetRole, onSetThinking, onSetPermission, onViewTrajectory, sidebarOpen, onCloseSidebar }: CoderPageProps) {
   const [pickerOpen, setPickerOpen] = useState(false)
   const { t } = useTranslation()
 
@@ -75,12 +76,14 @@ export function CoderPage({ ws, conversations, selectedId, onSelect, onCreated, 
           ws={ws}
           conversationId={activeCoderId}
           conversations={conversations}
+          conversationType="coder"
           onConversationCreated={onRefresh}
           onDefaultConversation={onSelect}
           onSetEndpoint={onSetEndpoint}
           onSetKnowledgeBase={onSetKnowledgeBase}
           onSetRole={onSetRole}
           onSetThinking={onSetThinking}
+          onSetPermission={onSetPermission}
           onViewTrajectory={onViewTrajectory}
         />
       </div>

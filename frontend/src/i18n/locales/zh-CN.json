@@ -36,7 +36,8 @@
     "hide": "隐藏",
     "refresh": "刷新",
     "error": "出错了",
-    "confirm": "确认"
+    "confirm": "确认",
+    "expand": "展开"
   },
   "settings": {
     "title": "设置",
@@ -280,6 +281,7 @@
     "pendingHint": "当前回复完成后自动发送",
     "pendingHeldHint": "上次回复未完成,已暂停自动发送",
     "sendNow": "立即执行",
+    "sendNowApprovalHint": "立即发送会取消当前未决审批并继续发送",
     "pendingBlockTitle": "已有待发送消息,请先处理上方悬浮条",
     "generating": "正在生成…",
     "viewTrajectory": "查看轨迹",
