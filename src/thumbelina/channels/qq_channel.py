@@ -216,12 +216,12 @@ class QQChannel(Channel):
         cid = getattr(self._agent, "current_conversation_id", None)
         if cid and self._agent.repository_manager is not None:
             try:
-                from thumbelina.api.routes.chat import apply_conversation_runtime
-
                 # QQ 通道没有 runtime shim,共享 self._agent 上的 app.state
                 # 没有引用;apply_conversation_runtime 只访问 app.state 上的
                 # endpoint_manager(可空)与 config(可空),空上下文满足需求。
                 from types import SimpleNamespace
+
+                from thumbelina.api.routes.chat import apply_conversation_runtime
 
                 await apply_conversation_runtime(
                     SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace())),

@@ -341,7 +341,7 @@ class TestSubagentToolLoop:
             responses=[
                 AIMessage(
                     content="",
-                    tool_calls=[{"name": "list_directory", "args": {}, "id": "c1", "type": "tool_call"}],
+                    tool_calls=[{"name": "list_directory", "args": {}, "id": "c1", "type": "tool_call"}],  # noqa: E501
                 ),
                 AIMessage(content="done"),
             ]

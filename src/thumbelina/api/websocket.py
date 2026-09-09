@@ -12,13 +12,13 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
 from thumbelina.agent.graph import ThumbelinaAgent
+from thumbelina.api.permission_broker import PermissionBroker
 from thumbelina.api.routes.attachments import resolve_attachments_root
 from thumbelina.api.routes.chat import (
     _apply_conversation_endpoint,
     apply_conversation_runtime,
     resolve_run_window,
 )
-from thumbelina.api.permission_broker import PermissionBroker
 from thumbelina.api.schemas import WebSocketMessage
 from thumbelina.concurrency import per_conversation_lock
 from thumbelina.subagents.base import SubagentEvent
