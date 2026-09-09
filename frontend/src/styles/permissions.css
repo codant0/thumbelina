@@ -1,0 +1,358 @@
+/* PermissionSelector / PermissionRequestCard 样式(spec §6.1,评审高-1)
+ *
+ * 模板:仿 composer.css:165-302 .role-float 结构;卡片用 --danger/--error 红色主题。
+ * 不进 useStatusBarConfig 开关(PermissionBadge 常显,见 StatusBar/PermissionBadge.tsx)。
+ */
+
+/* ----------------------------------------------------------------------
+ * PermissionSelector (下拉选择器)
+ * -------------------------------------------------------------------- */
+
+.permission-float {
+  position: relative;
+  display: inline-flex;
+}
+
+.permission-float__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-med);
+  font-family: inherit;
+  padding: 4px var(--sp-3);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  max-width: 240px;
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.permission-float__trigger:hover,
+.permission-float__trigger.is-active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* 五模式状态色(state 决定边的警示级别) */
+.permission-float__trigger[data-state="warning"] {
+  border-color: var(--warning, #f59e0b);
+  color: var(--warning, #f59e0b);
+}
+.permission-float__trigger[data-state="error"] {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.permission-float__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.permission-float__caret {
+  flex-shrink: 0;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.permission-float__caret.is-open {
+  transform: rotate(180deg);
+}
+
+.permission-float__panel {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: var(--z-dropdown);
+  min-width: 240px;
+  max-width: 320px;
+  max-height: 360px;
+  overflow-y: auto;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 5px;
+  box-shadow: var(--shadow-md);
+  animation: permission-float-in var(--dur-fast) var(--ease-out);
+}
+
+.permission-float__heading {
+  padding: var(--sp-2) var(--sp-3) 4px;
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+
+.permission-float__option {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  font-family: inherit;
+  text-align: left;
+  color: var(--text-primary);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.permission-float__option:hover {
+  background: var(--bg-hover);
+}
+.permission-float__option.is-selected {
+  color: var(--accent);
+}
+.permission-float__option--warning {
+  color: var(--warning, #f59e0b);
+}
+.permission-float__option--error {
+  color: var(--danger);
+}
+
+.permission-float__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.permission-float__desc {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  margin: 0;
+}
+.permission-float__hint {
+  padding: var(--sp-2) var(--sp-3);
+  margin: 4px 0 0;
+  font-size: var(--fs-xs);
+  color: var(--warning, #f59e0b);
+  border-top: 1px solid var(--border);
+}
+.permission-float__hidden-flag {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  margin-left: 4px;
+}
+
+@keyframes permission-float-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .permission-float__panel {
+    animation: none;
+  }
+  .permission-float__caret {
+    transition: none;
+  }
+}
+
+/* ----------------------------------------------------------------------
+ * PermissionRequestCard (审批卡,红/警示主题)
+ * -------------------------------------------------------------------- */
+
+.permission-request-card {
+  margin: var(--sp-3) 0;
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--danger-muted);
+  border: 1px solid var(--danger);
+  border-left-width: 4px;
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  animation: permission-card-in var(--dur-fast) var(--ease-out);
+}
+
+.permission-card__header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+.permission-card__icon {
+  display: flex;
+  align-items: center;
+  color: var(--danger);
+}
+.permission-card__title {
+  font-weight: var(--fw-bold);
+  font-size: var(--fs-md);
+  flex: 1;
+  min-width: 0;
+}
+.permission-card__count {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.permission-card__calls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.permission-call {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-2) var(--sp-3);
+}
+.permission-call__header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: 4px;
+}
+.permission-call__name {
+  font-weight: var(--fw-med);
+  font-family: var(--font-mono, monospace);
+}
+.permission-call__risk {
+  font-size: var(--fs-xs);
+  color: var(--danger);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.permission-call__rule {
+  display: flex;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+  margin-bottom: var(--sp-2);
+}
+.permission-call__rule-label {
+  color: var(--text-secondary);
+}
+.permission-call__rule-value {
+  color: var(--text-primary);
+  font-family: var(--font-mono, monospace);
+}
+
+.permission-call__command {
+  margin-top: var(--sp-2);
+}
+.permission-call__command-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+.permission-call__command-body {
+  background: var(--bg-surface, #1f1f1f);
+  color: var(--text-primary);
+  padding: var(--sp-2);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--fs-xs);
+  white-space: pre;
+  overflow-x: auto;
+  max-height: 200px;
+  overflow-y: auto;
+  margin: 0;
+}
+.permission-call__expand {
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: var(--fs-xs);
+  padding: 0;
+  text-decoration: underline;
+}
+
+.permission-card__actions {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+  flex-wrap: wrap;
+}
+.permission-approve-all,
+.permission-deny-all {
+  flex: 1;
+  min-width: 120px;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.permission-approve-all {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.permission-approve-all:hover:not(:disabled),
+.permission-deny-all:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.permission-approve-all:disabled,
+.permission-deny-all:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.permission-card__call-actions {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+.permission-approve-one {
+  background: transparent;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  padding: 2px var(--sp-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: var(--fs-xs);
+}
+.permission-approve-one:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.permission-card-hint {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  margin-top: var(--sp-2);
+}
+
+.permission-card__hint {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  margin-top: var(--sp-2);
+}
+
+.permission-request-count {
+  font-weight: var(--fw-med);
+}
+
+@keyframes permission-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .permission-request-card {
+    animation: none;
+  }
+}

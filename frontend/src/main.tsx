@@ -12,6 +12,7 @@ import './styles/trajectory.css'
 import './styles/coder.css'
 import './styles/memory.css'
 import './styles/blocks.css'
+import './styles/permissions.css'
 import App from './App.tsx'
 
 createRoot(document.getElementById('root')!).render(
