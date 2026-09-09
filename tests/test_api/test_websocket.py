@@ -127,7 +127,7 @@ def test_websocket_passes_context_window_to_stream(client):
     """流式路径应接收到解析出的上下文窗口。"""
     recorded = {}
 
-    async def _stream(message, context_window_tokens=None, attachments=None):
+    async def _stream(message, context_window_tokens=None, attachments=None, approval_waiter=None, **_):
         recorded["message"] = message
         recorded["window"] = context_window_tokens
         yield {"type": "content", "text": "ok"}
@@ -153,7 +153,7 @@ def test_websocket_passes_context_window_to_stream_when_not_streaming(client):
     client.app.state.config.llm.streaming_enabled = False
     recorded = {}
 
-    async def _stream(message, context_window_tokens=None, attachments=None):
+    async def _stream(message, context_window_tokens=None, attachments=None, approval_waiter=None, **_):
         recorded["message"] = message
         recorded["window"] = context_window_tokens
         yield {"type": "content", "text": "Agent response"}
@@ -210,7 +210,7 @@ async def test_websocket_serializes_same_conversation_turns():
     gate = asyncio.Event()
     first_started = asyncio.Event()
 
-    async def _stream(message, context_window_tokens=None, attachments=None):
+    async def _stream(message, context_window_tokens=None, attachments=None, approval_waiter=None, **_):
         order.append(("start", message))
         if message == "first":
             first_started.set()
@@ -291,7 +291,7 @@ def test_websocket_stop_cancels_inflight_generation(client):
     """流式进行中收到 stop 应取消生成并返回 stopped。"""
     import asyncio as _asyncio
 
-    async def _stream(message, context_window_tokens=None, attachments=None):
+    async def _stream(*args, **kwargs):
         yield {"type": "content", "text": "partial"}
         # 保持生成进行中，等待 stop 打断。
         await _asyncio.sleep(30)
@@ -317,7 +317,7 @@ def test_websocket_recovers_after_stop(client):
     """被 stop 打断后连接应能继续处理下一条普通消息。"""
     import asyncio as _asyncio
 
-    async def _stream(message, context_window_tokens=None, attachments=None):
+    async def _stream(message, context_window_tokens=None, attachments=None, approval_waiter=None, **_):
         if message == "first":
             yield {"type": "content", "text": "partial"}
             await _asyncio.sleep(30)
@@ -363,7 +363,7 @@ async def test_websocket_forwards_tool_events_streaming():
     """
     from thumbelina.api import websocket as ws_module
 
-    async def _stream(message, context_window_tokens=None, attachments=None):
+    async def _stream(*args, **kwargs):
         yield {
             "type": "tool_start",
             "call_id": "c1",
@@ -456,7 +456,7 @@ def test_websocket_non_streaming_consumes_stream_with_tool_events(client):
     单个 ``{"response": ...}`` 帧发送,done 帧的 streaming_mode 语义不变。"""
     recorded = {}
 
-    async def _stream(message, context_window_tokens=None, attachments=None):
+    async def _stream(message, context_window_tokens=None, attachments=None, approval_waiter=None, **_):
         recorded["message"] = message
         recorded["window"] = context_window_tokens
         yield {
@@ -511,7 +511,7 @@ def test_websocket_stop_persists_partial_response(client):
     import asyncio as _asyncio
     from unittest.mock import AsyncMock
 
-    async def _stream(message, context_window_tokens=None, attachments=None):
+    async def _stream(*args, **kwargs):
         yield {"type": "content", "text": "partial"}
         # 保持生成进行中，等待 stop 打断。
         await _asyncio.sleep(30)
@@ -538,7 +538,7 @@ def test_websocket_empty_partial_response_not_persisted(client):
     import asyncio as _asyncio
     from unittest.mock import AsyncMock
 
-    async def _stream(message, context_window_tokens=None, attachments=None):
+    async def _stream(*args, **kwargs):
         await _asyncio.sleep(30)
         yield {"type": "content", "text": "never arrives"}
 
@@ -559,7 +559,7 @@ def test_generation_survives_disconnect_and_replays_on_reattach(client):
     """刷新(断开)不取消在途生成:新连接 switch_conversation 重放缓存帧并续流。"""
     import asyncio as _asyncio
 
-    async def _stream(message, context_window_tokens=None, attachments=None):
+    async def _stream(*args, **kwargs):
         yield {"type": "content", "text": "part1"}
         await _asyncio.sleep(0.5)
         yield {"type": "content", "text": "part2"}
@@ -597,7 +597,7 @@ def test_stop_from_new_connection_cancels_detached_turn(client):
 
     from thumbelina.api import websocket as ws_module
 
-    async def _stream(message, context_window_tokens=None, attachments=None):
+    async def _stream(*args, **kwargs):
         yield {"type": "content", "text": "part1"}
         await _asyncio.sleep(30)
         yield {"type": "content", "text": "never"}
@@ -622,7 +622,7 @@ def test_reattach_replays_completed_turn_history_not_needed(client):
     """回合在断线期间正常完成:重连后无在途回合可附加,直接得到 ack。"""
     import asyncio as _asyncio
 
-    async def _stream(message, context_window_tokens=None, attachments=None):
+    async def _stream(*args, **kwargs):
         yield {"type": "content", "text": "quick"}
         await _asyncio.sleep(0.2)
 
