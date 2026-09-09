@@ -361,10 +361,15 @@ def _make_prompt_runner(app: FastAPI, repository: RepositoryManager) -> PromptRu
             # ContextVar 默认 fail-closed(只读+无审批者)兜底。
             if task.conversation_id:
                 try:
+                    from types import SimpleNamespace
+
                     from thumbelina.api.routes.chat import apply_conversation_runtime
 
+                    # ``app`` 是 FastAPI 实例,无 ``.app`` 属性 —— 用 SimpleNamespace
+                    # shim 提供 ``context.app.state`` 访问入口(与 QQ 通道同模式)。
+                    context = SimpleNamespace(app=app)
                     await apply_conversation_runtime(
-                        app, isolated, cid, unattended=True
+                        context, isolated, cid, unattended=True
                     )
                 except Exception:
                     logger.warning(
