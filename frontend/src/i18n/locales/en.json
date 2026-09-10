@@ -625,16 +625,18 @@
       "hiddenModeHint": "Current mode is hidden for this conversation type — switching will reveal it"
     },
     "mode": {
-      "readOnly": "Read-only",
-      "readOnlyDesc": "No local side effects. Only reading tools are exposed.",
-      "workspaceWrite": "Workspace write",
-      "workspaceWriteDesc": "Local writes limited to the active workspace.",
-      "globalWrite": "Global write",
-      "globalWriteDesc": "Writes allowed anywhere; protected paths still need approval.",
-      "fullAccess": "Full access",
-      "fullAccessDesc": "Writes allowed everywhere; only dangerous commands need approval.",
-      "auto": "Auto (no confirmation)",
-      "autoDesc": "Like full access but skips the approval step for unattended runs."
+      "readOnly": "Read",
+      "workspaceWrite": "Workspace",
+      "globalWrite": "Global",
+      "fullAccess": "Full",
+      "auto": "Auto",
+      "tooltip": {
+        "readOnly": "Read-only — no local side effects. Only reading tools are exposed.",
+        "workspaceWrite": "Workspace write — local writes limited to the active workspace. Dangerous commands still need approval.",
+        "globalWrite": "Global write — writes allowed anywhere on disk. Protected paths (database, memory, .env) still need approval.",
+        "fullAccess": "Full access — writes allowed everywhere, including protected paths. Only the hard-blocked dangerous commands (rm -rf /, mkfs, dd to block devices) are denied.",
+        "auto": "Auto — like full access but skips the approval step. Designed for unattended automation; you explicitly accept every dangerous operation up front."
+      }
     },
     "card": {
       "title": "Dangerous operations need your approval",

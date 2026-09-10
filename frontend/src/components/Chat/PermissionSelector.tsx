@@ -71,6 +71,8 @@ export function PermissionSelector({
   const showHiddenHint = modeIsHidden && open
   const labelKey = `permission.mode.${modeCamel(mode)}`
   const label = t(labelKey as `permission.mode.${string}`)
+  // 详细解释(spec §6.1): 短标签 + ARIA/hover title 显示完整说明
+  const tooltip = t(`permission.mode.tooltip.${modeCamel(mode)}`)
 
   // 选择新模式: 立即持久化(后端 400 非法值, 但前端已做可见集过滤, 实
   // 践中只可能是网络/服务故障), 同时通知父组件。失败时不关闭面板 ——
@@ -101,7 +103,7 @@ export function PermissionSelector({
         aria-haspopup="listbox"
         aria-expanded={open}
         disabled={disabled || saving}
-        title={t('permission.selector.title')}
+        title={tooltip}
         onClick={() => setOpen(o => !o)}
       >
         <ShieldCheck size={14} aria-hidden="true" />
@@ -129,11 +131,11 @@ export function PermissionSelector({
                 disabled={saving}
                 data-testid={`permission-option-${m}`}
                 className={`permission-float__option permission-float__option--${m}${selected ? ' is-selected' : ''}`}
+                title={t(`permission.mode.tooltip.${modeCamel(m)}`)}
                 onClick={() => { void handleSelect(m) }}
               >
                 <span className="permission-float__option-body">
                   <span className="permission-float__name">{t(`permission.mode.${modeCamel(m)}`)}</span>
-                  <span className="permission-float__desc">{t(`permission.mode.${modeCamel(m)}Desc`)}</span>
                 </span>
               </button>
             )

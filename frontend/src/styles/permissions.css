@@ -120,11 +120,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.permission-float__desc {
-  font-size: var(--fs-xs);
-  color: var(--text-secondary);
-  margin: 0;
-}
 .permission-float__hint {
   padding: var(--sp-2) var(--sp-3);
   margin: 4px 0 0;

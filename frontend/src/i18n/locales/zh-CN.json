@@ -626,15 +626,17 @@
     },
     "mode": {
       "readOnly": "只读",
-      "readOnlyDesc": "无本地副作用，只暴露只读类工具。",
-      "workspaceWrite": "工作区写入",
-      "workspaceWriteDesc": "本地写入限制在当前工作区内。",
-      "globalWrite": "全区写入",
-      "globalWriteDesc": "放开到整盘写入，但内部保护路径仍需确认。",
-      "fullAccess": "完全访问",
-      "fullAccessDesc": "任意路径可直接写入，仅危险命令需要确认。",
-      "auto": "自动（免确认）",
-      "autoDesc": "等同于完全访问，但跳过审批步骤以支持无人值守。"
+      "workspaceWrite": "工作区",
+      "globalWrite": "全局",
+      "fullAccess": "完全",
+      "auto": "自动",
+      "tooltip": {
+        "readOnly": "只读 — 无本地副作用,仅暴露读取类工具(读文件、搜索、读记忆等)。网络外呼(fetch_url/web_search)保留,可能数据外泄。",
+        "workspaceWrite": "工作区写入 — 本地写入仅限当前工作区。危险操作(sudo、git 强推、npm publish 等)需用户确认。",
+        "globalWrite": "全局写入 — 整盘可写。保护路径(数据库 thumbelina.db、记忆库 MEMORY/、.env、角色提示词、插件、TODO、附件)仍需用户确认。",
+        "fullAccess": "完全访问 — 整盘可写,含上述保护路径。仅硬底线的毁灭性命令被拒绝(rm -rf /、mkfs、dd 写块设备、fork 炸弹、关机等)。",
+        "auto": "自动 — 与完全访问相同,但跳过所有危险操作的审批步骤(每次自动放行 + WARNING 日志 + 轨迹标记)。面向无人值守的受信自动化,使用前请明确接受风险。"
+      }
     },
     "card": {
       "title": "以下危险操作需要你授权",

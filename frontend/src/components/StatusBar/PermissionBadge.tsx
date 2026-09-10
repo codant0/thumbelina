@@ -44,7 +44,8 @@ function modeIcon(mode: PermissionMode) {
 export function PermissionBadge({ mode }: PermissionBadgeProps) {
   const { t } = useTranslation()
   const label = t(`permission.mode.${modeCamel(mode)}`)
-  const title = t(`permission.badge.title.${modeCamel(mode)}`)
+  // 详细解释(spec §6.1): 短标签 + ARIA/hover title 显示完整说明
+  const title = t(`permission.mode.tooltip.${modeCamel(mode)}`)
   return (
     <StatusBarItemView
       icon={modeIcon(mode)}
