@@ -101,3 +101,48 @@ describe('PermissionSelector', () => {
     expect(setPermissionMock).toHaveBeenCalledWith('c1', 'global_write')
   })
 })
+
+
+describe('PermissionSelector state + icon 映射', () => {
+  it('触发器 class 含 state-warning (global_write) 与 state-error (full_access/auto)', () => {
+    const { rerender } = render(
+      <PermissionSelector conversationId="c1" mode="global_write" conversationType="chat" onChange={() => {}} />,
+    )
+    let trigger = screen.getByTestId('permission-selector-trigger')
+    expect(trigger.className).toContain('permission-float__trigger--warning')
+    expect(trigger.className).not.toContain('permission-float__trigger--error')
+
+    rerender(
+      <PermissionSelector conversationId="c1" mode="full_access" conversationType="chat" onChange={() => {}} />,
+    )
+    trigger = screen.getByTestId('permission-selector-trigger')
+    expect(trigger.className).toContain('permission-float__trigger--error')
+
+    rerender(
+      <PermissionSelector conversationId="c1" mode="auto" conversationType="chat" onChange={() => {}} />,
+    )
+    trigger = screen.getByTestId('permission-selector-trigger')
+    expect(trigger.className).toContain('permission-float__trigger--error')
+
+    rerender(
+      <PermissionSelector conversationId="c1" mode="read_only" conversationType="chat" onChange={() => {}} />,
+    )
+    trigger = screen.getByTestId('permission-selector-trigger')
+    expect(trigger.className).not.toContain('permission-float__trigger--warning')
+    expect(trigger.className).not.toContain('permission-float__trigger--error')
+  })
+
+  it('每个选项都有 SVG 图标(三种之一)', () => {
+    render(
+      <PermissionSelector conversationId="c1" mode="read_only" conversationType="coder" onChange={() => {}} />,
+    )
+    fireEvent.click(screen.getByTestId('permission-selector-trigger'))
+    const menu = screen.getByTestId('permission-selector-menu')
+    const optionButtons = menu?.querySelectorAll('[data-testid^="permission-option-"]') ?? []
+    expect(optionButtons.length).toBe(5)
+    for (const opt of Array.from(optionButtons)) {
+      // 每个选项按钮里至少一个 lucide svg
+      expect(opt.querySelector('svg')).not.toBeNull()
+    }
+  })
+})

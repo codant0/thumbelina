@@ -40,11 +40,11 @@
 }
 
 /* 五模式状态色(state 决定边的警示级别) */
-.permission-float__trigger[data-state="warning"] {
+.permission-float__trigger--warning {
   border-color: var(--warning, #f59e0b);
   color: var(--warning, #f59e0b);
 }
-.permission-float__trigger[data-state="error"] {
+.permission-float__trigger--error {
   border-color: var(--danger);
   color: var(--danger);
 }

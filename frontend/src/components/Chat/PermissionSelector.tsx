@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { ShieldCheck, ChevronUp, AlertTriangle } from 'lucide-react'
+import { ShieldCheck, ChevronUp, AlertTriangle, ShieldAlert } from 'lucide-react'
+import type { ReactElement } from 'react'
 import { useTranslation } from '../../i18n'
 import * as conversationsApi from '../../api/conversations'
 import type { PermissionMode } from '../../types/chat'
@@ -7,7 +8,24 @@ import {
   ALL_PERMISSION_MODES,
   CHAT_VISIBLE_PERMISSION_MODES,
   modeCamel,
+  permissionBadgeState,
+  permissionIconKind,
+  type PermissionIconKind,
 } from '../../types/chat'
+
+/** 模式图标 → lucide-react 元素(从 types/chat.ts 的字符串枚举到 JSX,
+ * 避免 types 模块引入 JSX 依赖) */
+function renderSelectorIcon(kind: PermissionIconKind, size: number): ReactElement {
+  switch (kind) {
+    case 'warning':
+      return <AlertTriangle size={size} aria-hidden="true" />
+    case 'shield-alert':
+      return <ShieldAlert size={size} aria-hidden="true" />
+    case 'shield':
+    default:
+      return <ShieldCheck size={size} aria-hidden="true" />
+  }
+}
 
 interface PermissionSelectorProps {
   conversationId: string | null
@@ -71,8 +89,11 @@ export function PermissionSelector({
   const showHiddenHint = modeIsHidden && open
   const labelKey = `permission.mode.${modeCamel(mode)}`
   const label = t(labelKey as `permission.mode.${string}`)
-  // 详细解释(spec §6.1): 短标签 + ARIA/hover title 显示完整说明
+  // 详细解释(spec §6.1): 全称 + ARIA/hover title 显示完整说明
   const tooltip = t(`permission.mode.tooltip.${modeCamel(mode)}`)
+  // 触发器与选项的图标与状态点(共享映射,见 types/chat.ts)
+  const triggerIconKind = permissionIconKind(mode)
+  const triggerState = permissionBadgeState(mode)
 
   // 选择新模式: 立即持久化(后端 400 非法值, 但前端已做可见集过滤, 实
   // 践中只可能是网络/服务故障), 同时通知父组件。失败时不关闭面板 ——
@@ -98,7 +119,7 @@ export function PermissionSelector({
     <div className="permission-float" ref={wrapRef} data-testid="permission-selector">
       <button
         type="button"
-        className={`permission-float__trigger permission-float__trigger--${mode}${modeIsHidden ? ' is-hidden' : ''}`}
+        className={`permission-float__trigger permission-float__trigger--${triggerState}${modeIsHidden ? ' is-hidden' : ''}`}
         data-testid="permission-selector-trigger"
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -106,7 +127,7 @@ export function PermissionSelector({
         title={tooltip}
         onClick={() => setOpen(o => !o)}
       >
-        <ShieldCheck size={14} aria-hidden="true" />
+        {renderSelectorIcon(triggerIconKind, 14)}
         <span className="permission-float__label">{label}</span>
         {modeIsHidden && <AlertTriangle size={11} className="permission-float__hidden-flag" aria-hidden="true" />}
         <ChevronUp size={13} className={`permission-float__caret${open ? ' is-open' : ''}`} />
@@ -122,6 +143,8 @@ export function PermissionSelector({
           <div className="permission-float__heading">{t('permission.selector.label')}</div>
           {visible.map(m => {
             const selected = !modeIsHidden && m === mode
+            const optionState = permissionBadgeState(m)
+            const optionIconKind = permissionIconKind(m)
             return (
               <button
                 key={m}
@@ -130,10 +153,11 @@ export function PermissionSelector({
                 aria-selected={selected}
                 disabled={saving}
                 data-testid={`permission-option-${m}`}
-                className={`permission-float__option permission-float__option--${m}${selected ? ' is-selected' : ''}`}
+                className={`permission-float__option permission-float__option--${optionState}${selected ? ' is-selected' : ''}`}
                 title={t(`permission.mode.tooltip.${modeCamel(m)}`)}
                 onClick={() => { void handleSelect(m) }}
               >
+                {renderSelectorIcon(optionIconKind, 14)}
                 <span className="permission-float__option-body">
                   <span className="permission-float__name">{t(`permission.mode.${modeCamel(m)}`)}</span>
                 </span>

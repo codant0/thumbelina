@@ -625,10 +625,10 @@
       "hiddenModeHint": "Current mode is hidden for this conversation type — switching will reveal it"
     },
     "mode": {
-      "readOnly": "Read",
-      "workspaceWrite": "Workspace",
-      "globalWrite": "Global",
-      "fullAccess": "Full",
+      "readOnly": "Read-only",
+      "workspaceWrite": "Workspace write",
+      "globalWrite": "Global write",
+      "fullAccess": "Full access",
       "auto": "Auto",
       "tooltip": {
         "readOnly": "Read-only — no local side effects. Only reading tools are exposed.",

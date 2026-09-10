@@ -626,9 +626,9 @@
     },
     "mode": {
       "readOnly": "只读",
-      "workspaceWrite": "工作区",
-      "globalWrite": "全局",
-      "fullAccess": "完全",
+      "workspaceWrite": "工作区写入",
+      "globalWrite": "全区写入",
+      "fullAccess": "完全访问",
       "auto": "自动",
       "tooltip": {
         "readOnly": "只读 — 无本地副作用,仅暴露读取类工具(读文件、搜索、读记忆等)。网络外呼(fetch_url/web_search)保留,可能数据外泄。",

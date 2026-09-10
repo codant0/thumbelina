@@ -227,3 +227,48 @@ export const CHAT_VISIBLE_PERMISSION_MODES: PermissionMode[] = [
   'full_access',
   'auto',
 ]
+
+
+/* ---------- 模式 → 状态点/图标 公共映射 ----------
+ * 状态点取值与 StatusBarItem 的 state 类型一致;PermissionSelector 与
+ * PermissionBadge 共用,避免重复实现。三色映射按用户反馈:
+ *   read_only       → ok(蓝)
+ *   workspace_write → ok(蓝)
+ *   global_write    → warning(黄) -- 整盘可写需警示
+ *   full_access     → error(红)   -- 助手内部数据/配置可改
+ *   auto            → error(红)   -- 无人值守免确认
+ */
+export type PermissionBadgeState = 'ok' | 'warning' | 'error'
+
+export function permissionBadgeState(mode: PermissionMode): PermissionBadgeState {
+  switch (mode) {
+    case 'read_only':
+    case 'workspace_write':
+      return 'ok'
+    case 'global_write':
+      return 'warning'
+    case 'full_access':
+    case 'auto':
+      return 'error'
+    default:
+      return 'ok'
+  }
+}
+
+/** 模式 → 语义图标名(不直接返回 React 元素以避免在 types 模块里
+ * 引入 JSX 依赖,组件层根据该名字 lucide-react 中取对应图标)。 */
+export type PermissionIconKind = 'shield' | 'warning' | 'shield-alert'
+
+export function permissionIconKind(mode: PermissionMode): PermissionIconKind {
+  switch (mode) {
+    case 'full_access':
+      return 'warning'
+    case 'auto':
+      return 'shield-alert'
+    case 'read_only':
+    case 'workspace_write':
+    case 'global_write':
+    default:
+      return 'shield'
+  }
+}
