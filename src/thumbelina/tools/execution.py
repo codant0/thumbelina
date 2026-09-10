@@ -104,23 +104,13 @@ def _run_blocking(command: str, cwd: str) -> str:
     return output + f"\n[exit code: {popen.returncode}]"
 
 
-def _rm_root_patterns() -> list[tuple[str, re.Pattern[str]]]:
-    """DEPRECATED 兼容 stub —— 见 ``thumbelina.tools.permissions``。
-
-    任务 2 上移至 ``thumbelina.tools.permissions``（spec §4.2 单一事实源），
-    reason 由中文短名改为稳定规则键（如 ``dangerous.rm_root``）。
-    旧测试若仍引用本函数，本 stub 抛 NotImplementedError 促迁移。
-    新代码请直接 ``from thumbelina.tools.permissions import DANGEROUS_PATTERNS``。
-    """
-    raise NotImplementedError(
-        "_rm_root_patterns 已上移至 thumbelina.tools.permissions；"
-        "请使用 DANGEROUS_PATTERNS"
-    )
-
-
-# DANGEROUS_PATTERNS / CONFIRM_PATTERNS 已于任务 2 上移至
-# thumbelina.tools.permissions（spec §4.2 单一事实源），由上方 import
-# re-export 给本模块的旧测试/外部调用方继续使用。
+# DANGEROUS_PATTERNS / CONFIRM_PATTERNS / PROTECTED_PATH_PATTERNS 已于任务 2/3
+# 上移至 thumbelina.tools.permissions（spec §4.2 单一事实源）。
+# 中-2 修复：删除 execution.py 旧副本（无 TODO/attachments/、无第二锚点），
+# 改由 ``from thumbelina.tools.permissions import DANGEROUS_PATTERNS,
+# CONFIRM_PATTERNS, PROTECTED_PATH_PATTERNS`` re-export 给旧测试/外部
+# 调用方继续使用。旧 _is_protected 副本不再保留——分类已迁至
+# permissions._is_protected（含双锚点）。
 __all__ = [
     "ExecutionTool",
     "RunShellTool",
@@ -128,62 +118,10 @@ __all__ = [
     "DANGEROUS_PATTERNS",
     "CONFIRM_PATTERNS",
     "PROTECTED_PATH_PATTERNS",
-    "_is_protected",
 ]
-
-PROTECTED_PATH_PATTERNS: list[str] = [
-    "thumbelina.db",
-    "MEMORY/",
-    "prompts/roles/",
-    "plugins/",
-    ".env",
-]
-
-
-def _is_protected(raw: str, workspace: str | None = None) -> str | None:
-    """命中保护路径则返回该模式,否则 None。
-
-    终审 I-2:目录类守卫(带尾斜杠,如 MEMORY/、plugins/)只锚定工作区
-    相对路径的开头分段——深层同名目录(src/memory/util.py、app/plugins/
-    views.py)是普通代码,不应误伤;文件名类守卫(thumbelina.db*、.env*)
-    保持任意层级分段匹配(数据/秘密文件放到哪都危险)。
-    绝对路径先以 workspace(无 workspace 时退到 CWD)前缀相对化再取分段;
-    前缀不匹配时保守地按原分段锚定。
-    """
-    posix = raw.replace("\\", "/").lower()
-    parts = [seg for seg in posix.split("/") if seg]
-    base = (workspace or os.getcwd()).replace("\\", "/").rstrip("/").lower()
-    base_parts = [seg for seg in base.split("/") if seg]
-    if base_parts and parts[: len(base_parts)] == base_parts:
-        parts = parts[len(base_parts) :]
-    for guard in PROTECTED_PATH_PATTERNS:
-        g = guard.lower()
-        if g.endswith("/"):
-            # 目录类:仅锚定开头分段
-            dirs = [seg for seg in g.rstrip("/").split("/") if seg]
-            if parts[: len(dirs)] == dirs:
-                return guard
-        else:
-            # 文件名类:任意层级
-            for seg in parts:
-                if seg == g or seg.startswith(g):
-                    return guard
-    return None
 
 
 _ERROR_HINTS = re.compile(r"\berror\b|denied|not found|Traceback|command not found", re.I)
-
-
-def _normalize_command(command: str) -> str:
-    """DEPRECATED 兼容 stub —— 见 permissions.normalize_shell_command。
-
-    任务 2 起上移为 ``thumbelina.tools.permissions.normalize_shell_command``
-    （spec §4.6 审批卡展示用，单一事实源）。本 stub 委托给新函数以保留
-    旧调用点的语义。
-    """
-    from thumbelina.tools.permissions import normalize_shell_command
-
-    return normalize_shell_command(command)
 
 
 class _RunShellArgs(BaseModel):

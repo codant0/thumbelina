@@ -15,10 +15,10 @@ from thumbelina.tools.base import (
 from thumbelina.tools.execution import (
     CONFIRM_PATTERNS,
     DANGEROUS_PATTERNS,
-    PROTECTED_PATH_PATTERNS,
     RunShellTool,
     WriteFileTool,
 )
+from thumbelina.tools.permissions import PROTECTED_PATH_PATTERNS
 
 
 def test_module_constants_exported():
@@ -36,7 +36,12 @@ def test_module_constants_exported():
     assert names and all(names)
     # 短名是人类可读文案:不得混入正则源码/元字符
     assert not any(ch in "".join(names) for ch in "\\[|"), names
+    # 中-2 修复: PROTECTED_PATH_PATTERNS 单一事实源在 thumbelina.tools.permissions,
+    # 旧 execution.py 副本(无 TODO/attachments、无第二锚点)删除后这里从
+    # permissions 模块直接 import,断言沿用确保清单不缩水。
     assert "thumbelina.db" in PROTECTED_PATH_PATTERNS
+    assert "TODO/" in PROTECTED_PATH_PATTERNS
+    assert "attachments/" in PROTECTED_PATH_PATTERNS
 
 
 # 任务 2 上移：reason 由中文短名改为稳定规则键（spec §3.2），
