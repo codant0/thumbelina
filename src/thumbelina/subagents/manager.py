@@ -297,8 +297,15 @@ class SubagentManager:
             if not tool_calls:
                 return last_text
             mode = get_permission_mode()
+            # 子 agent 共享主 agent 的工作区(spec §2)：当 manager/agent_ref
+            # 注入了 workspace 时传给 evaluate_tool_call,否则视为无工作区
+            # (保守起见取 False —— 即使 subagent 走主 agent 的 ContextVar,
+            # 没有显式 workspace 标记时按"等效只读兜底"处理)。
+            has_workspace = bool(getattr(self, "_workspace", None))
             decisions = [
-                evaluate_tool_call(mode, tc.get("name", ""), None, tc.get("args"))
+                evaluate_tool_call(
+                    mode, tc.get("name", ""), None, tc.get("args"), has_workspace=has_workspace
+                )
                 for tc in tool_calls
             ]
             runnable = [tc for tc, d in zip(tool_calls, decisions, strict=True)

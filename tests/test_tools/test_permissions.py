@@ -382,3 +382,75 @@ def test_is_tool_available_read_only_hides_mutating():
     ):
         assert is_tool_available(mode, "run_shell") is True
         assert is_tool_available(mode, "plugin_tool_x") is True
+
+
+def test_workspace_write_no_workspace_run_shell_denied():
+    """spec §3.3 第 12 行兜底: workspace_write + 无工作区 + run_shell → deny。
+
+    这是中-1 修复: chat 会话(无工作区)下用户选了 workspace_write,
+    但 evaluate_tool_call 之前直接委托 classify_shell_command 不看工作区,
+    常规命令会放行到 CWD(应用安装目录),绕过 chat 无工作区的承诺。
+    """
+    from thumbelina.tools.permissions import (
+        PermissionMode, evaluate_tool_call, parse_mode,
+    )
+
+    set_permission_mode(PermissionMode.WORKSPACE_WRITE)
+    # 有审批者入口(unattended=False): effective_mode 不降级,直接看 mode
+    # 但 has_workspace=False 时 evaluate_tool_call 应 deny run_shell
+    d = evaluate_tool_call(
+        PermissionMode.WORKSPACE_WRITE, "run_shell", None,
+        {"command": "echo x"}, has_workspace=False,
+    )
+    assert d.verdict == "deny"
+    assert d.reason == "rule.no_workspace"
+
+
+def test_workspace_write_no_workspace_write_file_denied():
+    """同上,但 write_file 路径(已有,但要确保新增参数兼容)。"""
+    from thumbelina.tools.permissions import PermissionMode, evaluate_tool_call
+
+    set_permission_mode(PermissionMode.WORKSPACE_WRITE)
+    d = evaluate_tool_call(
+        PermissionMode.WORKSPACE_WRITE, "write_file", None,
+        {"path": "x.txt", "content": "hi"}, has_workspace=False,
+    )
+    assert d.verdict == "deny"
+    assert d.reason == "rule.no_workspace"
+
+
+def test_workspace_write_with_workspace_allows():
+    """workspace_write + 有工作区 → 不应被无工作区兜底否决(常规命令 allow)。"""
+    from thumbelina.tools.permissions import PermissionMode, evaluate_tool_call
+
+    set_permission_mode(PermissionMode.WORKSPACE_WRITE)
+    d = evaluate_tool_call(
+        PermissionMode.WORKSPACE_WRITE, "run_shell", None,
+        {"command": "echo x"}, has_workspace=True,
+    )
+    assert d.verdict == "allow"
+
+
+def test_global_write_no_workspace_not_affected():
+    """global_write 起就允许任意路径(保护路径仍 confirm),无工作区不影响。"""
+    from thumbelina.tools.permissions import PermissionMode, evaluate_tool_call
+
+    set_permission_mode(PermissionMode.GLOBAL_WRITE)
+    d = evaluate_tool_call(
+        PermissionMode.GLOBAL_WRITE, "run_shell", None,
+        {"command": "echo x"}, has_workspace=False,
+    )
+    # 无工作区兜底仅作用于 WORKSPACE_WRITE(无边界时等效只读)
+    assert d.verdict == "allow"
+
+
+def test_has_workspace_default_true_backward_compatible():
+    """未传 has_workspace 时默认 True(向后兼容既有 evaluate_tool_call 调用)。"""
+    from thumbelina.tools.permissions import PermissionMode, evaluate_tool_call
+
+    set_permission_mode(PermissionMode.WORKSPACE_WRITE)
+    d = evaluate_tool_call(
+        PermissionMode.WORKSPACE_WRITE, "run_shell", None, {"command": "echo x"}
+    )
+    # 默认 True → 不触发无工作区 deny
+    assert d.verdict == "allow"

@@ -477,6 +477,7 @@ def evaluate_tool_call(
     name: str,
     category: str | None,      # 签名占位（spec §3.3 按 name 判定，category 备用）
     args: dict[str, Any] | None,
+    has_workspace: bool = True,
 ) -> PermissionDecision:
     """闸门单一事实源（spec §3.3）。
 
@@ -485,6 +486,7 @@ def evaluate_tool_call(
     ============ =========================================== =========
     READ_ONLY    name ∈ READ_ONLY_TOOLS                       allow
     READ_ONLY    name ∉ READ_ONLY_TOOLS                       deny rule.read_only
+    WORKSPACE_WRITE  无工作区 + run_shell/write_file         deny rule.no_workspace
     其它模式     name ∉ KNOWN_TOOLS                           confirm rule.unknown_tool
     其它模式     run_shell                                    委托 classify_shell_command
     其它模式     write_file                                   委托 evaluate_write_file
@@ -505,6 +507,13 @@ def evaluate_tool_call(
         if mode in (PermissionMode.GLOBAL_WRITE, PermissionMode.FULL_ACCESS, PermissionMode.AUTO):
             return confirm("rule.unknown_tool")
         return deny("rule.unknown_tool")
+    # workspace_write + 无工作区 = 等效只读(spec §3.3 第12 行兜底;
+    # 仅对有边界的工具生效)。无人值守入口的同类场景由 effective_mode 在
+    # evaluate_tool_call 之外先把 mode 降到 read_only,不会进到这里。
+    if mode is PermissionMode.WORKSPACE_WRITE and not has_workspace and name in (
+        "run_shell", "write_file"
+    ):
+        return deny("rule.no_workspace")
     if name == "run_shell":
         return classify_shell_command(
             str(args.get("command", "")), auto=mode is PermissionMode.AUTO

@@ -806,12 +806,16 @@ class ThumbelinaAgent:
         )
 
         mode = get_permission_mode()
+        # has_workspace 传 evaluate_tool_call 以兑现 spec §3.3 第 12 行兜底
+        # （workspace_write + 无工作区时 run_shell/write_file deny）。
+        has_workspace = bool(getattr(self, "workspace", None))
         decisions = [
             evaluate_tool_call(
                 mode,
                 c.get("name", ""),
                 self._tool_category(c.get("name", "")),
                 c.get("args"),
+                has_workspace=has_workspace,
             )
             for c in calls
         ]
