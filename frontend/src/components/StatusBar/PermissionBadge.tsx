@@ -3,6 +3,7 @@ import { useTranslation } from '../../i18n'
 import { StatusBarItemView } from './StatusBarItem'
 import type { StatusBarState } from './types'
 import type { PermissionMode } from '../../types/chat'
+import { modeCamel } from '../../types/chat'
 
 /** spec §6.1: 状态栏 PermissionBadge 必须常显, 不进 useStatusBarConfig 开关。 */
 interface PermissionBadgeProps {
@@ -31,12 +32,6 @@ function modeIcon(mode: PermissionMode) {
     return mode === 'auto' ? <ShieldAlert size={13} aria-hidden="true" /> : <AlertTriangle size={13} aria-hidden="true" />
   }
   return <ShieldCheck size={13} aria-hidden="true" />
-}
-
-/** snake_case `workspace_write` → camelCase `workspaceWrite` 以匹配 i18n key。 */
-function modeCamel(m: PermissionMode): string {
-  const parts = m.split('_')
-  return parts.map((p, i) => (i === 0 ? p : p.charAt(0).toUpperCase() + p.slice(1))).join('')
 }
 
 /**

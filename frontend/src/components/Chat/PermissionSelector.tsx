@@ -3,18 +3,11 @@ import { ShieldCheck, ChevronUp, AlertTriangle } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import * as conversationsApi from '../../api/conversations'
 import type { PermissionMode } from '../../types/chat'
-
-/** spec §3.1: 五档严格递增 */
-const ALL_MODES: PermissionMode[] = [
-  'read_only',
-  'workspace_write',
-  'global_write',
-  'full_access',
-  'auto',
-]
-
-/** chat 会话(spec §3.1)隐藏 workspace_write(无工作区语义);coder 五项全显 */
-const CHAT_VISIBLE_MODES: PermissionMode[] = ['read_only', 'global_write', 'full_access', 'auto']
+import {
+  ALL_PERMISSION_MODES,
+  CHAT_VISIBLE_PERMISSION_MODES,
+  modeCamel,
+} from '../../types/chat'
 
 interface PermissionSelectorProps {
   conversationId: string | null
@@ -72,7 +65,8 @@ export function PermissionSelector({
 
   if (!conversationId) return null
 
-  const visible = conversationType === 'chat' ? CHAT_VISIBLE_MODES : ALL_MODES
+  const visible =
+    conversationType === 'chat' ? CHAT_VISIBLE_PERMISSION_MODES : ALL_PERMISSION_MODES
   const modeIsHidden = !visible.includes(mode)
   const showHiddenHint = modeIsHidden && open
   const labelKey = `permission.mode.${modeCamel(mode)}`
@@ -158,8 +152,5 @@ export function PermissionSelector({
   )
 }
 
-/** snake_case `workspace_write` → camelCase `workspaceWrite` 以匹配 i18n key。 */
-function modeCamel(m: PermissionMode): string {
-  const parts = m.split('_')
-  return parts.map((p, i) => (i === 0 ? p : p.charAt(0).toUpperCase() + p.slice(1))).join('')
-}
+/** snake_case `workspace_write` → camelCase `workspaceWrite` 以匹配 i18n key。
+ *  已抽到 types/chat.ts:modeCamel,这里 re-import。 */

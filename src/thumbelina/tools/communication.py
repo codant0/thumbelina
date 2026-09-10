@@ -1,4 +1,4 @@
-"""用户沟通工具:向人主动发消息(spec §4.3)。
+"""用户沟通工具:向人主动发消息(spec §4.6)。
 
 从 ``agent/graph.py`` 的 ``_make_channel_tools`` 迁入,函数体逐字保持,
 对外 name/参数名/返回文案不变;统一继承
@@ -34,7 +34,7 @@ class CommunicationTool(ThumbelinaBaseTool):
 
     @staticmethod
     def _allowed_user_id(channel: Any) -> str | None:
-        """返回 channel 当前允许触达的用户 id（spec §4.3 收窄）。
+        """返回 channel 当前允许触达的用户 id（spec §4.6 收窄）。
 
         兼容两种属性暴露形式：
         - ``last_user_id`` property（wechat_channel 等统一封装）；
@@ -63,7 +63,7 @@ class CommunicationTool(ThumbelinaBaseTool):
             )
         requested = (user_id or "").strip()
         allowed = self._allowed_user_id(ch)
-        # 收窄：仅允许触达该 channel 最近一次会话的用户（spec §4.3）。
+        # 收窄：仅允许触达该 channel 最近一次会话的用户（spec §4.6）。
         # 空 user_id 走默认回退到 allowed；非空 user_id 必须与 allowed 一致。
         if requested:
             if not allowed or requested != allowed:

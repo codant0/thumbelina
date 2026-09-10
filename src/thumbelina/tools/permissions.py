@@ -450,7 +450,7 @@ READ_ONLY_TOOLS: frozenset[str] = frozenset({
     "fetch_url", "web_search",
     "search_memory", "read_memory",
     "list_subagents", "list_scheduled_tasks", "list_skill_compositions",
-    "notify_user_by_channel",   # spec §4.3：通知用户不改动状态，按只读语义放行
+    "notify_user_by_channel",   # spec §4.6：通知用户不改动状态，按只读语义放行
 })
 
 
