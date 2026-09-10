@@ -392,7 +392,8 @@ def test_workspace_write_no_workspace_run_shell_denied():
     常规命令会放行到 CWD(应用安装目录),绕过 chat 无工作区的承诺。
     """
     from thumbelina.tools.permissions import (
-        PermissionMode, evaluate_tool_call, parse_mode,
+        PermissionMode,
+        evaluate_tool_call,
     )
 
     set_permission_mode(PermissionMode.WORKSPACE_WRITE)

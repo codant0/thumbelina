@@ -622,11 +622,12 @@ class TestPromptRunnerWiring:
         from types import SimpleNamespace
 
         from thumbelina.api.routes.chat import (
-            _apply_conversation_permission,
             apply_conversation_runtime,
         )
         from thumbelina.tools.permissions import (
-            PermissionMode, get_permission_mode, set_permission_mode,
+            PermissionMode,
+            get_permission_mode,
+            set_permission_mode,
         )
 
         fake_state = SimpleNamespace(

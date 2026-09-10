@@ -117,7 +117,6 @@ __all__ = [
     "WriteFileTool",
     "DANGEROUS_PATTERNS",
     "CONFIRM_PATTERNS",
-    "PROTECTED_PATH_PATTERNS",
 ]
 
 
