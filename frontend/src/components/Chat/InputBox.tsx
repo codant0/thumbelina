@@ -261,8 +261,10 @@ export function InputBox({
     const trimmed = text.trim()
     // 空文本 + 无就绪附件 → 不发送;空文本 + 有就绪附件 → 允许(协议 §4.1)
     if (!trimmed && readyCount === 0) return
-    if (isStreaming) {
-      // 流式进行中:排队为待发消息(附件随文字一起进入待发队列)
+    if (isStreaming || pendingApproval) {
+      // 流式进行中或审批等待中(spec §5.4 第 1 条):排队为待发消息
+      // (附件随文字一起进入待发队列)。pendingApproval 显式挂钩避免
+      // 依赖 isStreaming 的隐式状态(中-3)。
       if (readyRefs.length > 0) onQueueSend?.(trimmed, readyRefs)
       else onQueueSend?.(trimmed)
       clearTextarea()
@@ -443,7 +445,7 @@ export function InputBox({
           disabled={disabled}
           rows={1}
         />
-        {isStreaming && (
+        {(isStreaming || pendingApproval) && (
           <button
             type="button"
             className="stop-send-btn"
