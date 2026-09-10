@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ShieldCheck, ChevronUp, AlertTriangle, ShieldAlert } from 'lucide-react'
+import { Eye, FolderLock, Globe, Unlock, Zap, ChevronUp, AlertTriangle } from 'lucide-react'
 import type { ReactElement } from 'react'
 import { useTranslation } from '../../i18n'
 import * as conversationsApi from '../../api/conversations'
@@ -13,17 +13,24 @@ import {
   type PermissionIconKind,
 } from '../../types/chat'
 
-/** 模式图标 → lucide-react 元素(从 types/chat.ts 的字符串枚举到 JSX,
- * 避免 types 模块引入 JSX 依赖) */
+/** PermissionIconKind 字符串 → lucide-react 元素。5 档 → 5 个不同图标:
+ *   eye (只读) / folder-lock (工作区写入) / globe (全区写入) /
+ *   unlock (完全访问) / zap (自动)。AlertTriangle 仅用于 hidden-flag 提示
+ *  (历史值不在可见集),不是模式图标。 */
 function renderSelectorIcon(kind: PermissionIconKind, size: number): ReactElement {
   switch (kind) {
-    case 'warning':
-      return <AlertTriangle size={size} aria-hidden="true" />
-    case 'shield-alert':
-      return <ShieldAlert size={size} aria-hidden="true" />
-    case 'shield':
+    case 'eye':
+      return <Eye size={size} aria-hidden="true" />
+    case 'folder-lock':
+      return <FolderLock size={size} aria-hidden="true" />
+    case 'globe':
+      return <Globe size={size} aria-hidden="true" />
+    case 'unlock':
+      return <Unlock size={size} aria-hidden="true" />
+    case 'zap':
+      return <Zap size={size} aria-hidden="true" />
     default:
-      return <ShieldCheck size={size} aria-hidden="true" />
+      return <Eye size={size} aria-hidden="true" />
   }
 }
 

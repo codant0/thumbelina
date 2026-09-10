@@ -256,19 +256,34 @@ export function permissionBadgeState(mode: PermissionMode): PermissionBadgeState
 }
 
 /** 模式 → 语义图标名(不直接返回 React 元素以避免在 types 模块里
- * 引入 JSX 依赖,组件层根据该名字 lucide-react 中取对应图标)。 */
-export type PermissionIconKind = 'shield' | 'warning' | 'shield-alert'
+ * 引入 JSX 依赖,组件层根据该名字 lucide-react 中取对应图标)。
+ * 5 档 → 5 个不同的 lucide 图标,避免视觉雷同:
+ *   read_only       → Eye(眼睛:只看)
+ *   workspace_write → FolderLock(文件夹+锁:范围限定)
+ *   global_write    → Globe(地球:整盘范围)
+ *   full_access     → Unlock(开锁:全开)
+ *   auto            → Zap(闪电:免审批自动放行)
+ */
+export type PermissionIconKind =
+  | 'eye'
+  | 'folder-lock'
+  | 'globe'
+  | 'unlock'
+  | 'zap'
 
 export function permissionIconKind(mode: PermissionMode): PermissionIconKind {
   switch (mode) {
-    case 'full_access':
-      return 'warning'
-    case 'auto':
-      return 'shield-alert'
     case 'read_only':
+      return 'eye'
     case 'workspace_write':
+      return 'folder-lock'
     case 'global_write':
+      return 'globe'
+    case 'full_access':
+      return 'unlock'
+    case 'auto':
+      return 'zap'
     default:
-      return 'shield'
+      return 'eye'
   }
 }

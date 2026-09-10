@@ -132,17 +132,25 @@ describe('PermissionSelector state + icon 映射', () => {
     expect(trigger.className).not.toContain('permission-float__trigger--error')
   })
 
-  it('每个选项都有 SVG 图标(三种之一)', () => {
+  it('每个选项都有 SVG 图标, 5 档互不重复', () => {
     render(
       <PermissionSelector conversationId="c1" mode="read_only" conversationType="coder" onChange={() => {}} />,
     )
     fireEvent.click(screen.getByTestId('permission-selector-trigger'))
     const menu = screen.getByTestId('permission-selector-menu')
-    const optionButtons = menu?.querySelectorAll('[data-testid^="permission-option-"]') ?? []
+    const optionButtons = Array.from(
+      menu?.querySelectorAll('[data-testid^="permission-option-"]') ?? [],
+    )
     expect(optionButtons.length).toBe(5)
-    for (const opt of Array.from(optionButtons)) {
-      // 每个选项按钮里至少一个 lucide svg
-      expect(opt.querySelector('svg')).not.toBeNull()
+    const seen = new Set<string>()
+    for (const opt of optionButtons) {
+      const svg = opt.querySelector('svg')
+      expect(svg).not.toBeNull()
+      // lucide 给每个 icon 一个唯一的 className(`lucide-<name>`)
+      const cls = svg?.getAttribute('class') ?? ''
+      seen.add(cls)
     }
+    // 5 档应至少有 5 个不同的 svg class
+    expect(seen.size).toBeGreaterThanOrEqual(5)
   })
 })

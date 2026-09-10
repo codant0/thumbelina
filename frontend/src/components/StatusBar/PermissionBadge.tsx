@@ -1,4 +1,4 @@
-import { ShieldCheck, AlertTriangle, ShieldAlert } from 'lucide-react'
+import { Eye, FolderLock, Globe, Unlock, Zap } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import { StatusBarItemView } from './StatusBarItem'
 import type { PermissionMode } from '../../types/chat'
@@ -6,6 +6,7 @@ import {
   modeCamel,
   permissionBadgeState,
   permissionIconKind,
+  type PermissionIconKind,
 } from '../../types/chat'
 
 /** spec §6.1: 状态栏 PermissionBadge 必须常显, 不进 useStatusBarConfig 开关。 */
@@ -13,17 +14,22 @@ interface PermissionBadgeProps {
   mode: PermissionMode
 }
 
-/** 模式 → 图标(spec §6.1 + 用户反馈: 全区写入标黄, 完全访问标红)。
- * 共享映射在 types/chat.ts:permissionIconKind 维护。 */
-function renderBadgeIcon(mode: PermissionMode) {
-  switch (permissionIconKind(mode)) {
-    case 'warning':
-      return <AlertTriangle size={13} aria-hidden="true" />
-    case 'shield-alert':
-      return <ShieldAlert size={13} aria-hidden="true" />
-    case 'shield':
+/** PermissionIconKind 字符串 → lucide-react 元素。5 档对应 5 个不同的
+ * 视觉图标,避免用户混淆(状态色只覆盖状态,图标覆盖语义)。 */
+function renderBadgeIcon(kind: PermissionIconKind) {
+  switch (kind) {
+    case 'eye':
+      return <Eye size={13} aria-hidden="true" />
+    case 'folder-lock':
+      return <FolderLock size={13} aria-hidden="true" />
+    case 'globe':
+      return <Globe size={13} aria-hidden="true" />
+    case 'unlock':
+      return <Unlock size={13} aria-hidden="true" />
+    case 'zap':
+      return <Zap size={13} aria-hidden="true" />
     default:
-      return <ShieldCheck size={13} aria-hidden="true" />
+      return <Eye size={13} aria-hidden="true" />
   }
 }
 
@@ -41,7 +47,7 @@ export function PermissionBadge({ mode }: PermissionBadgeProps) {
   const title = t(`permission.mode.tooltip.${modeCamel(mode)}`)
   return (
     <StatusBarItemView
-      icon={renderBadgeIcon(mode)}
+      icon={renderBadgeIcon(permissionIconKind(mode))}
       state={permissionBadgeState(mode)}
       label={label}
       title={title}
