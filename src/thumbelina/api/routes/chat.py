@@ -129,9 +129,7 @@ async def chat(
     # 应用会话的端点、角色、工作区与会话权限（HTTP / WebSocket / 通道共用）。
     # HTTP `/chat` 路由无人值守（无审批者 → confirm 一律 deny；spec §8）：
     # 显式 unattended=True 把意图写在调用点，默认 True（fail-closed）只是兜底。
-    await apply_conversation_runtime(
-        http_request, isolated_agent, conversation_id, unattended=True
-    )
+    await apply_conversation_runtime(http_request, isolated_agent, conversation_id, unattended=True)
 
     # 解析会话的上下文窗口（会话端点 → 全局活跃端点 →
     # llm.context_window），供压缩阶段使用。
@@ -306,9 +304,7 @@ async def _apply_conversation_permission(
         if conv:
             mode = parse_mode(conv.get("permission")) or PermissionMode.FULL_ACCESS
             has_ws = bool(conv.get("workspace"))
-    set_permission_mode(
-        effective_mode(mode, unattended=unattended, has_workspace=has_ws)
-    )
+    set_permission_mode(effective_mode(mode, unattended=unattended, has_workspace=has_ws))
     set_approval_context(not unattended)
 
 

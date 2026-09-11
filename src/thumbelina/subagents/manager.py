@@ -308,8 +308,9 @@ class SubagentManager:
                 )
                 for tc in tool_calls
             ]
-            runnable = [tc for tc, d in zip(tool_calls, decisions, strict=True)
-                        if d.verdict == "allow"]
+            runnable = [
+                tc for tc, d in zip(tool_calls, decisions, strict=True) if d.verdict == "allow"
+            ]
             if runnable:
                 gated = response.model_copy(update={"tool_calls": runnable})
                 executed = await tool_node(
@@ -317,9 +318,7 @@ class SubagentManager:
                     self._tools,
                     timeout=self.tool_timeout,
                 )
-                executed_by_id = {
-                    getattr(m, "tool_call_id", None): m for m in executed["messages"]
-                }
+                executed_by_id = {getattr(m, "tool_call_id", None): m for m in executed["messages"]}
             else:
                 executed_by_id = {}
             # 按原 tool_calls 顺序回填:执行结果取 tool_node 产出,被拒的

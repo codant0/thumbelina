@@ -8,6 +8,7 @@ The runtime wiring lives in :mod:`thumbelina.api.routes.chat` (HTTP / WebSocket
 / WeChat share this helper) — the agent layer's gate (Task 8) consumes the
 ContextVars this helper populates.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -113,9 +114,7 @@ async def test_unattended_with_workspace_caps_at_workspace_write():
     """无人值守 + 有工作区 → 全部模式上限为 workspace_write。"""
     from thumbelina.api.routes.chat import apply_conversation_runtime
 
-    context, agent = _make_runtime(
-        permission="global_write", workspace="C:/w/work"
-    )
+    context, agent = _make_runtime(permission="global_write", workspace="C:/w/work")
 
     await apply_conversation_runtime(context, agent, "c1", unattended=True)
 
@@ -158,9 +157,7 @@ async def test_attended_full_access_with_workspace_stays_full_access():
     """attended 入口不做上限降级：有工作区的 full_access 仍为 full_access。"""
     from thumbelina.api.routes.chat import apply_conversation_runtime
 
-    context, agent = _make_runtime(
-        permission="full_access", workspace="C:/w/work"
-    )
+    context, agent = _make_runtime(permission="full_access", workspace="C:/w/work")
 
     await apply_conversation_runtime(context, agent, "c1", unattended=False)
 

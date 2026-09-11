@@ -248,9 +248,7 @@ def _make_llm_with_tool_call_then_text(text_after: str = "done") -> MagicMock:
     side_effects: list[AIMessage] = [
         AIMessage(
             content="",
-            tool_calls=[
-                {"name": "run_shell", "args": {"command": "sudo ls"}, "id": "c1"}
-            ],
+            tool_calls=[{"name": "run_shell", "args": {"command": "sudo ls"}, "id": "c1"}],
         ),
         AIMessage(content=text_after),
     ]
@@ -267,9 +265,7 @@ def _make_llm_with_tool_call_then_text(text_after: str = "done") -> MagicMock:
         # 首轮：tool_call chunk；后续轮：纯文本 chunk（mock 简化）。
         yield AIMessage(
             content="",
-            tool_calls=[
-                {"name": "run_shell", "args": {"command": "sudo ls"}, "id": "c1"}
-            ],
+            tool_calls=[{"name": "run_shell", "args": {"command": "sudo ls"}, "id": "c1"}],
         )
 
     provider.chat_model.astream.side_effect = _aiter
@@ -334,8 +330,7 @@ async def test_stream_interrupt_resume_roundtrip(memory_agent_factory) -> None:
     async def waiter(request_id: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
         waiter_calls.append((request_id, payload))
         return [
-            {"call_id": c.get("call_id", ""), "approved": True}
-            for c in payload.get("calls", [])
+            {"call_id": c.get("call_id", ""), "approved": True} for c in payload.get("calls", [])
         ]
 
     async for ev in agent.stream("run sudo ls", approval_waiter=waiter):
@@ -408,8 +403,7 @@ async def test_run_with_approval_handler(memory_agent_factory) -> None:
     async def handler(payload: dict[str, Any]) -> list[dict[str, Any]]:
         handler_calls.append(payload)
         return [
-            {"call_id": c.get("call_id", ""), "approved": True}
-            for c in payload.get("calls", [])
+            {"call_id": c.get("call_id", ""), "approved": True} for c in payload.get("calls", [])
         ]
 
     response = await agent.run("run sudo ls", approval_handler=handler)

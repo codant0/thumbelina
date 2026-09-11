@@ -677,9 +677,7 @@ async def websocket_chat(websocket: WebSocket) -> None:
                     task.cancel()
                     await _wait_task_cleared(task)
                     if not requester_subscribed:
-                        await websocket.send_json(
-                            {"stopped": True, "conversation_id": stop_cid}
-                        )
+                        await websocket.send_json({"stopped": True, "conversation_id": stop_cid})
                 else:
                     await websocket.send_json({"stopped": True, "conversation_id": stop_cid})
                 continue

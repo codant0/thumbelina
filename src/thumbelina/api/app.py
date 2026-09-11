@@ -368,9 +368,7 @@ def _make_prompt_runner(app: FastAPI, repository: RepositoryManager) -> PromptRu
                     # ``app`` 是 FastAPI 实例,无 ``.app`` 属性 —— 用 SimpleNamespace
                     # shim 提供 ``context.app.state`` 访问入口(与 QQ 通道同模式)。
                     context = SimpleNamespace(app=app)
-                    await apply_conversation_runtime(
-                        context, isolated, cid, unattended=True
-                    )
+                    await apply_conversation_runtime(context, isolated, cid, unattended=True)
                 except Exception:
                     logger.warning(
                         "prompt task permission wiring failed; fail-closed",
@@ -731,11 +729,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from thumbelina.tools.base import ToolCategory
 
         subagent_manager.set_tools(
-            [
-                t
-                for t in agent.tools
-                if getattr(t, "category", None) == ToolCategory.PERCEPTION
-            ]
+            [t for t in agent.tools if getattr(t, "category", None) == ToolCategory.PERCEPTION]
         )
     # 暴露 memory_extractor 引用给热切换路径(§9.3);agent 自身的
     # memory_extractor 由 swap_provider 同步,此处仅作冗余入口。

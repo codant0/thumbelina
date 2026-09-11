@@ -351,9 +351,7 @@ class RepositoryManager:
             conversation_id, enabled, effort
         )
 
-    async def set_conversation_permission(
-        self, conversation_id: str, mode: str
-    ) -> bool:
+    async def set_conversation_permission(self, conversation_id: str, mode: str) -> bool:
         """Set the permission mode for a conversation.
 
         Parameters
@@ -371,9 +369,7 @@ class RepositoryManager:
         bool
             True if set successfully, False if conversation not found.
         """
-        return await self.conversation_repository.set_conversation_permission(
-            conversation_id, mode
-        )
+        return await self.conversation_repository.set_conversation_permission(conversation_id, mode)
 
     async def add_trajectory_events(
         self, conversation_id: str, events: list[dict[str, Any]]

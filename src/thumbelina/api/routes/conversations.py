@@ -140,8 +140,7 @@ class SetConversationPermissionRequest(BaseModel):
     mode: str = Field(
         ...,
         description=(
-            "Permission mode key: read_only / workspace_write / global_write / "
-            "full_access / auto"
+            "Permission mode key: read_only / workspace_write / global_write / full_access / auto"
         ),
     )
 
@@ -400,9 +399,7 @@ async def set_conversation_permission(
     rejected with 400 so the repository stores only canonical keys.
     """
     if parse_mode(body.mode) is None:
-        raise HTTPException(
-            status_code=400, detail=f"Invalid permission mode: {body.mode!r}"
-        )
+        raise HTTPException(status_code=400, detail=f"Invalid permission mode: {body.mode!r}")
     ok = await repository.set_conversation_permission(conversation_id, body.mode)
     if not ok:
         raise HTTPException(status_code=404, detail="Conversation not found")

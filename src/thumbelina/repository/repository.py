@@ -663,9 +663,7 @@ class ConversationRepository:
             session.commit()
             return True
 
-    async def set_conversation_permission(
-        self, conversation_id: str, mode: str
-    ) -> bool:
+    async def set_conversation_permission(self, conversation_id: str, mode: str) -> bool:
         """Set the permission mode for a conversation.
 
         Parameters

@@ -9,6 +9,7 @@
   - 任务 2：shell 分类器上移（含 Windows 规则组 + 写穿收紧），上移自
     tools/execution.py。
 """
+
 from __future__ import annotations
 
 import contextvars
@@ -228,9 +229,7 @@ _WRITE_CMD_RE = re.compile(
     re.I,
 )
 _WRITE_REDIRECT_RE = re.compile(r"\s>>?\s*\S")
-_ABSOLUTE_TARGET_RE = re.compile(
-    r"[A-Za-z]:\\[^\s]|\\\\[^\s]|>\s*/(?!dev/null)[A-Za-z]"
-)
+_ABSOLUTE_TARGET_RE = re.compile(r"[A-Za-z]:\\[^\s]|\\\\[^\s]|>\s*/(?!dev/null)[A-Za-z]")
 
 
 def _absolute_write(cmd: str) -> bool:
@@ -239,9 +238,7 @@ def _absolute_write(cmd: str) -> bool:
     return bool(_ABSOLUTE_TARGET_RE.search(cmd))
 
 
-def classify_shell_command(
-    command: str, *, auto: bool = False
-) -> PermissionDecision:
+def classify_shell_command(command: str, *, auto: bool = False) -> PermissionDecision:
     """对 shell 命令做两级裁决（spec §4.2-§4.4）：
 
     1. 空命令 → deny ``rule.empty_command``；
@@ -263,9 +260,7 @@ def classify_shell_command(
     # §4.4 设计意图以更具体的「写意图 + 绝对路径」为准（plan Task 2 用例）。
     if _absolute_write(cmd):
         if auto:
-            return PermissionDecision(
-                "allow", "dangerous", "confirm.absolute_write", True
-            )
+            return PermissionDecision("allow", "dangerous", "confirm.absolute_write", True)
         return confirm("confirm.absolute_write")
     for key, pat in CONFIRM_PATTERNS:
         if pat.search(cmd):
@@ -286,8 +281,8 @@ PROTECTED_PATH_PATTERNS: list[str] = [
     "prompts/roles/",
     "plugins/",
     ".env",
-    "TODO/",          # v3 新增（spec §4.5）：任务清单被改写可社会工程用户
-    "attachments/",     # v3 新增：覆盖后经 WS→WeChat 转发链注入对端内容
+    "TODO/",  # v3 新增（spec §4.5）：任务清单被改写可社会工程用户
+    "attachments/",  # v3 新增：覆盖后经 WS→WeChat 转发链注入对端内容
 ]
 
 
@@ -444,14 +439,25 @@ def _register_app_anchors(config: object | None = None) -> None:
 # 只读工具白名单（按工具 name 索引，spec §3.3 + §6.1）
 # 闸门对 READ_ONLY 模式按 name ∈ READ_ONLY_TOOLS 放行；其余一律
 # deny rule.read_only（白名单型策略，避免列举全量白名单外的工具名）。
-READ_ONLY_TOOLS: frozenset[str] = frozenset({
-    "read_file", "list_directory", "search_files", "search_text",
-    "parse_json", "parse_csv", "analyze_text",
-    "fetch_url", "web_search",
-    "search_memory", "read_memory",
-    "list_subagents", "list_scheduled_tasks", "list_skill_compositions",
-    "notify_user_by_channel",   # spec §4.6：通知用户不改动状态，按只读语义放行
-})
+READ_ONLY_TOOLS: frozenset[str] = frozenset(
+    {
+        "read_file",
+        "list_directory",
+        "search_files",
+        "search_text",
+        "parse_json",
+        "parse_csv",
+        "analyze_text",
+        "fetch_url",
+        "web_search",
+        "search_memory",
+        "read_memory",
+        "list_subagents",
+        "list_scheduled_tasks",
+        "list_skill_compositions",
+        "notify_user_by_channel",  # spec §4.6：通知用户不改动状态，按只读语义放行
+    }
+)
 
 
 # 闸门/工具级 security_review 共同消费的已知工具名册。
@@ -459,23 +465,38 @@ READ_ONLY_TOOLS: frozenset[str] = frozenset({
 # evaluate_write_file、schedule_task→无人值守判定）；未命中：高模式
 # confirm rule.unknown_tool 让用户在审批卡显式确认（闸门 fail-open
 # 上限；READ_ONLY/WORKSPACE_WRITE 走 deny 走 fail-closed）。
-KNOWN_TOOLS: frozenset[str] = frozenset({
-    "read_file", "list_directory", "search_files", "search_text",
-    "parse_json", "parse_csv", "analyze_text",
-    "fetch_url", "web_search",
-    "run_shell", "write_file", "remember",
-    "list_skill_compositions", "create_skill_composition", "execute_skill_composition",
-    "notify_user_by_channel",
-    "create_subagent", "list_subagents",
-    "schedule_task", "list_scheduled_tasks",
-    "search_memory", "read_memory",
-})
+KNOWN_TOOLS: frozenset[str] = frozenset(
+    {
+        "read_file",
+        "list_directory",
+        "search_files",
+        "search_text",
+        "parse_json",
+        "parse_csv",
+        "analyze_text",
+        "fetch_url",
+        "web_search",
+        "run_shell",
+        "write_file",
+        "remember",
+        "list_skill_compositions",
+        "create_skill_composition",
+        "execute_skill_composition",
+        "notify_user_by_channel",
+        "create_subagent",
+        "list_subagents",
+        "schedule_task",
+        "list_scheduled_tasks",
+        "search_memory",
+        "read_memory",
+    }
+)
 
 
 def evaluate_tool_call(
     mode: PermissionMode,
     name: str,
-    category: str | None,      # 签名占位（spec §3.3 按 name 判定，category 备用）
+    category: str | None,  # 签名占位（spec §3.3 按 name 判定，category 备用）
     args: dict[str, Any] | None,
     has_workspace: bool = True,
 ) -> PermissionDecision:
@@ -510,8 +531,10 @@ def evaluate_tool_call(
     # workspace_write + 无工作区 = 等效只读(spec §3.3 第12 行兜底;
     # 仅对有边界的工具生效)。无人值守入口的同类场景由 effective_mode 在
     # evaluate_tool_call 之外先把 mode 降到 read_only,不会进到这里。
-    if mode is PermissionMode.WORKSPACE_WRITE and not has_workspace and name in (
-        "run_shell", "write_file"
+    if (
+        mode is PermissionMode.WORKSPACE_WRITE
+        and not has_workspace
+        and name in ("run_shell", "write_file")
     ):
         return deny("rule.no_workspace")
     if name == "run_shell":
@@ -525,9 +548,7 @@ def evaluate_tool_call(
         if schedule_mode == "prompt":
             if mode is PermissionMode.AUTO:
                 # AUTO 豁免：无人值守任务自动放行（spec §3.3 AUTO 语义）
-                return PermissionDecision(
-                    "allow", "dangerous", "rule.unattended_task", True
-                )
+                return PermissionDecision("allow", "dangerous", "rule.unattended_task", True)
             return confirm("rule.unattended_task")
         # notify 模式只主动推消息给用户，不挂后台任务，等同只读放行
         return ALLOW

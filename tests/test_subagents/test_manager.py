@@ -341,7 +341,9 @@ class TestSubagentToolLoop:
             responses=[
                 AIMessage(
                     content="",
-                    tool_calls=[{"name": "list_directory", "args": {}, "id": "c1", "type": "tool_call"}],  # noqa: E501
+                    tool_calls=[
+                        {"name": "list_directory", "args": {}, "id": "c1", "type": "tool_call"}
+                    ],  # noqa: E501
                 ),
                 AIMessage(content="done"),
             ]
@@ -382,9 +384,12 @@ class TestSingleShotPseudoToolGuard:
     async def test_pseudo_tool_text_marks_subagent_failed(self, manager):
         manager.llm_provider.chat = AsyncMock(
             return_value=(
-                "我将对文档进行评审。" + chr(10)
-                + "<read_file>" + chr(10)
-                + "<path>x.md</path>" + chr(10)
+                "我将对文档进行评审。"
+                + chr(10)
+                + "<read_file>"
+                + chr(10)
+                + "<path>x.md</path>"
+                + chr(10)
                 + "</read_file>"
             )
         )

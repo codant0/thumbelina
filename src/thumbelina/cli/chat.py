@@ -322,11 +322,7 @@ async def _run_chat_session(config: AppConfig, provider: str, model: str | None)
         from thumbelina.tools.base import ToolCategory
 
         subagent_manager.set_tools(
-            [
-                t
-                for t in agent.tools
-                if getattr(t, "category", None) == ToolCategory.PERCEPTION
-            ]
+            [t for t in agent.tools if getattr(t, "category", None) == ToolCategory.PERCEPTION]
         )
 
     # CLI ContextVar 接线(spec §8:TTY 检测 → set_approval_context;

@@ -17,6 +17,7 @@ write_file = WriteFileTool()
 @pytest.mark.asyncio
 async def test_write_and_read_file(tmp_path):
     from thumbelina.tools.permissions import PermissionMode, set_permission_mode
+
     set_permission_mode(PermissionMode.FULL_ACCESS)
     try:
         path = str(tmp_path / "test.txt")
@@ -93,6 +94,7 @@ async def test_workspace_boundary_traversal_rejected(tmp_path):
 @pytest.mark.asyncio
 async def test_workspace_relative_write(tmp_path):
     from thumbelina.tools.permissions import PermissionMode, set_permission_mode
+
     set_permission_mode(PermissionMode.FULL_ACCESS)
     set_workspace(str(tmp_path))
     try:

@@ -70,10 +70,7 @@ class CommunicationTool(ThumbelinaBaseTool):
                 return (
                     None,
                     "",
-                    (
-                        f"Error: user_id 不允许（仅限当前会话用户）: "
-                        f"{requested!r}"
-                    ),
+                    (f"Error: user_id 不允许（仅限当前会话用户）: {requested!r}"),
                 )
             target = requested
         else:

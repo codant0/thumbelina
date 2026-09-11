@@ -871,8 +871,7 @@ class ThumbelinaAgent:
                 for i in pending:
                     c = calls[i]
                     approved = any(
-                        r.get("call_id") == c["id"] and r.get("approved")
-                        for r in (resumed or [])
+                        r.get("call_id") == c["id"] and r.get("approved") for r in (resumed or [])
                     )
                     if approved:
                         exec_idx.append(i)
@@ -1578,9 +1577,7 @@ class ThumbelinaAgent:
                         for c in payload.get("calls", [])
                     ]
                 try:
-                    result = await self.graph.ainvoke(
-                        Command(resume=decisions), config=config
-                    )
+                    result = await self.graph.ainvoke(Command(resume=decisions), config=config)
                 except GraphRecursionError:
                     logger.warning(
                         "Agent recursion limit (recursion_limit=%d) exceeded after resume; "
@@ -1732,9 +1729,7 @@ class ThumbelinaAgent:
                         continue
                     # messages 模式:event 为 (message_chunk, metadata) 元组。
                     message_chunk = event[0]
-                    metadata = (
-                        event[1] if len(event) > 1 and isinstance(event[1], dict) else {}
-                    )
+                    metadata = event[1] if len(event) > 1 and isinstance(event[1], dict) else {}
                     # 来自压缩节点的状态维护（删除、被剥离的 assistant 重新
                     # 发出）不属于回复内容。
                     if metadata.get("langgraph_node") == "compress":
@@ -1773,9 +1768,7 @@ class ThumbelinaAgent:
                     # Yield when buffer reaches batch size or time interval
                     now = asyncio.get_event_loop().time()
                     due = (now - last_flush) >= flush_interval
-                    if pending_reasoning and (
-                        len(pending_reasoning) >= batch_size or due
-                    ):
+                    if pending_reasoning and (len(pending_reasoning) >= batch_size or due):
                         yield {"type": "reasoning", "text": pending_reasoning}
                         pending_reasoning = ""
                         last_flush = now
@@ -1824,7 +1817,8 @@ class ThumbelinaAgent:
                 decisions = await approval_waiter(request_id, payload)
             except Exception:
                 logger.warning(
-                    "approval_waiter raised; treating as deny-all for %s", request_id,
+                    "approval_waiter raised; treating as deny-all for %s",
+                    request_id,
                     exc_info=True,
                 )
                 decisions = [
