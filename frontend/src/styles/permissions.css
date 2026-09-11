@@ -33,8 +33,7 @@
     background var(--dur-fast) var(--ease-out);
 }
 
-.permission-float__trigger:hover,
-.permission-float__trigger.is-active {
+.permission-float__trigger:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
@@ -47,6 +46,12 @@
 .permission-float__trigger--error {
   border-color: var(--danger);
   color: var(--danger);
+}
+/* 打开态(panel 展示中)覆盖 mode 警示色,与选项 is-selected 行为一致。
+ * 在 mode--warning/error + is-active 同时存在时,is-active(accent)胜出。 */
+.permission-float__trigger.is-active {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .permission-float__label {
@@ -113,6 +118,14 @@
 }
 .permission-float__option--error {
   color: var(--danger);
+}
+/* 选中态覆盖 mode 警示色(用户期望"以选中色 accent 蓝为准"):
+ * 在 mode--warning/error 与 is-selected 同时存在时,is-selected 胜出。
+ * 通过把 is-selected 规则放到 --warning/--error 之后 + 提升 specificity
+ * (0,2,1 vs 0,2,0) 实现。 */
+.permission-float__option.permission-float__option.is-selected {
+  color: var(--accent);
+  font-weight: var(--fw-med);
 }
 
 .permission-float__name {
