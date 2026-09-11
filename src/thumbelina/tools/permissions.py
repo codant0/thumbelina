@@ -292,16 +292,16 @@ _app_anchors: dict[str, str] = {}
 
 
 def set_app_anchor(guard: str, absolute_path: str) -> None:
-    """注册守卫名（如 ``"MEMORY/"``）对应的绝对路径（第二锚点）。
+    """注册守卫名(如 ``"MEMORY/"``)对应的绝对路径(第二锚点)。
 
-    重要:不要在内部调用 ``Path(absolute_path).resolve()``。Windows 上
-    ``resolve()`` 会调用 ``GetLongPathNameW`` 把短路径（如
-    ``C:\\Users\\ADMINI~1\\...``)展开为完整路径(``Administrator``),而
-    待比较的 raw 路径通常不 resolve(短路径形式),导致字符串 split
-    段比较失败、Python 3.11/3.13 + Windows 下行为差异(本地过 CI 挂)。
-    直接保留调用方传入的字符串形式即可:调用方负责传入规范化的绝对路径。
+    不在内部调用 ``Path(...).resolve()``(见 spec §4.5 与评审总结:
+    Windows 上 ``resolve()`` 会展开短路径而 raw 路径不展开,导致 split
+    段比较失败)。直接保留调用方传入的字符串形式,但规范化反斜杠 +
+    去掉首尾 ``/``,与 ``_is_protected`` 中 raw split 的"过滤空段"
+    语义保持一致。
     """
-    _app_anchors[guard] = absolute_path.replace("\\", "/").rstrip("/")
+    normalized = absolute_path.replace("\\", "/").strip("/").rstrip("/")
+    _app_anchors[guard] = normalized
 
 
 def get_app_anchors() -> dict[str, str]:
@@ -336,8 +336,11 @@ def _is_protected(raw: str) -> str | None:
                 return guard
             anchor = _app_anchors.get(guard)
             if anchor:
-                a = anchor.replace("\\", "/").lower().rstrip("/").split("/")
-                if parts[: len(a)] == a:
+                # 过滤空段(同 raw split 的语义) -- anchor 经 rstrip 后仍
+                # 可能含空前导段(如 ``"/tmp/..."``),直接 split 会得 ['',
+                # 'tmp', ...] 与 parts 不对齐。
+                a = [seg for seg in anchor.replace("\\", "/").lower().rstrip("/").split("/") if seg]
+                if a and parts[: len(a)] == a:
                     return guard
         else:
             for seg in parts:
