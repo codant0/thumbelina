@@ -104,7 +104,7 @@ describe('PermissionSelector', () => {
 
 
 describe('PermissionSelector state + icon 映射', () => {
-  it('触发器 class 含 state-warning (global_write) 与 state-error (full_access/auto)', () => {
+  it('仅 global_write 标 warning、full_access 标 error;其他三档 idle (中性, 无强调色)', () => {
     const { rerender } = render(
       <PermissionSelector conversationId="c1" mode="global_write" conversationType="chat" onChange={() => {}} />,
     )
@@ -117,19 +117,17 @@ describe('PermissionSelector state + icon 映射', () => {
     )
     trigger = screen.getByTestId('permission-selector-trigger')
     expect(trigger.className).toContain('permission-float__trigger--error')
-
-    rerender(
-      <PermissionSelector conversationId="c1" mode="auto" conversationType="chat" onChange={() => {}} />,
-    )
-    trigger = screen.getByTestId('permission-selector-trigger')
-    expect(trigger.className).toContain('permission-float__trigger--error')
-
-    rerender(
-      <PermissionSelector conversationId="c1" mode="read_only" conversationType="chat" onChange={() => {}} />,
-    )
-    trigger = screen.getByTestId('permission-selector-trigger')
     expect(trigger.className).not.toContain('permission-float__trigger--warning')
-    expect(trigger.className).not.toContain('permission-float__trigger--error')
+
+    // auto / read_only / workspace_write 都应是 idle (无强调色变体)
+    for (const mode of ['auto', 'read_only', 'workspace_write'] as const) {
+      rerender(
+        <PermissionSelector conversationId={`c-${mode}`} mode={mode} conversationType="chat" onChange={() => {}} />,
+      )
+      trigger = screen.getByTestId('permission-selector-trigger')
+      expect(trigger.className, `mode=${mode} should not have warning/error class`).not.toContain('permission-float__trigger--warning')
+      expect(trigger.className, `mode=${mode} should not have warning/error class`).not.toContain('permission-float__trigger--error')
+    }
   })
 
   it('每个选项都有 SVG 图标, 5 档互不重复', () => {

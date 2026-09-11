@@ -229,29 +229,22 @@ export const CHAT_VISIBLE_PERMISSION_MODES: PermissionMode[] = [
 ]
 
 
-/* ---------- 模式 → 状态点/图标 公共映射 ----------
- * 状态点取值与 StatusBarItem 的 state 类型一致;PermissionSelector 与
- * PermissionBadge 共用,避免重复实现。三色映射按用户反馈:
- *   read_only       → ok(蓝)
- *   workspace_write → ok(蓝)
- *   global_write    → warning(黄) -- 整盘可写需警示
- *   full_access     → error(红)   -- 助手内部数据/配置可改
- *   auto            → error(红)   -- 无人值守免确认
+/* ---------- 模式 → 状态点公共映射 ----------
+ * 仅两种模式带强调色(用户反馈):global_write 黄、full_access 红。
+ * 其他三档(read_only/workspace_write/auto)使用 'idle' -- StatusBarItem
+ * 对 idle 不显示状态点圆点,避免状态点 + 图标 + 配色三重信号叠加的视觉
+ * 噪音;图标本身的语义(Eye/FolderLock/Globe/Unlock/Zap)已足以区分。
  */
-export type PermissionBadgeState = 'ok' | 'warning' | 'error'
-
-export function permissionBadgeState(mode: PermissionMode): PermissionBadgeState {
+export function permissionBadgeState(
+  mode: PermissionMode,
+): 'idle' | 'warning' | 'error' {
   switch (mode) {
-    case 'read_only':
-    case 'workspace_write':
-      return 'ok'
     case 'global_write':
       return 'warning'
     case 'full_access':
-    case 'auto':
       return 'error'
     default:
-      return 'ok'
+      return 'idle'
   }
 }
 
