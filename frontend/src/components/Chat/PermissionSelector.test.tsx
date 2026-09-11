@@ -104,12 +104,21 @@ describe('PermissionSelector', () => {
 
 
 describe('PermissionSelector state + icon 映射', () => {
-  it('仅 global_write 标 warning、full_access 标 error;其他三档 idle (中性, 无强调色)', () => {
+  it('read_only 标 ok(绿)、global_write 标 warning(黄)、full_access 标 error(红);其余 idle', () => {
     const { rerender } = render(
-      <PermissionSelector conversationId="c1" mode="global_write" conversationType="chat" onChange={() => {}} />,
+      <PermissionSelector conversationId="c1" mode="read_only" conversationType="chat" onChange={() => {}} />,
     )
     let trigger = screen.getByTestId('permission-selector-trigger')
+    expect(trigger.className).toContain('permission-float__trigger--ok')
+    expect(trigger.className).not.toContain('permission-float__trigger--warning')
+    expect(trigger.className).not.toContain('permission-float__trigger--error')
+
+    rerender(
+      <PermissionSelector conversationId="c1" mode="global_write" conversationType="chat" onChange={() => {}} />,
+    )
+    trigger = screen.getByTestId('permission-selector-trigger')
     expect(trigger.className).toContain('permission-float__trigger--warning')
+    expect(trigger.className).not.toContain('permission-float__trigger--ok')
     expect(trigger.className).not.toContain('permission-float__trigger--error')
 
     rerender(
@@ -117,16 +126,18 @@ describe('PermissionSelector state + icon 映射', () => {
     )
     trigger = screen.getByTestId('permission-selector-trigger')
     expect(trigger.className).toContain('permission-float__trigger--error')
+    expect(trigger.className).not.toContain('permission-float__trigger--ok')
     expect(trigger.className).not.toContain('permission-float__trigger--warning')
 
-    // auto / read_only / workspace_write 都应是 idle (无强调色变体)
-    for (const mode of ['auto', 'read_only', 'workspace_write'] as const) {
+    // workspace_write / auto 应是 idle (无强调色变体)
+    for (const mode of ['workspace_write', 'auto'] as const) {
       rerender(
         <PermissionSelector conversationId={`c-${mode}`} mode={mode} conversationType="chat" onChange={() => {}} />,
       )
       trigger = screen.getByTestId('permission-selector-trigger')
-      expect(trigger.className, `mode=${mode} should not have warning/error class`).not.toContain('permission-float__trigger--warning')
-      expect(trigger.className, `mode=${mode} should not have warning/error class`).not.toContain('permission-float__trigger--error')
+      expect(trigger.className, `mode=${mode} should be idle`).not.toContain('permission-float__trigger--ok')
+      expect(trigger.className, `mode=${mode} should be idle`).not.toContain('permission-float__trigger--warning')
+      expect(trigger.className, `mode=${mode} should be idle`).not.toContain('permission-float__trigger--error')
     }
   })
 

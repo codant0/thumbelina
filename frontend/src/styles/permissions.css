@@ -43,6 +43,10 @@
  * 颜色始终等于"该项被选中时触发器会显示的颜色",保证一致。
  * 打开态(is-active)不再改 color,仅加深边框+背景表示面板展开,避免与
  * 模式语义色冲突(用户反馈:chat 页面 full_access 红被 accent 覆盖后不一致)。 */
+.permission-float__trigger--ok {
+  border-color: var(--success);
+  color: var(--success);
+}
 .permission-float__trigger--warning {
   border-color: var(--warning, #f59e0b);
   color: var(--warning, #f59e0b);
@@ -110,6 +114,9 @@
 }
 .permission-float__option:hover {
   background: var(--bg-hover);
+}
+.permission-float__option--ok {
+  color: var(--success);
 }
 .permission-float__option--warning {
   color: var(--warning, #f59e0b);

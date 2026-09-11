@@ -230,15 +230,19 @@ export const CHAT_VISIBLE_PERMISSION_MODES: PermissionMode[] = [
 
 
 /* ---------- 模式 → 状态点公共映射 ----------
- * 仅两种模式带强调色(用户反馈):global_write 黄、full_access 红。
- * 其他三档(read_only/workspace_write/auto)使用 'idle' -- StatusBarItem
- * 对 idle 不显示状态点圆点,避免状态点 + 图标 + 配色三重信号叠加的视觉
- * 噪音;图标本身的语义(Eye/FolderLock/Globe/Unlock/Zap)已足以区分。
+ * 三档带强调色(用户反馈):
+ *   read_only    → ok(绿)     无副作用
+ *   global_write → warning(黄) 整盘可写
+ *   full_access  → error(红)   助手内部数据/配置可改
+ * workspace_write / auto 使用 'idle' -- StatusBarItem 对 idle 不显示状态点
+ * 圆点,图标语义(FolderLock/Zap)已足以区分。
  */
 export function permissionBadgeState(
   mode: PermissionMode,
-): 'idle' | 'warning' | 'error' {
+): 'idle' | 'ok' | 'warning' | 'error' {
   switch (mode) {
+    case 'read_only':
+      return 'ok'
     case 'global_write':
       return 'warning'
     case 'full_access':

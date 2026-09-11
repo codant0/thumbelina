@@ -36,10 +36,11 @@ function renderBadgeIcon(kind: PermissionIconKind) {
 /**
  * 状态栏 PermissionBadge(spec §6.1): 当前会话权限模式, 常显(不进
  * useStatusBarConfig 开关)。配色:
+ *   read_only    → ok(绿)
  *   global_write → warning(黄)
  *   full_access  → error(红)
- * 其他三档(read_only/workspace_write/auto)使用 'idle' -- 图标本身的
- * 语义已足以区分,无需叠加状态点圆点 + 配色三重信号。
+ * workspace_write / auto 使用 'idle' -- 图标本身的语义(FolderLock/Zap)
+ * 已足以区分,无需叠加状态点圆点 + 配色。
  */
 export function PermissionBadge({ mode }: PermissionBadgeProps) {
   const { t } = useTranslation()
