@@ -204,14 +204,13 @@ export interface PendingApprovalSnapshot {
 /* ---------- 共享 UI 工具 ---------- */
 
 /** `global_write` -> `globalWrite`,与 i18n key 命名约定一致。
- *  PermissionSelector 与 PermissionBadge 都依赖此映射 —— 抽到类型模块
- *  避免重复。 */
+ *  PermissionSelector 依赖此映射 —— 抽到类型模块避免重复。 */
 export function modeCamel(m: PermissionMode): string {
   return m.replace(/_([a-z])/g, (_match, c: string) => c.toUpperCase())
 }
 
 /** 五模式全量顺序(由弱到强)。PermissionSelector 用作下拉列表与可见集
- *  比较;PermissionBadge 用作排序基线。 */
+ *  比较(chat 隐藏 workspace_write)。 */
 export const ALL_PERMISSION_MODES: PermissionMode[] = [
   'read_only',
   'workspace_write',

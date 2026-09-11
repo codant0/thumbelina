@@ -652,15 +652,6 @@
       "resolvedDenied": "Denied — operation cancelled",
       "expiredHint": "Approval request expired and was denied"
     },
-    "badge": {
-      "title": {
-        "readOnly": "Read-only — no local side effects",
-        "workspaceWrite": "Workspace write — limited to workspace",
-        "globalWrite": "Global write — anywhere on disk",
-        "fullAccess": "Full access — protected paths also writable",
-        "auto": "Auto — unattended, no approval"
-      }
-    },
     "rule": {
       "dangerous_rm_root": "Recursive delete targeting the filesystem root",
       "dangerous_mkfs": "Format a block device with mkfs",

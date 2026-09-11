@@ -652,15 +652,6 @@
       "resolvedDenied": "已拒绝，操作取消",
       "expiredHint": "审批请求超时，已按拒绝处理"
     },
-    "badge": {
-      "title": {
-        "readOnly": "只读 — 无本地副作用",
-        "workspaceWrite": "工作区写入 — 仅限工作区内",
-        "globalWrite": "全区写入 — 整盘可写",
-        "fullAccess": "完全访问 — 保护路径也可写",
-        "auto": "自动 — 无人值守，无需审批"
-      }
-    },
     "rule": {
       "dangerous_rm_root": "递归删除文件系统根目录",
       "dangerous_mkfs": "使用 mkfs 格式化块设备",

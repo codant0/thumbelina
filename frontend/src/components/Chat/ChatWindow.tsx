@@ -10,7 +10,6 @@ import { KnowledgeBaseSelector } from './KnowledgeBaseSelector'
 import { RoleSelector } from './RoleSelector'
 import { ThinkingSelector } from './ThinkingSelector'
 import { PermissionSelector } from './PermissionSelector'
-import { PermissionBadge } from '../StatusBar/PermissionBadge'
 import { ContextUsageItem } from '../StatusBar/ContextUsageItem'
 import { CacheHitRateItem } from '../StatusBar/CacheHitRateItem'
 import { useSettledMessages } from '../StatusBar/useSettledMessages'
@@ -555,8 +554,9 @@ export function ChatWindow({ ws, conversationId, conversations, conversationType
                   onChange={(mode) => onSetPermission(conversationId, mode)}
                 />
               )}
-              {/* 状态栏分组：上下文占用 + KV 缓存命中率 + 当前会话权限徽标
-                  (PermissionBadge 常显, 不进 useStatusBarConfig 开关, spec §6.1);
+              {/* 状态栏分组：上下文占用 + KV 缓存命中率 + git 分支。
+                  权限不再在此重复展示(工具栏 PermissionSelector 已显示当前模式,
+                  spec §6.1 的 PermissionBadge 移除以避免重复)。
                   只读展示，不触发 LLM 调用；回合进行中冻结，收到新响应/切换会
                   话才刷新，新建会话展示 0/空 */}
               <div className="statusbar-group">
@@ -566,7 +566,6 @@ export function ChatWindow({ ws, conversationId, conversations, conversationType
                   endpointId={activeConversation?.endpoint_id ?? null}
                 />
                 <CacheHitRateItem conversationId={conversationId} refreshKey={settled.version} />
-                <PermissionBadge mode={activeConversation?.permission ?? 'full_access'} />
                 <GitBranchSelector ws={ws} workspace={activeConversation?.workspace ?? null} />
               </div>
             </>
