@@ -38,7 +38,11 @@
   color: var(--accent);
 }
 
-/* 五模式状态色(state 决定边的警示级别) */
+/* 五模式状态色(state 决定边的警示级别)。触发器颜色 = 当前选中模式的颜色,
+ * 展开列表里每项也用同一映射(见 .permission-float__option--*) —— 列表项
+ * 颜色始终等于"该项被选中时触发器会显示的颜色",保证一致。
+ * 打开态(is-active)不再改 color,仅加深边框+背景表示面板展开,避免与
+ * 模式语义色冲突(用户反馈:chat 页面 full_access 红被 accent 覆盖后不一致)。 */
 .permission-float__trigger--warning {
   border-color: var(--warning, #f59e0b);
   color: var(--warning, #f59e0b);
@@ -47,11 +51,8 @@
   border-color: var(--danger);
   color: var(--danger);
 }
-/* 打开态(panel 展示中)覆盖 mode 警示色,与选项 is-selected 行为一致。
- * 在 mode--warning/error + is-active 同时存在时,is-active(accent)胜出。 */
 .permission-float__trigger.is-active {
-  border-color: var(--accent);
-  color: var(--accent);
+  background: var(--bg-hover);
 }
 
 .permission-float__label {
@@ -110,21 +111,19 @@
 .permission-float__option:hover {
   background: var(--bg-hover);
 }
-.permission-float__option.is-selected {
-  color: var(--accent);
-}
 .permission-float__option--warning {
   color: var(--warning, #f59e0b);
 }
 .permission-float__option--error {
   color: var(--danger);
 }
-/* 选中态覆盖 mode 警示色(用户期望"以选中色 accent 蓝为准"):
- * 在 mode--warning/error 与 is-selected 同时存在时,is-selected 胜出。
- * 通过把 is-selected 规则放到 --warning/--error 之后 + 提升 specificity
- * (0,2,1 vs 0,2,0) 实现。 */
-.permission-float__option.permission-float__option.is-selected {
-  color: var(--accent);
+/* 选中态不覆盖 color —— 列表项颜色始终是模式语义色,与触发器一致
+ * (用户反馈:chat 页面 full_access 红被 accent 覆盖后花掉;coder 的
+ * workspace_write 无强调色所以看不出问题)。选中仅用背景+字重表达。
+ * 注意:不要在这里写 color,否则 specificity (0,2,0) 会盖过
+ * .permission-float__option--error (0,1,0)。 */
+.permission-float__option.is-selected {
+  background: var(--bg-hover);
   font-weight: var(--fw-med);
 }
 
