@@ -292,8 +292,16 @@ _app_anchors: dict[str, str] = {}
 
 
 def set_app_anchor(guard: str, absolute_path: str) -> None:
-    """注册守卫名（如 ``"MEMORY/"``）对应的解析后绝对路径（第二锚点）。"""
-    _app_anchors[guard] = str(Path(absolute_path).resolve())
+    """注册守卫名（如 ``"MEMORY/"``）对应的绝对路径（第二锚点）。
+
+    重要:不要在内部调用 ``Path(absolute_path).resolve()``。Windows 上
+    ``resolve()`` 会调用 ``GetLongPathNameW`` 把短路径（如
+    ``C:\\Users\\ADMINI~1\\...``)展开为完整路径(``Administrator``),而
+    待比较的 raw 路径通常不 resolve(短路径形式),导致字符串 split
+    段比较失败、Python 3.11/3.13 + Windows 下行为差异(本地过 CI 挂)。
+    直接保留调用方传入的字符串形式即可:调用方负责传入规范化的绝对路径。
+    """
+    _app_anchors[guard] = absolute_path.replace("\\", "/").rstrip("/")
 
 
 def get_app_anchors() -> dict[str, str]:

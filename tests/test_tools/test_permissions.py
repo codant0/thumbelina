@@ -187,13 +187,13 @@ def test_classify_write_path_kinds(tmp_path):
     assert classify_write_path("anywhere.txt") == "unbounded"
 
 
-def test_register_anchor_records_absolute_resolved():
-    """set_app_anchor 应把传入路径解析为绝对路径存盘（Path.resolve 契约）。"""
-    import os
-
-    set_app_anchor("MEMORY/", "MEMORY")
+def test_register_anchor_records_passed_path_normalized():
+    """set_app_anchor 保留调用方传入的路径(规范化反斜杠、rstrip '/'),
+    不再内部 resolve -- 后者会在 Windows 上把短路径展开为完整路径,与
+    raw 待比较路径形式不一致导致 3.11 CI 失败。调用方负责传入绝对路径。"""
+    set_app_anchor("MEMORY/", "F:/projects/thumbelina/MEMORY/")
     anchors = get_app_anchors()
-    assert anchors["MEMORY/"].lower().replace("/", os.sep) == os.path.abspath("MEMORY").lower()
+    assert anchors["MEMORY/"] == "F:/projects/thumbelina/MEMORY"
 
 
 # ---------------------------------------------------------------------------
