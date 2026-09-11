@@ -16,12 +16,18 @@ write_file = WriteFileTool()
 
 @pytest.mark.asyncio
 async def test_write_and_read_file(tmp_path):
-    path = str(tmp_path / "test.txt")
-    result = await write_file.ainvoke({"path": path, "content": "hello world"})
-    assert "Successfully wrote" in result
+    from thumbelina.tools.permissions import PermissionMode, set_permission_mode
 
-    content = await read_file.ainvoke({"path": path})
-    assert content == "hello world"
+    set_permission_mode(PermissionMode.FULL_ACCESS)
+    try:
+        path = str(tmp_path / "test.txt")
+        result = await write_file.ainvoke({"path": path, "content": "hello world"})
+        assert "Successfully wrote" in result
+
+        content = await read_file.ainvoke({"path": path})
+        assert content == "hello world"
+    finally:
+        set_permission_mode(PermissionMode.READ_ONLY)
 
 
 @pytest.mark.asyncio
@@ -87,6 +93,9 @@ async def test_workspace_boundary_traversal_rejected(tmp_path):
 
 @pytest.mark.asyncio
 async def test_workspace_relative_write(tmp_path):
+    from thumbelina.tools.permissions import PermissionMode, set_permission_mode
+
+    set_permission_mode(PermissionMode.FULL_ACCESS)
     set_workspace(str(tmp_path))
     try:
         result = await write_file.ainvoke({"path": "new.txt", "content": "x"})
@@ -94,6 +103,7 @@ async def test_workspace_relative_write(tmp_path):
         assert (tmp_path / "new.txt").read_text() == "x"
     finally:
         set_workspace(None)
+        set_permission_mode(PermissionMode.READ_ONLY)
 
 
 @pytest.mark.asyncio

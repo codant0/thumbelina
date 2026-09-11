@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import sys
+from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import InMemoryHistory
@@ -16,10 +19,46 @@ from thumbelina.agent.graph import ThumbelinaAgent
 from thumbelina.config import AppConfig, load_config
 from thumbelina.llm.factory import create_provider
 from thumbelina.repository.manager import RepositoryManager
+from thumbelina.tools.permissions import (
+    PermissionMode,
+    set_approval_context,
+    set_permission_mode,
+)
+
+if TYPE_CHECKING:
+    # 仅供类型注解(避免函数签名行过长触发 E501)
+    ApprovalHandler = Callable[[dict[str, Any]], Awaitable[list[dict[str, Any]]]]
 
 logger = logging.getLogger(__name__)
 
 EXIT_COMMANDS = frozenset({"/exit", "/quit"})
+
+
+async def _approval_handler(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """CLI 终端审批(spec §5.4)：TTY 模式下,危险操作集中列出,单选 y/N 全部批准/拒绝。
+
+    非 TTY 模式(spec §8 fail-closed)不传该 handler；handler 内部仍兜底:若被
+    异常调用,默认拒绝以免绕过闸门。
+    """
+    calls = payload.get("calls") or []
+    if not calls:
+        return []
+    print("\n⚠️  需要授权的危险操作:")
+    for c in calls:
+        name = c.get("name", "")
+        args = c.get("args") or {}
+        try:
+            args_text = json.dumps(args, ensure_ascii=False)[:500]
+        except (TypeError, ValueError):
+            args_text = str(args)[:500]
+        print(f"  - {name}: {args_text}")
+        print(f"    规则: {c.get('reason', '')}")
+    try:
+        answer = input("批准全部? [y/N] ").strip().lower()
+    except EOFError:
+        answer = ""
+    approved = answer == "y"
+    return [{"call_id": str(c.get("call_id", "")), "approved": approved} for c in calls]
 
 
 class ChatSession:
@@ -43,6 +82,11 @@ class ChatSession:
         self.context_window_tokens = context_window_tokens
         self.history: list[dict[str, str]] = []
         self.running = False
+        # spec §8: 非 TTY（管道/重定向）→ 无审批者 → confirm 一律 deny。
+        # 只在 TTY 模式下挂 handler,确保 fail-closed。
+        self.approval_handler: ApprovalHandler | None = (
+            _approval_handler if sys.stdin.isatty() else None
+        )
 
     def is_exit_command(self, text: str) -> bool:
         """Check if the input is an exit command.
@@ -99,9 +143,12 @@ class ChatSession:
         """
         self.history.append({"role": "user", "content": user_input})
 
-        # Use the full agent pipeline (with graph, tools, repository)
+        # Use the full agent pipeline (with graph, tools, repository).
+        # TTY 时挂审批 handler(spec Task 17)；非 TTY 传 None → confirm 一律 deny。
         response = await self.agent.run(
-            user_input, context_window_tokens=self.context_window_tokens
+            user_input,
+            context_window_tokens=self.context_window_tokens,
+            approval_handler=self.approval_handler,
         )
 
         self.history.append({"role": "assistant", "content": response})
@@ -267,16 +314,24 @@ async def _run_chat_session(config: AppConfig, provider: str, model: str | None)
     )
 
     # 子 agent 只读工具集(仅感知类),与 Web 端装配保持一致。
+    #
+    # 权限(spec §9 subagent):子 agent 无审批者,confirm/deny 一律拒绝 ——
+    # 白名单在此扩类(加入写/执行类工具)时,必须确认 _run_tool_loop 里的
+    # evaluate_tool_call 闸门覆盖新工具名,否则会绕过权限矩阵。
     if subagent_manager is not None:
         from thumbelina.tools.base import ToolCategory
 
         subagent_manager.set_tools(
-            [
-                t
-                for t in agent.tools
-                if getattr(t, "category", None) == ToolCategory.PERCEPTION
-            ]
+            [t for t in agent.tools if getattr(t, "category", None) == ToolCategory.PERCEPTION]
         )
+
+    # CLI ContextVar 接线(spec §8:TTY 检测 → set_approval_context;
+    # 完整审批回路由 Task 17 在 run() 上挂 approval_handler)。设置 mode
+    # 为 FULL_ACCESS:CLI 不做工作区降级,操作粒度由 Task 17 的 TTY 审批卡
+    # 决定(交互模式按下 `y` 才放行 confirm 级调用)。管道/重定向时
+    # isatty()=False → 无审批者 → confirm 一律 deny。
+    set_permission_mode(PermissionMode.FULL_ACCESS)
+    set_approval_context(sys.stdin.isatty())
 
     session = ChatSession(
         agent=agent,

@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Boxes, CircleAlert, Gauge, Loader2, RefreshCw, Route, SearchX, Terminal, Wrench } from 'lucide-react'
+import { Boxes, CheckCircle2, CircleAlert, Gauge, Loader2, RefreshCw, Route, SearchX, ShieldOff, Terminal, Wrench, Zap } from 'lucide-react'
 import type { Conversation } from '../../types/chat'
 import type { TrajectoryDetail, TrajectoryEvent, TrajectoryPageData, TrajectoryTurn } from '../../types/trajectory'
 import { fetchTrajectory } from '../../api/trajectory'
 import { useTranslation } from '../../i18n'
 import { TrajectoryDetailModal } from './TrajectoryDetailModal'
-import { collapseMiddle, eventLabel, groupToolEvents, usageSummary } from './trajectoryDisplay'
+import { collapseMiddle, eventLabel, groupToolEvents, reasonLabelKey, usageSummary, verdictInfo } from './trajectoryDisplay'
 import type { ToolCallGroup } from './trajectoryDisplay'
 
 const PAGE_SIZE = 20
@@ -252,6 +252,10 @@ function ToolCallCard({ group, turnIndex, onOpenDetail }: {
 }) {
   const { t } = useTranslation()
   const payload = group.call.payload as Record<string, unknown>
+  const v = verdictInfo(payload)
+  const reasonKey = reasonLabelKey(typeof payload.reason === 'string' ? payload.reason : null)
+  // verdict="allowed" 不显示徽标（默认路径,避免视觉噪音）
+  const showBadge = v.kind !== null && v.kind !== 'allowed'
   return (
     <div className="tool-call-card">
       <button
@@ -260,7 +264,22 @@ function ToolCallCard({ group, turnIndex, onOpenDetail }: {
         data-testid="turn-event"
         onClick={() => onOpenDetail({ kind: 'event', event: group.call, turnIndex })}
       >
-        <span className="chip-label">{eventLabel(t, group.call)}</span>
+        <span className="chip-label">
+          {eventLabel(t, group.call)}
+          {showBadge && (
+            <span
+              className={`verdict-badge ${v.badgeClass}`}
+              data-testid="verdict-badge"
+              data-verdict={v.kind}
+              title={reasonKey ? t(reasonKey as `permission.rule.${string}`) : undefined}
+            >
+              {v.kind === 'denied' && <ShieldOff size={11} aria-hidden="true" />}
+              {v.kind === 'confirmed' && <CheckCircle2 size={11} aria-hidden="true" />}
+              {v.kind === 'auto_allowed' && <Zap size={11} aria-hidden="true" />}
+              <span>{t(v.labelKey as 'toolCalls.verdict.denied')}</span>
+            </span>
+          )}
+        </span>
         <span className="chip-icon"><Wrench size={14} aria-hidden="true" /></span>
         <span className="event-summary">{collapseMiddle(JSON.stringify(payload.args ?? {}), 120, 60, 40).text}</span>
         <span className="event-more">{t('trajectory.viewDetails')}</span>

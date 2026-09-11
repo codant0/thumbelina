@@ -169,3 +169,36 @@ describe('groupAnchorsByOffset', () => {
     expect(groupAnchorsByOffset([])).toEqual([])
   })
 })
+
+describe('upsertToolCall verdict 字段透传(spec §5.2 闸门裁决)', () => {
+  it('start 帧带 verdict=denied 时新卡带 denied', () => {
+    const list = upsertToolCall([], { ...start('c1', 'run_shell'), verdict: 'denied' })
+    expect(list[0].verdict).toBe('denied')
+  })
+
+  it('start 帧带 verdict=auto_allowed 时新卡带 auto_allowed', () => {
+    const list = upsertToolCall([], { ...start('c1', 'run_shell'), verdict: 'auto_allowed' })
+    expect(list[0].verdict).toBe('auto_allowed')
+  })
+
+  it('start 帧省略 verdict 时新卡不携带 verdict(隐式 allowed)', () => {
+    const list = upsertToolCall([], start('c1'))
+    expect(list[0].verdict).toBeUndefined()
+  })
+
+  it('start 帧 verdict=allowed 不写入(隐式默认)', () => {
+    const list = upsertToolCall([], { ...start('c1'), verdict: 'allowed' })
+    expect(list[0].verdict).toBeUndefined()
+  })
+
+  it('孤立 end 帧带 verdict=denied 时防御性建卡并写入 denied', () => {
+    const list = upsertToolCall([], { ...end('c1'), verdict: 'denied' })
+    expect(list[0].verdict).toBe('denied')
+  })
+
+  it('end 帧覆盖 start 帧的 verdict(start denied, end confirmed → confirmed)', () => {
+    let list = upsertToolCall([], { ...start('c1'), verdict: 'denied' })
+    list = upsertToolCall(list, { ...end('c1'), verdict: 'confirmed' })
+    expect(list[0].verdict).toBe('confirmed')
+  })
+})

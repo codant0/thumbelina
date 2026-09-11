@@ -25,6 +25,7 @@
 - **任务调度器** — 事件驱动调度：自然语言时间解析（中英文）的一次性任务与 5 字段 cron 表达式的循环任务，按可配置渠道（web/wechat/qq）交付，支持条件触发；任务持久化并在重启后恢复（错过的一次性任务按策略标记 MISSED 或补跑，cron 前推 next_run），Heartbeat 巡检保活，生命周期事件经 EventBus 供 hook 订阅并在 Web 界面任务页实时展示
 - **待办清单与随手记** — 基于本地 Markdown 文件的待办清单与随手记（`TODO/todolist.md` + `TODO/notes.md`），每项待办支持独立 Markdown 备注（块引用格式），按一级标题分组并提供分组过滤卡片，可在 Web 界面管理
 - **轨迹记录** — 每轮 agent 执行轨迹（工具调用、LLM 用量）按会话持久化，Web 界面 Trajectory 页分页浏览；KV 缓存命中率汇总供状态栏展示
+- **权限模式** — 工具执行前闸门统一裁决（非提示词约束）的五档能力阶梯：**只读**（无本地副作用）→ **工作区写入**（仅 coder 会话，限制在当前工作区边界内）→ **全区写入**（任意路径，保护路径仍标红）→ **完全访问**（chat 会话默认；连保护路径也可直接写，仅危险命令需审批）→ **自动**（免确认，面向无人值守）。Web 界面在 chat/coder 工具栏按会话类型过滤显示模式选择器，按会话持久化。工具调用触发闸门时消息流末尾挂载红色审批卡，用户决策经 WebSocket 回执路由到 agent。无人值守入口（微信 / QQ / 调度器 / HTTP / CLI 非 TTY）一律 **fail-closed**——confirm 级调用直接拒绝、不触发 interrupt。Trajectory 页完整回放每次工具调用的 verdict（已放行 / 用户已确认 / 自动放行 / 已拒绝）。规则矩阵见 `docs/specs/2026-09-06-permission-modes-design.md`。
 - **上下文压缩** — 会话上下文经 LangGraph checkpointer 持久化，可按需手动压缩（`POST /api/v1/conversations/{id}/compress`），压缩策略与 token 触发阈值经 `config.context` 配置（summary_recent / 滑动窗口）
 - **插件系统** — 注册和管理工具、技能、渠道、提供商，支持沙箱验证和依赖解析
 - **QQ Bot 频道** — 通过 QQ 官方 Bot SDK（`qq-botpy`）接入，支持频道、群聊和私聊

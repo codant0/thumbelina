@@ -408,8 +408,13 @@ class WeChatChannel(Channel):
             # 与 WebSocket/HTTP 入口共享 per-conversation 锁：同一会话的
             # 并发轮次会交错读改写同一检查点线程，必须串行化。
             async with per_conversation_lock(cid):
-                # 应用会话的端点/角色并解析上下文窗口，与 HTTP/WebSocket
-                # 共用同一套逻辑（惰性导入避免 channels → api 循环依赖）。
+                # 应用会话的端点/角色/工作区/权限并解析上下文窗口，
+                # 与 HTTP/WebSocket 共用同一套逻辑（惰性导入避免
+                # channels → api 循环依赖）。
+                #
+                # 微信通道入口无人值守(spec §8:无审批者 → confirm 一律 deny;
+                # 微信用户在别处无法响应审批)。显式 unattended=True 把意图写在
+                # 调用点，默认 True(fail-closed)只是兜底。
                 window_tokens = None
                 if self._runtime is not None and cid:
                     try:
@@ -418,7 +423,9 @@ class WeChatChannel(Channel):
                             resolve_run_window,
                         )
 
-                        await apply_conversation_runtime(self._runtime, self._agent, cid)
+                        await apply_conversation_runtime(
+                            self._runtime, self._agent, cid, unattended=True
+                        )
                         window_tokens = await resolve_run_window(self._runtime, self._agent, cid)
                     except Exception:
                         logger.warning("Failed to apply WeChat conversation runtime", exc_info=True)

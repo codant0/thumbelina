@@ -48,6 +48,9 @@ const baseState: ChatSocket = {
   switchConversation: vi.fn(),
   loadHistory: vi.fn(),
   subscribe: vi.fn(() => () => {}),
+  pendingApproval: null,
+  sendPermissionResponse: vi.fn(),
+  getPendingApproval: vi.fn(),
 }
 
 let wsState = baseState

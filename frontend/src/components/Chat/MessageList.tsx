@@ -1,11 +1,12 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { AttachmentRef, Message, SubagentEventPayload, ToolCall } from '../../types/chat'
+import type { AttachmentRef, Message, PermissionRequestPayload, SubagentEventPayload, ToolCall } from '../../types/chat'
 import { ArrowDown, Brain, Check, ChevronDown, Copy, RefreshCcw, Wrench } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import { MarkdownContent } from './MarkdownContent'
 import { JsonBlock } from './CodeBlock'
 import { SubagentCard } from './SubagentCard'
 import { AttachmentLightbox } from './AttachmentLightbox'
+import { PermissionRequestCard } from './PermissionRequestCard'
 import { attachmentUrl } from '../../api/attachments'
 import { splitLeadingJson } from '../../lib/codeUtils'
 import { groupAnchorsByOffset, splitContentByAnchors, summarizeToolCalls } from './toolCallEvents'
@@ -26,6 +27,12 @@ interface MessageListProps {
   onViewSubagentDetail?: (event: SubagentEventPayload) => void
   /** 点击聚合工具入口时的回调;由 ChatWindow 提供用于打开侧边统一面板。 */
   onViewToolCalls?: (msgId: string, callIds: string[]) => void
+  /** 当前会话挂起的审批请求(spec §5.4);渲染在消息之后、typing 之前。
+   *  出现时触发 snap-to-bottom(类似 SubagentCard 的处理,保证用户看到卡片)。
+   *  生命周期: 结算/done/error/切会话/clearMessages 时由 useWebSocket 清空。 */
+  permissionRequest?: PermissionRequestPayload | null
+  /** 审批响应上行(由 ChatWindow 传入 useWebSocket.sendPermissionResponse)。 */
+  onPermissionDecide?: (decisions: { call_id: string; approved: boolean }[]) => void
 }
 
 interface ThinkingBlockProps {
@@ -319,7 +326,7 @@ const MessageItem = memo(function MessageItem({
   )
 })
 
-function MessageListInner({ messages, waitingForReply, isStreaming, awaitingMoreContent, onRegenerate, subagentsByMsgId, onViewSubagentDetail, onViewToolCalls }: MessageListProps) {
+function MessageListInner({ messages, waitingForReply, isStreaming, awaitingMoreContent, onRegenerate, subagentsByMsgId, onViewSubagentDetail, onViewToolCalls, permissionRequest, onPermissionDecide }: MessageListProps) {
   const listRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   // Whether to keep following new content. False once the user scrolls up to read.
@@ -368,6 +375,18 @@ function MessageListInner({ messages, waitingForReply, isStreaming, awaitingMore
     })
     return () => cancelAnimationFrame(raf)
   }, [messages, waitingForReply])
+
+  // 审批卡出现/变更时强制 snap-to-bottom(spec §5.4: 用户需要立刻看到决策面板)。
+  // 与上面流式 snap 不同的语义: 即便用户滚到上方阅读,审批卡也必须可见 —
+  // 否决/批准是当轮必走的交互。这里复用一个 rAF 走布局后再滚,避免跳动。
+  useEffect(() => {
+    if (!permissionRequest) return
+    const raf = requestAnimationFrame(() => {
+      const node = listRef.current
+      if (node) node.scrollTop = node.scrollHeight
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [permissionRequest?.request_id, permissionRequest?.calls.length])
 
   // On conversation switch / history reload (first message id changed)
   // jump to the latest message synchronously after layout. Runs only on
@@ -451,6 +470,14 @@ function MessageListInner({ messages, waitingForReply, isStreaming, awaitingMore
               {...(onViewToolCalls ? { onViewToolCalls } : {})}
             />
           ))}
+          {/* 审批卡(spec §5.4): 渲染在消息之后、typing/generating 指示器之前。
+              出现时通过 effect 强制 snap-to-bottom, 保证用户能看到。 */}
+          {permissionRequest && onPermissionDecide && (
+            <PermissionRequestCard
+              request={permissionRequest}
+              onDecide={onPermissionDecide}
+            />
+          )}
           {waitingForReply && (
             <div className="message assistant typing-indicator" data-testid="typing-indicator">
               <span className="msg-role">{t('chat.roleAssistant')}</span>

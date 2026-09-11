@@ -40,6 +40,15 @@ from thumbelina.tools.base import (
     ThumbelinaBaseTool,
     ToolCategory,
 )
+from thumbelina.tools.permissions import (
+    CONFIRM_PATTERNS,
+    DANGEROUS_PATTERNS,
+    PermissionMode,
+    classify_shell_command,
+    classify_write_path,
+    evaluate_write_file,
+    get_permission_mode,
+)  # noqa: F401  # 旧测试/外部代码 re-export
 from thumbelina.tools.workspace_context import (
     get_workspace,
     resolve_workspace_path,
@@ -95,108 +104,23 @@ def _run_blocking(command: str, cwd: str) -> str:
     return output + f"\n[exit code: {popen.returncode}]"
 
 
-def _rm_root_patterns() -> list[tuple[str, re.Pattern[str]]]:
-    """rm 递归+强制删除任意绝对路径(/、/*、/etc)的黑名单正则(终审 I-1)。
-
-    语义:rm 后跟一串选项 token(r/f 可合写 ``-rf``/``-fr``、拆写 ``-r -f``,
-    长参数 ``--recursive``/``--force`` 各算一个标志;``-(?!-)`` 保证短选项
-    按字母匹配、长选项按词面匹配),目标以 ``/`` 开头 → Reject。
-    ``rm -rf ./build``、``rm file.txt`` 等相对/无标志命令不误伤;
-    仅含 r 或仅含 f 不构成危险组合。两条正则分别处理「合写」与「拆写」,
-    拆写两条枚举 r→f 与 f→r 顺序(可读优先)。
-    """
-    both = r"(?:\s+-\w*r\w*f\w*|\s+-\w*f\w*r\w*)"  # 合写:同一短选项含 r 与 f
-    skip = r"(?:\s+-\w+)*"  # 夹带的中性选项
-    r_tok = r"\s+-(?!-)\w*r\w*"  # 递归短选项(含 r 字母)
-    f_tok = r"\s+-(?!-)\w*f\w*"  # 强制短选项(含 f 字母)
-    r_long = r"\s+--recursive"  # 长参数等价形式
-    f_long = r"\s+--force"
-    target = r"\s+(/\S*)(?:\s|$)"  # 以 / 开头的目标(/、/*、/etc/...)
-    return [
-        ("rm 递归强删绝对路径", re.compile(rf"\brm{both}{skip}{target}", re.I)),
-        ("rm 递归强删绝对路径", re.compile(rf"\brm{r_tok}{skip}{f_tok}{skip}{target}", re.I)),
-        ("rm 递归强删绝对路径", re.compile(rf"\brm{f_tok}{skip}{r_tok}{skip}{target}", re.I)),
-        ("rm 递归强删绝对路径", re.compile(rf"\brm{r_long}{skip}{f_long}{skip}{target}", re.I)),
-        ("rm 递归强删绝对路径", re.compile(rf"\brm{f_long}{skip}{r_long}{skip}{target}", re.I)),
-    ]
-
-
-# 审核修复 B-7:每条规则为 (人类可读短名, 编译正则)。Reject/Confirm reason
-# 只输出短名——正则源码上百字符进 ToolMessage/日志会污染 LLM 上下文,
-# 且向模型披露完整规则。
-DANGEROUS_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    *_rm_root_patterns(),
-    ("格式化文件系统(mkfs)", re.compile(r"\bmkfs\b", re.I)),
-    # 审核修复 B-5:`dd of=/dev/null` 是合法丢弃写法,负向前瞻排除 null。
-    ("dd 写入块设备", re.compile(r"\bdd\b[^\n]*\bof=/dev/(?!null\b)", re.I)),
-    ("fork 炸弹", re.compile(r":\(\)\s*{", re.I)),
-    # 已知 best-effort 局限(审核 B-8,见 spec §11):无命令位概念,
-    # `grep -r shutdown src/` 会误杀;引入命令位置解析属过度设计,不修。
-    ("关机/重启/断电", re.compile(r"\bshutdown\b|\breboot\b|\bpoweroff\b", re.I)),
-    ("管道执行远程脚本", re.compile(r"\b(curl|wget)\b[^|]*\|\s*(sudo\s+)?(ba)?sh", re.I)),
-    # 无 \b:兼容「空格 + >」重定向(如 echo x > /dev/sda);审核修复 B-5:
-    # `(?!null\b)` 放行 `> /dev/null`、`2>/dev/null` 等丢弃输出的惯用法。
-    ("重定向写入块设备", re.compile(r">\s*/dev/(?!null\b)[a-z]", re.I)),
-    ("chmod 777 根目录", re.compile(r"\bchmod\s+(-R\s+)?777\s+/(\s|$)", re.I)),
+# DANGEROUS_PATTERNS / CONFIRM_PATTERNS / PROTECTED_PATH_PATTERNS 已于任务 2/3
+# 上移至 thumbelina.tools.permissions（spec §4.2 单一事实源）。
+# 中-2 修复：删除 execution.py 旧副本（无 TODO/attachments/、无第二锚点），
+# 改由 ``from thumbelina.tools.permissions import DANGEROUS_PATTERNS,
+# CONFIRM_PATTERNS, PROTECTED_PATH_PATTERNS`` re-export 给旧测试/外部
+# 调用方继续使用。旧 _is_protected 副本不再保留——分类已迁至
+# permissions._is_protected（含双锚点）。
+__all__ = [
+    "ExecutionTool",
+    "RunShellTool",
+    "WriteFileTool",
+    "DANGEROUS_PATTERNS",
+    "CONFIRM_PATTERNS",
 ]
-
-CONFIRM_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    ("git 强推", re.compile(r"\bgit\s+push\s+--force|\bgit\s+push\s+-f\b", re.I)),
-    ("npm 发布", re.compile(r"\bnpm\s+publish\b", re.I)),
-    ("docker 删除", re.compile(r"\bdocker\s+(rm|rmi)\b", re.I)),
-    ("sudo 提权", re.compile(r"\bsudo\b", re.I)),
-    ("写系统路径", re.compile(r">\s*/etc/|/usr/bin/|/boot/", re.I)),
-]
-
-PROTECTED_PATH_PATTERNS: list[str] = [
-    "thumbelina.db",
-    "MEMORY/",
-    "prompts/roles/",
-    "plugins/",
-    ".env",
-]
-
-
-def _is_protected(raw: str, workspace: str | None = None) -> str | None:
-    """命中保护路径则返回该模式,否则 None。
-
-    终审 I-2:目录类守卫(带尾斜杠,如 MEMORY/、plugins/)只锚定工作区
-    相对路径的开头分段——深层同名目录(src/memory/util.py、app/plugins/
-    views.py)是普通代码,不应误伤;文件名类守卫(thumbelina.db*、.env*)
-    保持任意层级分段匹配(数据/秘密文件放到哪都危险)。
-    绝对路径先以 workspace(无 workspace 时退到 CWD)前缀相对化再取分段;
-    前缀不匹配时保守地按原分段锚定。
-    """
-    posix = raw.replace("\\", "/").lower()
-    parts = [seg for seg in posix.split("/") if seg]
-    base = (workspace or os.getcwd()).replace("\\", "/").rstrip("/").lower()
-    base_parts = [seg for seg in base.split("/") if seg]
-    if base_parts and parts[: len(base_parts)] == base_parts:
-        parts = parts[len(base_parts) :]
-    for guard in PROTECTED_PATH_PATTERNS:
-        g = guard.lower()
-        if g.endswith("/"):
-            # 目录类:仅锚定开头分段
-            dirs = [seg for seg in g.rstrip("/").split("/") if seg]
-            if parts[: len(dirs)] == dirs:
-                return guard
-        else:
-            # 文件名类:任意层级
-            for seg in parts:
-                if seg == g or seg.startswith(g):
-                    return guard
-    return None
 
 
 _ERROR_HINTS = re.compile(r"\berror\b|denied|not found|Traceback|command not found", re.I)
-
-
-def _normalize_command(command: str) -> str:
-    # 审核修复 B-6:shell 会把「反斜杠+换行」拼成续行,若只折叠空白会残留字面
-    # `\`,使 `rm -rf \<newline>/` 绕过黑名单——先把续行折成空格再走原逻辑。
-    folded = re.sub(r"\\\r?\n", " ", command)
-    lines = [ln.split("#", 1)[0] for ln in folded.splitlines()]
-    return re.sub(r"\s+", " ", " ".join(lines)).strip()
 
 
 class _RunShellArgs(BaseModel):
@@ -242,40 +166,24 @@ class RunShellTool(ExecutionTool):
     args_schema: type[BaseModel] = _RunShellArgs
 
     async def security_review(self, args: dict[str, Any]) -> Allow | Confirm | Reject:
-        """执行前安全审查:命令文本归一化后过两级规则表。
+        """执行前安全审查（spec §4.2-§4.4）：委托共享分类器。
 
-        防护清单(按裁决顺序):
-        1. 空命令 → Reject(无信息量的调用不放行)。
-        2. ``DANGEROUS_PATTERNS`` 任一命中 → Reject,不可执行。防护的
-           破坏性操作类别:
-           - rm 递归强删绝对路径(``-rf``/``-fr``/``-r -f``/``--recursive
-             --force`` 各合写拆写顺序 × 目标 ``/`` 开头任意路径,含 ``/*``)
-           - mkfs 格式化文件系统
-           - dd 写入块设备(``of=/dev/`` 族,``of=/dev/null`` 放行)
-           - fork 炸弹(``:(){`` 递归函数定义头)
-           - shutdown/reboot/poweroff 断电重启
-           - curl/wget 管道给 sh/bash 执行远程脚本
-           - ``> /dev/X`` 重定向写块设备(``> /dev/null`` 放行)
-           - chmod 777 根目录
-        3. ``CONFIRM_PATTERNS`` 任一命中 → Confirm:本期**放行 + WARNING
-           日志**(由基类模板执行),覆盖不可逆/外泄类操作:git 强推、
-           npm 发布、docker rm/rmi 删除、sudo 提权、写系统路径。
-        4. 其余 → Allow。
-
-        审查对象是**归一化后的文本**(``_normalize_command``:折续行、剥
-        ``#`` 注释、折叠空白),不解析引号/变量/管道结构——故本防线是
-        行为塑形而非对抗性边界(见模块 docstring 定位声明;已知绕过形态
-        列举于 spec §11)。命中 reason 只输出规则短名,不外泄正则源码。
+        任务 2 起把两级规则表与归一化逻辑上移至
+        ``thumbelina.tools.permissions.classify_shell_command``（单一事实源），
+        reason 由中文短名改为稳定规则键（``dangerous.*`` / ``confirm.*``）。
+        本方法保留 ``auto=False``：Task 6 接线 ``auto=(mode is AUTO)`` 后，
+        自动模式下 CONFIRM 命中转为 ``auto_allowed=True`` 放行（任务 4 范围）。
         """
-        cmd = _normalize_command(str(args.get("command", "")))
-        if not cmd:
-            return Reject("空命令")
-        for name, pat in DANGEROUS_PATTERNS:
-            if pat.search(cmd):
-                return Reject(name)
-        for name, pat in CONFIRM_PATTERNS:
-            if pat.search(cmd):
-                return Confirm(name)
+        from thumbelina.tools.permissions import get_permission_mode
+
+        decision = classify_shell_command(
+            str(args.get("command", "")),
+            auto=(get_permission_mode() == PermissionMode.AUTO),
+        )
+        if decision.verdict == "deny":
+            return Reject(decision.reason)
+        if decision.verdict == "confirm":
+            return Confirm(decision.reason)
         return Allow()
 
     async def _execute(self, command: str) -> str:
@@ -345,35 +253,24 @@ class WriteFileTool(ExecutionTool):
     args_schema: type[BaseModel] = _WriteFileArgs
 
     async def security_review(self, args: dict[str, Any]) -> Allow | Confirm | Reject:
-        """执行前安全审查:两道独立闸门,任一命中即 Reject。
+        """执行前安全审查:委托 ``permissions.evaluate_write_file``(Task 3)。
 
-        防护清单:
-        1. 工作区边界:复用 ``resolve_workspace_path``——coder 会话下
-           绝对路径或解析后越出 workspace 的相对路径(``../`` 等)直接
-           拒绝;普通会话无 workspace 时此闸不生效(legacy 行为)。
-        2. 保护路径(``_is_protected``,分两类策略):
-           - 目录类(锚定 workspace 根分段,深层同名目录不误伤):
-             ``MEMORY/``——记忆库唯一写路径是抽取器,阻断 agent 绕过
-             配额/审计直写;``prompts/roles/``——角色系统提示词,防
-             自我改写提权;``plugins/``——插件加载目录,防注入代码。
-           - 文件名类(任意层级分段匹配,放到哪都危险):
-             ``thumbelina.db*``——会话/检查点/配置数据库(含 -wal/-shm);
-             ``.env``*——环境变量秘密文件。
-        3. 其余 → Allow(本工具无 Confirm 档:写文件的影响已由边界+
-           保护路径穷举,其余写操作视为正常职能)。
+        单一事实源——与闸门 ``evaluate_tool_call`` 共用 ``classify_write_path``,
+        保证保护路径第二锚点(MEMORY/TODO/attachments 等)裁决一致。
 
-        reason 只输出命中的守卫名;审查在落盘之前拦截,恶意路径不触盘。
+        委托前读 ContextVar:READ_ONLY 默认拒绝全部写(spec §3.3 矩阵);其余
+        模式走 mode-aware 裁决——workspace_write 越界/保护路径 deny,
+        global_write 保护路径 confirm,full_access/auto 放行。
         """
         raw = str(args.get("path", ""))
-        # 第一道:复用工作区边界检查(越界相对路径/绝对路径直接拒绝)
-        try:
-            resolve_workspace_path(raw)
-        except ValueError as exc:
-            return Reject(str(exc))
-        # 第二道:保护路径(含 resolve 前的原始相对路径与解析后的绝对路径)
-        guard = _is_protected(raw, get_workspace())
-        if guard:
-            return Reject(f"受保护路径: {guard}")
+        mode = get_permission_mode()
+        if mode is PermissionMode.READ_ONLY:
+            return Reject("rule.read_only")
+        decision = evaluate_write_file(mode, raw)
+        if decision.verdict == "deny":
+            return Reject(decision.reason)
+        if decision.verdict == "confirm":
+            return Confirm(decision.reason)
         return Allow()
 
     async def _execute(self, path: str, content: str) -> str:
@@ -381,6 +278,12 @@ class WriteFileTool(ExecutionTool):
 
         - 边界二次校验:再走一次 ``resolve_workspace_path``——与审查
           独立复核,防绕过入口直接调用(纵深)。
+        - mode-aware 越界放行(Task 3,spec §3.3 矩阵 GLOBAL_WRITE+)：
+          当闸门已裁决 allow 但 ``resolve_workspace_path`` 仍抛
+          ``ValueError``(越界相对路径/绝对路径)时,GLOBAL_WRITE/
+          FULL_ACCESS/AUTO 模式落到 ``Path(path).resolve()`` 继续,
+          允许越界写——与闸门裁决保持一致;WORKSPACE_WRITE 维持原
+          ``Error:`` 行为。
         - 字节精确写:``newline=""`` 关闭平台换行转译(终审 I-3),
           使"Successfully wrote N bytes"文案与自验证的字节比对同时为真。
         - 失败不抛:权限/OS 错误转 ``Error:`` 字符串返回。
@@ -389,7 +292,20 @@ class WriteFileTool(ExecutionTool):
             resolved = resolve_workspace_path(path)
             p = Path(resolved) if resolved is not None else Path(path).resolve()
         except ValueError as exc:
-            return f"Error: {exc}"
+            mode = get_permission_mode()
+            if (
+                mode
+                in (
+                    PermissionMode.GLOBAL_WRITE,
+                    PermissionMode.FULL_ACCESS,
+                    PermissionMode.AUTO,
+                )
+                and classify_write_path(path) == "escape"
+            ):
+                # 闸门已裁决 allow，越界路径按无边界模式放行
+                p = Path(path).resolve()
+            else:
+                return f"Error: {exc}"
         try:
             p.parent.mkdir(parents=True, exist_ok=True)
             # 终审 I-3:newline="" 关闭平台换行转译,字节精确落盘——

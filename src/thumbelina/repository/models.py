@@ -186,6 +186,12 @@ class Conversation(Base):
         default="medium",
         comment="Thinking intensity: low, medium, or high",
     )
+    permission: Mapped[str] = mapped_column(
+        String(20),
+        default="full_access",
+        server_default="full_access",
+        comment="Permission mode: read_only/workspace_write/global_write/full_access/auto",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         server_default=func.now(),

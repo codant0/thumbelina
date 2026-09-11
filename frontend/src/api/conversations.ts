@@ -1,4 +1,4 @@
-import type { Conversation, ThinkingEffort } from '../types/chat'
+import type { Conversation, PermissionMode, ThinkingEffort } from '../types/chat'
 
 const API_BASE = '/api/v1'
 
@@ -109,6 +109,26 @@ export async function setConversationThinking(
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ enabled, effort }),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.detail || `HTTP ${res.status}`)
+  }
+  return res.json() as Promise<Conversation>
+}
+
+/**
+ * 设置会话权限模式(设计 spec §3.1):与后端 PUT /api/v1/conversations/{id}/permission 对齐,
+ * 非法值由后端 400 拒绝;前端不做白名单过滤(可见集由 PermissionSelector 控制,历史值仍可下发)。
+ */
+export async function setConversationPermission(
+  id: string,
+  mode: PermissionMode,
+): Promise<Conversation> {
+  const res = await fetch(`${API_BASE}/conversations/${id}/permission`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode }),
   })
   if (!res.ok) {
     const data = await res.json().catch(() => ({}))

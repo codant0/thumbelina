@@ -604,3 +604,50 @@ class TestSchedulerIntegration:
         assert len(completed) == 1
         assert completed[0].payload["result"] == REPLY
         assert failed == []
+
+
+class TestPromptRunnerWiring:
+    """P0-2 fix verification: _make_prompt_runner -> _run_prompt applies conversation
+    permission/workspace at scheduler path via SimpleNamespace(app=app) shim.
+
+    Verifies the regression: pre-fix passed `app` directly to
+    apply_conversation_runtime, which crashed with `AttributeError: FastAPI
+    has no attribute .app` (silently caught by the surrounding try/except,
+    making the runtime wiring a no-op).
+    """
+
+    async def test_run_prompt_shim_does_not_raise_attribute_error(self):
+        """The SimpleNamespace(app=app) shim lets apply_conversation_runtime
+        access context.app.state without crashing on the bare FastAPI app."""
+        from types import SimpleNamespace
+
+        from thumbelina.api.routes.chat import (
+            apply_conversation_runtime,
+        )
+        from thumbelina.tools.permissions import (
+            PermissionMode,
+            get_permission_mode,
+            set_permission_mode,
+        )
+
+        fake_state = SimpleNamespace(
+            endpoint_manager=None,
+            config=SimpleNamespace(tools=SimpleNamespace(approval_timeout_seconds=600)),
+        )
+        fake_app = SimpleNamespace(state=fake_state)
+
+        # Pre-fix regression assertion: passing fake_app (bare, no .app attr)
+        # directly to apply_conversation_runtime must fail with AttributeError.
+        fake_agent = SimpleNamespace(repository_manager=None, workspace=None)
+        try:
+            await apply_conversation_runtime(fake_app, fake_agent, "cid-test", unattended=True)
+            assert False, "pre-fix AttributeError expected when passing bare FastAPI"
+        except AttributeError as exc:
+            assert "app" in str(exc).lower() or "state" in str(exc).lower()
+
+        # Post-fix: the shim works
+        context = SimpleNamespace(app=fake_app)
+        set_permission_mode(PermissionMode.READ_ONLY)
+        await apply_conversation_runtime(context, fake_agent, "cid-test", unattended=True)
+        # Unattended + no workspace -> READ_ONLY floor (effective_mode)
+        assert get_permission_mode() is PermissionMode.READ_ONLY

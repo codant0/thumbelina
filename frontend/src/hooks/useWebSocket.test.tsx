@@ -432,3 +432,209 @@ describe('useWebSocket 断线重连与心跳', () => {
     expect(instances).toHaveLength(2)
   })
 })
+
+describe('useWebSocket 权限审批流(spec §5.4)', () => {
+  let getWs: () => CapturedWebSocket | null
+
+  beforeEach(() => {
+    getWs = stubChatWebSocket()
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  function dispatch(payload: string) {
+    act(() => {
+      getWs()!.onmessage({ data: payload })
+    })
+  }
+
+  it('permission_request 帧登记为 pendingApproval(当前会话)', () => {
+    const { result } = renderHook(() => useWebSocket('ws://localhost/x', 'c1'))
+    expect(result.current.pendingApproval).toBeNull()
+
+    dispatch(JSON.stringify({
+      permission_request: {
+        request_id: 'r1',
+        calls: [{ call_id: 'c1', name: 'run_shell', args: { command: 'sudo ls' }, risk: 'dangerous', reason: 'confirm.sudo' }],
+      },
+      conversation_id: 'c1',
+    }))
+
+    expect(result.current.pendingApproval).not.toBeNull()
+    expect(result.current.pendingApproval?.request_id).toBe('r1')
+    expect(result.current.pendingApproval?.calls[0].reason).toBe('confirm.sudo')
+  })
+
+  it('非当前会话的 permission_request 不登记(其他会话的审批由后端 broker 兜底)', () => {
+    const { result } = renderHook(() => useWebSocket('ws://localhost/x', 'c1'))
+    dispatch(JSON.stringify({
+      permission_request: {
+        request_id: 'r1',
+        calls: [{ call_id: 'c1', name: 'run_shell', args: {}, risk: 'dangerous', reason: 'confirm.sudo' }],
+      },
+      conversation_id: 'c2',
+    }))
+    expect(result.current.pendingApproval).toBeNull()
+  })
+
+  it('sendPermissionResponse 上行 permission_response 帧并清卡', () => {
+    const { result } = renderHook(() => useWebSocket('ws://localhost/x', 'c1'))
+    dispatch(JSON.stringify({
+      permission_request: {
+        request_id: 'r1',
+        calls: [{ call_id: 'c1', name: 'run_shell', args: {}, risk: 'dangerous', reason: 'confirm.sudo' }],
+      },
+      conversation_id: 'c1',
+    }))
+    act(() => {
+      result.current.sendPermissionResponse([{ call_id: 'c1', approved: false }])
+    })
+    const sent = getWs()!.send.mock.calls.map(c => JSON.parse(c[0] as string))
+    expect(sent).toContainEqual({
+      permission_response: { request_id: 'r1', decisions: [{ call_id: 'c1', approved: false }] },
+    })
+    expect(result.current.pendingApproval).toBeNull()
+  })
+
+  it('error code busy_pending_approval 仅清卡,等待态保持', () => {
+    const { result } = renderHook(() => useWebSocket('ws://localhost/x', 'c1'))
+    dispatch(JSON.stringify({
+      permission_request: {
+        request_id: 'r1',
+        calls: [{ call_id: 'c1', name: 'run_shell', args: {}, risk: 'dangerous', reason: 'confirm.sudo' }],
+      },
+      conversation_id: 'c1',
+    }))
+    expect(result.current.pendingApproval).not.toBeNull()
+
+    dispatch(JSON.stringify({
+      error: '等待权限审批',
+      code: 'busy_pending_approval',
+      conversation_id: 'c1',
+    }))
+    // 清卡
+    expect(result.current.pendingApproval).toBeNull()
+    // 不终结轮次: waitingForReply 未被错误帧错误地清掉。
+    // 注意 waitingForReply 状态依赖 sessionConvRef, 它由 error 分支兜底
+    // 重置(会话已无在途回合) —— 不被本错误码特殊路径命中。
+    // 这里断言: 没有发送任何 message 后, 等待态保持空(无 user message 已发),
+    // 这表明错误处理没有冒充正常 error 终结流程(没有 markPendingHeld 等副作用)。
+    expect(result.current.waitingForReply).toBe(false)
+  })
+
+  it('error code permission_unknown_request 清卡,后续轮次不受影响', () => {
+    const { result } = renderHook(() => useWebSocket('ws://localhost/x', 'c1'))
+    dispatch(JSON.stringify({
+      permission_request: {
+        request_id: 'r1',
+        calls: [{ call_id: 'c1', name: 'run_shell', args: {}, risk: 'dangerous', reason: 'confirm.sudo' }],
+      },
+      conversation_id: 'c1',
+    }))
+    dispatch(JSON.stringify({
+      error: 'Unknown or expired permission request',
+      code: 'permission_unknown_request',
+      conversation_id: 'c1',
+    }))
+    expect(result.current.pendingApproval).toBeNull()
+  })
+
+  it('pending_approval 快照帧非 null 时替换 pendingApproval', () => {
+    const { result } = renderHook(() => useWebSocket('ws://localhost/x', 'c1'))
+    dispatch(JSON.stringify({
+      pending_approval: {
+        request_id: 'r2',
+        calls: [{ call_id: 'c1', name: 'run_shell', args: {}, risk: 'dangerous', reason: 'confirm.sudo' }],
+      },
+      conversation_id: 'c1',
+    }))
+    expect(result.current.pendingApproval?.request_id).toBe('r2')
+  })
+
+  it('pending_approval 快照帧 null 时清空 pendingApproval', () => {
+    const { result } = renderHook(() => useWebSocket('ws://localhost/x', 'c1'))
+    dispatch(JSON.stringify({
+      permission_request: {
+        request_id: 'r1',
+        calls: [{ call_id: 'c1', name: 'run_shell', args: {}, risk: 'dangerous', reason: 'confirm.sudo' }],
+      },
+      conversation_id: 'c1',
+    }))
+    dispatch(JSON.stringify({
+      pending_approval: null,
+      conversation_id: 'c1',
+    }))
+    expect(result.current.pendingApproval).toBeNull()
+  })
+
+  it('done 帧到达时清 pendingApproval(防御)', () => {
+    const { result } = renderHook(() => useWebSocket('ws://localhost/x', 'c1'))
+    dispatch(JSON.stringify({
+      permission_request: {
+        request_id: 'r1',
+        calls: [{ call_id: 'c1', name: 'run_shell', args: {}, risk: 'dangerous', reason: 'confirm.sudo' }],
+      },
+      conversation_id: 'c1',
+    }))
+    dispatch(JSON.stringify({ chunk: 'hi', conversation_id: 'c1' }))
+    dispatch(JSON.stringify({ done: true, conversation_id: 'c1' }))
+    expect(result.current.pendingApproval).toBeNull()
+  })
+
+  it('stopped 帧到达时清 pendingApproval(取消=拒绝+终止轮次)', () => {
+    const { result } = renderHook(() => useWebSocket('ws://localhost/x', 'c1'))
+    dispatch(JSON.stringify({
+      permission_request: {
+        request_id: 'r1',
+        calls: [{ call_id: 'c1', name: 'run_shell', args: {}, risk: 'dangerous', reason: 'confirm.sudo' }],
+      },
+      conversation_id: 'c1',
+    }))
+    dispatch(JSON.stringify({ stopped: true, conversation_id: 'c1' }))
+    expect(result.current.pendingApproval).toBeNull()
+  })
+
+  it('重连成功后清卡并请求 get_pending_approval 快照', () => {
+    // 切到支持重连的桩: onopen/onclose 可控
+    const instances: ReconnectableWS[] = []
+    vi.unstubAllGlobals()
+    vi.stubGlobal('WebSocket', class {
+      static OPEN = 1
+      readyState = 1
+      onopen: ((event: Event) => void) | null = null
+      onmessage: ((event: { data: string }) => void) | null = null
+      onclose: ((event: CloseEvent) => void) | null = null
+      send = vi.fn()
+      close = vi.fn()
+      constructor() {
+        instances.push(this as unknown as ReconnectableWS)
+      }
+    })
+    vi.useFakeTimers()
+    try {
+      renderHook(() => useWebSocket('ws://localhost/x', 'c1'))
+      const ws1 = instances[0]
+      act(() => ws1.onopen?.(new Event('open')))
+
+      // 首连不主动查询(常规首连由 ChatWindow 切会话 effect 直发 switch_conversation,
+      // 后端用 ack 中的 pending_approval 字段夹带快照, 见 Task 12)。
+      const firstOpenSends = ws1.send.mock.calls.map(c => JSON.parse(c[0] as string))
+      expect(firstOpenSends.some(s => 'get_pending_approval' in s)).toBe(false)
+
+      // 模拟一次重连: 断开 → 退避到期 → 新连接 onopen
+      act(() => ws1.onclose?.(new CloseEvent('close')))
+      act(() => { vi.advanceTimersByTime(1200) })
+      const ws2 = instances[1]
+      act(() => ws2.onopen?.(new Event('open')))
+
+      // 重连后请求当前会话的待审批快照
+      const secondOpenSends = ws2.send.mock.calls.map(c => JSON.parse(c[0] as string))
+      expect(secondOpenSends).toContainEqual({ get_pending_approval: 'c1' })
+    } finally {
+      vi.useRealTimers()
+      vi.unstubAllGlobals()
+    }
+  })
+})

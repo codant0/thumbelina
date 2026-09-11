@@ -67,6 +67,7 @@ from thumbelina.scheduler.scheduler import TaskScheduler
 from thumbelina.scheduler.store import TaskStore
 from thumbelina.security.auth import AuthService
 from thumbelina.security.rate_limit import RateLimiter
+from thumbelina.tools.permissions import _register_app_anchors
 
 logger = logging.getLogger(__name__)
 
@@ -354,6 +355,25 @@ def _make_prompt_runner(app: FastAPI, repository: RepositoryManager) -> PromptRu
             # conversation state, shared provider/repository/checkpointer.
             isolated = app.state.agent.clone()
             isolated.current_conversation_id = cid
+            # 任务继承会话的 permission + 工作区(spec §5.5:用户改会话权限
+            # 即改定时任务权限,语义一致且少一列 source_permission)。
+            # 调度器入口无审批者 → unattended=True;任务未绑定会话时跳过,
+            # ContextVar 默认 fail-closed(只读+无审批者)兜底。
+            if task.conversation_id:
+                try:
+                    from types import SimpleNamespace
+
+                    from thumbelina.api.routes.chat import apply_conversation_runtime
+
+                    # ``app`` 是 FastAPI 实例,无 ``.app`` 属性 —— 用 SimpleNamespace
+                    # shim 提供 ``context.app.state`` 访问入口(与 QQ 通道同模式)。
+                    context = SimpleNamespace(app=app)
+                    await apply_conversation_runtime(context, isolated, cid, unattended=True)
+                except Exception:
+                    logger.warning(
+                        "prompt task permission wiring failed; fail-closed",
+                        exc_info=True,
+                    )
             reply: str = await isolated.run(task.content)
 
         try:
@@ -634,6 +654,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     else:
         app.state.memory_service = None
 
+    # 启动时按 config 解析应用内部目录为绝对锚点(spec §4.5:目录类守卫
+    # 在 workspace≠CWD 时只锚定"相对前缀分段"会漏绝对路径)。失败仅
+    # WARNING 日志——启动必须继续,无锚点退化为"workspace 相对前缀"
+    # 单一锚点(深层保护路径仍生效)。
+    try:
+        _register_app_anchors(config)
+    except Exception:
+        logger.warning("permission app anchor registration failed", exc_info=True)
+
     # Initialize conversation auto-namer (shares the active LLM provider)
     from thumbelina.analysis.namer import ConversationNamer
 
@@ -681,18 +710,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     app.state.agent = agent
 
+    # 权限审批桥(spec §5.4):WS 通路的 interrupt 请求登记于此,任意连接的
+    # {"permission_response": ...} 按 request_id 结算;超时(默认 600s)按全拒。
+    from thumbelina.api.permission_broker import PermissionBroker
+
+    app.state.permission_broker = PermissionBroker(
+        timeout_seconds=float(getattr(config.tools, "approval_timeout_seconds", 600) or 600)
+    )
+
     # 子 agent 只读工具集:仅感知类(读/搜/取/记忆读),避免嵌套派发
     # (collaboration)、写/执行副作用与通信通道;空集时 manager 自动退回
     # 无工具单轮模式。工具在会话 ContextVar 继承下与主 agent 同工作区。
+    #
+    # 权限(spec §9 subagent):子 agent 无审批者,confirm/deny 一律拒绝 ——
+    # 白名单在此扩类(加入写/执行类工具)时,必须确认 _run_tool_loop 里的
+    # evaluate_tool_call 闸门覆盖新工具名,否则会绕过权限矩阵。
     if subagent_manager is not None:
         from thumbelina.tools.base import ToolCategory
 
         subagent_manager.set_tools(
-            [
-                t
-                for t in agent.tools
-                if getattr(t, "category", None) == ToolCategory.PERCEPTION
-            ]
+            [t for t in agent.tools if getattr(t, "category", None) == ToolCategory.PERCEPTION]
         )
     # 暴露 memory_extractor 引用给热切换路径(§9.3);agent 自身的
     # memory_extractor 由 swap_provider 同步,此处仅作冗余入口。

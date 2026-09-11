@@ -14,6 +14,7 @@ from thumbelina.api.schemas import ConversationDetailSchema, ConversationSchema,
 from thumbelina.concurrency import per_conversation_lock
 from thumbelina.prompts.roles import list_roles
 from thumbelina.repository.manager import RepositoryManager
+from thumbelina.tools.permissions import parse_mode
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,13 @@ class CreateConversationRequest(BaseModel):
         default=None,
         description="Absolute workspace directory path; required when mode='coder'",
     )
+    permission: str | None = Field(
+        default=None,
+        description=(
+            "Initial permission mode (read_only/workspace_write/global_write/"
+            "full_access/auto); null leaves the default 'full_access'"
+        ),
+    )
 
 
 class RenameConversationRequest(BaseModel):
@@ -126,6 +134,17 @@ class SetConversationThinkingRequest(BaseModel):
     )
 
 
+class SetConversationPermissionRequest(BaseModel):
+    """Request body for setting the permission mode of a conversation."""
+
+    mode: str = Field(
+        ...,
+        description=(
+            "Permission mode key: read_only / workspace_write / global_write / full_access / auto"
+        ),
+    )
+
+
 class CompressConversationRequest(BaseModel):
     """Request body for manually compressing a conversation's context."""
 
@@ -149,8 +168,20 @@ async def create_conversation(
     mode = body.mode if body else "chat"
     workspace = _validate_workspace(mode, body.workspace) if body else None
     role = "coder" if mode == "coder" else None
+    permission = "full_access"
+    if body and body.permission is not None:
+        if parse_mode(body.permission) is None:
+            raise HTTPException(
+                status_code=422, detail=f"Invalid permission mode: {body.permission!r}"
+            )
+        permission = body.permission
     conv_id = await repository.create_conversation(
-        name=name, pinned=pinned, mode=mode, workspace=workspace, role=role
+        name=name,
+        pinned=pinned,
+        mode=mode,
+        workspace=workspace,
+        role=role,
+        permission=permission,
     )
     conv = await repository.get_conversation(conv_id)
     if conv is None:
@@ -214,6 +245,7 @@ async def get_conversation(
         role=conversation.get("role"),
         thinking_enabled=conversation.get("thinking_enabled", False),
         thinking_effort=conversation.get("thinking_effort", "medium"),
+        permission=conversation.get("permission", "full_access"),
         created_at=conversation["created_at"],
         updated_at=conversation["updated_at"],
         summary=conversation.get("summary"),
@@ -343,6 +375,32 @@ async def set_conversation_thinking(
 ) -> ConversationSchema:
     """Set thinking-mode (on/off + intensity) for a conversation."""
     ok = await repository.set_conversation_thinking(conversation_id, body.enabled, body.effort)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    conv = await repository.get_conversation(conversation_id)
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return ConversationSchema(**conv)
+
+
+@router.put(
+    "/conversations/{conversation_id}/permission",
+    response_model=ConversationSchema,
+)
+async def set_conversation_permission(
+    conversation_id: str,
+    body: SetConversationPermissionRequest,
+    repository: RepositoryManager = Depends(get_repository_manager),
+) -> ConversationSchema:
+    """Set the permission mode for a conversation.
+
+    ``mode`` must be one of ``read_only`` / ``workspace_write`` /
+    ``global_write`` / ``full_access`` / ``auto``; unknown values are
+    rejected with 400 so the repository stores only canonical keys.
+    """
+    if parse_mode(body.mode) is None:
+        raise HTTPException(status_code=400, detail=f"Invalid permission mode: {body.mode!r}")
+    ok = await repository.set_conversation_permission(conversation_id, body.mode)
     if not ok:
         raise HTTPException(status_code=404, detail="Conversation not found")
     conv = await repository.get_conversation(conversation_id)

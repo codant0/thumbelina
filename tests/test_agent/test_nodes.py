@@ -269,9 +269,7 @@ class TestToolNodeTimeout:
         async def _on_event(info):
             events.append(info)
 
-        ai_msg = AIMessage(
-            content="", tool_calls=[{"id": "call_1", "name": "slow", "args": {}}]
-        )
+        ai_msg = AIMessage(content="", tool_calls=[{"id": "call_1", "name": "slow", "args": {}}])
         result = await tool_node(
             {"messages": [ai_msg]}, [mock_tool], on_tool_event=_on_event, timeout=0.05
         )
@@ -295,12 +293,8 @@ class TestToolNodeTimeout:
         mock_tool.name = "fast"
         mock_tool.ainvoke = AsyncMock(return_value="fast result")
 
-        ai_msg = AIMessage(
-            content="", tool_calls=[{"id": "call_1", "name": "fast", "args": {}}]
-        )
-        result = await tool_node(
-            {"messages": [ai_msg]}, [mock_tool], timeout=5.0
-        )
+        ai_msg = AIMessage(content="", tool_calls=[{"id": "call_1", "name": "fast", "args": {}}])
+        result = await tool_node({"messages": [ai_msg]}, [mock_tool], timeout=5.0)
 
         assert result["messages"][0].content == "fast result"
         assert isinstance(result["messages"][0], ToolMessage)

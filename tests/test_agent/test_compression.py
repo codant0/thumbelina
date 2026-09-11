@@ -516,8 +516,15 @@ class TestCompressNode:
         assert contents == ["x" * 4000, "ack", "second", "ack"]
 
     @pytest.mark.asyncio
-    async def test_tool_pairs_stay_intact_across_compression(self):
+    async def test_tool_pairs_stay_intact_across_compression(self, monkeypatch):
         from langchain_core.tools import tool
+
+        import thumbelina.tools.permissions as perms_mod
+        from thumbelina.tools.permissions import (
+            PermissionMode,
+            set_approval_context,
+            set_permission_mode,
+        )
 
         @tool
         async def echo(text: str) -> str:
@@ -542,10 +549,23 @@ class TestCompressNode:
         provider.chat_model = MagicMock()
         provider.chat_model.bind_tools.return_value = bound_model
 
+        # Task 8：闸门按 KNOWN_TOOLS 裁决；echo 是测试工具不在内置名册里，
+        # 临时扩入让它走 allow 分支（FULL_ACCESS 模式）。
+        monkeypatch.setattr(perms_mod, "KNOWN_TOOLS", perms_mod.KNOWN_TOOLS | {"echo"})
+
         agent, _ = _make_agent(default_window=3000, tools=[echo], provider=provider)
-        await agent.run("start")
-        await agent.run("more")
-        await agent.run("final?")
+        # Task 8：闸门在 _tool_node_node 首行（READ_ONLY 默认拒绝 echo），
+        # 本测试关注压缩对 tool_calls/ToolMessage 配对的影响，与权限
+        # 无关：把权限放宽到 FULL_ACCESS 让 echo 真正执行。
+        set_permission_mode(PermissionMode.FULL_ACCESS)
+        set_approval_context(False)
+        try:
+            await agent.run("start")
+            await agent.run("more")
+            await agent.run("final?")
+        finally:
+            set_permission_mode(PermissionMode.READ_ONLY)
+            set_approval_context(False)
 
         snapshot = await agent.graph.aget_state({"configurable": {"thread_id": "conv-compress"}})
         messages: list[BaseMessage] = snapshot.values["messages"]

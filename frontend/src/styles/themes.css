@@ -27,6 +27,9 @@
   --warning-muted: rgba(251, 191, 36, 0.10);
   --error: #f87171;
   --error-muted: rgba(248, 113, 113, 0.10);
+  /* 危险/审批红:与 error 同色但语义独立,供 PermissionRequestCard 等专用 */
+  --danger: var(--error);
+  --danger-muted: var(--error-muted);
   --user-bubble: #3b3b4f;
   --user-bubble-text: #e4e4e7;
   --assistant-bubble: var(--bg-elevated);
@@ -71,6 +74,9 @@
   --warning-muted: rgba(234, 179, 8, 0.12);
   --error: #ef4444;
   --error-muted: rgba(239, 68, 68, 0.12);
+  /* 危险/审批红:与 error 同色但语义独立,供 PermissionRequestCard 等专用 */
+  --danger: var(--error);
+  --danger-muted: var(--error-muted);
   --user-bubble: #0f766e;
   --user-bubble-text: #ffffff;
   --assistant-bubble: #f4f4f5;
@@ -115,6 +121,9 @@
   --warning-muted: rgba(224, 180, 106, 0.12);
   --error: #d08080;
   --error-muted: rgba(208, 128, 128, 0.12);
+  /* 危险/审批红:与 error 同色但语义独立,供 PermissionRequestCard 等专用 */
+  --danger: var(--error);
+  --danger-muted: var(--error-muted);
   --user-bubble: #4a3d35;
   --user-bubble-text: #f5efe9;
   --assistant-bubble: var(--bg-elevated);

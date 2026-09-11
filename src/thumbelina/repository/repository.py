@@ -115,11 +115,17 @@ class ConversationRepository:
         mode: str = "chat",
         workspace: str | None = None,
         role: str | None = None,
+        permission: str = "full_access",
     ) -> str:
         """Synchronous implementation of create_conversation."""
         with self._get_session() as session:
             conversation = Conversation(
-                name=name, pinned=pinned, mode=mode, workspace=workspace, role=role
+                name=name,
+                pinned=pinned,
+                mode=mode,
+                workspace=workspace,
+                role=role,
+                permission=permission,
             )
             session.add(conversation)
             session.commit()
@@ -133,9 +139,16 @@ class ConversationRepository:
         mode: str = "chat",
         workspace: str | None = None,
         role: str | None = None,
+        permission: str = "full_access",
     ) -> str:
         return await asyncio.to_thread(
-            self._create_conversation_sync, name, pinned, mode, workspace, role
+            self._create_conversation_sync,
+            name,
+            pinned,
+            mode,
+            workspace,
+            role,
+            permission,
         )
 
     def _add_message_sync(
@@ -280,6 +293,7 @@ class ConversationRepository:
                     "role": conv.role,
                     "thinking_enabled": conv.thinking_enabled or False,
                     "thinking_effort": conv.thinking_effort or "medium",
+                    "permission": conv.permission or "full_access",
                     "created_at": conv.created_at.isoformat(),
                     "updated_at": conv.updated_at.isoformat(),
                     "summary": conv.summary,
@@ -315,6 +329,7 @@ class ConversationRepository:
                     "workspace": conv.workspace,
                     "thinking_enabled": conv.thinking_enabled or False,
                     "thinking_effort": conv.thinking_effort or "medium",
+                    "permission": conv.permission or "full_access",
                     "created_at": conv.created_at.isoformat(),
                     "updated_at": conv.updated_at.isoformat(),
                     "summary": conv.summary,
@@ -358,6 +373,7 @@ class ConversationRepository:
                 "workspace": conversation.workspace,
                 "thinking_enabled": conversation.thinking_enabled or False,
                 "thinking_effort": conversation.thinking_effort or "medium",
+                "permission": conversation.permission or "full_access",
                 "created_at": conversation.created_at.isoformat(),
                 "updated_at": conversation.updated_at.isoformat(),
                 "summary": conversation.summary,
@@ -636,6 +652,36 @@ class ConversationRepository:
             True if set successfully, False if conversation not found.
         """
         return await asyncio.to_thread(self._set_thinking_sync, conversation_id, enabled, effort)
+
+    def _set_permission_sync(self, conversation_id: str, mode: str) -> bool:
+        """Synchronous implementation of set_conversation_permission."""
+        with self._get_session() as session:
+            conversation = session.get(Conversation, conversation_id)
+            if conversation is None:
+                return False
+            conversation.permission = mode
+            session.commit()
+            return True
+
+    async def set_conversation_permission(self, conversation_id: str, mode: str) -> bool:
+        """Set the permission mode for a conversation.
+
+        Parameters
+        ----------
+        conversation_id:
+            ID of the conversation to update.
+        mode:
+            Permission mode key: ``read_only`` / ``workspace_write`` /
+            ``global_write`` / ``full_access`` / ``auto``. The route layer
+            validates the value against ``PermissionMode`` before calling
+            this method, so the repository trusts the input.
+
+        Returns
+        -------
+        bool
+            True if set successfully, False if conversation not found.
+        """
+        return await asyncio.to_thread(self._set_permission_sync, conversation_id, mode)
 
     def _search_messages_sync(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
         """Synchronous implementation of search_messages."""

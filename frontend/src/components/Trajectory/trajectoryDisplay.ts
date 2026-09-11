@@ -4,6 +4,45 @@ export const PREVIEW_LIMIT = 600
 export const PREVIEW_HEAD = 200
 export const PREVIEW_TAIL = 200
 
+/** 闸门裁决（spec §3.2/§5.2）→ 前端展示语义。allowed 不展示徽标。 */
+export type VerdictKind = 'allowed' | 'denied' | 'confirmed' | 'auto_allowed'
+
+/** verdict 字符串 → i18n key / 徽标配色类 / 标题用本地化文本。 */
+export interface VerdictInfo {
+  kind: VerdictKind | null
+  labelKey: string
+  badgeClass: string
+}
+
+/** reason（stable rule key，如 ``rule.sudo``）→ 与 PermissionRequestCard 同一映射。 */
+function reasonToI18nKey(reason: string): string {
+  return `permission.rule.${reason.replace(/\./g, '_')}`
+}
+
+/** 从 tool_call payload 提取 verdict + reason 渲染信息；非工具事件或缺字段返回 null kind。 */
+export function verdictInfo(payload: Record<string, unknown>): VerdictInfo {
+  const v = payload.verdict
+  if (v === 'denied') {
+    return { kind: 'denied', labelKey: 'toolCalls.verdict.denied', badgeClass: 'verdict-badge--denied' }
+  }
+  if (v === 'confirmed') {
+    return { kind: 'confirmed', labelKey: 'toolCalls.verdict.confirmed', badgeClass: 'verdict-badge--confirmed' }
+  }
+  if (v === 'auto_allowed') {
+    return { kind: 'auto_allowed', labelKey: 'toolCalls.verdict.autoAllowed', badgeClass: 'verdict-badge--auto' }
+  }
+  if (v === 'allowed') {
+    return { kind: 'allowed', labelKey: 'toolCalls.verdict.allowed', badgeClass: 'verdict-badge--allowed' }
+  }
+  return { kind: null, labelKey: '', badgeClass: '' }
+}
+
+/** reason → i18n key（与 PermissionRequestCard 同形）。reason 为空时返回 null。 */
+export function reasonLabelKey(reason: string | undefined | null): string | null {
+  if (typeof reason !== 'string' || reason === '') return null
+  return reasonToI18nKey(reason)
+}
+
 export function collapseMiddle(
   text: string,
   limit = PREVIEW_LIMIT,

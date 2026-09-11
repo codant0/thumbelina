@@ -15,6 +15,13 @@ from thumbelina.llm.endpoint_manager import EndpointManager, LLMEndpoint
 from thumbelina.llm.factory import create_provider
 from thumbelina.prompts.roles import get_role_prompt
 from thumbelina.repository.manager import RepositoryManager
+from thumbelina.tools.permissions import (
+    PermissionMode,
+    effective_mode,
+    parse_mode,
+    set_approval_context,
+    set_permission_mode,
+)
 from thumbelina.tools.workspace_context import set_workspace
 
 logger = logging.getLogger(__name__)
@@ -119,8 +126,10 @@ async def chat(
     isolated_agent = agent.clone()
     isolated_agent.current_conversation_id = conversation_id
 
-    # 应用会话的端点与角色（HTTP / WebSocket / 通道共用）
-    await apply_conversation_runtime(http_request, isolated_agent, conversation_id)
+    # 应用会话的端点、角色、工作区与会话权限（HTTP / WebSocket / 通道共用）。
+    # HTTP `/chat` 路由无人值守（无审批者 → confirm 一律 deny；spec §8）：
+    # 显式 unattended=True 把意图写在调用点，默认 True（fail-closed）只是兜底。
+    await apply_conversation_runtime(http_request, isolated_agent, conversation_id, unattended=True)
 
     # 解析会话的上下文窗口（会话端点 → 全局活跃端点 →
     # llm.context_window），供压缩阶段使用。
@@ -271,17 +280,50 @@ async def _apply_conversation_workspace(agent: ThumbelinaAgent, conversation_id:
     set_workspace(workspace)
 
 
-async def apply_conversation_runtime(
-    context: Any, agent: ThumbelinaAgent, conversation_id: str
+async def _apply_conversation_permission(
+    agent: ThumbelinaAgent, conversation_id: str, *, unattended: bool
 ) -> None:
-    """应用会话的端点、角色与工作区（HTTP / WebSocket / 通道共用）。
+    """读取会话的 ``permission`` 列,按 spec §8 写入 ContextVar。
+
+    流程(plan Task 6 / spec §8):
+    1. 解析会话 → 读取 ``permission`` 与 ``workspace``;
+    2. 未知模式回退 ``FULL_ACCESS``(防御历史脏数据, 与前端 hidden hint 一致);
+    3. ``effective_mode(mode, unattended=..., has_workspace=...)`` 应用
+       无人值守上限(spec §8 规则 2, auto 显式豁免);
+    4. ``set_approval_context(not unattended)`` —— 无人值守入口不开审批
+       闸门,confirm 一律 deny(规则 1)。
+    """
+    mode = PermissionMode.FULL_ACCESS
+    has_ws = bool(getattr(agent, "workspace", None))
+    repository = agent.repository_manager
+    if repository is not None:
+        try:
+            conv = await repository.get_conversation(conversation_id)
+        except Exception:
+            conv = None
+        if conv:
+            mode = parse_mode(conv.get("permission")) or PermissionMode.FULL_ACCESS
+            has_ws = bool(conv.get("workspace"))
+    set_permission_mode(effective_mode(mode, unattended=unattended, has_workspace=has_ws))
+    set_approval_context(not unattended)
+
+
+async def apply_conversation_runtime(
+    context: Any, agent: ThumbelinaAgent, conversation_id: str, *, unattended: bool = True
+) -> None:
+    """应用会话的端点、角色、工作区与权限（HTTP / WebSocket / 通道共用）。
 
     ``context`` 只需暴露 ``app.state``（``Request``、``WebSocket`` 或
     指向 ``app.state`` 的轻量 shim 均可）。
+
+    ``unattended`` 默认 ``True``（fail-closed：未接线的入口不会获得完整
+    写权限或审批闸门）；显式 ``unattended=False`` 表示该入口有审批者
+    （WS、CLI TTY），允许 confirm 走 interrupt 路径（plan Task 6）。
     """
     await _apply_conversation_endpoint(context, agent, conversation_id)
     await _apply_conversation_role(agent, conversation_id)
     await _apply_conversation_workspace(agent, conversation_id)
+    await _apply_conversation_permission(agent, conversation_id, unattended=unattended)
 
 
 async def resolve_run_window(

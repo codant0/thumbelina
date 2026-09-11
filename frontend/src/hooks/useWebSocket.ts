@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { AttachmentRef, Message, SendAttachmentInput, SubagentEventPayload, ToolAnchor, ToolCall, ToolEventPayload } from '../types/chat'
+import type { AttachmentRef, Message, PermissionDecision, PermissionRequestPayload, PendingApprovalSnapshot, SendAttachmentInput, SubagentEventPayload, ToolAnchor, ToolCall, ToolEventPayload } from '../types/chat'
 import { markInterrupted, upsertToolCall } from '../components/Chat/toolCallEvents'
 
 interface WsIncoming {
@@ -35,6 +35,12 @@ interface WsIncoming {
   /** 实时工具调用事件(设计 §5.2):start/end 成对、按 call_id 配对,先于/交错于
    *  文本 chunk 到达;由当轮 assistant 占位消息按 call_id upsert 工具卡。 */
   tool_event?: ToolEventPayload
+  /** 权限审批请求(后端 WS 层广播,顶层带 conversation_id);登记后置该会话审批等待态。 */
+  permission_request?: PermissionRequestPayload
+  /** 重连/切会话时的待审批快照;null 表示该会话无挂起审批。 */
+  pending_approval?: PendingApprovalSnapshot | null
+  /** 错误帧 code(用于审批相关错误码分流,见 spec §5.4) */
+  code?: 'permission_unknown_request' | 'busy_pending_approval' | string
 }
 
 /** ``{task_event: …}`` 帧体;与 ``GET /tasks/events`` 的条目结构一致。 */
@@ -197,6 +203,12 @@ export function useWebSocket(url: string, activeConversationId?: string) {
   // (只有重连才提示"重连中"并自动刷新历史)。manualClose 标记 effect
   // cleanup 的主动关闭,避免卸载/换 url 时误调度重连。
   const [retryEpoch, setRetryEpoch] = useState(0)
+  // 权限审批等待(spec §5.4):只在 activeConversation 的 pending 暴露给 UI,
+  // 其他会话的审批由 broker 在后端兜底(后端 task 已 broadcast 到所有连接,
+  // 此处按 conversation_id 过滤);null = 无挂起审批。`done`/`stopped`/切会
+  // 话/clearMessages 时清空。
+  const [pendingApproval, setPendingApproval] = useState<PermissionRequestPayload | null>(null)
+  const pendingApprovalRef = useRef<PermissionRequestPayload | null>(null)
   const retryAttemptRef = useRef(0)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -219,10 +231,23 @@ export function useWebSocket(url: string, activeConversationId?: string) {
     }
   }, [])
 
+  // pendingApproval 的 ref 镜像: sendPermissionResponse 闭包要读到最新值,
+  // useCallback 的依赖数组不能直接放 state(否则每次清卡都重建引用)。仅在
+  // setPendingApproval 旁路写入。
+  const setPendingApprovalTracked = useCallback((value: PermissionRequestPayload | null) => {
+    pendingApprovalRef.current = value
+    setPendingApproval(value)
+  }, [])
+
   // Keep the active conversation ref in sync with the prop
   useEffect(() => {
     activeConversationRef.current = activeConversationId
-  }, [activeConversationId])
+    // 切会话: 旧会话的审批卡不再适用于新视图, 清掉避免跨会话串话。
+    // 后端 broker 仍保留旧会话的 pending(后端按 conversation_id 分桶),
+    // 新会话若有挂起审批由 onopen 的 get_pending_approval 拉取快照。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPendingApprovalTracked(null)
+  }, [activeConversationId, setPendingApprovalTracked])
 
   useEffect(() => {
     lastConversationIdRef.current = lastConversationId
@@ -491,6 +516,44 @@ export function useWebSocket(url: string, activeConversationId?: string) {
     setPendingFor(conv, null)
   }, [setPendingFor])
 
+  /**
+   * 上行审批响应帧(spec §5.4):由 PermissionRequestCard 调用;后端 broker
+   * 结算后继续 stream 的 resume 循环。无 WS 连接时静默丢弃(挂载竞态, 重连
+   * 后会经 onopen → get_pending_approval 重新拉取最新快照)。
+   */
+  const sendPermissionResponse = useCallback((decisions: PermissionDecision[]) => {
+    const req = pendingApprovalRef.current
+    if (!req) return
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      try {
+        wsRef.current.send(JSON.stringify({
+          permission_response: { request_id: req.request_id, decisions },
+        }))
+      } catch {
+        // 发送失败:不清 pending(连接马上走 onclose 重连, 重连后会重新拉快照)。
+      }
+    }
+    // 本地乐观清卡:后端 broker 不论是否结算, 后续 tool_end / done / error /
+    // 切会话都会再清一次;即便响应帧未送达, 后端 broker 也会超时按全拒结算。
+    setPendingApprovalTracked(null)
+  }, [setPendingApprovalTracked])
+
+  /**
+   * 主动拉取指定会话的待审批快照(重连后由 onopen 调用);后端回
+   * ``pending_approval`` 帧(可能为 null)。无 WS 连接时静默 no-op。
+   */
+  const getPendingApproval = useCallback((conversationId?: string) => {
+    const cid = conversationId ?? activeConversationRef.current
+    if (!cid) return
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      try {
+        wsRef.current.send(JSON.stringify({ get_pending_approval: cid }))
+      } catch {
+        // 连接刚建立即失败的场景交由 onclose 统一重连
+      }
+    }
+  }, [])
+
   useEffect(() => {
     // 新连接开始(含重连 epoch 重跑):清除上一轮 cleanup 留下的主动关闭标记。
     manualCloseRef.current = false
@@ -566,6 +629,23 @@ export function useWebSocket(url: string, activeConversationId?: string) {
           // 连接刚建立即失败的场景交由 onclose 统一重连
         }
       }
+      // 重连后:清掉 stale 审批卡并向服务端查询当前会话的待审批快照。断线期间
+      // 后端可能已超时结算,本地残留的 pending 卡片是假的;新拉到的真实
+      // 快照会覆盖 null 留下的空态。首连不主动查询(常规首连由 ChatWindow
+      // 的切换 effect 直发 switch_conversation, 后端用 switch_conversation
+      // ack 中的 pending_approval 字段夹带快照, 见 Task 12)。
+      if (isReconnect) {
+        pendingApprovalRef.current = null
+        setPendingApproval(null)
+        const cid = activeConversationRef.current
+        if (cid) {
+          try {
+            ws.send(JSON.stringify({ get_pending_approval: cid }))
+          } catch {
+            // 连接刚建立即失败的场景交由 onclose 统一重连
+          }
+        }
+      }
       startHeartbeat()
     }
 
@@ -637,6 +717,15 @@ export function useWebSocket(url: string, activeConversationId?: string) {
 
       if (data.error) {
         const conv = data.conversation_id ?? null
+        // 审批相关错误码(spec §5.4): 仅清卡/提示, 不终结当轮 —— 后端主循环
+        // 仍可能继续或等待用户响应。permission_unknown_request 提示用户重新
+        // 审批(后端 broker 已超时/重复结算);busy_pending_approval 提示发送
+        // 的消息需先排队等审批结束。
+        if (data.code === 'permission_unknown_request') {
+          setPendingApprovalTracked(null)
+        } else if (data.code === 'busy_pending_approval') {
+          setPendingApprovalTracked(null)
+        }
         if (conv) {
           setLastConversationId(conv)
           if (!knownConversationsRef.current.has(conv)) {
@@ -746,6 +835,38 @@ export function useWebSocket(url: string, activeConversationId?: string) {
           }
           if (newMsgs.length > 0) {
             setMessages(prev => [...prev, ...newMsgs])
+          }
+        }
+        return
+      }
+
+      // 权限审批请求(spec §5.4):后端 broker 拦截 confirm 类工具调用后
+      // 通过 broadcast_chat_message 广播此帧(顶层带 conversation_id)。
+      // 当前会话 → 登记并暴露给 PermissionRequestCard;其他会话的审批
+      // 由后端 broker 在该会话挂起, 我们不展示(用户视图聚焦当前会话)。
+      // 后端重复帧(用户多 tab 共享 / 切回会话快照拉取)→ 同样的 request_id
+      // 直接覆盖式 set(后端已结算的会先发 done/error 把卡清掉)。
+      if (data.permission_request) {
+        const conv = data.conversation_id ?? null
+        if (conv && conv === activeConversationRef.current) {
+          setPendingApprovalTracked(data.permission_request)
+        }
+        return
+      }
+
+      // 待审批快照(重连/切会话 ack 由 get_pending_approval 触发):null
+      // 表示后端无挂起审批;非 null → 用快照替换 pendingApproval(同样按
+      // 当前会话过滤, 防止跨会话污染)。
+      if (data.pending_approval !== undefined) {
+        const conv = data.conversation_id ?? null
+        if (!conv || conv === activeConversationRef.current) {
+          if (data.pending_approval === null) {
+            setPendingApprovalTracked(null)
+          } else {
+            setPendingApprovalTracked({
+              request_id: data.pending_approval.request_id,
+              calls: data.pending_approval.calls,
+            })
           }
         }
         return
@@ -926,6 +1047,11 @@ export function useWebSocket(url: string, activeConversationId?: string) {
           }
           clearWaitingFor(conv)
         }
+        // 用户 stop 同时取消未决审批(spec §5.4 「立即发送」语义):清卡
+        // 后由后端 broker 超时(已结算)或下一次响应携带 resume 结果。
+        if (!conv || conv === activeConversationRef.current) {
+          setPendingApprovalTracked(null)
+        }
         sessionConvRef.current = null
         // 后端取消不补发 tool_end:先把残留 running 卡标为 interrupted,
         // 再终结消息(终结的 spread 会保留工具卡状态)。
@@ -966,6 +1092,11 @@ export function useWebSocket(url: string, activeConversationId?: string) {
             }
           }
           streamConvRef.current = conv
+        }
+        // 当前会话的回合正常结束 → 清掉可能残留的审批卡(防御:broker
+        // 结算的下一个工具调用还没来 done 帧就已暴露卡片的极端场景)。
+        if (!conv || conv === activeConversationRef.current) {
+          setPendingApprovalTracked(null)
         }
         sessionConvRef.current = null
         if (twTimerRef.current) {
@@ -1237,7 +1368,9 @@ export function useWebSocket(url: string, activeConversationId?: string) {
     // 显式清空某会话上下文时,连带清掉该会话的待发消息;
     // 无参调用(切换会话视图)不影响任何待发消息。
     if (conversationId) setPendingFor(conversationId, null)
-  }, [stopTypewriter, setPendingFor])
+    // 切会话/清空上下文: 审批卡不属于消息历史, 一并清掉避免跨会话串话。
+    setPendingApprovalTracked(null)
+  }, [stopTypewriter, setPendingFor, setPendingApprovalTracked])
 
   const clearNewConversation = useCallback(() => {
     setNewConversationId(null)
@@ -1285,6 +1418,11 @@ export function useWebSocket(url: string, activeConversationId?: string) {
     switchConversation,
     loadHistory,
     subscribe,
+    // 权限审批(spec §5.4):当前会话的待审批请求 + 响应上行 + 主动快照拉取。
+    // pendingApproval 为 null 表示无挂起审批。
+    pendingApproval,
+    sendPermissionResponse,
+    getPendingApproval,
   }
 }
 

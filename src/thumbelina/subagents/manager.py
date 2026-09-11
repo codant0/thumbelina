@@ -262,11 +262,17 @@ class SubagentManager:
         - 每个工具调用复用 :func:`thumbelina.agent.nodes.tool_node`，与主
           agent 保持一致的错误文案与 per-tool 超时语义。
         - 达到轮次上限时返回已有文本并明确标注"可能不完整"，绝不静默截断。
+        - 权限（Task 13, spec §9 subagent）：每次执行前经
+          :func:`evaluate_tool_call` 逐 call 裁决（模式取自继承来的
+          ContextVar）。子 agent 没有审批者，``confirm`` 与 ``deny`` 同等
+          处理：合成 ``Error: 权限拒绝: <reason>`` ToolMessage 而不执行，
+          并按原 ``tool_calls`` 顺序回填（provider 要求配对且有序）。
         """
         # 惰性导入避免包初始化环（agent 包初始化会加载协作工具链）。
-        from langchain_core.messages import BaseMessage
+        from langchain_core.messages import BaseMessage, ToolMessage
 
         from thumbelina.agent.nodes import tool_node
+        from thumbelina.tools.permissions import evaluate_tool_call, get_permission_mode
 
         try:
             model = self.llm_provider.chat_model.bind_tools(self._tools)
@@ -287,12 +293,63 @@ class SubagentManager:
             response = await model.ainvoke(messages)
             messages.append(response)
             last_text = _message_text(response)
-            if not getattr(response, "tool_calls", None):
+            tool_calls = list(getattr(response, "tool_calls", None) or [])
+            if not tool_calls:
                 return last_text
-            executed = await tool_node(
-                {"messages": messages}, self._tools, timeout=self.tool_timeout
-            )
-            messages.extend(executed["messages"])
+            mode = get_permission_mode()
+            # 子 agent 共享主 agent 的工作区(spec §2)：当 manager/agent_ref
+            # 注入了 workspace 时传给 evaluate_tool_call,否则视为无工作区
+            # (保守起见取 False —— 即使 subagent 走主 agent 的 ContextVar,
+            # 没有显式 workspace 标记时按"等效只读兜底"处理)。
+            has_workspace = bool(getattr(self, "_workspace", None))
+            decisions = [
+                evaluate_tool_call(
+                    mode, tc.get("name", ""), None, tc.get("args"), has_workspace=has_workspace
+                )
+                for tc in tool_calls
+            ]
+            runnable = [
+                tc for tc, d in zip(tool_calls, decisions, strict=True) if d.verdict == "allow"
+            ]
+            if runnable:
+                gated = response.model_copy(update={"tool_calls": runnable})
+                executed = await tool_node(
+                    {"messages": [*messages[:-1], gated]},
+                    self._tools,
+                    timeout=self.tool_timeout,
+                )
+                executed_by_id = {getattr(m, "tool_call_id", None): m for m in executed["messages"]}
+            else:
+                executed_by_id = {}
+            # 按原 tool_calls 顺序回填:执行结果取 tool_node 产出,被拒的
+            # 位置就地合成错误 ToolMessage(与主闸门同文案规则)。
+            tool_messages: list[BaseMessage] = []
+            for tc, decision in zip(tool_calls, decisions, strict=True):
+                call_id = tc.get("id", "")
+                if decision.verdict == "allow":
+                    produced = executed_by_id.get(call_id)
+                    if produced is not None:
+                        tool_messages.append(produced)
+                        continue
+                    tool_messages.append(
+                        ToolMessage(
+                            content="Error: 权限拒绝: rule.unknown_tool",
+                            tool_call_id=call_id,
+                        )
+                    )
+                    continue
+                logger.info(
+                    "Subagent tool call %s denied by permission gate (%s)",
+                    tc.get("name", ""),
+                    decision.reason,
+                )
+                tool_messages.append(
+                    ToolMessage(
+                        content=f"Error: 权限拒绝: {decision.reason}",
+                        tool_call_id=call_id,
+                    )
+                )
+            messages.extend(tool_messages)
         # 轮次耗尽:用一次无工具调用强制收束。循环里模型可能全程只发工具
         # 调用(last_text 为空),只返回提示语对主 agent 毫无价值;带上完整
         # 循环历史让模型基于已 gathered 的证据直接产出结论。

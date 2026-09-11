@@ -15,10 +15,10 @@ from thumbelina.tools.base import (
 from thumbelina.tools.execution import (
     CONFIRM_PATTERNS,
     DANGEROUS_PATTERNS,
-    PROTECTED_PATH_PATTERNS,
     RunShellTool,
     WriteFileTool,
 )
+from thumbelina.tools.permissions import PROTECTED_PATH_PATTERNS
 
 
 def test_module_constants_exported():
@@ -36,25 +36,30 @@ def test_module_constants_exported():
     assert names and all(names)
     # 短名是人类可读文案:不得混入正则源码/元字符
     assert not any(ch in "".join(names) for ch in "\\[|"), names
+    # 中-2 修复: PROTECTED_PATH_PATTERNS 单一事实源在 thumbelina.tools.permissions,
+    # 旧 execution.py 副本(无 TODO/attachments、无第二锚点)删除后这里从
+    # permissions 模块直接 import,断言沿用确保清单不缩水。
     assert "thumbelina.db" in PROTECTED_PATH_PATTERNS
+    assert "TODO/" in PROTECTED_PATH_PATTERNS
+    assert "attachments/" in PROTECTED_PATH_PATTERNS
 
 
-# 审核修复 B-7:Reject/Confirm reason 只含短名,不泄露正则源码
-# (上百字符进 ToolMessage/日志会污染 LLM 上下文,且向模型披露完整规则)。
+# 任务 2 上移：reason 由中文短名改为稳定规则键（spec §3.2），
+# 后端不下发中文自由串，前端经 i18n 映射。reason 形如 ``dangerous.rm_root``。
 @pytest.mark.asyncio
-async def test_reject_reason_uses_short_name_not_pattern_source():
+async def test_reject_reason_uses_rule_key_not_pattern_source():
     verdict = await RunShellTool().security_review({"command": "rm -rf /"})
     assert isinstance(verdict, Reject)
-    assert "\\" not in verdict.reason
-    assert verdict.reason in {name for name, _ in DANGEROUS_PATTERNS}
+    assert "\\" not in verdict.reason  # 不泄露正则源码
+    assert verdict.reason == "dangerous.rm_root"  # 稳定规则键
 
 
 @pytest.mark.asyncio
-async def test_confirm_reason_uses_short_name_not_pattern_source():
+async def test_confirm_reason_uses_rule_key_not_pattern_source():
     verdict = await RunShellTool().security_review({"command": "sudo ls"})
     assert isinstance(verdict, Confirm)
-    assert "\\" not in verdict.reason
-    assert verdict.reason in {name for name, _ in CONFIRM_PATTERNS}
+    assert "\\" not in verdict.reason  # 不泄露正则源码
+    assert verdict.reason == "confirm.sudo"  # 稳定规则键
 
 
 @pytest.mark.parametrize(
@@ -225,18 +230,22 @@ async def test_nonzero_exit_suspect():
 
 @pytest.mark.asyncio
 async def test_write_file_rejects_db(tmp_path, monkeypatch):
+    from thumbelina.tools.permissions import PermissionMode, set_permission_mode
     from thumbelina.tools.workspace_context import set_workspace
 
     set_workspace(str(tmp_path))
+    set_permission_mode(PermissionMode.WORKSPACE_WRITE)
     out = await WriteFileTool()._arun(path="thumbelina.db", content="x")
     assert "安全审查拒绝" in out
 
 
 @pytest.mark.asyncio
 async def test_write_file_rejects_protected_dirs(tmp_path):
+    from thumbelina.tools.permissions import PermissionMode, set_permission_mode
     from thumbelina.tools.workspace_context import set_workspace
 
     set_workspace(str(tmp_path))
+    set_permission_mode(PermissionMode.WORKSPACE_WRITE)
     for p in ["prompts/roles/x.md", ".env", "plugins/y.py", "MEMORY/a/b.md"]:
         out = await WriteFileTool()._arun(path=p, content="x")
         assert "安全审查拒绝" in out, p
@@ -250,9 +259,11 @@ async def test_write_file_rejects_protected_dirs(tmp_path):
     ["src/memory/util.py", "app/plugins/views.py", "docs/prompts/roles/x.md"],
 )
 async def test_deep_same_name_dirs_allowed(tmp_path, p):
+    from thumbelina.tools.permissions import PermissionMode, set_permission_mode
     from thumbelina.tools.workspace_context import set_workspace
 
     set_workspace(str(tmp_path))
+    set_permission_mode(PermissionMode.WORKSPACE_WRITE)
     out = await WriteFileTool()._arun(path=p, content="x")
     assert "Successfully wrote" in out, p
 
@@ -260,9 +271,11 @@ async def test_deep_same_name_dirs_allowed(tmp_path, p):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("p", ["MEMORY/a.md", "plugins/y.py", "prompts/roles/z.md"])
 async def test_root_level_protected_dirs_rejected(tmp_path, p):
+    from thumbelina.tools.permissions import PermissionMode, set_permission_mode
     from thumbelina.tools.workspace_context import set_workspace
 
     set_workspace(str(tmp_path))
+    set_permission_mode(PermissionMode.WORKSPACE_WRITE)
     out = await WriteFileTool()._arun(path=p, content="x")
     assert "安全审查拒绝" in out, p
 
@@ -273,9 +286,11 @@ async def test_root_level_protected_dirs_rejected(tmp_path, p):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("content", ["line1\nline2\n", "line1\r\nline2\r\n"])
 async def test_write_file_crlf_byte_exact(tmp_path, content):
+    from thumbelina.tools.permissions import PermissionMode, set_permission_mode
     from thumbelina.tools.workspace_context import set_workspace
 
     set_workspace(str(tmp_path))
+    set_permission_mode(PermissionMode.WORKSPACE_WRITE)
     out = await WriteFileTool()._arun(path="crlf.txt", content=content)
     assert "[warn]" not in out
     assert (tmp_path / "crlf.txt").read_bytes() == content.encode("utf-8")
@@ -283,18 +298,22 @@ async def test_write_file_crlf_byte_exact(tmp_path, content):
 
 @pytest.mark.asyncio
 async def test_write_file_ok_verify(tmp_path):
+    from thumbelina.tools.permissions import PermissionMode, set_permission_mode
     from thumbelina.tools.workspace_context import set_workspace
 
     set_workspace(str(tmp_path))
+    set_permission_mode(PermissionMode.WORKSPACE_WRITE)
     out = await WriteFileTool()._arun(path="sub/a.txt", content="hello")
     assert out == "Successfully wrote 5 bytes to sub/a.txt"
 
 
 @pytest.mark.asyncio
 async def test_write_file_workspace_escape(tmp_path):
+    from thumbelina.tools.permissions import PermissionMode, set_permission_mode
     from thumbelina.tools.workspace_context import set_workspace
 
     set_workspace(str(tmp_path))
+    set_permission_mode(PermissionMode.WORKSPACE_WRITE)
     out = await WriteFileTool()._arun(path="../outside.txt", content="x")
     assert out.startswith("Error:")
 

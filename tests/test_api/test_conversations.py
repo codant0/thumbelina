@@ -312,6 +312,82 @@ def test_set_thinking_rejects_invalid_effort(client, conversation_id):
     assert response.status_code == 422
 
 
+def test_set_permission_route(client, conversation_id):
+    """PUT /conversations/{id}/permission should set and round-trip the mode."""
+    response = client.put(
+        f"/api/v1/conversations/{conversation_id}/permission",
+        json={"mode": "global_write"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == conversation_id
+    assert data["permission"] == "global_write"
+
+    detail = client.get(f"/api/v1/conversations/{conversation_id}").json()
+    assert detail["permission"] == "global_write"
+
+
+def test_set_permission_invalid_mode(client, conversation_id):
+    """PUT /conversations/{id}/permission should reject unknown mode values."""
+    response = client.put(
+        f"/api/v1/conversations/{conversation_id}/permission",
+        json={"mode": "yolo"},
+    )
+    assert response.status_code == 400
+
+
+def test_set_permission_nonexistent_conversation(client):
+    """PUT /conversations/{id}/permission should 404 for unknown IDs."""
+    response = client.put(
+        "/api/v1/conversations/nonexistent-id/permission",
+        json={"mode": "read_only"},
+    )
+    assert response.status_code == 404
+
+
+def test_create_with_permission(client, tmp_path):
+    """POST /conversations should persist the supplied permission mode."""
+    response = client.post(
+        "/api/v1/conversations",
+        json={
+            "mode": "coder",
+            "workspace": str(tmp_path),
+            "permission": "workspace_write",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["permission"] == "workspace_write"
+
+
+def test_create_with_invalid_permission_rejected(client):
+    """POST /conversations should reject an unknown permission mode."""
+    response = client.post(
+        "/api/v1/conversations",
+        json={"permission": "bogus"},
+    )
+    assert response.status_code == 422
+
+
+def test_create_default_permission_is_full_access(client):
+    """POST /conversations without permission should default to 'full_access'."""
+    response = client.post("/api/v1/conversations", json={})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["permission"] == "full_access"
+
+
+def test_set_permission_round_trip_each_mode(client, conversation_id):
+    """Each canonical mode key should be accepted by the PUT route."""
+    for mode in ("read_only", "workspace_write", "global_write", "full_access", "auto"):
+        response = client.put(
+            f"/api/v1/conversations/{conversation_id}/permission",
+            json={"mode": mode},
+        )
+        assert response.status_code == 200, f"failed for mode={mode}"
+        assert response.json()["permission"] == mode
+
+
 def test_clear_conversation_messages(client, conversation_id):
     """DELETE /conversations/{id}/messages should empty the history."""
     detail = client.get(f"/api/v1/conversations/{conversation_id}").json()

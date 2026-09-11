@@ -145,6 +145,33 @@ Markdown file-system-backed layered memory (default directory `MEMORY/`). Three 
 - `MessageQueue` — async inter-agent messaging
 - `SharedState` — lock-protected KV store
 
+### Permission Modes (`tools/permissions.py`)
+
+Single source of truth for the five-mode capability ladder and gate decisions (spec `2026-09-06-permission-modes-design.md` §3/§4/§5). Enforced at tool execution, **not** as a prompt convention.
+
+- `PermissionMode` (StrEnum) + `LADDER` (strictly increasing order: `READ_ONLY` → `WORKSPACE_WRITE` → `GLOBAL_WRITE` → `FULL_ACCESS` → `AUTO`)
+- `PermissionDecision` (verdict: `allow` / `confirm` / `deny`; risk: `normal` / `dangerous`; `auto_allowed` flag for auto-mode auto-passes)
+- ContextVar injection (default fail-closed): `set_permission_mode` / `get_permission_mode`, `set_approval_context` / `has_approver`
+- `effective_mode(mode, *, unattended, has_workspace)` — unattended ceiling is `WORKSPACE_WRITE` (with workspace) / `READ_ONLY` (without); `AUTO` is explicitly exempt
+- Shell classifier moved up from `tools/execution.py` (`POSIX_DANGEROUS`, `WINDOWS_DANGEROUS`, `POSIX_CONFIRM`, `WINDOWS_CONFIRM`, write-piercing patterns, `_rm_root_patterns`) — `RunShellTool` / `WriteFileTool` `security_review` delegate here so rules cannot drift between the gate and the tool layer
+- `normalize_shell_command` — line-continuation fold + comment strip + whitespace collapse, used both by the classifier (prevent `rm -rf \n/` bypass) and the approval-card preview (spec §4.6)
+
+**The gate lives in `agent/graph.py::_tool_node_node` — its first line of body, before any `trajectory_recorder` / `get_stream_writer` / `tool_start` emission.** Replay idempotency (verdict stored in the trajectory payload, gate re-evaluated on resume) requires the gate to precede those side effects (review P2-1). The gate itself does not enter `try/except Exception`: `GraphInterrupt(GraphBubbleUp(Exception))` is swallowed by that pattern (review T5). Resume must reuse the local `config` from the same `stream()` / `run()` scope so the thread_id stays stable (review T6).
+
+**Entry-point matrix** — each entry decides whether it has an approver and what the unattended ceiling is. `apply_conversation_runtime` is the single helper that wires `set_workspace` + `set_permission_mode` + `set_approval_context` for a request; it is called in only three places (HTTP chat route, WS `_run_generation`, WeChat channel), so every other entry must either call it explicitly or accept the fail-closed default (`READ_ONLY`, no approver).
+
+| Entry | File / call site | Approver | Unattended ceiling | Mode wired |
+|---|---|---|---|---|
+| HTTP chat route | `api/routes/chat.py::apply_conversation_runtime` | None (one-shot) | `READ_ONLY` / `WORKSPACE_WRITE` | per request |
+| WebSocket `_run_generation` | `api/websocket.py` | `PermissionRequestCard` via WS broker | n/a (interactive) | per session |
+| WeChat channel | `channels/wechat_channel.py` (via `apply_conversation_runtime`) | None | `READ_ONLY` / `WORKSPACE_WRITE` | per session |
+| QQ channel | `channels/qq_channel.py` | **None** | `READ_ONLY` | not yet wired (fail-closed default applies) |
+| Scheduler `_run_prompt` | `api/app.py` | **None** | `READ_ONLY` / `WORKSPACE_WRITE` | not yet wired (fail-closed default applies) |
+| CLI `_run_chat_session` (TTY) | `cli/chat.py` | CLI `_approval_handler` (y/N prompt) | n/a (interactive) | `FULL_ACCESS` + `isatty()` |
+| CLI `_run_chat_session` (non-TTY / piped) | `cli/chat.py` | **None** | `READ_ONLY` / `WORKSPACE_WRITE` | `FULL_ACCESS` set, but `approval_handler=None` → confirm calls denied |
+
+**Sub-agent whitelist expansion rule.** `cli/chat.py` and `api/app.py` both call `SubagentManager.set_tools(...)` to restrict the worker's tool surface to `ToolCategory.PERCEPTION`. Sub-agents have **no approver**, so adding a write / execution tool to that whitelist must be accompanied by a corresponding entry in `evaluate_tool_call` (gate matrix) — otherwise the sub-agent will bypass the gate entirely. (See `subagents/manager.py` `_run_tool_loop`.)
+
 ### Frontend (`frontend/src/`)
 
 React 19 + TypeScript + Vite 8. Pages: Chat, Tasks, Memory, Dream, Settings, Plugins, Channels. Three themes (dark/light/warm). i18n via `LocaleContext` (English + Chinese).

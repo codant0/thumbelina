@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
-import { AlertCircle, Clock, ImagePlus, Send, Square, X, Zap } from 'lucide-react'
+import { AlertCircle, Clock, ImagePlus, Send, ShieldOff, Square, X, Zap } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import { canSendMessage } from '../../hooks/useWebSocket'
 import type { SendAttachmentInput } from '../../types/chat'
@@ -49,6 +49,13 @@ interface InputBoxProps {
   onAttachmentsChange?: (next: LocalAttachment[] | ((prev: LocalAttachment[]) => LocalAttachment[])) => void
   /** 当前待发消息里排队的图片数(悬浮条徽标展示)。 */
   pendingAttachmentCount?: number
+  /** 存在挂起的权限审批(spec §5.4): 提交/立即发送会取消未决审批(拒绝)
+   *  并继续发送;stop 按钮保持可用(取消=拒绝并终止轮次)。审批期间输入
+   *  也走 onQueueSend 排队(沿用 isStreaming 的同条路径)。 */
+  pendingApproval?: boolean
+  /** 「立即发送」前由 ChatWindow 拒绝未决审批(spec §5.4 「立即发送」语义)。
+   *  无审批时该 prop 不被调用(由 ChatWindow 仅在 pendingApproval 时传入)。 */
+  onCancelApproval?: () => void
 }
 
 const EMPTY_ATTACHMENTS: LocalAttachment[] = []
@@ -131,6 +138,8 @@ export function InputBox({
   attachments,
   onAttachmentsChange,
   pendingAttachmentCount,
+  pendingApproval,
+  onCancelApproval,
 }: InputBoxProps) {
   const [text, setText] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -252,8 +261,10 @@ export function InputBox({
     const trimmed = text.trim()
     // 空文本 + 无就绪附件 → 不发送;空文本 + 有就绪附件 → 允许(协议 §4.1)
     if (!trimmed && readyCount === 0) return
-    if (isStreaming) {
-      // 流式进行中:排队为待发消息(附件随文字一起进入待发队列)
+    if (isStreaming || pendingApproval) {
+      // 流式进行中或审批等待中(spec §5.4 第 1 条):排队为待发消息
+      // (附件随文字一起进入待发队列)。pendingApproval 显式挂钩避免
+      // 依赖 isStreaming 的隐式状态(中-3)。
       if (readyRefs.length > 0) onQueueSend?.(trimmed, readyRefs)
       else onQueueSend?.(trimmed)
       clearTextarea()
@@ -299,6 +310,30 @@ export function InputBox({
 
   return (
     <div className="input-box">
+      {/* 审批等待态(独立浮条): 与 pending 浮条并列, 但语义不同 ——
+          「立即发送」会先拒绝未决审批再发送, stop 按钮取消=拒绝并终止轮次。
+          该条先于 pending 浮条出现, 占据输入框上方同一片空间。 */}
+      {pendingApproval && (
+        <div
+          className="pending-float pending-float--approval"
+          data-testid="approval-waiting"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="pending-float-head">
+            <div className="pending-float-head-row">
+              <span className="pending-float-icon-chip" aria-hidden="true">
+                <ShieldOff size={14} data-icon="ShieldOff" />
+              </span>
+              <span className="pending-float-title">{t('permission.card.waitingHint')}</span>
+            </div>
+            <div className="pending-float-hint">
+              {/* 「立即发送」会取消审批(spec §5.4 立即发送语义) */}
+              {t('chat.sendNowApprovalHint')}
+            </div>
+          </div>
+        </div>
+      )}
       {pendingActive && (
         <div
           className="pending-float"
@@ -346,7 +381,10 @@ export function InputBox({
               type="button"
               className="btn btn-pill btn-primary"
               data-testid="pending-send-now"
-              onClick={onSendPendingNow}
+              onClick={() => {
+                if (pendingApproval) onCancelApproval?.()
+                onSendPendingNow?.()
+              }}
             >
               <Zap size={12} />
               {t('chat.sendNow')}
@@ -407,7 +445,7 @@ export function InputBox({
           disabled={disabled}
           rows={1}
         />
-        {isStreaming && (
+        {(isStreaming || pendingApproval) && (
           <button
             type="button"
             className="stop-send-btn"

@@ -138,9 +138,7 @@ async def test_search_files_keeps_event_loop_responsive(tmp_path):
             (d / f"f{j:02d}.txt").write_text(("haystack" + chr(10)) * 1000, encoding="utf-8")
 
     tool = p.SearchFilesTool()
-    search_task = asyncio.create_task(
-        tool._arun(pattern="zzz-no-hit", path=str(tmp_path))
-    )
+    search_task = asyncio.create_task(tool._arun(pattern="zzz-no-hit", path=str(tmp_path)))
 
     ticks = 0
     while not search_task.done():
